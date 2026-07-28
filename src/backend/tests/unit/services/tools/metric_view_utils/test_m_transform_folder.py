@@ -1,4 +1,5 @@
 """Tests for MTransformFolder — fold M steps into base SQL query."""
+
 from __future__ import annotations
 
 import pytest
@@ -26,26 +27,38 @@ class TestFold:
 
     def test_select_rows_only(self, folder: MTransformFolder):
         sql = "SELECT a, b FROM t"
-        steps = [MStep(step_type="SelectRows",
-                       raw_expression='Table.SelectRows(prev, each [status] <> "inactive")')]
+        steps = [
+            MStep(
+                step_type="SelectRows",
+                raw_expression='Table.SelectRows(prev, each [status] <> "inactive")',
+            )
+        ]
         result = folder.fold(sql, steps, [])
         assert "status" in result
         assert "'inactive'" in result
 
     def test_column_transforms_only(self, folder: MTransformFolder):
         sql = "SELECT col1, col2 FROM t"
-        steps = [MStep(step_type="ReplaceValue",
-                       raw_expression='Table.ReplaceValue(prev, null, "0", Replacer.ReplaceValue, {"col1"})')]
+        steps = [
+            MStep(
+                step_type="ReplaceValue",
+                raw_expression='Table.ReplaceValue(prev, null, "0", Replacer.ReplaceValue, {"col1"})',
+            )
+        ]
         result = folder.fold(sql, steps, [])
         assert "COALESCE" in result
 
     def test_both_select_rows_and_transforms(self, folder: MTransformFolder):
         sql = "SELECT col1, col2 FROM t"
         steps = [
-            MStep(step_type="SelectRows",
-                  raw_expression='Table.SelectRows(prev, each [status] <> "X")'),
-            MStep(step_type="ReplaceValue",
-                  raw_expression='Table.ReplaceValue(prev, null, "0", Replacer.ReplaceValue, {"col1"})'),
+            MStep(
+                step_type="SelectRows",
+                raw_expression='Table.SelectRows(prev, each [status] <> "X")',
+            ),
+            MStep(
+                step_type="ReplaceValue",
+                raw_expression='Table.ReplaceValue(prev, null, "0", Replacer.ReplaceValue, {"col1"})',
+            ),
         ]
         result = folder.fold(sql, steps, [])
         assert "COALESCE" in result
@@ -59,8 +72,12 @@ class TestFold:
 
     def test_union_arms_with_transforms(self, folder: MTransformFolder):
         sql = "SELECT a, b FROM t1 UNION SELECT a, b FROM t2"
-        steps = [MStep(step_type="ReplaceValue",
-                       raw_expression='Table.ReplaceValue(prev, null, "N/A", Replacer.ReplaceValue, {"a"})')]
+        steps = [
+            MStep(
+                step_type="ReplaceValue",
+                raw_expression='Table.ReplaceValue(prev, null, "N/A", Replacer.ReplaceValue, {"a"})',
+            )
+        ]
         result = folder.fold(sql, steps, [])
         assert "COALESCE" in result
         assert "UNION" in result
@@ -68,16 +85,22 @@ class TestFold:
     def test_rename_columns_stored(self, folder: MTransformFolder):
         sql = "SELECT old_col FROM t"
         steps = [
-            MStep(step_type="RenameColumns",
-                  raw_expression='Table.RenameColumns(prev, {{"old_col", "new_col"}})'),
+            MStep(
+                step_type="RenameColumns",
+                raw_expression='Table.RenameColumns(prev, {{"old_col", "new_col"}})',
+            ),
         ]
         # RenameColumns alone produces no col_exprs → returns base
         assert folder.fold(sql, steps, []) == sql
 
     def test_remove_columns(self, folder: MTransformFolder):
         sql = "SELECT keep_col, drop_col FROM t"
-        steps = [MStep(step_type="RemoveColumns",
-                       raw_expression='Table.RemoveColumns(prev, {"drop_col"})')]
+        steps = [
+            MStep(
+                step_type="RemoveColumns",
+                raw_expression='Table.RemoveColumns(prev, {"drop_col"})',
+            )
+        ]
         result = folder.fold(sql, steps, [])
         assert "drop_col" not in result or "None" not in result
 
@@ -183,23 +206,29 @@ class TestCleanWhereClause:
 
 class TestParseSelectRows:
     def test_each_col_neq(self, folder: MTransformFolder):
-        step = MStep(step_type="SelectRows",
-                     raw_expression='Table.SelectRows(prev, each [status] <> "inactive")')
+        step = MStep(
+            step_type="SelectRows",
+            raw_expression='Table.SelectRows(prev, each [status] <> "inactive")',
+        )
         result = folder._parse_select_rows(step)
         assert "status" in result
         assert "'inactive'" in result
         assert "[" not in result  # brackets should be removed
 
     def test_brackets_to_bare_col(self, folder: MTransformFolder):
-        step = MStep(step_type="SelectRows",
-                     raw_expression='Table.SelectRows(prev, each [my_col] = "val")')
+        step = MStep(
+            step_type="SelectRows",
+            raw_expression='Table.SelectRows(prev, each [my_col] = "val")',
+        )
         result = folder._parse_select_rows(step)
         assert "my_col" in result
         assert "[" not in result
 
     def test_quotes_converted(self, folder: MTransformFolder):
-        step = MStep(step_type="SelectRows",
-                     raw_expression='Table.SelectRows(prev, each [col] <> "value")')
+        step = MStep(
+            step_type="SelectRows",
+            raw_expression='Table.SelectRows(prev, each [col] <> "value")',
+        )
         result = folder._parse_select_rows(step)
         assert "'" in result
         assert '"' not in result
@@ -214,32 +243,46 @@ class TestParseSelectRows:
 
 class TestBuildColumnTransforms:
     def test_replace_value_null_coalesce(self, folder: MTransformFolder):
-        steps = [MStep(step_type="ReplaceValue",
-                       raw_expression='Table.ReplaceValue(prev, null, "0", Replacer.ReplaceValue, {"col"})')]
+        steps = [
+            MStep(
+                step_type="ReplaceValue",
+                raw_expression='Table.ReplaceValue(prev, null, "0", Replacer.ReplaceValue, {"col"})',
+            )
+        ]
         result = folder._build_column_transforms(steps, {}, [])
         assert "col" in result
         assert "COALESCE(col, '0')" == result["col"]
 
     def test_replace_text(self, folder: MTransformFolder):
-        steps = [MStep(step_type="ReplaceValue",
-                       raw_expression='Table.ReplaceValue(prev, "old", "new", Replacer.ReplaceText, {"col"})')]
+        steps = [
+            MStep(
+                step_type="ReplaceValue",
+                raw_expression='Table.ReplaceValue(prev, "old", "new", Replacer.ReplaceText, {"col"})',
+            )
+        ]
         result = folder._build_column_transforms(steps, {}, [])
         assert "REPLACE(col, 'old', 'new')" == result["col"]
 
     def test_coalesce_chaining(self, folder: MTransformFolder):
         """Two consecutive ReplaceValue null→COALESCE should chain."""
         steps = [
-            MStep(step_type="ReplaceValue",
-                  raw_expression='Table.ReplaceValue(prev, null, "0", Replacer.ReplaceValue, {"col"})'),
-            MStep(step_type="ReplaceValue",
-                  raw_expression='Table.ReplaceValue(prev, null, "X", Replacer.ReplaceValue, {"col"})'),
+            MStep(
+                step_type="ReplaceValue",
+                raw_expression='Table.ReplaceValue(prev, null, "0", Replacer.ReplaceValue, {"col"})',
+            ),
+            MStep(
+                step_type="ReplaceValue",
+                raw_expression='Table.ReplaceValue(prev, null, "X", Replacer.ReplaceValue, {"col"})',
+            ),
         ]
         result = folder._build_column_transforms(steps, {}, [])
         assert result["col"] == "COALESCE(COALESCE(col, '0'), 'X')"
 
     def test_duplicate_split_chain(self, folder: MTransformFolder):
-        dup_step = MStep(step_type="DuplicateColumn",
-                         raw_expression='Table.DuplicateColumn(#"prev", "src_col", "dup_col")')
+        dup_step = MStep(
+            step_type="DuplicateColumn",
+            raw_expression='Table.DuplicateColumn(#"prev", "src_col", "dup_col")',
+        )
         split_step = MStep(
             step_type="SplitColumn",
             raw_expression='Table.SplitColumn(#"prev", "dup_col", Splitter.SplitTextByPositions({0, 4}), {"part_a", "part_b"})',
@@ -251,8 +294,10 @@ class TestBuildColumnTransforms:
 
     def test_duplicate_split_unrenamed_removed(self, folder: MTransformFolder):
         """Parts NOT in rename_map are added to remove_set."""
-        dup_step = MStep(step_type="DuplicateColumn",
-                         raw_expression='Table.DuplicateColumn(#"prev", "src_col", "dup_col")')
+        dup_step = MStep(
+            step_type="DuplicateColumn",
+            raw_expression='Table.DuplicateColumn(#"prev", "src_col", "dup_col")',
+        )
         split_step = MStep(
             step_type="SplitColumn",
             raw_expression='Table.SplitColumn(#"prev", "dup_col", Splitter.SplitTextByPositions({0, 4}), {"part_a", "part_b"})',
@@ -263,46 +308,66 @@ class TestBuildColumnTransforms:
         assert result.get("part_b") is None
 
     def test_transform_column_types_int64(self, folder: MTransformFolder):
-        steps = [MStep(step_type="TransformColumnTypes",
-                       raw_expression='Table.TransformColumnTypes(prev, {{"col", Int64.Type}})')]
+        steps = [
+            MStep(
+                step_type="TransformColumnTypes",
+                raw_expression='Table.TransformColumnTypes(prev, {{"col", Int64.Type}})',
+            )
+        ]
         result = folder._build_column_transforms(steps, {}, [])
         assert result["col"] == "CAST(col AS BIGINT)"
 
     def test_transform_column_types_other(self, folder: MTransformFolder):
-        steps = [MStep(step_type="TransformColumnTypes",
-                       raw_expression='Table.TransformColumnTypes(prev, {{"col", Text.Type}})')]
+        steps = [
+            MStep(
+                step_type="TransformColumnTypes",
+                raw_expression='Table.TransformColumnTypes(prev, {{"col", Text.Type}})',
+            )
+        ]
         result = folder._build_column_transforms(steps, {}, [])
         assert result["col"] == "CAST(col AS STRING)"
 
     def test_transform_column_types_over_existing(self, folder: MTransformFolder):
         """Cast wraps existing expression."""
         steps = [
-            MStep(step_type="ReplaceValue",
-                  raw_expression='Table.ReplaceValue(prev, null, "0", Replacer.ReplaceValue, {"col"})'),
-            MStep(step_type="TransformColumnTypes",
-                  raw_expression='Table.TransformColumnTypes(prev, {{"col", Int64.Type}})'),
+            MStep(
+                step_type="ReplaceValue",
+                raw_expression='Table.ReplaceValue(prev, null, "0", Replacer.ReplaceValue, {"col"})',
+            ),
+            MStep(
+                step_type="TransformColumnTypes",
+                raw_expression='Table.TransformColumnTypes(prev, {{"col", Int64.Type}})',
+            ),
         ]
         result = folder._build_column_transforms(steps, {}, [])
         assert result["col"] == "CAST(COALESCE(col, '0') AS BIGINT)"
 
     def test_transform_columns_text_starts_with(self, folder: MTransformFolder):
-        steps = [MStep(
-            step_type="TransformColumns",
-            raw_expression='Table.TransformColumns(prev, {{"col", each if Text.StartsWith(_, "AB") then "XX" else _}})',
-        )]
+        steps = [
+            MStep(
+                step_type="TransformColumns",
+                raw_expression='Table.TransformColumns(prev, {{"col", each if Text.StartsWith(_, "AB") then "XX" else _}})',
+            )
+        ]
         result = folder._build_column_transforms(steps, {}, [])
         assert result["col"] == "CASE WHEN col LIKE 'AB%' THEN 'XX' ELSE col END"
 
     def test_remove_columns(self, folder: MTransformFolder):
-        remove_steps = [MStep(step_type="RemoveColumns",
-                              raw_expression='Table.RemoveColumns(prev, {"drop_me", "also_drop"})')]
+        remove_steps = [
+            MStep(
+                step_type="RemoveColumns",
+                raw_expression='Table.RemoveColumns(prev, {"drop_me", "also_drop"})',
+            )
+        ]
         result = folder._build_column_transforms([], {}, remove_steps)
         assert result["drop_me"] is None
         assert result["also_drop"] is None
 
     def test_rename_map_used_in_split(self, folder: MTransformFolder):
-        dup = MStep(step_type="DuplicateColumn",
-                    raw_expression='Table.DuplicateColumn(#"prev", "code", "code_dup")')
+        dup = MStep(
+            step_type="DuplicateColumn",
+            raw_expression='Table.DuplicateColumn(#"prev", "code", "code_dup")',
+        )
         split = MStep(
             step_type="SplitColumn",
             raw_expression='Table.SplitColumn(#"prev", "code_dup", Splitter.SplitTextByPositions({0, 3}), {"part1", "part2"})',
@@ -350,7 +415,10 @@ class TestApplyWithWrapper:
     def test_pbi_columns_fallback(self, folder: MTransformFolder):
         """When no SELECT columns can be extracted, falls back to pbi_columns."""
         sql = "INVALID SQL"
-        pbi_cols = [{"name": "a", "columnType": "Data"}, {"name": "b", "columnType": "Calculated"}]
+        pbi_cols = [
+            {"name": "a", "columnType": "Data"},
+            {"name": "b", "columnType": "Calculated"},
+        ]
         col_exprs = {"a": "UPPER(a)"}
         result = folder._apply_with_wrapper(sql, [], col_exprs, pbi_cols)
         assert "UPPER(a) AS a" in result
@@ -547,7 +615,9 @@ class TestCompactWhere:
 
     def test_or_block_long(self):
         """Long OR block should be multi-line."""
-        long_or = " OR ".join([f"very_long_column_name_{i} = 'some_value'" for i in range(5)])
+        long_or = " OR ".join(
+            [f"very_long_column_name_{i} = 'some_value'" for i in range(5)]
+        )
         result = MTransformFolder._compact_where(f"x = 1 AND ({long_or})")
         assert "AND (" in result or "OR" in result
 

@@ -4,22 +4,26 @@ Unit tests for PowerBIBusinessMappingRepository and PowerBIFieldSynonymRepositor
 Tests the functionality of Power BI context configuration repositories including
 business term mappings and field synonym CRUD operations.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-from datetime import datetime, timezone
 
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.models.powerbi_context_config import (
+    PowerBIBusinessMapping,
+    PowerBIFieldSynonym,
+)
 from src.repositories.powerbi_context_config_repository import (
     PowerBIBusinessMappingRepository,
     PowerBIFieldSynonymRepository,
 )
-from src.models.powerbi_context_config import PowerBIBusinessMapping, PowerBIFieldSynonym
-
 
 # ---------------------------------------------------------------------------
 # Helpers / stub models
 # ---------------------------------------------------------------------------
+
 
 class MockBusinessMapping:
     def __init__(
@@ -58,7 +62,9 @@ class MockFieldSynonym:
         self.group_id = group_id
         self.semantic_model_id = semantic_model_id
         self.field_name = field_name
-        self.synonyms = synonyms if synonyms is not None else ["customer count", "customers"]
+        self.synonyms = (
+            synonyms if synonyms is not None else ["customer count", "customers"]
+        )
         self.created_at = created_at or datetime.now(timezone.utc)
         self.updated_at = updated_at or datetime.now(timezone.utc)
 
@@ -66,6 +72,7 @@ class MockFieldSynonym:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_session():
@@ -103,6 +110,7 @@ def _make_scalar_result(items):
 # PowerBIBusinessMappingRepository tests
 # ---------------------------------------------------------------------------
 
+
 class TestBusinessMappingRepositoryInit:
     def test_init_sets_model_and_session(self, mock_session):
         repo = PowerBIBusinessMappingRepository(session=mock_session)
@@ -128,7 +136,9 @@ class TestBusinessMappingGetByModel:
         mock_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_by_model_empty_returns_empty_list(self, mapping_repo, mock_session):
+    async def test_get_by_model_empty_returns_empty_list(
+        self, mapping_repo, mock_session
+    ):
         mock_session.execute.return_value = _make_scalar_result([])
 
         result = await mapping_repo.get_by_model(
@@ -138,7 +148,9 @@ class TestBusinessMappingGetByModel:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_get_by_model_different_groups_isolated(self, mapping_repo, mock_session):
+    async def test_get_by_model_different_groups_isolated(
+        self, mapping_repo, mock_session
+    ):
         mapping_g1 = MockBusinessMapping(group_id="group1")
         mock_session.execute.return_value = _make_scalar_result([mapping_g1])
 
@@ -193,7 +205,9 @@ class TestBusinessMappingDeleteByModel:
         mock_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_delete_by_model_zero_when_none_exist(self, mapping_repo, mock_session):
+    async def test_delete_by_model_zero_when_none_exist(
+        self, mapping_repo, mock_session
+    ):
         mock_result = MagicMock()
         mock_result.rowcount = 0
         mock_session.execute.return_value = mock_result
@@ -205,7 +219,9 @@ class TestBusinessMappingDeleteByModel:
         assert count == 0
 
     @pytest.mark.asyncio
-    async def test_delete_by_model_db_error_propagates(self, mapping_repo, mock_session):
+    async def test_delete_by_model_db_error_propagates(
+        self, mapping_repo, mock_session
+    ):
         mock_session.execute.side_effect = Exception("DB error")
 
         with pytest.raises(Exception, match="DB error"):
@@ -218,7 +234,9 @@ class TestBusinessMappingGetAsDict:
     @pytest.mark.asyncio
     async def test_get_as_dict_returns_mapping(self, mapping_repo, mock_session):
         mappings = [
-            MockBusinessMapping(natural_term="total sales", dax_expression="[Total Sales]"),
+            MockBusinessMapping(
+                natural_term="total sales", dax_expression="[Total Sales]"
+            ),
             MockBusinessMapping(
                 id=2,
                 natural_term="ytd revenue",
@@ -237,7 +255,9 @@ class TestBusinessMappingGetAsDict:
         }
 
     @pytest.mark.asyncio
-    async def test_get_as_dict_empty_returns_empty_dict(self, mapping_repo, mock_session):
+    async def test_get_as_dict_empty_returns_empty_dict(
+        self, mapping_repo, mock_session
+    ):
         mock_session.execute.return_value = _make_scalar_result([])
 
         result = await mapping_repo.get_as_dict(
@@ -250,6 +270,7 @@ class TestBusinessMappingGetAsDict:
 # ---------------------------------------------------------------------------
 # PowerBIFieldSynonymRepository tests
 # ---------------------------------------------------------------------------
+
 
 class TestFieldSynonymRepositoryInit:
     def test_init_sets_model_and_session(self, mock_session):
@@ -274,7 +295,9 @@ class TestFieldSynonymGetByModel:
         assert len(result) == 2
 
     @pytest.mark.asyncio
-    async def test_get_by_model_empty_returns_empty_list(self, synonym_repo, mock_session):
+    async def test_get_by_model_empty_returns_empty_list(
+        self, synonym_repo, mock_session
+    ):
         mock_session.execute.return_value = _make_scalar_result([])
 
         result = await synonym_repo.get_by_model(
@@ -300,7 +323,9 @@ class TestFieldSynonymGetByField:
         assert result.field_name == "num_customers"
 
     @pytest.mark.asyncio
-    async def test_get_by_field_not_found_returns_none(self, synonym_repo, mock_session):
+    async def test_get_by_field_not_found_returns_none(
+        self, synonym_repo, mock_session
+    ):
         mock_session.execute.return_value = _make_scalar_result([])
 
         result = await synonym_repo.get_by_field(

@@ -1,32 +1,33 @@
-import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock, PropertyMock
-from types import SimpleNamespace
-import os
-import time
-import json
-import subprocess
 import asyncio
-import httpx
-from typing import Dict, Any, Optional, Tuple
+import json
+import os
+import subprocess
+import time
 from contextlib import contextmanager
+from types import SimpleNamespace
+from typing import Any, Dict, Optional, Tuple
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
+
+import httpx
+import pytest
 
 from src.utils.databricks_auth import (
     AuthContext,
     DatabricksAuth,
-    extract_user_token_from_request,
-    is_scope_error,
-    setup_environment_variables,
     _clean_environment,
-    get_databricks_auth_headers_sync,
-    validate_databricks_connection,
-    get_databricks_auth_headers,
+    _databricks_auth,
+    extract_user_token_from_request,
     get_auth_context,
+    get_current_databricks_user,
+    get_databricks_auth_headers,
+    get_databricks_auth_headers_sync,
+    get_mcp_access_token,
+    get_mcp_auth_headers,
     get_workspace_client,
     get_workspace_client_with_fallback,
-    get_mcp_access_token,
-    get_current_databricks_user,
-    get_mcp_auth_headers,
-    _databricks_auth,
+    is_scope_error,
+    setup_environment_variables,
+    validate_databricks_connection,
 )
 
 
@@ -39,16 +40,24 @@ def _make_auth(**kwargs):
 
 # ── AuthContext ────────────────────────────────────────
 
+
 class TestAuthContext:
     def test_init_basic(self):
-        ctx = AuthContext(token="t", workspace_url="https://host.com", auth_method="pat")
+        ctx = AuthContext(
+            token="t", workspace_url="https://host.com", auth_method="pat"
+        )
         assert ctx.token == "t"
         assert ctx.workspace_url == "https://host.com"
         assert ctx.auth_method == "pat"
         assert ctx.user_identity is None
 
     def test_init_with_user_identity(self):
-        ctx = AuthContext(token="t", workspace_url="https://h.com", auth_method="obo", user_identity="u@x.com")
+        ctx = AuthContext(
+            token="t",
+            workspace_url="https://h.com",
+            auth_method="obo",
+            user_identity="u@x.com",
+        )
         assert ctx.user_identity == "u@x.com"
 
     def test_url_normalization_no_https(self):
@@ -56,7 +65,9 @@ class TestAuthContext:
         assert ctx.workspace_url == "https://host.com"
 
     def test_url_strips_trailing_slash(self):
-        ctx = AuthContext(token="t", workspace_url="https://host.com/", auth_method="pat")
+        ctx = AuthContext(
+            token="t", workspace_url="https://host.com/", auth_method="pat"
+        )
         assert ctx.workspace_url == "https://host.com"
 
     def test_get_headers(self):
@@ -92,16 +103,24 @@ class TestAuthContext:
         assert client is mock_wc.return_value
 
     def test_repr_with_identity(self):
-        ctx = AuthContext(token="t", workspace_url="https://h.com", auth_method="obo", user_identity="u@x.com")
+        ctx = AuthContext(
+            token="t",
+            workspace_url="https://h.com",
+            auth_method="obo",
+            user_identity="u@x.com",
+        )
         r = repr(ctx)
         assert "obo" in r and "u@x.com" in r
 
     def test_repr_service(self):
-        ctx = AuthContext(token="t", workspace_url="https://h.com", auth_method="service_principal")
+        ctx = AuthContext(
+            token="t", workspace_url="https://h.com", auth_method="service_principal"
+        )
         assert "service" in repr(ctx)
 
 
 # ── _clean_environment ─────────────────────────────────
+
 
 class TestCleanEnvironment:
     def test_cleans_and_restores(self):
@@ -127,14 +146,21 @@ class TestCleanEnvironment:
         os.environ.pop("DATABRICKS_TOKEN", None)
 
     def test_no_vars_set(self):
-        for v in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY", "DATABRICKS_CLIENT_ID",
-                   "DATABRICKS_CLIENT_SECRET", "DATABRICKS_CONFIG_FILE", "DATABRICKS_CONFIG_PROFILE"]:
+        for v in [
+            "DATABRICKS_TOKEN",
+            "DATABRICKS_API_KEY",
+            "DATABRICKS_CLIENT_ID",
+            "DATABRICKS_CLIENT_SECRET",
+            "DATABRICKS_CONFIG_FILE",
+            "DATABRICKS_CONFIG_PROFILE",
+        ]:
             os.environ.pop(v, None)
         with _clean_environment():
             pass
 
 
 # ── _load_config ───────────────────────────────────────
+
 
 class TestLoadConfig:
     @pytest.mark.asyncio
@@ -153,9 +179,14 @@ class TestLoadConfig:
         mock_session = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
-        with patch.object(auth, "_check_oauth_environment"), \
-             patch("src.services.databricks.workspace.service.DatabricksService", return_value=mock_service), \
-             patch("src.db.session.request_scoped_session", return_value=mock_session):
+        with (
+            patch.object(auth, "_check_oauth_environment"),
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService",
+                return_value=mock_service,
+            ),
+            patch("src.db.session.request_scoped_session", return_value=mock_session),
+        ):
             result = await auth._load_config()
         assert result is True
         assert auth._workspace_host == "https://myhost.databricks.com"
@@ -168,9 +199,14 @@ class TestLoadConfig:
         mock_session = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
-        with patch.object(auth, "_check_oauth_environment"), \
-             patch("src.services.databricks.workspace.service.DatabricksService", return_value=mock_service), \
-             patch("src.db.session.request_scoped_session", return_value=mock_session):
+        with (
+            patch.object(auth, "_check_oauth_environment"),
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService",
+                return_value=mock_service,
+            ),
+            patch("src.db.session.request_scoped_session", return_value=mock_session),
+        ):
             result = await auth._load_config()
         assert result is True
 
@@ -178,11 +214,17 @@ class TestLoadConfig:
     async def test_db_import_raises(self):
         auth = DatabricksAuth()
         with patch.object(auth, "_check_oauth_environment"):
-            original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+            original_import = (
+                __builtins__.__import__
+                if hasattr(__builtins__, "__import__")
+                else __import__
+            )
+
             def fail_import(name, *args, **kwargs):
                 if name == "src.services.databricks.workspace.service":
                     raise ImportError("no module")
                 return original_import(name, *args, **kwargs)
+
             with patch("builtins.__import__", side_effect=fail_import):
                 result = await auth._load_config()
         assert result is True
@@ -192,12 +234,16 @@ class TestLoadConfig:
         auth = DatabricksAuth()
         mock_sdk_config = MagicMock()
         mock_sdk_config.host = "https://sdk-detected.databricks.com"
-        with patch.object(auth, "_check_oauth_environment"), \
-             patch("src.utils.databricks_auth.Config", return_value=mock_sdk_config):
+        with (
+            patch.object(auth, "_check_oauth_environment"),
+            patch("src.utils.databricks_auth.Config", return_value=mock_sdk_config),
+        ):
+
             def fail_import(name, *args, **kwargs):
                 if "databricks_service" in name or "session" in name:
                     raise ImportError("no module")
                 return __import__(name, *args, **kwargs)
+
             with patch("builtins.__import__", side_effect=fail_import):
                 result = await auth._load_config()
         assert result is True
@@ -206,12 +252,18 @@ class TestLoadConfig:
     @pytest.mark.asyncio
     async def test_sdk_autodetect_fails(self):
         auth = DatabricksAuth()
-        with patch.object(auth, "_check_oauth_environment"), \
-             patch("src.utils.databricks_auth.Config", side_effect=Exception("sdk fail")):
+        with (
+            patch.object(auth, "_check_oauth_environment"),
+            patch(
+                "src.utils.databricks_auth.Config", side_effect=Exception("sdk fail")
+            ),
+        ):
+
             def fail_import(name, *args, **kwargs):
                 if "databricks_service" in name or "session" in name:
                     raise ImportError("no module")
                 return __import__(name, *args, **kwargs)
+
             with patch("builtins.__import__", side_effect=fail_import):
                 result = await auth._load_config()
         assert result is True
@@ -219,17 +271,24 @@ class TestLoadConfig:
     @pytest.mark.asyncio
     async def test_load_config_outer_exception(self):
         auth = DatabricksAuth()
-        with patch.object(auth, "_check_oauth_environment", side_effect=Exception("boom")):
+        with patch.object(
+            auth, "_check_oauth_environment", side_effect=Exception("boom")
+        ):
             result = await auth._load_config()
         assert result is False
 
 
 # ── _check_oauth_environment ───────────────────────────
 
+
 class TestCheckOauthEnvironment:
     def test_sets_client_credentials(self):
         auth = DatabricksAuth()
-        with patch.dict(os.environ, {"DATABRICKS_CLIENT_ID": "cid", "DATABRICKS_CLIENT_SECRET": "csec"}, clear=False):
+        with patch.dict(
+            os.environ,
+            {"DATABRICKS_CLIENT_ID": "cid", "DATABRICKS_CLIENT_SECRET": "csec"},
+            clear=False,
+        ):
             auth._check_oauth_environment()
         assert auth._client_id == "cid"
         assert auth._client_secret == "csec"
@@ -242,7 +301,9 @@ class TestCheckOauthEnvironment:
 
     def test_sets_host_from_env_with_https(self):
         auth = DatabricksAuth()
-        with patch.dict(os.environ, {"DATABRICKS_HOST": "https://myhost.com/"}, clear=False):
+        with patch.dict(
+            os.environ, {"DATABRICKS_HOST": "https://myhost.com/"}, clear=False
+        ):
             auth._check_oauth_environment()
         assert auth._workspace_host == "https://myhost.com"
 
@@ -254,31 +315,58 @@ class TestCheckOauthEnvironment:
 
 # ── _is_service_token_expired ──────────────────────────
 
+
 class TestIsServiceTokenExpired:
     def test_no_token(self):
-        assert _make_auth(service_token=None, service_token_fetched_at=None)._is_service_token_expired() is True
+        assert (
+            _make_auth(
+                service_token=None, service_token_fetched_at=None
+            )._is_service_token_expired()
+            is True
+        )
 
     def test_no_fetched_at(self):
-        assert _make_auth(service_token="t", service_token_fetched_at=None)._is_service_token_expired() is True
+        assert (
+            _make_auth(
+                service_token="t", service_token_fetched_at=None
+            )._is_service_token_expired()
+            is True
+        )
 
     def test_not_expired(self):
-        auth = _make_auth(service_token="t", service_token_fetched_at=time.time(),
-                          service_token_expires_in=3600, token_refresh_buffer=300)
+        auth = _make_auth(
+            service_token="t",
+            service_token_fetched_at=time.time(),
+            service_token_expires_in=3600,
+            token_refresh_buffer=300,
+        )
         assert auth._is_service_token_expired() is False
 
     def test_expired(self):
-        auth = _make_auth(service_token="t", service_token_fetched_at=time.time() - 4000,
-                          service_token_expires_in=3600, token_refresh_buffer=300)
+        auth = _make_auth(
+            service_token="t",
+            service_token_fetched_at=time.time() - 4000,
+            service_token_expires_in=3600,
+            token_refresh_buffer=300,
+        )
         assert auth._is_service_token_expired() is True
 
 
 # ── _refresh_service_token ─────────────────────────────
 
+
 class TestRefreshServiceToken:
     @pytest.mark.asyncio
     async def test_success(self):
-        auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://h.com")
-        with patch.object(auth, "_get_service_principal_token", new_callable=AsyncMock, return_value="new_tok"):
+        auth = _make_auth(
+            client_id="c", client_secret="s", workspace_host="https://h.com"
+        )
+        with patch.object(
+            auth,
+            "_get_service_principal_token",
+            new_callable=AsyncMock,
+            return_value="new_tok",
+        ):
             result = await auth._refresh_service_token()
         assert result == "new_tok"
         assert auth._service_token == "new_tok"
@@ -286,39 +374,61 @@ class TestRefreshServiceToken:
     @pytest.mark.asyncio
     async def test_returns_none(self):
         auth = _make_auth(client_id="c", client_secret="s")
-        with patch.object(auth, "_get_service_principal_token", new_callable=AsyncMock, return_value=None):
+        with patch.object(
+            auth,
+            "_get_service_principal_token",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
             assert await auth._refresh_service_token() is None
 
     @pytest.mark.asyncio
     async def test_raises(self):
         auth = _make_auth(client_id="c", client_secret="s")
-        with patch.object(auth, "_get_service_principal_token", new_callable=AsyncMock, side_effect=Exception("fail")):
+        with patch.object(
+            auth,
+            "_get_service_principal_token",
+            new_callable=AsyncMock,
+            side_effect=Exception("fail"),
+        ):
             assert await auth._refresh_service_token() is None
 
 
 # ── get_auth_headers / _get_unified_auth_headers ───────
 
+
 class TestGetAuthHeaders:
     @pytest.mark.asyncio
     async def test_load_config_fails(self):
         auth = _make_auth(config_loaded=False)
-        with patch.object(auth, "_load_config", new_callable=AsyncMock, return_value=False):
+        with patch.object(
+            auth, "_load_config", new_callable=AsyncMock, return_value=False
+        ):
             headers, err = await auth.get_auth_headers()
         assert headers is None and "Failed to load" in err
 
     @pytest.mark.asyncio
     async def test_exception(self):
         auth = _make_auth(config_loaded=False)
-        with patch.object(auth, "_load_config", new_callable=AsyncMock, side_effect=Exception("boom")):
+        with patch.object(
+            auth, "_load_config", new_callable=AsyncMock, side_effect=Exception("boom")
+        ):
             headers, err = await auth.get_auth_headers()
         assert headers is None and "boom" in err
 
     @pytest.mark.asyncio
     async def test_user_token_sets_access_token(self):
         """Line 484: user_token param triggers set_user_access_token."""
-        auth = _make_auth(config_loaded=True, user_access_token=None,
-                          api_token=None, client_id=None, client_secret=None)
-        with patch.object(auth, "_load_config", new_callable=AsyncMock, return_value=True):
+        auth = _make_auth(
+            config_loaded=True,
+            user_access_token=None,
+            api_token=None,
+            client_id=None,
+            client_secret=None,
+        )
+        with patch.object(
+            auth, "_load_config", new_callable=AsyncMock, return_value=True
+        ):
             headers, err = await auth.get_auth_headers(user_token="ut")
         # After set_user_access_token, OBO path returns bearer headers
         assert headers is not None
@@ -326,79 +436,167 @@ class TestGetAuthHeaders:
 
     @pytest.mark.asyncio
     async def test_pat_valid(self):
-        auth = _make_auth(config_loaded=True, api_token="pat_tok", workspace_host="https://h.com",
-                          user_access_token=None, client_id=None, client_secret=None)
-        with patch.object(auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-             patch.object(auth, "_validate_token", new_callable=AsyncMock, return_value=True):
+        auth = _make_auth(
+            config_loaded=True,
+            api_token="pat_tok",
+            workspace_host="https://h.com",
+            user_access_token=None,
+            client_id=None,
+            client_secret=None,
+        )
+        with (
+            patch.object(
+                auth, "_load_config", new_callable=AsyncMock, return_value=True
+            ),
+            patch.object(
+                auth, "_validate_token", new_callable=AsyncMock, return_value=True
+            ),
+        ):
             headers, err = await auth.get_auth_headers()
         assert err is None and headers["Authorization"] == "Bearer pat_tok"
 
     @pytest.mark.asyncio
     async def test_pat_invalid(self):
-        auth = _make_auth(config_loaded=True, api_token="bad", workspace_host="https://h.com",
-                          user_access_token=None, client_id=None, client_secret=None)
-        with patch.object(auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-             patch.object(auth, "_validate_token", new_callable=AsyncMock, return_value=False):
+        auth = _make_auth(
+            config_loaded=True,
+            api_token="bad",
+            workspace_host="https://h.com",
+            user_access_token=None,
+            client_id=None,
+            client_secret=None,
+        )
+        with (
+            patch.object(
+                auth, "_load_config", new_callable=AsyncMock, return_value=True
+            ),
+            patch.object(
+                auth, "_validate_token", new_callable=AsyncMock, return_value=False
+            ),
+        ):
             headers, err = await auth.get_auth_headers()
         assert headers is None
 
     @pytest.mark.asyncio
     async def test_spn_expired_refresh_success(self):
-        auth = _make_auth(config_loaded=True, api_token=None, user_access_token=None,
-                          client_id="c", client_secret="s", service_token=None, service_token_fetched_at=None)
-        with patch.object(auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-             patch.object(auth, "_is_service_token_expired", return_value=True), \
-             patch.object(auth, "_refresh_service_token", new_callable=AsyncMock, return_value="new"):
+        auth = _make_auth(
+            config_loaded=True,
+            api_token=None,
+            user_access_token=None,
+            client_id="c",
+            client_secret="s",
+            service_token=None,
+            service_token_fetched_at=None,
+        )
+        with (
+            patch.object(
+                auth, "_load_config", new_callable=AsyncMock, return_value=True
+            ),
+            patch.object(auth, "_is_service_token_expired", return_value=True),
+            patch.object(
+                auth,
+                "_refresh_service_token",
+                new_callable=AsyncMock,
+                return_value="new",
+            ),
+        ):
             headers, err = await auth.get_auth_headers()
         assert err is None and headers["Authorization"] == "Bearer new"
 
     @pytest.mark.asyncio
     async def test_spn_expired_refresh_fails(self):
-        auth = _make_auth(config_loaded=True, api_token=None, user_access_token=None,
-                          client_id="c", client_secret="s")
-        with patch.object(auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-             patch.object(auth, "_is_service_token_expired", return_value=True), \
-             patch.object(auth, "_refresh_service_token", new_callable=AsyncMock, return_value=None):
+        auth = _make_auth(
+            config_loaded=True,
+            api_token=None,
+            user_access_token=None,
+            client_id="c",
+            client_secret="s",
+        )
+        with (
+            patch.object(
+                auth, "_load_config", new_callable=AsyncMock, return_value=True
+            ),
+            patch.object(auth, "_is_service_token_expired", return_value=True),
+            patch.object(
+                auth,
+                "_refresh_service_token",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
             headers, err = await auth.get_auth_headers()
         assert headers is None
 
     @pytest.mark.asyncio
     async def test_spn_cached(self):
-        auth = _make_auth(config_loaded=True, api_token=None, user_access_token=None,
-                          client_id="c", client_secret="s", service_token="cached",
-                          service_token_fetched_at=time.time(), service_token_expires_in=3600,
-                          token_refresh_buffer=300)
-        with patch.object(auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-             patch.object(auth, "_is_service_token_expired", return_value=False):
+        auth = _make_auth(
+            config_loaded=True,
+            api_token=None,
+            user_access_token=None,
+            client_id="c",
+            client_secret="s",
+            service_token="cached",
+            service_token_fetched_at=time.time(),
+            service_token_expires_in=3600,
+            token_refresh_buffer=300,
+        )
+        with (
+            patch.object(
+                auth, "_load_config", new_callable=AsyncMock, return_value=True
+            ),
+            patch.object(auth, "_is_service_token_expired", return_value=False),
+        ):
             headers, err = await auth.get_auth_headers()
         assert err is None and headers["Authorization"] == "Bearer cached"
 
     @pytest.mark.asyncio
     async def test_unified_exception(self):
-        auth = _make_auth(config_loaded=True, user_access_token="tok",
-                          api_token=None, client_id=None, client_secret=None)
-        with patch.object(auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-             patch.object(auth, "_create_bearer_headers", side_effect=Exception("unexp")):
+        auth = _make_auth(
+            config_loaded=True,
+            user_access_token="tok",
+            api_token=None,
+            client_id=None,
+            client_secret=None,
+        )
+        with (
+            patch.object(
+                auth, "_load_config", new_callable=AsyncMock, return_value=True
+            ),
+            patch.object(
+                auth, "_create_bearer_headers", side_effect=Exception("unexp")
+            ),
+        ):
             headers, err = await auth.get_auth_headers()
         assert headers is None and "unexp" in err
 
 
 # ── _get_service_principal_token ───────────────────────
 
+
 class TestGetServicePrincipalToken:
     @pytest.mark.asyncio
     async def test_no_credentials(self):
-        assert await _make_auth(client_id=None, client_secret=None)._get_service_principal_token() is None
+        assert (
+            await _make_auth(
+                client_id=None, client_secret=None
+            )._get_service_principal_token()
+            is None
+        )
 
     @pytest.mark.asyncio
     async def test_sdk_returns_bearer_token(self):
         """SDK returns headers dict with valid Bearer token."""
-        auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://example.com")
+        auth = _make_auth(
+            client_id="c", client_secret="s", workspace_host="https://example.com"
+        )
 
         mock_client = MagicMock()
-        mock_client.config.authenticate.return_value = {"Authorization": "Bearer sdk_token_value"}
+        mock_client.config.authenticate.return_value = {
+            "Authorization": "Bearer sdk_token_value"
+        }
 
-        with patch("src.utils.databricks_auth.WorkspaceClient", return_value=mock_client):
+        with patch(
+            "src.utils.databricks_auth.WorkspaceClient", return_value=mock_client
+        ):
             result = await auth._get_service_principal_token()
 
         assert result == "sdk_token_value"
@@ -408,13 +606,24 @@ class TestGetServicePrincipalToken:
     @pytest.mark.asyncio
     async def test_sdk_unexpected_header_format(self):
         """SDK returns non-Bearer header -> falls through to manual flow."""
-        auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://example.com")
+        auth = _make_auth(
+            client_id="c", client_secret="s", workspace_host="https://example.com"
+        )
 
         mock_client = MagicMock()
         mock_client.config.authenticate.return_value = {"Authorization": "Basic xyz123"}
 
-        with patch("src.utils.databricks_auth.WorkspaceClient", return_value=mock_client), \
-             patch.object(auth, "_manual_oauth_flow", new_callable=AsyncMock, return_value="manual_tok"):
+        with (
+            patch(
+                "src.utils.databricks_auth.WorkspaceClient", return_value=mock_client
+            ),
+            patch.object(
+                auth,
+                "_manual_oauth_flow",
+                new_callable=AsyncMock,
+                return_value="manual_tok",
+            ),
+        ):
             result = await auth._get_service_principal_token()
 
         assert result == "manual_tok"
@@ -422,13 +631,24 @@ class TestGetServicePrincipalToken:
     @pytest.mark.asyncio
     async def test_sdk_empty_authorization_header(self):
         """SDK returns empty Authorization header -> falls through to manual flow."""
-        auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://example.com")
+        auth = _make_auth(
+            client_id="c", client_secret="s", workspace_host="https://example.com"
+        )
 
         mock_client = MagicMock()
         mock_client.config.authenticate.return_value = {"Authorization": ""}
 
-        with patch("src.utils.databricks_auth.WorkspaceClient", return_value=mock_client), \
-             patch.object(auth, "_manual_oauth_flow", new_callable=AsyncMock, return_value="fallback"):
+        with (
+            patch(
+                "src.utils.databricks_auth.WorkspaceClient", return_value=mock_client
+            ),
+            patch.object(
+                auth,
+                "_manual_oauth_flow",
+                new_callable=AsyncMock,
+                return_value="fallback",
+            ),
+        ):
             result = await auth._get_service_principal_token()
 
         assert result == "fallback"
@@ -436,37 +656,78 @@ class TestGetServicePrincipalToken:
     @pytest.mark.asyncio
     async def test_sdk_returns_non_dict(self):
         """SDK returns non-dict (callable) -> falls through to manual flow."""
-        auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://example.com")
+        auth = _make_auth(
+            client_id="c", client_secret="s", workspace_host="https://example.com"
+        )
 
         mock_client = MagicMock()
-        mock_client.config.authenticate.return_value = lambda: {"Authorization": "Bearer x"}
+        mock_client.config.authenticate.return_value = lambda: {
+            "Authorization": "Bearer x"
+        }
 
-        with patch("src.utils.databricks_auth.WorkspaceClient", return_value=mock_client), \
-             patch.object(auth, "_manual_oauth_flow", new_callable=AsyncMock, return_value="manual_result"):
+        with (
+            patch(
+                "src.utils.databricks_auth.WorkspaceClient", return_value=mock_client
+            ),
+            patch.object(
+                auth,
+                "_manual_oauth_flow",
+                new_callable=AsyncMock,
+                return_value="manual_result",
+            ),
+        ):
             result = await auth._get_service_principal_token()
 
         assert result == "manual_result"
 
     @pytest.mark.asyncio
     async def test_sdk_fails_manual_fallback(self):
-        auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://h.com")
-        with patch("src.utils.databricks_auth.WorkspaceClient", side_effect=Exception("sdk fail")), \
-             patch.object(auth, "_manual_oauth_flow", new_callable=AsyncMock, return_value="manual"):
+        auth = _make_auth(
+            client_id="c", client_secret="s", workspace_host="https://h.com"
+        )
+        with (
+            patch(
+                "src.utils.databricks_auth.WorkspaceClient",
+                side_effect=Exception("sdk fail"),
+            ),
+            patch.object(
+                auth,
+                "_manual_oauth_flow",
+                new_callable=AsyncMock,
+                return_value="manual",
+            ),
+        ):
             assert await auth._get_service_principal_token() == "manual"
 
     @pytest.mark.asyncio
     async def test_outer_exception(self):
-        auth = _make_auth(client_id="c", client_secret="s", workspace_host="https://h.com")
-        with patch("src.utils.databricks_auth.WorkspaceClient", side_effect=Exception("sdk")), \
-             patch.object(auth, "_manual_oauth_flow", new_callable=AsyncMock, side_effect=Exception("manual")):
+        auth = _make_auth(
+            client_id="c", client_secret="s", workspace_host="https://h.com"
+        )
+        with (
+            patch(
+                "src.utils.databricks_auth.WorkspaceClient",
+                side_effect=Exception("sdk"),
+            ),
+            patch.object(
+                auth,
+                "_manual_oauth_flow",
+                new_callable=AsyncMock,
+                side_effect=Exception("manual"),
+            ),
+        ):
             assert await auth._get_service_principal_token() is None
 
 
 # ── Simple accessors ───────────────────────────────────
 
+
 class TestSimpleAccessors:
     def test_get_workspace_host(self):
-        assert _make_auth(workspace_host="https://h.com").get_workspace_host() == "https://h.com"
+        assert (
+            _make_auth(workspace_host="https://h.com").get_workspace_host()
+            == "https://h.com"
+        )
 
     def test_get_workspace_host_none(self):
         assert _make_auth(workspace_host=None).get_workspace_host() is None
@@ -474,12 +735,19 @@ class TestSimpleAccessors:
     @pytest.mark.asyncio
     async def test_get_workspace_url_loads_config(self):
         auth = _make_auth(config_loaded=False, workspace_host="https://h.com")
-        with patch.object(auth, "_load_config", new_callable=AsyncMock, return_value=True):
+        with patch.object(
+            auth, "_load_config", new_callable=AsyncMock, return_value=True
+        ):
             assert await auth.get_workspace_url() == "https://h.com"
 
     @pytest.mark.asyncio
     async def test_get_workspace_url_already_loaded(self):
-        assert await _make_auth(config_loaded=True, workspace_host="https://h.com").get_workspace_url() == "https://h.com"
+        assert (
+            await _make_auth(
+                config_loaded=True, workspace_host="https://h.com"
+            ).get_workspace_url()
+            == "https://h.com"
+        )
 
     def test_get_api_token(self):
         assert _make_auth(api_token="tok").get_api_token() == "tok"
@@ -490,35 +758,68 @@ class TestSimpleAccessors:
 
 # ── validate_databricks_connection ─────────────────────
 
+
 class TestValidateDatabricksConnection:
     @pytest.mark.asyncio
     async def test_config_load_fails(self):
-        with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=False):
+        with patch.object(
+            _databricks_auth, "_load_config", new_callable=AsyncMock, return_value=False
+        ):
             ok, err = await validate_databricks_connection()
         assert ok is False and "Failed to load" in err
 
     @pytest.mark.asyncio
     async def test_token_valid(self):
-        with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-             patch.object(_databricks_auth, "_validate_token", new_callable=AsyncMock, return_value=True):
+        with (
+            patch.object(
+                _databricks_auth,
+                "_load_config",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch.object(
+                _databricks_auth,
+                "_validate_token",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+        ):
             ok, err = await validate_databricks_connection()
         assert ok is True and err is None
 
     @pytest.mark.asyncio
     async def test_token_invalid(self):
-        with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-             patch.object(_databricks_auth, "_validate_token", new_callable=AsyncMock, return_value=False):
+        with (
+            patch.object(
+                _databricks_auth,
+                "_load_config",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch.object(
+                _databricks_auth,
+                "_validate_token",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+        ):
             ok, err = await validate_databricks_connection()
         assert ok is False and "validation failed" in err
 
     @pytest.mark.asyncio
     async def test_exception(self):
-        with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, side_effect=Exception("conn err")):
+        with patch.object(
+            _databricks_auth,
+            "_load_config",
+            new_callable=AsyncMock,
+            side_effect=Exception("conn err"),
+        ):
             ok, err = await validate_databricks_connection()
         assert ok is False and "conn err" in err
 
 
 # ── get_databricks_auth_headers_sync ───────────────────
+
 
 class TestGetDatabricksAuthHeadersSync:
     def test_basic_call(self):
@@ -528,6 +829,7 @@ class TestGetDatabricksAuthHeadersSync:
     def test_from_async_context(self):
         async def _inner():
             return get_databricks_auth_headers_sync()
+
         loop = asyncio.new_event_loop()
         try:
             headers, err = loop.run_until_complete(_inner())
@@ -538,8 +840,10 @@ class TestGetDatabricksAuthHeadersSync:
 
     def test_exception_path(self):
         """Lines 760-762: outer exception."""
-        with patch("asyncio.get_running_loop", side_effect=RuntimeError), \
-             patch("asyncio.run", side_effect=Exception("async boom")):
+        with (
+            patch("asyncio.get_running_loop", side_effect=RuntimeError),
+            patch("asyncio.run", side_effect=Exception("async boom")),
+        ):
             headers, err = get_databricks_auth_headers_sync()
         assert headers is None
         assert "async boom" in err
@@ -547,22 +851,38 @@ class TestGetDatabricksAuthHeadersSync:
 
 # ── setup_environment_variables ────────────────────────
 
+
 class TestSetupEnvironmentVariables:
     def test_config_load_fails(self):
         import warnings
-        with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=False):
+
+        with patch.object(
+            _databricks_auth, "_load_config", new_callable=AsyncMock, return_value=False
+        ):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", DeprecationWarning)
                 assert setup_environment_variables(user_token="tok") is False
 
     def test_set_access_token_fails(self):
         import warnings
+
         orig_host = _databricks_auth._workspace_host
         orig_token = _databricks_auth._api_token
         try:
             _databricks_auth._workspace_host = "https://h.com"
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch.object(_databricks_auth, "set_user_access_token", side_effect=Exception("oops")):
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch.object(
+                    _databricks_auth,
+                    "set_user_access_token",
+                    side_effect=Exception("oops"),
+                ),
+            ):
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", DeprecationWarning)
                     result = setup_environment_variables(user_token="tok")
@@ -571,17 +891,28 @@ class TestSetupEnvironmentVariables:
         finally:
             _databricks_auth._workspace_host = orig_host
             _databricks_auth._api_token = orig_token
-            for v in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY", "DATABRICKS_HOST", "DATABRICKS_API_BASE"]:
+            for v in [
+                "DATABRICKS_TOKEN",
+                "DATABRICKS_API_KEY",
+                "DATABRICKS_HOST",
+                "DATABRICKS_API_BASE",
+            ]:
                 os.environ.pop(v, None)
 
     def test_without_token_uses_api_token(self):
         import warnings
+
         orig_token = _databricks_auth._api_token
         orig_host = _databricks_auth._workspace_host
         try:
             _databricks_auth._api_token = "pat_value"
             _databricks_auth._workspace_host = "https://h.com"
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True):
+            with patch.object(
+                _databricks_auth,
+                "_load_config",
+                new_callable=AsyncMock,
+                return_value=True,
+            ):
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", DeprecationWarning)
                     assert setup_environment_variables(None) is True
@@ -589,18 +920,31 @@ class TestSetupEnvironmentVariables:
         finally:
             _databricks_auth._api_token = orig_token
             _databricks_auth._workspace_host = orig_host
-            for v in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY", "DATABRICKS_HOST", "DATABRICKS_API_BASE"]:
+            for v in [
+                "DATABRICKS_TOKEN",
+                "DATABRICKS_API_KEY",
+                "DATABRICKS_HOST",
+                "DATABRICKS_API_BASE",
+            ]:
                 os.environ.pop(v, None)
 
     def test_from_async_context(self):
         import warnings
+
         orig_host = _databricks_auth._workspace_host
+
         async def _inner():
             _databricks_auth._workspace_host = "https://h.com"
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True):
+            with patch.object(
+                _databricks_auth,
+                "_load_config",
+                new_callable=AsyncMock,
+                return_value=True,
+            ):
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", DeprecationWarning)
                     return setup_environment_variables(user_token="tok2")
+
         loop = asyncio.new_event_loop()
         try:
             result = loop.run_until_complete(_inner())
@@ -608,20 +952,29 @@ class TestSetupEnvironmentVariables:
         finally:
             loop.close()
             _databricks_auth._workspace_host = orig_host
-            for v in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY", "DATABRICKS_HOST", "DATABRICKS_API_BASE"]:
+            for v in [
+                "DATABRICKS_TOKEN",
+                "DATABRICKS_API_KEY",
+                "DATABRICKS_HOST",
+                "DATABRICKS_API_BASE",
+            ]:
                 os.environ.pop(v, None)
 
     def test_outer_exception(self):
         """Lines 868-870."""
         import warnings
-        with patch("asyncio.get_running_loop", side_effect=RuntimeError), \
-             patch("asyncio.run", side_effect=Exception("run fail")):
+
+        with (
+            patch("asyncio.get_running_loop", side_effect=RuntimeError),
+            patch("asyncio.run", side_effect=Exception("run fail")),
+        ):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", DeprecationWarning)
                 assert setup_environment_variables(user_token="tok") is False
 
 
 # ── extract_user_token_from_request ────────────────────
+
 
 class TestExtractUserToken:
     def test_forwarded_header(self):
@@ -646,6 +999,7 @@ class TestExtractUserToken:
 
 # ── get_auth_context ───────────────────────────────────
 
+
 class TestGetAuthContext:
     @pytest.fixture(autouse=True)
     def _clear_obo_cache(self):
@@ -653,6 +1007,7 @@ class TestGetAuthContext:
         # token hash; tests in this class reuse token strings, so clear it
         # around every test to keep them independent.
         from src.utils import databricks_auth as m
+
         m._OBO_VALIDATION_CACHE.clear()
         m._PAT_TOKEN_CACHE.clear()
         yield
@@ -660,8 +1015,16 @@ class TestGetAuthContext:
         m._PAT_TOKEN_CACHE.clear()
 
     def _save(self):
-        return {k: getattr(_databricks_auth, f"_{k}") for k in
-                ["workspace_host", "client_id", "client_secret", "service_token", "config_loaded"]}
+        return {
+            k: getattr(_databricks_auth, f"_{k}")
+            for k in [
+                "workspace_host",
+                "client_id",
+                "client_secret",
+                "service_token",
+                "config_loaded",
+            ]
+        }
 
     def _restore(self, s):
         for k, v in s.items():
@@ -669,7 +1032,9 @@ class TestGetAuthContext:
 
     @pytest.mark.asyncio
     async def test_config_load_fails(self):
-        with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=False):
+        with patch.object(
+            _databricks_auth, "_load_config", new_callable=AsyncMock, return_value=False
+        ):
             assert await get_auth_context() is None
 
     @pytest.mark.asyncio
@@ -677,7 +1042,12 @@ class TestGetAuthContext:
         s = self._save()
         _databricks_auth._workspace_host = None
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True):
+            with patch.object(
+                _databricks_auth,
+                "_load_config",
+                new_callable=AsyncMock,
+                return_value=True,
+            ):
                 assert await get_auth_context() is None
         finally:
             self._restore(s)
@@ -692,9 +1062,19 @@ class TestGetAuthContext:
         mock_client = MagicMock()
         mock_client.current_user.me.return_value = mock_user
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.utils.databricks_auth._clean_environment") as mc, \
-                 patch("src.utils.databricks_auth.WorkspaceClient", return_value=mock_client):
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch("src.utils.databricks_auth._clean_environment") as mc,
+                patch(
+                    "src.utils.databricks_auth.WorkspaceClient",
+                    return_value=mock_client,
+                ),
+            ):
                 mc.return_value.__enter__ = Mock(return_value=None)
                 mc.return_value.__exit__ = Mock(return_value=False)
                 result = await get_auth_context(user_token="user_tok")
@@ -712,9 +1092,19 @@ class TestGetAuthContext:
         mock_client = MagicMock()
         mock_client.current_user.me.return_value = mock_user
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.utils.databricks_auth._clean_environment") as mc, \
-                 patch("src.utils.databricks_auth.WorkspaceClient", return_value=mock_client):
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch("src.utils.databricks_auth._clean_environment") as mc,
+                patch(
+                    "src.utils.databricks_auth.WorkspaceClient",
+                    return_value=mock_client,
+                ),
+            ):
                 mc.return_value.__enter__ = Mock(return_value=None)
                 mc.return_value.__exit__ = Mock(return_value=False)
                 result = await get_auth_context(user_token="tok")
@@ -733,12 +1123,24 @@ class TestGetAuthContext:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.utils.databricks_auth._clean_environment") as mc, \
-                 patch("src.utils.databricks_auth.WorkspaceClient", side_effect=Exception("obo fail")), \
-                 patch("src.services.settings.api_keys.ApiKeysService"), \
-                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
-                 patch("src.utils.user_context.UserContext") as mock_uc:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch("src.utils.databricks_auth._clean_environment") as mc,
+                patch(
+                    "src.utils.databricks_auth.WorkspaceClient",
+                    side_effect=Exception("obo fail"),
+                ),
+                patch("src.services.settings.api_keys.ApiKeysService"),
+                patch(
+                    "src.db.session.request_scoped_session", return_value=mock_session
+                ),
+                patch("src.utils.user_context.UserContext") as mock_uc,
+            ):
                 mc.return_value.__enter__ = Mock(return_value=None)
                 mc.return_value.__exit__ = Mock(return_value=False)
                 mock_uc.get_group_context.return_value = None
@@ -762,11 +1164,23 @@ class TestGetAuthContext:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_service), \
-                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
-                 patch("src.utils.user_context.UserContext"), \
-                 patch("src.utils.encryption_utils.EncryptionUtils") as enc:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch(
+                    "src.services.settings.api_keys.ApiKeysService",
+                    return_value=mock_service,
+                ),
+                patch(
+                    "src.db.session.request_scoped_session", return_value=mock_session
+                ),
+                patch("src.utils.user_context.UserContext"),
+                patch("src.utils.encryption_utils.EncryptionUtils") as enc,
+            ):
                 enc.decrypt_value.return_value = "decrypted"
                 result = await get_auth_context(group_id="grp1")
             assert result.auth_method == "pat" and result.token == "decrypted"
@@ -790,11 +1204,23 @@ class TestGetAuthContext:
         mock_group_ctx = MagicMock()
         mock_group_ctx.primary_group_id = "ctx_grp"
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_service), \
-                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
-                 patch("src.utils.user_context.UserContext") as mock_uc, \
-                 patch("src.utils.encryption_utils.EncryptionUtils") as enc:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch(
+                    "src.services.settings.api_keys.ApiKeysService",
+                    return_value=mock_service,
+                ),
+                patch(
+                    "src.db.session.request_scoped_session", return_value=mock_session
+                ),
+                patch("src.utils.user_context.UserContext") as mock_uc,
+                patch("src.utils.encryption_utils.EncryptionUtils") as enc,
+            ):
                 mock_uc.get_group_context.return_value = mock_group_ctx
                 enc.decrypt_value.return_value = "pat_from_ctx"
                 result = await get_auth_context()  # no group_id param, uses UserContext
@@ -809,6 +1235,7 @@ class TestGetAuthContext:
         just primary_group_id. (Regression: PAT under 'user_dev_localhost' was
         missed because primary was 'bi-specialist'.)"""
         from src.utils.databricks_auth import invalidate_pat_cache
+
         invalidate_pat_cache()  # avoid stale cache bleeding from other tests
         s = self._save()
         _databricks_auth._workspace_host = "https://h.com"
@@ -833,15 +1260,31 @@ class TestGetAuthContext:
         mock_group_ctx.group_ids = ["g1", "g2", "g3"]
         mock_group_ctx.primary_group_id = "g1"
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.settings.api_keys.ApiKeysService", side_effect=make_service), \
-                 patch("src.db.session.async_session_factory", return_value=mock_session), \
-                 patch("src.utils.user_context.UserContext") as mock_uc, \
-                 patch("src.utils.encryption_utils.EncryptionUtils") as enc:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch(
+                    "src.services.settings.api_keys.ApiKeysService",
+                    side_effect=make_service,
+                ),
+                patch(
+                    "src.db.session.async_session_factory", return_value=mock_session
+                ),
+                patch("src.utils.user_context.UserContext") as mock_uc,
+                patch("src.utils.encryption_utils.EncryptionUtils") as enc,
+            ):
                 mock_uc.get_group_context.return_value = mock_group_ctx
                 enc.decrypt_value.return_value = "pat_from_g3"
-                result = await get_auth_context()  # no group_id param → searches all groups
-            assert result is not None, "PAT under a non-primary group should still resolve"
+                result = (
+                    await get_auth_context()
+                )  # no group_id param → searches all groups
+            assert (
+                result is not None
+            ), "PAT under a non-primary group should still resolve"
             assert result.auth_method == "pat" and result.token == "pat_from_g3"
         finally:
             invalidate_pat_cache()
@@ -857,10 +1300,19 @@ class TestGetAuthContext:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.settings.api_keys.ApiKeysService"), \
-                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
-                 patch("src.utils.user_context.UserContext") as mock_uc:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch("src.services.settings.api_keys.ApiKeysService"),
+                patch(
+                    "src.db.session.request_scoped_session", return_value=mock_session
+                ),
+                patch("src.utils.user_context.UserContext") as mock_uc,
+            ):
                 mock_uc.get_group_context.side_effect = Exception("no context")
                 assert await get_auth_context() is None
         finally:
@@ -879,10 +1331,22 @@ class TestGetAuthContext:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_service), \
-                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
-                 patch("src.utils.user_context.UserContext"):
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch(
+                    "src.services.settings.api_keys.ApiKeysService",
+                    return_value=mock_service,
+                ),
+                patch(
+                    "src.db.session.request_scoped_session", return_value=mock_session
+                ),
+                patch("src.utils.user_context.UserContext"),
+            ):
                 assert await get_auth_context(group_id="grp") is None
         finally:
             self._restore(s)
@@ -902,10 +1366,22 @@ class TestGetAuthContext:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_service), \
-                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
-                 patch("src.utils.user_context.UserContext"):
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch(
+                    "src.services.settings.api_keys.ApiKeysService",
+                    return_value=mock_service,
+                ),
+                patch(
+                    "src.db.session.request_scoped_session", return_value=mock_session
+                ),
+                patch("src.utils.user_context.UserContext"),
+            ):
                 assert await get_auth_context(group_id="grp") is None
         finally:
             self._restore(s)
@@ -917,13 +1393,26 @@ class TestGetAuthContext:
         _databricks_auth._client_id = None
         _databricks_auth._client_secret = None
         try:
-            original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+            original_import = (
+                __builtins__.__import__
+                if hasattr(__builtins__, "__import__")
+                else __import__
+            )
+
             def fail_import(name, *args, **kwargs):
                 if name == "src.services.settings.api_keys":
                     raise ImportError("no module")
                 return original_import(name, *args, **kwargs)
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("builtins.__import__", side_effect=fail_import):
+
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch("builtins.__import__", side_effect=fail_import),
+            ):
                 assert await get_auth_context(group_id="grp") is None
         finally:
             self._restore(s)
@@ -938,12 +1427,28 @@ class TestGetAuthContext:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch.object(_databricks_auth, "_is_service_token_expired", return_value=True), \
-                 patch.object(_databricks_auth, "_refresh_service_token", new_callable=AsyncMock, return_value="spn"), \
-                 patch("src.services.settings.api_keys.ApiKeysService"), \
-                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
-                 patch("src.utils.user_context.UserContext") as uc:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch.object(
+                    _databricks_auth, "_is_service_token_expired", return_value=True
+                ),
+                patch.object(
+                    _databricks_auth,
+                    "_refresh_service_token",
+                    new_callable=AsyncMock,
+                    return_value="spn",
+                ),
+                patch("src.services.settings.api_keys.ApiKeysService"),
+                patch(
+                    "src.db.session.request_scoped_session", return_value=mock_session
+                ),
+                patch("src.utils.user_context.UserContext") as uc,
+            ):
                 uc.get_group_context.return_value = None
                 result = await get_auth_context()
             assert result.auth_method == "service_principal" and result.token == "spn"
@@ -961,11 +1466,22 @@ class TestGetAuthContext:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch.object(_databricks_auth, "_is_service_token_expired", return_value=False), \
-                 patch("src.services.settings.api_keys.ApiKeysService"), \
-                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
-                 patch("src.utils.user_context.UserContext") as uc:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch.object(
+                    _databricks_auth, "_is_service_token_expired", return_value=False
+                ),
+                patch("src.services.settings.api_keys.ApiKeysService"),
+                patch(
+                    "src.db.session.request_scoped_session", return_value=mock_session
+                ),
+                patch("src.utils.user_context.UserContext") as uc,
+            ):
                 uc.get_group_context.return_value = None
                 result = await get_auth_context()
             assert result.token == "cached"
@@ -982,12 +1498,28 @@ class TestGetAuthContext:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch.object(_databricks_auth, "_is_service_token_expired", return_value=True), \
-                 patch.object(_databricks_auth, "_refresh_service_token", new_callable=AsyncMock, return_value=None), \
-                 patch("src.services.settings.api_keys.ApiKeysService"), \
-                 patch("src.db.session.request_scoped_session", return_value=mock_session), \
-                 patch("src.utils.user_context.UserContext") as uc:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch.object(
+                    _databricks_auth, "_is_service_token_expired", return_value=True
+                ),
+                patch.object(
+                    _databricks_auth,
+                    "_refresh_service_token",
+                    new_callable=AsyncMock,
+                    return_value=None,
+                ),
+                patch("src.services.settings.api_keys.ApiKeysService"),
+                patch(
+                    "src.db.session.request_scoped_session", return_value=mock_session
+                ),
+                patch("src.utils.user_context.UserContext") as uc,
+            ):
                 uc.get_group_context.return_value = None
                 assert await get_auth_context() is None
         finally:
@@ -995,7 +1527,12 @@ class TestGetAuthContext:
 
     @pytest.mark.asyncio
     async def test_outer_exception(self):
-        with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, side_effect=Exception("total")):
+        with patch.object(
+            _databricks_auth,
+            "_load_config",
+            new_callable=AsyncMock,
+            side_effect=Exception("total"),
+        ):
             assert await get_auth_context() is None
 
     @pytest.mark.asyncio
@@ -1006,16 +1543,28 @@ class TestGetAuthContext:
         _databricks_auth._client_id = None
         _databricks_auth._client_secret = None
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.db.session.async_session_factory") as mock_sf, \
-                 patch("src.utils.user_context.UserContext") as mock_uc, \
-                 patch.dict(os.environ, {"DATABRICKS_TOKEN": "env_pat_token"}, clear=False):
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch("src.db.session.async_session_factory") as mock_sf,
+                patch("src.utils.user_context.UserContext") as mock_uc,
+                patch.dict(
+                    os.environ, {"DATABRICKS_TOKEN": "env_pat_token"}, clear=False
+                ),
+            ):
                 mock_session = AsyncMock()
                 mock_sf.return_value.__aenter__ = AsyncMock(return_value=mock_session)
                 mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
                 mock_svc = AsyncMock()
                 mock_svc.find_by_name = AsyncMock(return_value=None)
-                with patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_svc):
+                with patch(
+                    "src.services.settings.api_keys.ApiKeysService",
+                    return_value=mock_svc,
+                ):
                     mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
                     result = await get_auth_context()
             assert result is not None
@@ -1036,16 +1585,26 @@ class TestGetAuthContext:
             # Ensure DATABRICKS_TOKEN is NOT set
             env_clean = {k: v for k, v in os.environ.items() if k != "DATABRICKS_TOKEN"}
             env_clean.update(env)
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.db.session.async_session_factory") as mock_sf, \
-                 patch("src.utils.user_context.UserContext") as mock_uc, \
-                 patch.dict(os.environ, env_clean, clear=True):
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch("src.db.session.async_session_factory") as mock_sf,
+                patch("src.utils.user_context.UserContext") as mock_uc,
+                patch.dict(os.environ, env_clean, clear=True),
+            ):
                 mock_session = AsyncMock()
                 mock_sf.return_value.__aenter__ = AsyncMock(return_value=mock_session)
                 mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
                 mock_svc = AsyncMock()
                 mock_svc.find_by_name = AsyncMock(return_value=None)
-                with patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_svc):
+                with patch(
+                    "src.services.settings.api_keys.ApiKeysService",
+                    return_value=mock_svc,
+                ):
                     mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
                     result = await get_auth_context()
             assert result is not None
@@ -1062,16 +1621,30 @@ class TestGetAuthContext:
         _databricks_auth._client_id = None
         _databricks_auth._client_secret = None
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.db.session.async_session_factory") as mock_sf, \
-                 patch("src.utils.user_context.UserContext") as mock_uc, \
-                 patch.dict(os.environ, {"DATABRICKS_TOKEN": "tok_val", "DATABRICKS_API_KEY": "key_val"}, clear=False):
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch("src.db.session.async_session_factory") as mock_sf,
+                patch("src.utils.user_context.UserContext") as mock_uc,
+                patch.dict(
+                    os.environ,
+                    {"DATABRICKS_TOKEN": "tok_val", "DATABRICKS_API_KEY": "key_val"},
+                    clear=False,
+                ),
+            ):
                 mock_session = AsyncMock()
                 mock_sf.return_value.__aenter__ = AsyncMock(return_value=mock_session)
                 mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
                 mock_svc = AsyncMock()
                 mock_svc.find_by_name = AsyncMock(return_value=None)
-                with patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_svc):
+                with patch(
+                    "src.services.settings.api_keys.ApiKeysService",
+                    return_value=mock_svc,
+                ):
                     mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
                     result = await get_auth_context()
             assert result.token == "tok_val"
@@ -1088,19 +1661,34 @@ class TestGetAuthContext:
         _databricks_auth._service_token = "spn_tok"
         _databricks_auth._service_token_fetched_at = None
         try:
-            env_clean = {k: v for k, v in os.environ.items()
-                         if k not in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY")}
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.db.session.async_session_factory") as mock_sf, \
-                 patch("src.utils.user_context.UserContext") as mock_uc, \
-                 patch.dict(os.environ, env_clean, clear=True), \
-                 patch.object(_databricks_auth, "_is_service_token_expired", return_value=False):
+            env_clean = {
+                k: v
+                for k, v in os.environ.items()
+                if k not in ("DATABRICKS_TOKEN", "DATABRICKS_API_KEY")
+            }
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch("src.db.session.async_session_factory") as mock_sf,
+                patch("src.utils.user_context.UserContext") as mock_uc,
+                patch.dict(os.environ, env_clean, clear=True),
+                patch.object(
+                    _databricks_auth, "_is_service_token_expired", return_value=False
+                ),
+            ):
                 mock_session = AsyncMock()
                 mock_sf.return_value.__aenter__ = AsyncMock(return_value=mock_session)
                 mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
                 mock_svc = AsyncMock()
                 mock_svc.find_by_name = AsyncMock(return_value=None)
-                with patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_svc):
+                with patch(
+                    "src.services.settings.api_keys.ApiKeysService",
+                    return_value=mock_svc,
+                ):
                     mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
                     result = await get_auth_context()
             assert result is not None
@@ -1117,16 +1705,30 @@ class TestGetAuthContext:
         _databricks_auth._client_id = None
         _databricks_auth._client_secret = None
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.db.session.async_session_factory") as mock_sf, \
-                 patch("src.utils.user_context.UserContext") as mock_uc, \
-                 patch.dict(os.environ, {"DATABRICKS_TOKEN": "", "DATABRICKS_API_KEY": ""}, clear=False):
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch("src.db.session.async_session_factory") as mock_sf,
+                patch("src.utils.user_context.UserContext") as mock_uc,
+                patch.dict(
+                    os.environ,
+                    {"DATABRICKS_TOKEN": "", "DATABRICKS_API_KEY": ""},
+                    clear=False,
+                ),
+            ):
                 mock_session = AsyncMock()
                 mock_sf.return_value.__aenter__ = AsyncMock(return_value=mock_session)
                 mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
                 mock_svc = AsyncMock()
                 mock_svc.find_by_name = AsyncMock(return_value=None)
-                with patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_svc):
+                with patch(
+                    "src.services.settings.api_keys.ApiKeysService",
+                    return_value=mock_svc,
+                ):
                     mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
                     result = await get_auth_context()
             # Empty strings are falsy, so no PAT -> no SPN creds -> None
@@ -1137,31 +1739,52 @@ class TestGetAuthContext:
 
 # ── get_workspace_client ───────────────────────────────
 
+
 class TestGetWorkspaceClient:
     @pytest.mark.asyncio
     async def test_auth_context_none(self):
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=None):
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
             assert await get_workspace_client() is None
 
     @pytest.mark.asyncio
     async def test_success(self):
         ctx = MagicMock()
         ctx.get_workspace_client.return_value = MagicMock()
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=ctx):
-            assert await get_workspace_client(user_token="t") is ctx.get_workspace_client.return_value
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=ctx,
+        ):
+            assert (
+                await get_workspace_client(user_token="t")
+                is ctx.get_workspace_client.return_value
+            )
 
     @pytest.mark.asyncio
     async def test_exception(self):
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, side_effect=Exception("e")):
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            side_effect=Exception("e"),
+        ):
             assert await get_workspace_client() is None
 
 
 # ── get_workspace_client_with_fallback ─────────────────
 
+
 class TestGetWorkspaceClientWithFallback:
     @pytest.mark.asyncio
     async def test_auth_none(self):
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=None):
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
             c, t = await get_workspace_client_with_fallback(operation_name="op")
         assert c is None and t is None
 
@@ -1170,7 +1793,11 @@ class TestGetWorkspaceClientWithFallback:
         ctx = MagicMock()
         ctx.auth_method = "obo"
         ctx.get_workspace_client.return_value = MagicMock()
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=ctx):
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=ctx,
+        ):
             c, t = await get_workspace_client_with_fallback(user_token="ut")
         assert c is not None and t == "ut"
 
@@ -1179,18 +1806,27 @@ class TestGetWorkspaceClientWithFallback:
         ctx = MagicMock()
         ctx.auth_method = "pat"
         ctx.get_workspace_client.return_value = MagicMock()
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=ctx):
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=ctx,
+        ):
             c, t = await get_workspace_client_with_fallback(user_token="t")
         assert c is not None and t is None
 
     @pytest.mark.asyncio
     async def test_exception(self):
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, side_effect=Exception("e")):
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            side_effect=Exception("e"),
+        ):
             c, t = await get_workspace_client_with_fallback()
         assert c is None and t is None
 
 
 # ── get_mcp_access_token ───────────────────────────────
+
 
 class TestGetMcpAccessToken:
     @pytest.mark.asyncio
@@ -1219,7 +1855,10 @@ class TestGetMcpAccessToken:
 
     @pytest.mark.asyncio
     async def test_called_process_error(self):
-        with patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "cmd", stderr="cli err")):
+        with patch(
+            "subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, "cmd", stderr="cli err"),
+        ):
             tok, err = await get_mcp_access_token()
         assert tok is None and "CLI command failed" in err
 
@@ -1240,10 +1879,15 @@ class TestGetMcpAccessToken:
 
 # ── get_current_databricks_user ────────────────────────
 
+
 class TestGetCurrentDatabricksUser:
     @pytest.mark.asyncio
     async def test_no_client(self):
-        with patch("src.utils.databricks_auth.get_workspace_client", new_callable=AsyncMock, return_value=None):
+        with patch(
+            "src.utils.databricks_auth.get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
             u, e = await get_current_databricks_user()
         assert u is None and "Failed to create" in e
 
@@ -1253,7 +1897,11 @@ class TestGetCurrentDatabricksUser:
         mu.user_name = "u@x.com"
         mc = MagicMock()
         mc.current_user.me.return_value = mu
-        with patch("src.utils.databricks_auth.get_workspace_client", new_callable=AsyncMock, return_value=mc):
+        with patch(
+            "src.utils.databricks_auth.get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=mc,
+        ):
             u, e = await get_current_databricks_user(user_token="t")
         assert u == "u@x.com" and e is None
 
@@ -1265,7 +1913,11 @@ class TestGetCurrentDatabricksUser:
         mu.display_name = None
         mc = MagicMock()
         mc.current_user.me.return_value = mu
-        with patch("src.utils.databricks_auth.get_workspace_client", new_callable=AsyncMock, return_value=mc):
+        with patch(
+            "src.utils.databricks_auth.get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=mc,
+        ):
             u, e = await get_current_databricks_user()
         assert u == "app-id"
 
@@ -1277,7 +1929,11 @@ class TestGetCurrentDatabricksUser:
         mu.display_name = "DN"
         mc = MagicMock()
         mc.current_user.me.return_value = mu
-        with patch("src.utils.databricks_auth.get_workspace_client", new_callable=AsyncMock, return_value=mc):
+        with patch(
+            "src.utils.databricks_auth.get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=mc,
+        ):
             u, e = await get_current_databricks_user()
         assert u == "DN"
 
@@ -1289,7 +1945,11 @@ class TestGetCurrentDatabricksUser:
         mu.display_name = None
         mc = MagicMock()
         mc.current_user.me.return_value = mu
-        with patch("src.utils.databricks_auth.get_workspace_client", new_callable=AsyncMock, return_value=mc):
+        with patch(
+            "src.utils.databricks_auth.get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=mc,
+        ):
             u, e = await get_current_databricks_user()
         assert u is None and "Could not determine" in e
 
@@ -1297,7 +1957,11 @@ class TestGetCurrentDatabricksUser:
     async def test_me_returns_none(self):
         mc = MagicMock()
         mc.current_user.me.return_value = None
-        with patch("src.utils.databricks_auth.get_workspace_client", new_callable=AsyncMock, return_value=mc):
+        with patch(
+            "src.utils.databricks_auth.get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=mc,
+        ):
             u, e = await get_current_databricks_user()
         assert u is None and "returned None" in e
 
@@ -1305,27 +1969,40 @@ class TestGetCurrentDatabricksUser:
     async def test_me_raises(self):
         mc = MagicMock()
         mc.current_user.me.side_effect = Exception("api err")
-        with patch("src.utils.databricks_auth.get_workspace_client", new_callable=AsyncMock, return_value=mc):
+        with patch(
+            "src.utils.databricks_auth.get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=mc,
+        ):
             u, e = await get_current_databricks_user()
         assert u is None and "Failed to get current user" in e
 
     @pytest.mark.asyncio
     async def test_outer_exception(self):
-        with patch("src.utils.databricks_auth.get_workspace_client", new_callable=AsyncMock, side_effect=Exception("x")):
+        with patch(
+            "src.utils.databricks_auth.get_workspace_client",
+            new_callable=AsyncMock,
+            side_effect=Exception("x"),
+        ):
             u, e = await get_current_databricks_user()
         assert u is None and "x" in e
 
 
 # ── get_mcp_auth_headers ──────────────────────────────
 
+
 class TestGetMcpAuthHeaders:
     @pytest.mark.asyncio
     async def test_obo_success_with_sse(self):
         ma = MagicMock()
         ma.set_user_access_token = Mock()
-        ma.get_auth_headers = AsyncMock(return_value=({"Authorization": "Bearer tok"}, None))
+        ma.get_auth_headers = AsyncMock(
+            return_value=({"Authorization": "Bearer tok"}, None)
+        )
         with patch("src.utils.databricks_auth.DatabricksAuth", return_value=ma):
-            h, e = await get_mcp_auth_headers("https://mcp.example.com", user_token="tok", include_sse_headers=True)
+            h, e = await get_mcp_auth_headers(
+                "https://mcp.example.com", user_token="tok", include_sse_headers=True
+            )
         assert e is None and h["Accept"] == "text/event-stream"
 
     @pytest.mark.asyncio
@@ -1334,7 +2011,9 @@ class TestGetMcpAuthHeaders:
         ma.set_user_access_token = Mock()
         ma.get_auth_headers = AsyncMock(return_value=(None, "obo failed"))
         with patch("src.utils.databricks_auth.DatabricksAuth", return_value=ma):
-            h, e = await get_mcp_auth_headers("https://mcp.example.com", user_token="tok", api_key="k")
+            h, e = await get_mcp_auth_headers(
+                "https://mcp.example.com", user_token="tok", api_key="k"
+            )
         assert e is None and h["Authorization"] == "Bearer k"
 
     @pytest.mark.asyncio
@@ -1343,12 +2022,16 @@ class TestGetMcpAuthHeaders:
         ma.set_user_access_token = Mock()
         ma.get_auth_headers = AsyncMock(side_effect=Exception("boom"))
         with patch("src.utils.databricks_auth.DatabricksAuth", return_value=ma):
-            h, e = await get_mcp_auth_headers("https://mcp.example.com", user_token="tok", api_key="k")
+            h, e = await get_mcp_auth_headers(
+                "https://mcp.example.com", user_token="tok", api_key="k"
+            )
         assert e is None and h["Authorization"] == "Bearer k"
 
     @pytest.mark.asyncio
     async def test_api_key_with_sse(self):
-        h, e = await get_mcp_auth_headers("https://mcp.example.com", api_key="k", include_sse_headers=True)
+        h, e = await get_mcp_auth_headers(
+            "https://mcp.example.com", api_key="k", include_sse_headers=True
+        )
         assert e is None and h["Accept"] == "text/event-stream"
 
     @pytest.mark.asyncio
@@ -1358,32 +2041,58 @@ class TestGetMcpAuthHeaders:
 
     @pytest.mark.asyncio
     async def test_cli_fallback_with_sse(self):
-        with patch("src.utils.databricks_auth.get_mcp_access_token", new_callable=AsyncMock, return_value=("ct", None)):
-            h, e = await get_mcp_auth_headers("https://mcp.example.com", include_sse_headers=True)
+        with patch(
+            "src.utils.databricks_auth.get_mcp_access_token",
+            new_callable=AsyncMock,
+            return_value=("ct", None),
+        ):
+            h, e = await get_mcp_auth_headers(
+                "https://mcp.example.com", include_sse_headers=True
+            )
         assert e is None and h["Authorization"] == "Bearer ct"
 
     @pytest.mark.asyncio
     async def test_cli_fallback_without_sse(self):
-        with patch("src.utils.databricks_auth.get_mcp_access_token", new_callable=AsyncMock, return_value=("ct", None)):
+        with patch(
+            "src.utils.databricks_auth.get_mcp_access_token",
+            new_callable=AsyncMock,
+            return_value=("ct", None),
+        ):
             h, e = await get_mcp_auth_headers("https://mcp.example.com")
         assert e is None and "Accept" not in h
 
     @pytest.mark.asyncio
     async def test_cli_fallback_error(self):
-        with patch("src.utils.databricks_auth.get_mcp_access_token", new_callable=AsyncMock, return_value=(None, "cli err")):
+        with patch(
+            "src.utils.databricks_auth.get_mcp_access_token",
+            new_callable=AsyncMock,
+            return_value=(None, "cli err"),
+        ):
             h, e = await get_mcp_auth_headers("https://mcp.example.com")
         assert h is None and e == "cli err"
 
     @pytest.mark.asyncio
     async def test_outer_exception(self):
         """Lines 1383-1385."""
-        with patch("src.utils.databricks_auth.DatabricksAuth", side_effect=Exception("total")), \
-             patch("src.utils.databricks_auth.get_mcp_access_token", new_callable=AsyncMock, side_effect=Exception("also")):
-            h, e = await get_mcp_auth_headers("https://mcp.example.com", user_token="tok")
+        with (
+            patch(
+                "src.utils.databricks_auth.DatabricksAuth",
+                side_effect=Exception("total"),
+            ),
+            patch(
+                "src.utils.databricks_auth.get_mcp_access_token",
+                new_callable=AsyncMock,
+                side_effect=Exception("also"),
+            ),
+        ):
+            h, e = await get_mcp_auth_headers(
+                "https://mcp.example.com", user_token="tok"
+            )
         assert h is None
 
 
 # ── is_scope_error ─────────────────────────────────────
+
 
 class TestIsScopeError:
     def test_required_scopes(self):
@@ -1404,6 +2113,7 @@ class TestIsScopeError:
 
 # ── DatabricksAuth httpx methods ───────────────────────
 
+
 class TestDatabricksAuthHttpxMethods:
     def _mk(self, **kw):
         auth = DatabricksAuth()
@@ -1413,7 +2123,9 @@ class TestDatabricksAuthHttpxMethods:
 
     @pytest.mark.asyncio
     async def test_manual_oauth_success(self):
-        auth = self._mk(workspace_host="https://h.com", client_id="c", client_secret="s")
+        auth = self._mk(
+            workspace_host="https://h.com", client_id="c", client_secret="s"
+        )
         mr = MagicMock()
         mr.status_code = 200
         mr.json.return_value = {"access_token": "tok", "expires_in": 7200}
@@ -1426,11 +2138,18 @@ class TestDatabricksAuthHttpxMethods:
 
     @pytest.mark.asyncio
     async def test_manual_oauth_no_host(self):
-        assert await self._mk(workspace_host=None, client_id="c", client_secret="s")._manual_oauth_flow() is None
+        assert (
+            await self._mk(
+                workspace_host=None, client_id="c", client_secret="s"
+            )._manual_oauth_flow()
+            is None
+        )
 
     @pytest.mark.asyncio
     async def test_manual_oauth_no_token_in_resp(self):
-        auth = self._mk(workspace_host="https://h.com", client_id="c", client_secret="s")
+        auth = self._mk(
+            workspace_host="https://h.com", client_id="c", client_secret="s"
+        )
         mr = MagicMock()
         mr.status_code = 200
         mr.json.return_value = {}
@@ -1443,7 +2162,9 @@ class TestDatabricksAuthHttpxMethods:
 
     @pytest.mark.asyncio
     async def test_manual_oauth_non_200(self):
-        auth = self._mk(workspace_host="https://h.com", client_id="c", client_secret="s")
+        auth = self._mk(
+            workspace_host="https://h.com", client_id="c", client_secret="s"
+        )
         mr = MagicMock()
         mr.status_code = 400
         mr.text = "Bad"
@@ -1456,7 +2177,9 @@ class TestDatabricksAuthHttpxMethods:
 
     @pytest.mark.asyncio
     async def test_manual_oauth_exception(self):
-        auth = self._mk(workspace_host="https://h.com", client_id="c", client_secret="s")
+        auth = self._mk(
+            workspace_host="https://h.com", client_id="c", client_secret="s"
+        )
         mc = AsyncMock()
         mc.post.side_effect = Exception("err")
         with patch("src.utils.databricks_auth.httpx.AsyncClient") as M:
@@ -1479,11 +2202,19 @@ class TestDatabricksAuthHttpxMethods:
 
     @pytest.mark.asyncio
     async def test_validate_no_token(self):
-        assert await self._mk(api_token=None, workspace_host="https://h.com")._validate_token() is False
+        assert (
+            await self._mk(
+                api_token=None, workspace_host="https://h.com"
+            )._validate_token()
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_validate_no_host(self):
-        assert await self._mk(api_token="t", workspace_host=None)._validate_token() is False
+        assert (
+            await self._mk(api_token="t", workspace_host=None)._validate_token()
+            is False
+        )
 
     @pytest.mark.asyncio
     async def test_validate_non_200(self):
@@ -1510,6 +2241,7 @@ class TestDatabricksAuthHttpxMethods:
 
 # ── OBO validation cache (PERF-006) ───────────────────────────────────
 
+
 class TestOboValidationCache:
     """The SCIM me() round trip must run at most once per token per TTL,
     and never block the event loop (it runs via asyncio.to_thread)."""
@@ -1517,6 +2249,7 @@ class TestOboValidationCache:
     @pytest.fixture(autouse=True)
     def _clear_obo_cache(self):
         from src.utils import databricks_auth as m
+
         m._OBO_VALIDATION_CACHE.clear()
         m._PAT_TOKEN_CACHE.clear()
         yield
@@ -1524,8 +2257,16 @@ class TestOboValidationCache:
         m._PAT_TOKEN_CACHE.clear()
 
     def _save(self):
-        return {k: getattr(_databricks_auth, f"_{k}") for k in
-                ["workspace_host", "client_id", "client_secret", "service_token", "config_loaded"]}
+        return {
+            k: getattr(_databricks_auth, f"_{k}")
+            for k in [
+                "workspace_host",
+                "client_id",
+                "client_secret",
+                "service_token",
+                "config_loaded",
+            ]
+        }
 
     def _restore(self, s):
         for k, v in s.items():
@@ -1544,8 +2285,18 @@ class TestOboValidationCache:
         s = self._save()
         _databricks_auth._workspace_host = "https://h.com"
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.utils.databricks_auth.WorkspaceClient", return_value=self._mock_client()) as mock_wc:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch(
+                    "src.utils.databricks_auth.WorkspaceClient",
+                    return_value=self._mock_client(),
+                ) as mock_wc,
+            ):
                 r1 = await get_auth_context(user_token="cache-tok-1")
                 r2 = await get_auth_context(user_token="cache-tok-1")
             assert r1.user_identity == "u@x.com"
@@ -1560,8 +2311,18 @@ class TestOboValidationCache:
         s = self._save()
         _databricks_auth._workspace_host = "https://h.com"
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.utils.databricks_auth.WorkspaceClient", return_value=self._mock_client()) as mock_wc:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch(
+                    "src.utils.databricks_auth.WorkspaceClient",
+                    return_value=self._mock_client(),
+                ) as mock_wc,
+            ):
                 await get_auth_context(user_token="cache-tok-A")
                 await get_auth_context(user_token="cache-tok-B")
             assert mock_wc.call_count == 2
@@ -1571,12 +2332,24 @@ class TestOboValidationCache:
     @pytest.mark.asyncio
     async def test_expired_entry_revalidates(self):
         import hashlib as _hashlib
+
         from src.utils import databricks_auth as m
+
         s = self._save()
         _databricks_auth._workspace_host = "https://h.com"
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.utils.databricks_auth.WorkspaceClient", return_value=self._mock_client()) as mock_wc:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch(
+                    "src.utils.databricks_auth.WorkspaceClient",
+                    return_value=self._mock_client(),
+                ) as mock_wc,
+            ):
                 await get_auth_context(user_token="cache-tok-exp")
                 th = _hashlib.sha256(b"cache-tok-exp").hexdigest()
                 identity, _ = m._OBO_VALIDATION_CACHE[th]
@@ -1589,14 +2362,25 @@ class TestOboValidationCache:
     @pytest.mark.asyncio
     async def test_failed_validation_not_cached(self):
         from src.utils import databricks_auth as m
+
         s = self._save()
         _databricks_auth._workspace_host = "https://h.com"
         _databricks_auth._client_id = None
         _databricks_auth._client_secret = None
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.utils.databricks_auth.WorkspaceClient", side_effect=Exception("bad token")) as mock_wc, \
-                 patch.dict("os.environ", {}, clear=False):
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch(
+                    "src.utils.databricks_auth.WorkspaceClient",
+                    side_effect=Exception("bad token"),
+                ) as mock_wc,
+                patch.dict("os.environ", {}, clear=False),
+            ):
                 # Both calls must attempt SCIM — failures are never cached
                 await get_auth_context(user_token="cache-tok-bad", skip_db_auth=True)
                 await get_auth_context(user_token="cache-tok-bad", skip_db_auth=True)
@@ -1607,6 +2391,7 @@ class TestOboValidationCache:
 
     def test_cache_put_prunes_expired_then_clears_at_cap(self):
         from src.utils import databricks_auth as m
+
         # Fill with expired entries up to the cap: put() prunes them
         for i in range(m._OBO_VALIDATION_CACHE_MAX):
             m._OBO_VALIDATION_CACHE[f"h{i}"] = (None, 0.0)
@@ -1614,6 +2399,7 @@ class TestOboValidationCache:
         assert list(m._OBO_VALIDATION_CACHE) == ["fresh"]
         # Fill with live entries up to the cap: put() clears rather than grow unbounded
         import time as _time
+
         live = _time.time() + 1000
         for i in range(m._OBO_VALIDATION_CACHE_MAX):
             m._OBO_VALIDATION_CACHE[f"l{i}"] = (None, live)
@@ -1623,6 +2409,7 @@ class TestOboValidationCache:
 
 # ── PAT lookup cache (PERF-005) ───────────────────────────────────
 
+
 class TestPatLookupCache:
     """The api_keys DB lookup inside get_auth_context must run at most once
     per group per TTL; 'no PAT configured' is cached too."""
@@ -1630,6 +2417,7 @@ class TestPatLookupCache:
     @pytest.fixture(autouse=True)
     def _clear_caches(self):
         from src.utils import databricks_auth as m
+
         m._OBO_VALIDATION_CACHE.clear()
         m._PAT_TOKEN_CACHE.clear()
         yield
@@ -1637,8 +2425,16 @@ class TestPatLookupCache:
         m._PAT_TOKEN_CACHE.clear()
 
     def _save(self):
-        return {k: getattr(_databricks_auth, f"_{k}") for k in
-                ["workspace_host", "client_id", "client_secret", "service_token", "config_loaded"]}
+        return {
+            k: getattr(_databricks_auth, f"_{k}")
+            for k in [
+                "workspace_host",
+                "client_id",
+                "client_secret",
+                "service_token",
+                "config_loaded",
+            ]
+        }
 
     def _restore(self, s):
         for k, v in s.items():
@@ -1662,10 +2458,21 @@ class TestPatLookupCache:
         _databricks_auth._workspace_host = "https://h.com"
         mock_session, svc = self._make_session_and_service(encrypted="enc")
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.settings.api_keys.ApiKeysService", return_value=svc), \
-                 patch("src.db.session.async_session_factory", return_value=mock_session), \
-                 patch("src.utils.encryption_utils.EncryptionUtils") as mock_enc:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch(
+                    "src.services.settings.api_keys.ApiKeysService", return_value=svc
+                ),
+                patch(
+                    "src.db.session.async_session_factory", return_value=mock_session
+                ),
+                patch("src.utils.encryption_utils.EncryptionUtils") as mock_enc,
+            ):
                 mock_enc.decrypt_value.return_value = "decrypted-pat"
                 r1 = await get_auth_context(group_id="grp-cache")
                 r2 = await get_auth_context(group_id="grp-cache")
@@ -1685,9 +2492,20 @@ class TestPatLookupCache:
         monkeypatch.delenv("DATABRICKS_API_KEY", raising=False)
         mock_session, svc = self._make_session_and_service(encrypted=None)
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.settings.api_keys.ApiKeysService", return_value=svc), \
-                 patch("src.db.session.async_session_factory", return_value=mock_session):
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch(
+                    "src.services.settings.api_keys.ApiKeysService", return_value=svc
+                ),
+                patch(
+                    "src.db.session.async_session_factory", return_value=mock_session
+                ),
+            ):
                 r1 = await get_auth_context(group_id="grp-none")
                 r2 = await get_auth_context(group_id="grp-none")
             assert r1 is None and r2 is None
@@ -1699,14 +2517,26 @@ class TestPatLookupCache:
     @pytest.mark.asyncio
     async def test_invalidate_pat_cache_forces_refetch(self):
         from src.utils.databricks_auth import invalidate_pat_cache
+
         s = self._save()
         _databricks_auth._workspace_host = "https://h.com"
         mock_session, svc = self._make_session_and_service(encrypted="enc")
         try:
-            with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.settings.api_keys.ApiKeysService", return_value=svc), \
-                 patch("src.db.session.async_session_factory", return_value=mock_session), \
-                 patch("src.utils.encryption_utils.EncryptionUtils") as mock_enc:
+            with (
+                patch.object(
+                    _databricks_auth,
+                    "_load_config",
+                    new_callable=AsyncMock,
+                    return_value=True,
+                ),
+                patch(
+                    "src.services.settings.api_keys.ApiKeysService", return_value=svc
+                ),
+                patch(
+                    "src.db.session.async_session_factory", return_value=mock_session
+                ),
+                patch("src.utils.encryption_utils.EncryptionUtils") as mock_enc,
+            ):
                 mock_enc.decrypt_value.return_value = "decrypted-pat"
                 await get_auth_context(group_id="grp-inv")
                 invalidate_pat_cache("grp-inv")
@@ -1716,8 +2546,10 @@ class TestPatLookupCache:
             self._restore(s)
 
     def test_invalidate_without_group_clears_all(self):
-        from src.utils import databricks_auth as m
         import time as _time
+
+        from src.utils import databricks_auth as m
+
         m._PAT_TOKEN_CACHE["g1"] = ("t1", _time.time() + 60)
         m._PAT_TOKEN_CACHE["g2"] = ("t2", _time.time() + 60)
         m.invalidate_pat_cache()

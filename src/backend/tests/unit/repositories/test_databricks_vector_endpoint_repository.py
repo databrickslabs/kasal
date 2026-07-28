@@ -4,19 +4,22 @@ Unit tests for DatabricksVectorEndpointRepository.
 Tests create, get, list, delete, wait_for_ready, get_status operations.
 All HTTP calls are mocked via aiohttp mock helpers.
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.repositories.databricks_vector_endpoint_repository import DatabricksVectorEndpointRepository
+import pytest
+
+from src.repositories.databricks_vector_endpoint_repository import (
+    DatabricksVectorEndpointRepository,
+)
 from src.schemas.databricks_vector_endpoint import (
     EndpointCreate,
     EndpointInfo,
-    EndpointResponse,
     EndpointListResponse,
+    EndpointResponse,
     EndpointState,
     EndpointType,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -58,6 +61,7 @@ def make_http_ctx(status: int, json_data: dict | None = None, text_data: str = "
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def repo():
     return DatabricksVectorEndpointRepository(WORKSPACE_URL)
@@ -82,6 +86,7 @@ def sample_endpoint_info():
 # __init__
 # ---------------------------------------------------------------------------
 
+
 class TestInit:
     def test_stores_workspace_url(self):
         r = DatabricksVectorEndpointRepository("https://ws.databricks.com")
@@ -89,8 +94,14 @@ class TestInit:
 
     def test_has_required_methods(self):
         r = DatabricksVectorEndpointRepository(WORKSPACE_URL)
-        for method in ["create_endpoint", "get_endpoint", "list_endpoints",
-                       "delete_endpoint", "wait_for_endpoint_ready", "get_endpoint_status"]:
+        for method in [
+            "create_endpoint",
+            "get_endpoint",
+            "list_endpoints",
+            "delete_endpoint",
+            "wait_for_endpoint_ready",
+            "get_endpoint_status",
+        ]:
             assert callable(getattr(r, method))
 
 
@@ -98,20 +109,27 @@ class TestInit:
 # _get_auth_token
 # ---------------------------------------------------------------------------
 
+
 class TestGetAuthToken:
     @pytest.mark.asyncio
     async def test_returns_token_from_auth_context(self, repo):
         auth = MagicMock()
         auth.token = AUTH_TOKEN
-        with patch("src.repositories.databricks_vector_endpoint_repository.get_auth_context",
-                   new_callable=AsyncMock, return_value=auth):
+        with patch(
+            "src.repositories.databricks_vector_endpoint_repository.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=auth,
+        ):
             token = await repo._get_auth_token("user-tok")
         assert token == AUTH_TOKEN
 
     @pytest.mark.asyncio
     async def test_raises_when_no_auth_context(self, repo):
-        with patch("src.repositories.databricks_vector_endpoint_repository.get_auth_context",
-                   new_callable=AsyncMock, return_value=None):
+        with patch(
+            "src.repositories.databricks_vector_endpoint_repository.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
             with pytest.raises(Exception, match="Failed to get authentication context"):
                 await repo._get_auth_token()
 
@@ -120,50 +138,77 @@ class TestGetAuthToken:
 # create_endpoint
 # ---------------------------------------------------------------------------
 
+
 class TestCreateEndpoint:
     @pytest.mark.asyncio
-    async def test_create_success(self, repo, sample_endpoint_create, sample_endpoint_info):
-        with patch.object(repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN), \
-             patch.object(repo, "get_endpoint", new_callable=AsyncMock) as mock_get:
+    async def test_create_success(
+        self, repo, sample_endpoint_create, sample_endpoint_info
+    ):
+        with (
+            patch.object(
+                repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN
+            ),
+            patch.object(repo, "get_endpoint", new_callable=AsyncMock) as mock_get,
+        ):
             mock_get.return_value = EndpointResponse(
                 success=True, endpoint=sample_endpoint_info, message="ok"
             )
             session_cm, _ = make_http_ctx(201)
-            with patch("src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
-                       return_value=session_cm):
+            with patch(
+                "src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
+                return_value=session_cm,
+            ):
                 result = await repo.create_endpoint(sample_endpoint_create)
 
         assert result.success is True
         assert result.endpoint is sample_endpoint_info
 
     @pytest.mark.asyncio
-    async def test_create_already_exists(self, repo, sample_endpoint_create, sample_endpoint_info):
-        with patch.object(repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN), \
-             patch.object(repo, "get_endpoint", new_callable=AsyncMock) as mock_get:
+    async def test_create_already_exists(
+        self, repo, sample_endpoint_create, sample_endpoint_info
+    ):
+        with (
+            patch.object(
+                repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN
+            ),
+            patch.object(repo, "get_endpoint", new_callable=AsyncMock) as mock_get,
+        ):
             mock_get.return_value = EndpointResponse(
                 success=True, endpoint=sample_endpoint_info, message="exists"
             )
             session_cm, _ = make_http_ctx(409, text_data="already exists")
-            with patch("src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
-                       return_value=session_cm):
+            with patch(
+                "src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
+                return_value=session_cm,
+            ):
                 result = await repo.create_endpoint(sample_endpoint_create)
 
         assert result.success is True
 
     @pytest.mark.asyncio
-    async def test_create_failure_returns_error_response(self, repo, sample_endpoint_create):
-        with patch.object(repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
+    async def test_create_failure_returns_error_response(
+        self, repo, sample_endpoint_create
+    ):
+        with patch.object(
+            repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN
+        ):
             session_cm, _ = make_http_ctx(500, text_data="Internal Server Error")
-            with patch("src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
-                       return_value=session_cm):
+            with patch(
+                "src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
+                return_value=session_cm,
+            ):
                 result = await repo.create_endpoint(sample_endpoint_create)
 
         assert result.success is False
         assert result.error is not None
 
     @pytest.mark.asyncio
-    async def test_create_exception_returns_error_response(self, repo, sample_endpoint_create):
-        with patch.object(repo, "_get_auth_token", side_effect=Exception("auth failure")):
+    async def test_create_exception_returns_error_response(
+        self, repo, sample_endpoint_create
+    ):
+        with patch.object(
+            repo, "_get_auth_token", side_effect=Exception("auth failure")
+        ):
             result = await repo.create_endpoint(sample_endpoint_create)
         assert result.success is False
         assert "auth failure" in result.error
@@ -173,6 +218,7 @@ class TestCreateEndpoint:
 # get_endpoint
 # ---------------------------------------------------------------------------
 
+
 class TestGetEndpoint:
     @pytest.mark.asyncio
     async def test_get_success(self, repo):
@@ -180,10 +226,14 @@ class TestGetEndpoint:
             "endpoint_type": "STANDARD",
             "endpoint_status": {"state": "ONLINE"},
         }
-        with patch.object(repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
+        with patch.object(
+            repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN
+        ):
             session_cm, _ = make_http_ctx(200, json_data=data)
-            with patch("src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
-                       return_value=session_cm):
+            with patch(
+                "src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
+                return_value=session_cm,
+            ):
                 result = await repo.get_endpoint("my-endpoint")
 
         assert result.success is True
@@ -192,10 +242,14 @@ class TestGetEndpoint:
 
     @pytest.mark.asyncio
     async def test_get_not_found(self, repo):
-        with patch.object(repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
+        with patch.object(
+            repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN
+        ):
             session_cm, _ = make_http_ctx(404)
-            with patch("src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
-                       return_value=session_cm):
+            with patch(
+                "src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
+                return_value=session_cm,
+            ):
                 result = await repo.get_endpoint("missing-endpoint")
 
         assert result.success is False
@@ -203,10 +257,14 @@ class TestGetEndpoint:
 
     @pytest.mark.asyncio
     async def test_get_api_error(self, repo):
-        with patch.object(repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
+        with patch.object(
+            repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN
+        ):
             session_cm, _ = make_http_ctx(503, text_data="Service Unavailable")
-            with patch("src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
-                       return_value=session_cm):
+            with patch(
+                "src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
+                return_value=session_cm,
+            ):
                 result = await repo.get_endpoint("my-endpoint")
 
         assert result.success is False
@@ -214,7 +272,9 @@ class TestGetEndpoint:
 
     @pytest.mark.asyncio
     async def test_get_exception_returns_error(self, repo):
-        with patch.object(repo, "_get_auth_token", side_effect=Exception("network error")):
+        with patch.object(
+            repo, "_get_auth_token", side_effect=Exception("network error")
+        ):
             result = await repo.get_endpoint("ep")
         assert result.success is False
         assert "network error" in result.error
@@ -224,21 +284,32 @@ class TestGetEndpoint:
 # list_endpoints
 # ---------------------------------------------------------------------------
 
+
 class TestListEndpoints:
     @pytest.mark.asyncio
     async def test_list_success_with_endpoints(self, repo):
         data = {
             "endpoints": [
-                {"name": "ep1", "endpoint_type": "STANDARD",
-                 "endpoint_status": {"state": "ONLINE"}},
-                {"name": "ep2", "endpoint_type": "STANDARD",
-                 "endpoint_status": {"state": "OFFLINE"}},
+                {
+                    "name": "ep1",
+                    "endpoint_type": "STANDARD",
+                    "endpoint_status": {"state": "ONLINE"},
+                },
+                {
+                    "name": "ep2",
+                    "endpoint_type": "STANDARD",
+                    "endpoint_status": {"state": "OFFLINE"},
+                },
             ]
         }
-        with patch.object(repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
+        with patch.object(
+            repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN
+        ):
             session_cm, _ = make_http_ctx(200, json_data=data)
-            with patch("src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
-                       return_value=session_cm):
+            with patch(
+                "src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
+                return_value=session_cm,
+            ):
                 result = await repo.list_endpoints()
 
         assert result.success is True
@@ -247,10 +318,14 @@ class TestListEndpoints:
     @pytest.mark.asyncio
     async def test_list_success_empty(self, repo):
         data = {"endpoints": []}
-        with patch.object(repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
+        with patch.object(
+            repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN
+        ):
             session_cm, _ = make_http_ctx(200, json_data=data)
-            with patch("src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
-                       return_value=session_cm):
+            with patch(
+                "src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
+                return_value=session_cm,
+            ):
                 result = await repo.list_endpoints()
 
         assert result.success is True
@@ -258,10 +333,14 @@ class TestListEndpoints:
 
     @pytest.mark.asyncio
     async def test_list_api_error(self, repo):
-        with patch.object(repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
+        with patch.object(
+            repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN
+        ):
             session_cm, _ = make_http_ctx(500, text_data="Error")
-            with patch("src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
-                       return_value=session_cm):
+            with patch(
+                "src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
+                return_value=session_cm,
+            ):
                 result = await repo.list_endpoints()
 
         assert result.success is False
@@ -279,12 +358,16 @@ class TestListEndpoints:
 # delete_endpoint
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteEndpoint:
     @pytest.mark.asyncio
     async def test_delete_success(self, repo):
         from src.schemas.databricks_vector_index import IndexListResponse
+
         # Patch the inline local import inside delete_endpoint
-        with patch.object(repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN):
+        with patch.object(
+            repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN
+        ):
             with patch(
                 "src.repositories.databricks_vector_index_repository.DatabricksVectorIndexRepository"
             ) as _:
@@ -298,24 +381,37 @@ class TestDeleteEndpoint:
             with patch(
                 "src.repositories.databricks_vector_endpoint_repository.DatabricksVectorIndexRepository",
                 create=True,
-                new=MagicMock(return_value=mock_idx_repo)
+                new=MagicMock(return_value=mock_idx_repo),
             ):
                 pass  # this won't work since it's a local import
 
             # Use builtins-level patch for the local import
             import src.repositories.databricks_vector_index_repository as idx_mod
-            with patch.object(idx_mod, "DatabricksVectorIndexRepository", MagicMock(return_value=mock_idx_repo)):
+
+            with patch.object(
+                idx_mod,
+                "DatabricksVectorIndexRepository",
+                MagicMock(return_value=mock_idx_repo),
+            ):
                 session_cm, _ = make_http_ctx(200)
-                with patch("src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
-                           return_value=session_cm):
+                with patch(
+                    "src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
+                    return_value=session_cm,
+                ):
                     result = await repo.delete_endpoint("ep-to-delete")
 
         assert result.success is True
 
     @pytest.mark.asyncio
     async def test_delete_fails_when_endpoint_has_indexes(self, repo):
-        from src.schemas.databricks_vector_index import IndexListResponse, IndexInfo, IndexState, IndexType
         import src.repositories.databricks_vector_index_repository as idx_mod
+        from src.schemas.databricks_vector_index import (
+            IndexInfo,
+            IndexListResponse,
+            IndexState,
+            IndexType,
+        )
+
         sample_idx = IndexInfo(
             name="catalog.schema.idx",
             endpoint_name="ep",
@@ -325,9 +421,15 @@ class TestDeleteEndpoint:
         )
         mock_idx_repo = AsyncMock()
         mock_idx_repo.list_indexes = AsyncMock(
-            return_value=IndexListResponse(success=True, indexes=[sample_idx], message="one")
+            return_value=IndexListResponse(
+                success=True, indexes=[sample_idx], message="one"
+            )
         )
-        with patch.object(idx_mod, "DatabricksVectorIndexRepository", MagicMock(return_value=mock_idx_repo)):
+        with patch.object(
+            idx_mod,
+            "DatabricksVectorIndexRepository",
+            MagicMock(return_value=mock_idx_repo),
+        ):
             result = await repo.delete_endpoint("ep-with-indexes")
 
         assert result.success is False
@@ -335,17 +437,28 @@ class TestDeleteEndpoint:
 
     @pytest.mark.asyncio
     async def test_delete_not_found(self, repo):
-        from src.schemas.databricks_vector_index import IndexListResponse
         import src.repositories.databricks_vector_index_repository as idx_mod
+        from src.schemas.databricks_vector_index import IndexListResponse
+
         mock_idx_repo = AsyncMock()
         mock_idx_repo.list_indexes = AsyncMock(
             return_value=IndexListResponse(success=True, indexes=[], message="none")
         )
-        with patch.object(repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN), \
-             patch.object(idx_mod, "DatabricksVectorIndexRepository", MagicMock(return_value=mock_idx_repo)):
+        with (
+            patch.object(
+                repo, "_get_auth_token", new_callable=AsyncMock, return_value=AUTH_TOKEN
+            ),
+            patch.object(
+                idx_mod,
+                "DatabricksVectorIndexRepository",
+                MagicMock(return_value=mock_idx_repo),
+            ),
+        ):
             session_cm, _ = make_http_ctx(404)
-            with patch("src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
-                       return_value=session_cm):
+            with patch(
+                "src.repositories.databricks_vector_endpoint_repository.aiohttp.ClientSession",
+                return_value=session_cm,
+            ):
                 result = await repo.delete_endpoint("not-found-ep")
 
         assert result.success is False
@@ -353,7 +466,12 @@ class TestDeleteEndpoint:
     @pytest.mark.asyncio
     async def test_delete_exception_returns_error(self, repo):
         import src.repositories.databricks_vector_index_repository as idx_mod
-        with patch.object(idx_mod, "DatabricksVectorIndexRepository", side_effect=Exception("SDK error")):
+
+        with patch.object(
+            idx_mod,
+            "DatabricksVectorIndexRepository",
+            side_effect=Exception("SDK error"),
+        ):
             result = await repo.delete_endpoint("ep")
         assert result.success is False
         assert "SDK error" in result.error
@@ -362,6 +480,7 @@ class TestDeleteEndpoint:
 # ---------------------------------------------------------------------------
 # get_endpoint_status
 # ---------------------------------------------------------------------------
+
 
 class TestGetEndpointStatus:
     @pytest.mark.asyncio
@@ -423,6 +542,7 @@ class TestGetEndpointStatus:
 # wait_for_endpoint_ready
 # ---------------------------------------------------------------------------
 
+
 class TestWaitForEndpointReady:
     @pytest.mark.asyncio
     async def test_returns_immediately_when_online(self, repo, sample_endpoint_info):
@@ -432,16 +552,16 @@ class TestWaitForEndpointReady:
                 success=True, endpoint=sample_endpoint_info, message="ok"
             )
             with patch("asyncio.sleep", new_callable=AsyncMock):
-                result = await repo.wait_for_endpoint_ready("my-endpoint", max_wait_seconds=10)
+                result = await repo.wait_for_endpoint_ready(
+                    "my-endpoint", max_wait_seconds=10
+                )
 
         assert result.success is True
         assert result.endpoint.state == "ONLINE"
 
     @pytest.mark.asyncio
     async def test_returns_failure_when_endpoint_fails(self, repo):
-        failed_info = EndpointInfo(
-            name="ep", state=EndpointState.FAILED, ready=False
-        )
+        failed_info = EndpointInfo(name="ep", state=EndpointState.FAILED, ready=False)
         with patch.object(repo, "get_endpoint", new_callable=AsyncMock) as mock_get:
             mock_get.return_value = EndpointResponse(
                 success=True, endpoint=failed_info, message="failed"
@@ -472,9 +592,11 @@ class TestWaitForEndpointReady:
         def fake_time():
             return next(time_vals)
 
-        with patch.object(repo, "get_endpoint", side_effect=mock_get_ep), \
-             patch("asyncio.sleep", new_callable=AsyncMock), \
-             patch("asyncio.get_event_loop") as mock_loop:
+        with (
+            patch.object(repo, "get_endpoint", side_effect=mock_get_ep),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            patch("asyncio.get_event_loop") as mock_loop,
+        ):
             mock_loop.return_value.time = fake_time
             result = await repo.wait_for_endpoint_ready("ep", max_wait_seconds=300)
 

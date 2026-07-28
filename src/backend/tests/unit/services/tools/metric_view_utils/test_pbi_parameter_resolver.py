@@ -1,6 +1,10 @@
 """Tests for PBI parameter resolver."""
+
 import pytest
-from src.services.tools.metric_view_utils.pbi_parameter_resolver import PbiParameterResolver
+
+from src.services.tools.metric_view_utils.pbi_parameter_resolver import (
+    PbiParameterResolver,
+)
 
 
 class TestPbiParameterResolverNoConfig:
@@ -35,7 +39,7 @@ class TestCurrencyFilter:
 
     def test_currency_filter_ampersand_format(self):
         resolver = PbiParameterResolver(parameter_defaults={"CurrencyFilter": "30"})
-        sql = "\"\" & CurrencyFilter & \"\""
+        sql = '"" & CurrencyFilter & ""'
         result = resolver.resolve(sql)
         assert "'30'" in result
 
@@ -49,24 +53,28 @@ class TestCurrencyFilter:
 
 class TestReVersionFilter:
     def test_re_version_configured(self):
-        resolver = PbiParameterResolver(parameter_defaults={
-            "RE_Version_ranges": {
-                "R100": "MONTH(CURRENT_DATE()) >= 10",
+        resolver = PbiParameterResolver(
+            parameter_defaults={
+                "RE_Version_ranges": {
+                    "R100": "MONTH(CURRENT_DATE()) >= 10",
+                }
             }
-        })
+        )
         sql = "'${RE_Version}' = 'R100'"
         result = resolver.resolve(sql)
         assert "MONTH(CURRENT_DATE()) >= 10" in result
 
     def test_re_version_multiple_ranges(self):
-        resolver = PbiParameterResolver(parameter_defaults={
-            "RE_Version_ranges": {
-                "R000": "1 = 0",
-                "R040": "MONTH(CURRENT_DATE()) >= 4 AND MONTH(CURRENT_DATE()) < 7",
-                "R070": "MONTH(CURRENT_DATE()) >= 7 AND MONTH(CURRENT_DATE()) < 10",
-                "R100": "MONTH(CURRENT_DATE()) >= 10",
+        resolver = PbiParameterResolver(
+            parameter_defaults={
+                "RE_Version_ranges": {
+                    "R000": "1 = 0",
+                    "R040": "MONTH(CURRENT_DATE()) >= 4 AND MONTH(CURRENT_DATE()) < 7",
+                    "R070": "MONTH(CURRENT_DATE()) >= 7 AND MONTH(CURRENT_DATE()) < 10",
+                    "R100": "MONTH(CURRENT_DATE()) >= 10",
+                }
             }
-        })
+        )
         sql = "'${RE_Version}' = 'R040'"
         result = resolver.resolve(sql)
         assert "MONTH(CURRENT_DATE()) >= 4" in result
@@ -79,11 +87,13 @@ class TestReVersionFilter:
 
     def test_re_version_bare_reference_replaced(self):
         """After resolving specific versions, remaining ${RE_Version} refs get the CASE expr."""
-        resolver = PbiParameterResolver(parameter_defaults={
-            "RE_Version_ranges": {
-                "R100": "MONTH(CURRENT_DATE()) >= 10",
+        resolver = PbiParameterResolver(
+            parameter_defaults={
+                "RE_Version_ranges": {
+                    "R100": "MONTH(CURRENT_DATE()) >= 10",
+                }
             }
-        })
+        )
         sql = "'${RE_Version}'"
         result = resolver.resolve(sql)
         assert "CASE" in result  # Falls back to the CASE expression
@@ -99,14 +109,18 @@ class TestFiscperFilter:
         assert "Sample" not in result
 
     def test_fiscper_filter_opt_out(self):
-        resolver = PbiParameterResolver(parameter_defaults={"resolve_fiscper_filter": False})
+        resolver = PbiParameterResolver(
+            parameter_defaults={"resolve_fiscper_filter": False}
+        )
         sql = "CASE WHEN '${FiscperFilter}' = 'Sample' THEN x ELSE y END"
         result = resolver.resolve(sql)
         assert "FiscperFilter" in result
 
     def test_fiscper_nested_else(self):
         resolver = PbiParameterResolver()
-        sql = "CASE WHEN '${FiscperFilter}' = 'Sample' THEN sample_val ELSE (col * 2) END"
+        sql = (
+            "CASE WHEN '${FiscperFilter}' = 'Sample' THEN sample_val ELSE (col * 2) END"
+        )
         result = resolver.resolve(sql)
         assert "col * 2" in result
 
@@ -121,10 +135,12 @@ class TestFiscperFilter:
 
 class TestReVersionCaseOverride:
     def test_custom_case_expression(self):
-        resolver = PbiParameterResolver(parameter_defaults={
-            "RE_Version_CASE": "CASE WHEN 1=1 THEN 'CUSTOM' END",
-            "RE_Version_ranges": {"R100": "1=1"},
-        })
+        resolver = PbiParameterResolver(
+            parameter_defaults={
+                "RE_Version_CASE": "CASE WHEN 1=1 THEN 'CUSTOM' END",
+                "RE_Version_ranges": {"R100": "1=1"},
+            }
+        )
         sql = "'${RE_Version}'"
         result = resolver.resolve(sql)
         assert "CUSTOM" in result
@@ -132,10 +148,12 @@ class TestReVersionCaseOverride:
 
 class TestCombined:
     def test_all_parameters_resolved(self):
-        resolver = PbiParameterResolver(parameter_defaults={
-            "CurrencyFilter": "30",
-            "RE_Version_ranges": {"R100": "MONTH(CURRENT_DATE()) >= 10"},
-        })
+        resolver = PbiParameterResolver(
+            parameter_defaults={
+                "CurrencyFilter": "30",
+                "RE_Version_ranges": {"R100": "MONTH(CURRENT_DATE()) >= 10"},
+            }
+        )
         sql = (
             "SELECT * FROM t "
             "WHERE currency = '${CurrencyFilter}' "
@@ -153,8 +171,7 @@ class TestFindUnresolvedParams:
 
     def test_detects_ampersand_param(self):
         r = PbiParameterResolver()
-        found = r.find_unresolved_params(
-            "source.fiscper = '\"& FiscperFilter &\"'")
+        found = r.find_unresolved_params("source.fiscper = '\"& FiscperFilter &\"'")
         assert "FiscperFilter" in found
 
     def test_detects_dollar_brace_param(self):
@@ -168,5 +185,6 @@ class TestFindUnresolvedParams:
     def test_multiple_distinct_params(self):
         r = PbiParameterResolver()
         found = r.find_unresolved_params(
-            "a = '\"& FiscperFilter &\"' AND b = '${CurrencyFilter}'")
+            "a = '\"& FiscperFilter &\"' AND b = '${CurrencyFilter}'"
+        )
         assert set(found) == {"FiscperFilter", "CurrencyFilter"}

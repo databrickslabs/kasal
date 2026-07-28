@@ -4,22 +4,24 @@ Unit tests for HITL (Human in the Loop) Approval models.
 Tests the functionality of the HITLApproval and HITLWebhook database models
 including field validation, properties, defaults, and constraints.
 """
-import pytest
-from datetime import datetime, timezone, timedelta
+
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.models.hitl_approval import (
     HITLApproval,
-    HITLWebhook,
     HITLApprovalStatus,
-    HITLTimeoutAction,
     HITLRejectionAction,
+    HITLTimeoutAction,
+    HITLWebhook,
 )
-
 
 # =============================================================================
 # Status Constants Tests
 # =============================================================================
+
 
 class TestHITLApprovalStatus:
     """Test cases for HITLApprovalStatus constants."""
@@ -81,6 +83,7 @@ class TestHITLRejectionAction:
 # HITLApproval Model Tests
 # =============================================================================
 
+
 class TestHITLApprovalModel:
     """Test cases for HITLApproval model."""
 
@@ -91,7 +94,7 @@ class TestHITLApprovalModel:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=1,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         assert approval.execution_id == "exec_12345"
         assert approval.flow_id == "flow_67890"
@@ -114,7 +117,7 @@ class TestHITLApprovalModel:
             "timeout_seconds": 7200,
             "timeout_action": "auto_reject",
             "require_comment": True,
-            "allowed_approvers": ["admin@example.com"]
+            "allowed_approvers": ["admin@example.com"],
         }
         flow_state = {"key": "value", "step": 1}
 
@@ -138,7 +141,7 @@ class TestHITLApprovalModel:
             webhook_sent=True,
             webhook_sent_at=now,
             webhook_response={"status": "ok"},
-            created_at=now
+            created_at=now,
         )
 
         assert approval.status == HITLApprovalStatus.APPROVED
@@ -158,7 +161,7 @@ class TestHITLApprovalModel:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=1,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         assert approval.status == HITLApprovalStatus.PENDING
 
@@ -169,7 +172,7 @@ class TestHITLApprovalModel:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=1,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         assert approval.gate_config == {}
 
@@ -180,7 +183,7 @@ class TestHITLApprovalModel:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=1,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         assert approval.flow_state_snapshot == {}
 
@@ -191,7 +194,7 @@ class TestHITLApprovalModel:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=1,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         assert approval.webhook_sent is False
 
@@ -203,7 +206,7 @@ class TestHITLApprovalModel:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=1,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         after = datetime.now(timezone.utc)
 
@@ -222,7 +225,7 @@ class TestHITLApprovalModel:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config=gate_config
+            gate_config=gate_config,
         )
         after = datetime.now(timezone.utc)
 
@@ -243,7 +246,7 @@ class TestHITLApprovalModel:
             crew_sequence=1,
             group_id="group_abc",
             gate_config=gate_config,
-            expires_at=custom_expires
+            expires_at=custom_expires,
         )
 
         assert approval.expires_at == custom_expires
@@ -275,6 +278,7 @@ class TestHITLApprovalModel:
 # HITLApproval Properties Tests
 # =============================================================================
 
+
 class TestHITLApprovalProperties:
     """Test cases for HITLApproval model properties."""
 
@@ -287,7 +291,7 @@ class TestHITLApprovalProperties:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            expires_at=future
+            expires_at=future,
         )
         assert approval.is_expired is False
 
@@ -300,7 +304,7 @@ class TestHITLApprovalProperties:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            expires_at=past
+            expires_at=past,
         )
         assert approval.is_expired is True
 
@@ -313,7 +317,7 @@ class TestHITLApprovalProperties:
             crew_sequence=1,
             group_id="group_abc",
             expires_at=None,
-            gate_config={}  # Prevent auto-calculation
+            gate_config={},  # Prevent auto-calculation
         )
         # Force expires_at to None after __init__
         approval.expires_at = None
@@ -329,7 +333,7 @@ class TestHITLApprovalProperties:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            expires_at=just_past
+            expires_at=just_past,
         )
         assert approval.is_expired is True
 
@@ -341,7 +345,7 @@ class TestHITLApprovalProperties:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config={"timeout_action": "fail"}
+            gate_config={"timeout_action": "fail"},
         )
         assert approval.timeout_action == "fail"
 
@@ -353,7 +357,7 @@ class TestHITLApprovalProperties:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config={}
+            gate_config={},
         )
         assert approval.timeout_action == HITLTimeoutAction.AUTO_REJECT
 
@@ -365,7 +369,7 @@ class TestHITLApprovalProperties:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config={"message": "Custom approval message"}
+            gate_config={"message": "Custom approval message"},
         )
         assert approval.message == "Custom approval message"
 
@@ -377,7 +381,7 @@ class TestHITLApprovalProperties:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config={}
+            gate_config={},
         )
         assert approval.message == "Approval required to proceed"
 
@@ -390,7 +394,7 @@ class TestHITLApprovalProperties:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config={"allowed_approvers": approvers}
+            gate_config={"allowed_approvers": approvers},
         )
         assert approval.allowed_approvers == approvers
 
@@ -402,7 +406,7 @@ class TestHITLApprovalProperties:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config={}
+            gate_config={},
         )
         assert approval.allowed_approvers == []
 
@@ -414,7 +418,7 @@ class TestHITLApprovalProperties:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config={"allowed_approvers": None}
+            gate_config={"allowed_approvers": None},
         )
         assert approval.allowed_approvers == []
 
@@ -422,6 +426,7 @@ class TestHITLApprovalProperties:
 # =============================================================================
 # can_be_approved_by Method Tests
 # =============================================================================
+
 
 class TestCanBeApprovedBy:
     """Test cases for can_be_approved_by method."""
@@ -434,7 +439,7 @@ class TestCanBeApprovedBy:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config={}
+            gate_config={},
         )
         assert approval.can_be_approved_by("anyone@example.com") is True
         assert approval.can_be_approved_by("random@company.org") is True
@@ -447,7 +452,9 @@ class TestCanBeApprovedBy:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config={"allowed_approvers": ["admin@example.com", "manager@example.com"]}
+            gate_config={
+                "allowed_approvers": ["admin@example.com", "manager@example.com"]
+            },
         )
         assert approval.can_be_approved_by("admin@example.com") is True
         assert approval.can_be_approved_by("manager@example.com") is True
@@ -460,7 +467,7 @@ class TestCanBeApprovedBy:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config={"allowed_approvers": ["admin@example.com"]}
+            gate_config={"allowed_approvers": ["admin@example.com"]},
         )
         assert approval.can_be_approved_by("random@example.com") is False
         assert approval.can_be_approved_by("other@company.org") is False
@@ -473,7 +480,7 @@ class TestCanBeApprovedBy:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config={"allowed_approvers": ["Admin@Example.COM"]}
+            gate_config={"allowed_approvers": ["Admin@Example.COM"]},
         )
         assert approval.can_be_approved_by("admin@example.com") is True
         assert approval.can_be_approved_by("ADMIN@EXAMPLE.COM") is True
@@ -487,7 +494,7 @@ class TestCanBeApprovedBy:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config={"allowed_approvers": []}
+            gate_config={"allowed_approvers": []},
         )
         assert approval.can_be_approved_by("anyone@example.com") is True
 
@@ -499,7 +506,7 @@ class TestCanBeApprovedBy:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config={"allowed_approvers": ["the.one@example.com"]}
+            gate_config={"allowed_approvers": ["the.one@example.com"]},
         )
         assert approval.can_be_approved_by("the.one@example.com") is True
         assert approval.can_be_approved_by("not.the.one@example.com") is False
@@ -509,15 +516,14 @@ class TestCanBeApprovedBy:
 # HITLWebhook Model Tests
 # =============================================================================
 
+
 class TestHITLWebhookModel:
     """Test cases for HITLWebhook model."""
 
     def test_creation_minimal(self):
         """Test basic HITLWebhook model creation with minimal required fields."""
         webhook = HITLWebhook(
-            group_id="group_abc",
-            name="My Webhook",
-            url="https://example.com/webhook"
+            group_id="group_abc", name="My Webhook", url="https://example.com/webhook"
         )
         assert webhook.group_id == "group_abc"
         assert webhook.name == "My Webhook"
@@ -543,7 +549,7 @@ class TestHITLWebhookModel:
             headers=headers,
             secret="my-secret-key",
             created_at=now,
-            updated_at=now
+            updated_at=now,
         )
 
         assert webhook.name == "Production Webhook"
@@ -557,27 +563,21 @@ class TestHITLWebhookModel:
     def test_default_events(self):
         """Test that events defaults to ['gate_reached']."""
         webhook = HITLWebhook(
-            group_id="group_abc",
-            name="Test Webhook",
-            url="https://example.com/webhook"
+            group_id="group_abc", name="Test Webhook", url="https://example.com/webhook"
         )
         assert webhook.events == ["gate_reached"]
 
     def test_default_headers(self):
         """Test that headers defaults to empty dict."""
         webhook = HITLWebhook(
-            group_id="group_abc",
-            name="Test Webhook",
-            url="https://example.com/webhook"
+            group_id="group_abc", name="Test Webhook", url="https://example.com/webhook"
         )
         assert webhook.headers == {}
 
     def test_default_enabled(self):
         """Test that enabled defaults to True."""
         webhook = HITLWebhook(
-            group_id="group_abc",
-            name="Test Webhook",
-            url="https://example.com/webhook"
+            group_id="group_abc", name="Test Webhook", url="https://example.com/webhook"
         )
         assert webhook.enabled is True
 
@@ -585,9 +585,7 @@ class TestHITLWebhookModel:
         """Test that created_at is automatically set."""
         before = datetime.now(timezone.utc)
         webhook = HITLWebhook(
-            group_id="group_abc",
-            name="Test Webhook",
-            url="https://example.com/webhook"
+            group_id="group_abc", name="Test Webhook", url="https://example.com/webhook"
         )
         after = datetime.now(timezone.utc)
 
@@ -624,6 +622,7 @@ class TestHITLWebhookModel:
 # Model Relationship Tests
 # =============================================================================
 
+
 class TestHITLApprovalRelationships:
     """Test cases for HITLApproval relationships."""
 
@@ -634,8 +633,8 @@ class TestHITLApprovalRelationships:
 
     def test_relationship_configuration(self):
         """Test that relationship is correctly configured."""
-        from sqlalchemy.orm import relationship as orm_relationship
         from sqlalchemy.inspection import inspect
+        from sqlalchemy.orm import relationship as orm_relationship
 
         mapper = inspect(HITLApproval)
         relationships = mapper.relationships
@@ -652,6 +651,7 @@ class TestHITLApprovalRelationships:
 # Edge Cases and Error Handling Tests
 # =============================================================================
 
+
 class TestHITLApprovalEdgeCases:
     """Test edge cases and boundary conditions for HITLApproval."""
 
@@ -664,20 +664,15 @@ class TestHITLApprovalEdgeCases:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            previous_crew_output=long_output
+            previous_crew_output=long_output,
         )
         assert len(approval.previous_crew_output) == 100000
 
     def test_complex_flow_state_snapshot(self):
         """Test with complex nested flow_state_snapshot."""
         complex_state = {
-            "nested": {
-                "deep": {
-                    "values": [1, 2, 3],
-                    "data": {"key": "value"}
-                }
-            },
-            "list": [{"item": 1}, {"item": 2}]
+            "nested": {"deep": {"values": [1, 2, 3], "data": {"key": "value"}}},
+            "list": [{"item": 1}, {"item": 2}],
         }
         approval = HITLApproval(
             execution_id="exec_12345",
@@ -685,7 +680,7 @@ class TestHITLApprovalEdgeCases:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            flow_state_snapshot=complex_state
+            flow_state_snapshot=complex_state,
         )
         assert approval.flow_state_snapshot == complex_state
 
@@ -696,7 +691,7 @@ class TestHITLApprovalEdgeCases:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=0,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         assert approval.crew_sequence == 0
 
@@ -707,7 +702,7 @@ class TestHITLApprovalEdgeCases:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=9999,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         assert approval.crew_sequence == 9999
 
@@ -721,7 +716,7 @@ class TestHITLApprovalEdgeCases:
             group_id="group_abc/def",
             previous_crew_name="Crew with 'quotes' and \"double quotes\"",
             previous_crew_output="Output with\nnewlines\tand\ttabs",
-            approval_comment="Unicode: test"
+            approval_comment="Unicode: test",
         )
         assert "'" in approval.previous_crew_name
         assert "\n" in approval.previous_crew_output
@@ -734,7 +729,7 @@ class TestHITLApprovalEdgeCases:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            gate_config={}
+            gate_config={},
         )
         # All properties should return defaults without error
         assert approval.message == "Approval required to proceed"
@@ -752,7 +747,7 @@ class TestHITLWebhookEdgeCases:
             group_id="group_abc",
             name="All Events Webhook",
             url="https://example.com/webhook",
-            events=all_events
+            events=all_events,
         )
         assert len(webhook.events) == 4
         assert all_events == webhook.events
@@ -762,13 +757,13 @@ class TestHITLWebhookEdgeCases:
         headers = {
             "Authorization": "Bearer token123",
             "X-Custom-Header": "CustomValue",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
         webhook = HITLWebhook(
             group_id="group_abc",
             name="Test Webhook",
             url="https://example.com/webhook",
-            headers=headers
+            headers=headers,
         )
         assert webhook.headers == headers
 
@@ -776,18 +771,14 @@ class TestHITLWebhookEdgeCases:
         """Test with long URL."""
         long_url = "https://example.com/" + "path/" * 100 + "endpoint"
         webhook = HITLWebhook(
-            group_id="group_abc",
-            name="Long URL Webhook",
-            url=long_url
+            group_id="group_abc", name="Long URL Webhook", url=long_url
         )
         assert webhook.url == long_url
 
     def test_updated_at_initially_none(self):
         """Test that updated_at can be None initially."""
         webhook = HITLWebhook(
-            group_id="group_abc",
-            name="Test Webhook",
-            url="https://example.com/webhook"
+            group_id="group_abc", name="Test Webhook", url="https://example.com/webhook"
         )
         # updated_at may be None or set by column default
         # The model allows it to be None
@@ -796,6 +787,7 @@ class TestHITLWebhookEdgeCases:
 # =============================================================================
 # Status Transition Tests
 # =============================================================================
+
 
 class TestHITLApprovalStatusTransitions:
     """Test status value assignments for HITLApproval."""
@@ -807,7 +799,7 @@ class TestHITLApprovalStatusTransitions:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=1,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         approval.status = HITLApprovalStatus.APPROVED
         assert approval.status == HITLApprovalStatus.APPROVED
@@ -819,7 +811,7 @@ class TestHITLApprovalStatusTransitions:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=1,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         approval.status = HITLApprovalStatus.REJECTED
         assert approval.status == HITLApprovalStatus.REJECTED
@@ -831,7 +823,7 @@ class TestHITLApprovalStatusTransitions:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=1,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         approval.status = HITLApprovalStatus.TIMEOUT
         assert approval.status == HITLApprovalStatus.TIMEOUT
@@ -843,7 +835,7 @@ class TestHITLApprovalStatusTransitions:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=1,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         approval.status = HITLApprovalStatus.RETRY
         assert approval.status == HITLApprovalStatus.RETRY
@@ -852,6 +844,7 @@ class TestHITLApprovalStatusTransitions:
 # =============================================================================
 # Rejection Action Tests
 # =============================================================================
+
 
 class TestHITLApprovalRejectionActions:
     """Test rejection action assignments for HITLApproval."""
@@ -863,7 +856,7 @@ class TestHITLApprovalRejectionActions:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=1,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         approval.rejection_action = HITLRejectionAction.REJECT
         assert approval.rejection_action == HITLRejectionAction.REJECT
@@ -875,7 +868,7 @@ class TestHITLApprovalRejectionActions:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=1,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         approval.rejection_action = HITLRejectionAction.RETRY
         assert approval.rejection_action == HITLRejectionAction.RETRY
@@ -884,6 +877,7 @@ class TestHITLApprovalRejectionActions:
 # =============================================================================
 # Webhook Notification Tests
 # =============================================================================
+
 
 class TestHITLApprovalWebhookTracking:
     """Test webhook tracking fields in HITLApproval."""
@@ -898,7 +892,7 @@ class TestHITLApprovalWebhookTracking:
             flow_id="flow_67890",
             gate_node_id="gate_001",
             crew_sequence=1,
-            group_id="group_abc"
+            group_id="group_abc",
         )
 
         # Simulate webhook being sent
@@ -915,7 +909,7 @@ class TestHITLApprovalWebhookTracking:
         complex_response = {
             "status": 200,
             "headers": {"content-type": "application/json"},
-            "body": {"message": "success", "data": [1, 2, 3]}
+            "body": {"message": "success", "data": [1, 2, 3]},
         }
 
         approval = HITLApproval(
@@ -924,7 +918,7 @@ class TestHITLApprovalWebhookTracking:
             gate_node_id="gate_001",
             crew_sequence=1,
             group_id="group_abc",
-            webhook_response=complex_response
+            webhook_response=complex_response,
         )
 
         assert approval.webhook_response == complex_response

@@ -4,11 +4,13 @@ Unit tests for services/tools/custom/powerbi_connector_tool.py
 Tests CrewAI integration tool for Power BI dataset extraction and conversion.
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
+
 from src.services.tools.powerbi_connector_tool import (
+    PowerBIConnectorTool,
     PowerBIConnectorToolSchema,
-    PowerBIConnectorTool
 )
 
 
@@ -18,8 +20,7 @@ class TestPowerBIConnectorToolSchema:
     def test_schema_initialization_minimal(self):
         """Test schema with minimal required parameters"""
         schema = PowerBIConnectorToolSchema(
-            semantic_model_id="model123",
-            group_id="workspace456"
+            semantic_model_id="model123", group_id="workspace456"
         )
 
         assert schema.semantic_model_id == "model123"
@@ -29,10 +30,20 @@ class TestPowerBIConnectorToolSchema:
     def test_schema_excludes_auth_and_connection_fields(self):
         """Auth/connection plumbing must NOT be LLM-fillable schema fields."""
         forbidden = {
-            "client_secret", "password", "access_token", "llm_token",
-            "api_key", "token", "tenant_id", "client_id", "username",
-            "auth_method", "workspace_id", "dataset_id",
-            "llm_workspace_url", "llm_model",
+            "client_secret",
+            "password",
+            "access_token",
+            "llm_token",
+            "api_key",
+            "token",
+            "tenant_id",
+            "client_id",
+            "username",
+            "auth_method",
+            "workspace_id",
+            "dataset_id",
+            "llm_workspace_url",
+            "llm_model",
         }
         present = forbidden & set(PowerBIConnectorToolSchema.model_fields.keys())
         assert not present, f"Forbidden fields exposed in schema: {present}"
@@ -48,7 +59,7 @@ class TestPowerBIConnectorToolSchema:
             sql_dialect="postgresql",
             uc_catalog="test_catalog",
             uc_schema="test_schema",
-            info_table_name="Custom Measures"
+            info_table_name="Custom Measures",
         )
 
         assert schema.outbound_format == "sql"
@@ -79,10 +90,14 @@ class TestPowerBIConnectorTool:
         mock_pipeline.execute.return_value = {
             "success": True,
             "output": [
-                {"name": "Total Sales", "expression": "SUM(Sales[Amount])", "description": "Total"}
+                {
+                    "name": "Total Sales",
+                    "expression": "SUM(Sales[Amount])",
+                    "description": "Total",
+                }
             ],
             "measure_count": 1,
-            "errors": []
+            "errors": [],
         }
         tool._pipeline = mock_pipeline
 
@@ -90,7 +105,7 @@ class TestPowerBIConnectorTool:
             semantic_model_id="model123",
             group_id="workspace456",
             access_token="token789",
-            outbound_format="dax"
+            outbound_format="dax",
         )
 
         assert "Power BI Measures Converted to DAX" in result
@@ -103,7 +118,7 @@ class TestPowerBIConnectorTool:
             "success": True,
             "output": "SELECT SUM(amount) as total_sales FROM sales",
             "measure_count": 1,
-            "errors": []
+            "errors": [],
         }
         tool._pipeline = mock_pipeline
 
@@ -111,7 +126,7 @@ class TestPowerBIConnectorTool:
             semantic_model_id="model123",
             group_id="workspace456",
             access_token="token789",
-            outbound_format="sql"
+            outbound_format="sql",
         )
 
         assert "Power BI Measures Converted to SQL" in result
@@ -124,14 +139,14 @@ class TestPowerBIConnectorTool:
             "success": False,
             "output": None,
             "measure_count": 0,
-            "errors": ["Connection failed"]
+            "errors": ["Connection failed"],
         }
         tool._pipeline = mock_pipeline
 
         result = tool._run(
             semantic_model_id="model123",
             group_id="workspace456",
-            access_token="token789"
+            access_token="token789",
         )
 
         assert "Error" in result

@@ -11,8 +11,12 @@ Focuses on:
 - Error handling
 """
 
+from unittest.mock import MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, PropertyMock
+
+from src.services.converters.base.connectors import ConnectorType
+from src.services.converters.base.models import KPI, DAXMeasure, KPIDefinition
 from src.services.converters.pipeline import (
     ConversionPipeline,
     OutboundFormat,
@@ -20,8 +24,6 @@ from src.services.converters.pipeline import (
     convert_powerbi_to_sql,
     convert_powerbi_to_uc_metrics,
 )
-from src.services.converters.base.connectors import ConnectorType
-from src.services.converters.base.models import KPI, KPIDefinition, DAXMeasure
 
 
 class TestOutboundFormat:
@@ -37,6 +39,7 @@ class TestOutboundFormat:
     def test_outbound_format_is_enum(self):
         """Test OutboundFormat is a string enum"""
         from enum import Enum
+
         assert issubclass(OutboundFormat, str)
         assert issubclass(OutboundFormat, Enum)
 
@@ -82,16 +85,16 @@ class TestConversionPipelineFormatTranspiled:
                     description="Revenue",
                     technical_name="revenue",
                     formula="SUM(Sales[Amount])",
-                    source_table="Sales"
+                    source_table="Sales",
                 )
-            ]
+            ],
         )
         # Attach _advanced_parsing metadata to KPI
         kpi = definition.kpis[0]
         kpi._advanced_parsing = {
             "transpiled_sql": "SUM(`Amount`)",
             "is_transpilable": True,
-            "signature": "sum ( <<table:1>> <<column:1>> )"
+            "signature": "sum ( <<table:1>> <<column:1>> )",
         }
         return definition
 
@@ -106,16 +109,16 @@ class TestConversionPipelineFormatTranspiled:
                     description="Complex Revenue",
                     technical_name="complex_revenue",
                     formula="CALCULATE(SUM(Sales[Amount]), KEEPFILTERS(Sales[Region]))",
-                    source_table="Sales"
+                    source_table="Sales",
                 )
-            ]
+            ],
         )
         kpi = definition.kpis[0]
         kpi._advanced_parsing = {
             "transpiled_sql": "",
             "is_transpilable": False,
             "signature": "...",
-            "transpilability_reason": "contains KEEPFILTERS"
+            "transpilability_reason": "contains KEEPFILTERS",
         }
         return definition
 
@@ -129,9 +132,9 @@ class TestConversionPipelineFormatTranspiled:
                 KPI(
                     description="Revenue",
                     technical_name="revenue",
-                    formula="SUM(Sales[Amount])"
+                    formula="SUM(Sales[Amount])",
                 )
-            ]
+            ],
         )
         # No _advanced_parsing attribute added
         return definition
@@ -149,7 +152,9 @@ class TestConversionPipelineFormatTranspiled:
         assert measure["sql"] == "SUM(`Amount`)"
         assert measure["is_transpilable"] is True
 
-    def test_format_transpiled_sql_non_transpilable(self, pipeline, non_transpilable_definition):
+    def test_format_transpiled_sql_non_transpilable(
+        self, pipeline, non_transpilable_definition
+    ):
         """Test _format_transpiled_sql falls back to original formula"""
         result = pipeline._format_transpiled_sql(non_transpilable_definition, {})
 
@@ -160,7 +165,9 @@ class TestConversionPipelineFormatTranspiled:
         # Should use original formula when not transpilable
         assert "CALCULATE" in measure["sql"] or measure["sql"] is not None
 
-    def test_format_transpiled_sql_missing_metadata(self, pipeline, missing_metadata_definition):
+    def test_format_transpiled_sql_missing_metadata(
+        self, pipeline, missing_metadata_definition
+    ):
         """Test _format_transpiled_sql skips KPIs without _advanced_parsing"""
         result = pipeline._format_transpiled_sql(missing_metadata_definition, {})
 
@@ -175,7 +182,9 @@ class TestConversionPipelineFormatTranspiled:
         assert len(result) == 1
         assert "signature" in result[0]
 
-    def test_format_transpiled_sql_returns_source_table(self, pipeline, simple_definition):
+    def test_format_transpiled_sql_returns_source_table(
+        self, pipeline, simple_definition
+    ):
         """Test _format_transpiled_sql includes source_table"""
         result = pipeline._format_transpiled_sql(simple_definition, {})
 
@@ -185,11 +194,7 @@ class TestConversionPipelineFormatTranspiled:
 
     def test_format_transpiled_sql_empty_definition(self, pipeline):
         """Test _format_transpiled_sql with empty KPIs list"""
-        definition = KPIDefinition(
-            description="Empty",
-            technical_name="empty",
-            kpis=[]
-        )
+        definition = KPIDefinition(description="Empty", technical_name="empty", kpis=[])
 
         result = pipeline._format_transpiled_sql(definition, {})
         assert result == []
@@ -203,17 +208,20 @@ class TestConversionPipelineFormatTranspiled:
         assert isinstance(result, str)
         assert "version:" in result or "measures:" in result
 
-    def test_format_transpiled_uc_metrics_has_measures(self, pipeline, simple_definition):
+    def test_format_transpiled_uc_metrics_has_measures(
+        self, pipeline, simple_definition
+    ):
         """Test _format_transpiled_uc_metrics includes measure names"""
         result = pipeline._format_transpiled_uc_metrics(simple_definition, {})
 
         assert "revenue" in result
 
-    def test_format_transpiled_uc_metrics_with_catalog(self, pipeline, simple_definition):
+    def test_format_transpiled_uc_metrics_with_catalog(
+        self, pipeline, simple_definition
+    ):
         """Test _format_transpiled_uc_metrics uses catalog from params"""
         result = pipeline._format_transpiled_uc_metrics(
-            simple_definition,
-            {"catalog": "my_catalog", "schema": "my_schema"}
+            simple_definition, {"catalog": "my_catalog", "schema": "my_schema"}
         )
 
         assert isinstance(result, str)
@@ -228,15 +236,15 @@ class TestConversionPipelineFormatTranspiled:
                     description="Revenue",
                     technical_name="revenue",
                     formula="SUM(Sales[Amount])",
-                    source_table="my_catalog.my_schema.FactSales"
+                    source_table="my_catalog.my_schema.FactSales",
                 )
-            ]
+            ],
         )
         kpi = definition.kpis[0]
         kpi._advanced_parsing = {
             "transpiled_sql": "SUM(`Amount`)",
             "is_transpilable": True,
-            "signature": "sum ( <<table:1>> <<column:1>> )"
+            "signature": "sum ( <<table:1>> <<column:1>> )",
         }
 
         result = pipeline._format_transpiled_uc_metrics(definition, {})
@@ -244,15 +252,24 @@ class TestConversionPipelineFormatTranspiled:
         assert "source:" in result
         assert "FactSales" in result or "my_catalog" in result
 
-    def test_format_transpiled_uc_metrics_non_transpilable(self, pipeline, non_transpilable_definition):
+    def test_format_transpiled_uc_metrics_non_transpilable(
+        self, pipeline, non_transpilable_definition
+    ):
         """Test _format_transpiled_uc_metrics marks non-transpilable measures"""
         result = pipeline._format_transpiled_uc_metrics(non_transpilable_definition, {})
 
         assert isinstance(result, str)
         # Should include a warning comment
-        assert "WARNING" in result or "warning" in result.lower() or "NOT transpilable" in result.lower() or "NOT transpilable" in result
+        assert (
+            "WARNING" in result
+            or "warning" in result.lower()
+            or "NOT transpilable" in result.lower()
+            or "NOT transpilable" in result
+        )
 
-    def test_format_transpiled_uc_metrics_skips_missing_metadata(self, pipeline, missing_metadata_definition):
+    def test_format_transpiled_uc_metrics_skips_missing_metadata(
+        self, pipeline, missing_metadata_definition
+    ):
         """Test _format_transpiled_uc_metrics skips KPIs without metadata"""
         result = pipeline._format_transpiled_uc_metrics(missing_metadata_definition, {})
 
@@ -277,9 +294,9 @@ class TestConversionPipelineConvertToFormat:
                     technical_name="revenue",
                     formula="amount",
                     aggregation_type="SUM",
-                    source_table="Sales"
+                    source_table="Sales",
                 )
-            ]
+            ],
         )
 
     def test_convert_to_format_unsupported_raises(self, pipeline, simple_definition):
@@ -294,9 +311,7 @@ class TestConversionPipelineConvertToFormat:
         # Note: _convert_to_dax has a known bug accessing dax_measure.table
         try:
             result = pipeline._convert_to_format(
-                simple_definition,
-                OutboundFormat.DAX,
-                {}
+                simple_definition, OutboundFormat.DAX, {}
             )
             assert isinstance(result, list)
         except AttributeError:
@@ -312,7 +327,7 @@ class TestConversionPipelineConvertToFormat:
                 simple_definition,
                 OutboundFormat.SQL,
                 {"dialect": "databricks"},
-                inbound_type=None  # Not PowerBI, so generation path
+                inbound_type=None,  # Not PowerBI, so generation path
             )
             # If no bug, should return string
             assert result is not None
@@ -330,35 +345,34 @@ class TestConversionPipelineConvertToFormat:
                     description="Revenue",
                     technical_name="revenue",
                     formula="SUM(Sales[Amount])",
-                    source_table="Sales"
+                    source_table="Sales",
                 )
-            ]
+            ],
         )
         # Add _advanced_parsing to enable transpilation path
         kpi = definition.kpis[0]
         kpi._advanced_parsing = {
             "transpiled_sql": "SUM(`Amount`)",
             "is_transpilable": True,
-            "signature": "sum ( <<table:1>> <<column:1>> )"
+            "signature": "sum ( <<table:1>> <<column:1>> )",
         }
 
         result = pipeline._convert_to_format(
-            definition,
-            OutboundFormat.SQL,
-            {},
-            inbound_type=ConnectorType.POWERBI
+            definition, OutboundFormat.SQL, {}, inbound_type=ConnectorType.POWERBI
         )
 
         # Should use transpilation path
         assert isinstance(result, list)
 
-    def test_convert_to_format_uc_metrics_generation_path(self, pipeline, simple_definition):
+    def test_convert_to_format_uc_metrics_generation_path(
+        self, pipeline, simple_definition
+    ):
         """Test _convert_to_format routes to UC Metrics generation for non-PowerBI"""
         result = pipeline._convert_to_format(
             simple_definition,
             OutboundFormat.UC_METRICS,
             {},
-            inbound_type=None  # Not PowerBI, so generation path
+            inbound_type=None,  # Not PowerBI, so generation path
         )
 
         assert result is not None
@@ -383,9 +397,9 @@ class TestConversionPipelineConvertToDAX:
                     technical_name="revenue",
                     formula="amount",
                     aggregation_type="SUM",
-                    source_table="Sales"
+                    source_table="Sales",
                 )
-            ]
+            ],
         )
 
     def test_convert_to_dax_raises_or_returns_list(self, pipeline, simple_definition):
@@ -403,7 +417,9 @@ class TestConversionPipelineConvertToDAX:
             # Other errors are acceptable
             pass
 
-    def test_convert_to_dax_known_bug_table_attribute(self, pipeline, simple_definition):
+    def test_convert_to_dax_known_bug_table_attribute(
+        self, pipeline, simple_definition
+    ):
         """Test that _convert_to_dax raises AttributeError due to known bug in .table access"""
         # Known issue: pipeline accesses dax_measure.table which doesn't exist
         with pytest.raises(AttributeError) as exc_info:
@@ -429,9 +445,9 @@ class TestConversionPipelineConvertToSQL:
                     technical_name="revenue",
                     formula="amount",
                     aggregation_type="SUM",
-                    source_table="Sales"
+                    source_table="Sales",
                 )
-            ]
+            ],
         )
 
     def test_convert_to_sql_generation_path(self, pipeline, simple_definition):
@@ -440,9 +456,7 @@ class TestConversionPipelineConvertToSQL:
         # but SQLTranslationResult doesn't have that method
         try:
             result = pipeline._convert_to_sql(
-                simple_definition,
-                {"dialect": "databricks"},
-                use_transpilation=False
+                simple_definition, {"dialect": "databricks"}, use_transpilation=False
             )
             assert result is not None
         except AttributeError as e:
@@ -453,9 +467,7 @@ class TestConversionPipelineConvertToSQL:
         """Test SQL generation with STANDARD dialect - may raise AttributeError due to known bug"""
         try:
             result = pipeline._convert_to_sql(
-                simple_definition,
-                {"dialect": "standard"},
-                use_transpilation=False
+                simple_definition, {"dialect": "standard"}, use_transpilation=False
             )
             assert result is not None
         except AttributeError as e:
@@ -472,22 +484,18 @@ class TestConversionPipelineConvertToSQL:
                     description="Revenue",
                     technical_name="revenue",
                     formula="SUM(Sales[Amount])",
-                    source_table="Sales"
+                    source_table="Sales",
                 )
-            ]
+            ],
         )
         kpi = definition.kpis[0]
         kpi._advanced_parsing = {
             "transpiled_sql": "SUM(`Amount`)",
             "is_transpilable": True,
-            "signature": "sum ( <<table:1>> <<column:1>> )"
+            "signature": "sum ( <<table:1>> <<column:1>> )",
         }
 
-        result = pipeline._convert_to_sql(
-            definition,
-            {},
-            use_transpilation=True
-        )
+        result = pipeline._convert_to_sql(definition, {}, use_transpilation=True)
 
         assert isinstance(result, list)
 
@@ -510,9 +518,9 @@ class TestConversionPipelineConvertToUCMetrics:
                     technical_name="revenue",
                     formula="amount",
                     aggregation_type="SUM",
-                    source_table="Sales"
+                    source_table="Sales",
                 )
-            ]
+            ],
         )
 
     def test_convert_to_uc_metrics_generation(self, pipeline, simple_definition):
@@ -520,7 +528,7 @@ class TestConversionPipelineConvertToUCMetrics:
         result = pipeline._convert_to_uc_metrics(
             simple_definition,
             {"catalog": "main", "schema": "default"},
-            use_transpilation=False
+            use_transpilation=False,
         )
 
         assert isinstance(result, str)
@@ -535,22 +543,18 @@ class TestConversionPipelineConvertToUCMetrics:
                     description="Revenue",
                     technical_name="revenue",
                     formula="SUM(Sales[Amount])",
-                    source_table="Sales"
+                    source_table="Sales",
                 )
-            ]
+            ],
         )
         kpi = definition.kpis[0]
         kpi._advanced_parsing = {
             "transpiled_sql": "SUM(`Amount`)",
             "is_transpilable": True,
-            "signature": "sum ( <<table:1>> <<column:1>> )"
+            "signature": "sum ( <<table:1>> <<column:1>> )",
         }
 
-        result = pipeline._convert_to_uc_metrics(
-            definition,
-            {},
-            use_transpilation=True
-        )
+        result = pipeline._convert_to_uc_metrics(definition, {}, use_transpilation=True)
 
         assert isinstance(result, str)
 
@@ -567,7 +571,7 @@ class TestConversionPipelineExecute:
         result = pipeline.execute(
             inbound_type=ConnectorType.TABLEAU,
             inbound_params={},
-            outbound_format=OutboundFormat.DAX
+            outbound_format=OutboundFormat.DAX,
         )
 
         assert result["success"] is False
@@ -578,7 +582,7 @@ class TestConversionPipelineExecute:
         result = pipeline.execute(
             inbound_type=ConnectorType.TABLEAU,
             inbound_params={},
-            outbound_format=OutboundFormat.DAX
+            outbound_format=OutboundFormat.DAX,
         )
 
         assert "success" in result
@@ -595,9 +599,9 @@ class TestConversionPipelineExecute:
             inbound_params={
                 "semantic_model_id": "fake_id",
                 "group_id": "fake_group",
-                "access_token": "invalid_token"
+                "access_token": "invalid_token",
             },
-            outbound_format=OutboundFormat.DAX
+            outbound_format=OutboundFormat.DAX,
         )
 
         # Should fail due to connection error
@@ -612,9 +616,7 @@ class TestConvenienceFunctions:
     def test_convert_powerbi_to_dax_fails_gracefully(self):
         """Test convert_powerbi_to_dax fails gracefully with invalid credentials"""
         result = convert_powerbi_to_dax(
-            semantic_model_id="fake",
-            group_id="fake",
-            access_token="invalid"
+            semantic_model_id="fake", group_id="fake", access_token="invalid"
         )
 
         assert result["success"] is False
@@ -623,9 +625,7 @@ class TestConvenienceFunctions:
     def test_convert_powerbi_to_sql_fails_gracefully(self):
         """Test convert_powerbi_to_sql fails gracefully with invalid credentials"""
         result = convert_powerbi_to_sql(
-            semantic_model_id="fake",
-            group_id="fake",
-            access_token="invalid"
+            semantic_model_id="fake", group_id="fake", access_token="invalid"
         )
 
         assert result["success"] is False
@@ -633,9 +633,7 @@ class TestConvenienceFunctions:
     def test_convert_powerbi_to_uc_metrics_fails_gracefully(self):
         """Test convert_powerbi_to_uc_metrics fails gracefully"""
         result = convert_powerbi_to_uc_metrics(
-            semantic_model_id="fake",
-            group_id="fake",
-            access_token="invalid"
+            semantic_model_id="fake", group_id="fake", access_token="invalid"
         )
 
         assert result["success"] is False
@@ -646,7 +644,7 @@ class TestConvenienceFunctions:
             semantic_model_id="fake",
             group_id="fake",
             access_token="invalid",
-            dialect="standard"
+            dialect="standard",
         )
 
         # Should fail (no credentials) but not crash

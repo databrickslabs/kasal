@@ -29,7 +29,9 @@ def llm():
 class TestToolErrorsBecomeResults:
     def test_http_error_is_returned_not_raised(self, llm):
         def scrape(**_kwargs):
-            raise urllib.error.HTTPError("https://example.com/x", 404, "Not Found", {}, None)
+            raise urllib.error.HTTPError(
+                "https://example.com/x", 404, "Not Found", {}, None
+            )
 
         result = llm._handle_tool_execution("scrape", {}, {"scrape": scrape})
 
@@ -39,6 +41,7 @@ class TestToolErrorsBecomeResults:
 
     def test_the_result_tells_the_model_what_to_do_next(self, llm):
         """Otherwise the model repeats the same dead call until the round cap."""
+
         def failing(**_kwargs):
             raise RuntimeError("boom")
 
@@ -64,14 +67,13 @@ class TestToolErrorsBecomeResults:
 
     def test_a_huge_error_is_truncated(self, llm):
         """A tool echoing a whole page must not eat the context window."""
+
         def failing(**_kwargs):
             raise RuntimeError("x" * 10_000)
 
         result = llm._handle_tool_execution("t", {}, {"t": failing})
         assert len(result) < 800
-        assert result.endswith(
-            "already have."
-        ) or "…" in result
+        assert result.endswith("already have.") or "…" in result
 
 
 class TestWhatStillPropagates:

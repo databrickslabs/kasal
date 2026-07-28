@@ -1,12 +1,13 @@
 """
 Unit tests for tool capability manifest and lethal-trifecta detection.
 """
+
 import logging
 
 from src.services.security.tool_capability_manifest import (
-    TrifectaAssessment,
-    ToolCapability,
     TOOL_CAPABILITIES,
+    ToolCapability,
+    TrifectaAssessment,
     assess_trifecta,
     classify_mcp_server,
     log_trifecta_warning,
@@ -112,9 +113,13 @@ class TestLogTrifectaWarning:
             untrusted_tools=["SerperDevTool"],
             external_tools=["GenieTool", "SerperDevTool"],
         )
-        with caplog.at_level(logging.WARNING, logger="src.services.security.tool_capability_manifest"):
+        with caplog.at_level(
+            logging.WARNING, logger="src.services.security.tool_capability_manifest"
+        ):
             log_trifecta_warning(assessment, context="test crew")
-        assert any("[SECURITY] Lethal trifecta detected" in r.message for r in caplog.records)
+        assert any(
+            "[SECURITY] Lethal trifecta detected" in r.message for r in caplog.records
+        )
 
     def test_logs_info_on_no_trifecta(self, caplog):
         assessment = TrifectaAssessment(
@@ -123,7 +128,9 @@ class TestLogTrifectaWarning:
             ingests_untrusted=False,
             communicates_externally=False,
         )
-        with caplog.at_level(logging.INFO, logger="src.services.security.tool_capability_manifest"):
+        with caplog.at_level(
+            logging.INFO, logger="src.services.security.tool_capability_manifest"
+        ):
             log_trifecta_warning(assessment)
         assert any("[SECURITY] No lethal trifecta" in r.message for r in caplog.records)
 
@@ -137,7 +144,9 @@ class TestLogTrifectaWarning:
             untrusted_tools=["SerperDevTool"],
             external_tools=["GenieTool"],
         )
-        with caplog.at_level(logging.WARNING, logger="src.services.security.tool_capability_manifest"):
+        with caplog.at_level(
+            logging.WARNING, logger="src.services.security.tool_capability_manifest"
+        ):
             log_trifecta_warning(assessment, context="crew with 3 tasks")
         assert any("crew with 3 tasks" in r.message for r in caplog.records)
 
@@ -208,7 +217,10 @@ class TestClassifyMcpServer:
 
     def test_classification_is_case_insensitive(self):
         # The picker passes display names verbatim, so matching must be lowercased.
-        assert classify_mcp_server("DATABRICKS SQL") & ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS
+        assert (
+            classify_mcp_server("DATABRICKS SQL")
+            & ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS
+        )
 
     def test_unknown_server_defaults_to_untrusted_external(self):
         # The crux: we can't enumerate internet-capable MCP servers, so anything
@@ -221,6 +233,7 @@ class TestClassifyMcpServer:
     def test_empty_name_is_none(self):
         assert classify_mcp_server("") == ToolCapability.NONE
 
+
 # ==========================================================================
 # Additional coverage: assess_mixed_task, log_mixed_task_warning,
 # apply_spotlighting_wrappers, run_crew_security_checks
@@ -230,19 +243,22 @@ from unittest.mock import MagicMock, patch
 
 def test_assess_mixed_task_no_tools():
     from src.services.security.tool_capability_manifest import assess_mixed_task
+
     result = assess_mixed_task([])
     assert result.is_mixed is False
 
 
 def test_assess_mixed_task_only_untrusted():
     from src.services.security.tool_capability_manifest import (
-        assess_mixed_task,
         TOOL_CAPABILITIES,
         ToolCapability,
+        assess_mixed_task,
     )
+
     # Find a tool with INGESTS_UNTRUSTED_CONTENT but no READS_SENSITIVE_DATA
     untrusted_tools = [
-        name for name, cap in TOOL_CAPABILITIES.items()
+        name
+        for name, cap in TOOL_CAPABILITIES.items()
         if (cap & ToolCapability.INGESTS_UNTRUSTED_CONTENT)
         and not (cap & ToolCapability.READS_SENSITIVE_DATA)
         and not (cap & ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS)
@@ -257,17 +273,20 @@ def test_assess_mixed_task_only_untrusted():
 
 def test_assess_mixed_task_is_mixed():
     from src.services.security.tool_capability_manifest import (
-        assess_mixed_task,
         TOOL_CAPABILITIES,
         ToolCapability,
+        assess_mixed_task,
     )
+
     # Find tools to create a mixed scenario
     untrusted = [
-        name for name, cap in TOOL_CAPABILITIES.items()
+        name
+        for name, cap in TOOL_CAPABILITIES.items()
         if cap & ToolCapability.INGESTS_UNTRUSTED_CONTENT
     ][:1]
     sensitive = [
-        name for name, cap in TOOL_CAPABILITIES.items()
+        name
+        for name, cap in TOOL_CAPABILITIES.items()
         if cap & ToolCapability.READS_SENSITIVE_DATA
         and not (cap & ToolCapability.INGESTS_UNTRUSTED_CONTENT)
     ][:1]
@@ -275,11 +294,16 @@ def test_assess_mixed_task_is_mixed():
     if not untrusted or not sensitive:
         # Manually test with mocked TOOL_CAPABILITIES
         from src.services.security import tool_capability_manifest as mod
+
         original = mod.TOOL_CAPABILITIES.copy()
-        mod.TOOL_CAPABILITIES["fake_untrusted"] = ToolCapability.INGESTS_UNTRUSTED_CONTENT
+        mod.TOOL_CAPABILITIES["fake_untrusted"] = (
+            ToolCapability.INGESTS_UNTRUSTED_CONTENT
+        )
         mod.TOOL_CAPABILITIES["fake_sensitive"] = ToolCapability.READS_SENSITIVE_DATA
         try:
-            result = assess_mixed_task(["fake_untrusted", "fake_sensitive"], "test_task")
+            result = assess_mixed_task(
+                ["fake_untrusted", "fake_sensitive"], "test_task"
+            )
             assert result.is_mixed is True
             assert "fake_untrusted" in result.untrusted_tools
             assert "fake_sensitive" in result.sensitive_tools
@@ -292,15 +316,18 @@ def test_assess_mixed_task_is_mixed():
 
 
 def test_assess_mixed_task_with_destructive():
+    from src.services.security import tool_capability_manifest as mod
     from src.services.security.tool_capability_manifest import (
-        assess_mixed_task,
         TOOL_CAPABILITIES,
         ToolCapability,
+        assess_mixed_task,
     )
-    from src.services.security import tool_capability_manifest as mod
+
     original = mod.TOOL_CAPABILITIES.copy()
     mod.TOOL_CAPABILITIES["fake_untrusted"] = ToolCapability.INGESTS_UNTRUSTED_CONTENT
-    mod.TOOL_CAPABILITIES["fake_destructive"] = ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS
+    mod.TOOL_CAPABILITIES["fake_destructive"] = (
+        ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS
+    )
     try:
         result = assess_mixed_task(["fake_untrusted", "fake_destructive"], "test_task")
         assert result.is_mixed is True
@@ -313,11 +340,13 @@ def test_assess_mixed_task_with_destructive():
 
 # ---- log_mixed_task_warning ----
 
+
 def test_log_mixed_task_warning_not_mixed():
     from src.services.security.tool_capability_manifest import (
-        log_mixed_task_warning,
         MixedTaskAssessment,
+        log_mixed_task_warning,
     )
+
     assessment = MixedTaskAssessment(
         is_mixed=False,
         untrusted_tools=[],
@@ -331,9 +360,10 @@ def test_log_mixed_task_warning_not_mixed():
 
 def test_log_mixed_task_warning_is_mixed():
     from src.services.security.tool_capability_manifest import (
-        log_mixed_task_warning,
         MixedTaskAssessment,
+        log_mixed_task_warning,
     )
+
     assessment = MixedTaskAssessment(
         is_mixed=True,
         untrusted_tools=["web_search"],
@@ -347,8 +377,12 @@ def test_log_mixed_task_warning_is_mixed():
 
 # ---- apply_spotlighting_wrappers ----
 
+
 def test_apply_spotlighting_no_agents():
-    from src.services.security.tool_capability_manifest import apply_spotlighting_wrappers
+    from src.services.security.tool_capability_manifest import (
+        apply_spotlighting_wrappers,
+    )
+
     crew = MagicMock()
     crew.agents = []
     result = apply_spotlighting_wrappers(crew)
@@ -356,7 +390,9 @@ def test_apply_spotlighting_no_agents():
 
 
 def test_apply_spotlighting_agent_no_untrusted_tools():
-    from src.services.security.tool_capability_manifest import apply_spotlighting_wrappers
+    from src.services.security.tool_capability_manifest import (
+        apply_spotlighting_wrappers,
+    )
 
     class FakeAgent:
         def __init__(self):
@@ -373,12 +409,12 @@ def test_apply_spotlighting_agent_no_untrusted_tools():
 
 
 def test_apply_spotlighting_with_untrusted_tool():
+    from src.services.security import tool_capability_manifest as mod
     from src.services.security.tool_capability_manifest import (
-        apply_spotlighting_wrappers,
         TOOL_CAPABILITIES,
         ToolCapability,
+        apply_spotlighting_wrappers,
     )
-    from src.services.security import tool_capability_manifest as mod
 
     # Inject a fake untrusted tool
     original = mod.TOOL_CAPABILITIES.copy()
@@ -407,8 +443,10 @@ def test_apply_spotlighting_with_untrusted_tool():
 
 # ---- run_crew_security_checks ----
 
+
 def test_run_crew_security_checks_empty_crew():
     from src.services.security.tool_capability_manifest import run_crew_security_checks
+
     crew = MagicMock()
     crew.agents = []
     crew.tasks = []
@@ -418,6 +456,7 @@ def test_run_crew_security_checks_empty_crew():
 
 def test_run_crew_security_checks_with_tasks():
     from src.services.security.tool_capability_manifest import run_crew_security_checks
+
     crew = MagicMock()
 
     task = MagicMock()
@@ -436,6 +475,7 @@ def test_run_crew_security_checks_with_tasks():
 
 def test_run_crew_security_checks_exception_handled():
     from src.services.security.tool_capability_manifest import run_crew_security_checks
+
     crew = MagicMock()
     crew.agents = MagicMock(side_effect=Exception("Crew access failed"))
     crew.tasks = MagicMock(side_effect=Exception("Tasks access failed"))
@@ -445,10 +485,13 @@ def test_run_crew_security_checks_exception_handled():
 
 def test_run_crew_security_checks_spotlighting_exception():
     from src.services.security.tool_capability_manifest import run_crew_security_checks
+
     crew = MagicMock()
     crew.agents = []
     crew.tasks = []
-    with patch('src.services.security.tool_capability_manifest.apply_spotlighting_wrappers',
-               side_effect=Exception("spotlighting error")):
+    with patch(
+        "src.services.security.tool_capability_manifest.apply_spotlighting_wrappers",
+        side_effect=Exception("spotlighting error"),
+    ):
         # Should not raise
         run_crew_security_checks(crew)

@@ -13,7 +13,9 @@ from typing import List, Optional, Set
 CONTEXT_WINDOW = "context_window"  # prompt exceeded the model's context window
 FATAL_4XX = "fatal_4xx"  # model-incompatibility 4xx (e.g. Gemini thought_signature)
 RATE_LIMIT = "rate_limit"  # sustained 429 after same-model backoff
-ENDPOINT_MISSING = "endpoint_missing"  # 404: the model's serving endpoint isn't deployed here
+ENDPOINT_MISSING = (
+    "endpoint_missing"  # 404: the model's serving endpoint isn't deployed here
+)
 
 _CONTEXT_MARKERS = (
     "context length",

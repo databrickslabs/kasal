@@ -2,30 +2,30 @@
 Unit tests for AgentBricks API router.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.core.exceptions import NotFoundError
+import pytest
 
 from src.api.agentbricks_router import (
-    router,
-    get_agentbricks_endpoints,
-    search_agentbricks_endpoints,
-    get_agentbricks_endpoint_details,
-    query_agentbricks_endpoint,
     execute_agentbricks_query,
+    get_agentbricks_endpoint_details,
+    get_agentbricks_endpoints,
+    query_agentbricks_endpoint,
+    router,
+    search_agentbricks_endpoints,
 )
+from src.core.exceptions import NotFoundError
 from src.schemas.agentbricks import (
+    AgentBricksAuthConfig,
     AgentBricksEndpoint,
     AgentBricksEndpointsRequest,
     AgentBricksEndpointsResponse,
+    AgentBricksExecutionRequest,
+    AgentBricksExecutionResponse,
+    AgentBricksMessage,
     AgentBricksQueryRequest,
     AgentBricksQueryResponse,
     AgentBricksQueryStatus,
-    AgentBricksExecutionRequest,
-    AgentBricksExecutionResponse,
-    AgentBricksAuthConfig,
-    AgentBricksMessage,
 )
 
 
@@ -66,51 +66,59 @@ class TestGetAgentBricksEndpoints:
             AgentBricksEndpoint(id="ep-2", name="endpoint-2"),
         ]
         mock_response = AgentBricksEndpointsResponse(
-            endpoints=mock_endpoints,
-            total_count=2,
-            filtered=False
+            endpoints=mock_endpoints, total_count=2, filtered=False
         )
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.get_endpoints.return_value = mock_response
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     result = await get_agentbricks_endpoints(
                         request=mock_request,
                         ready_only=True,
                         search_query=None,
-                        group_context=mock_group_context
+                        group_context=mock_group_context,
                     )
 
         assert len(result.endpoints) == 2
         assert result.total_count == 2
 
     @pytest.mark.asyncio
-    async def test_get_endpoints_with_search_query(self, mock_request, mock_group_context):
+    async def test_get_endpoints_with_search_query(
+        self, mock_request, mock_group_context
+    ):
         """Test get endpoints with search query filter."""
         mock_response = AgentBricksEndpointsResponse(
             endpoints=[AgentBricksEndpoint(id="ep-1", name="matching-endpoint")],
             total_count=1,
-            filtered=True
+            filtered=True,
         )
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.get_endpoints.return_value = mock_response
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     result = await get_agentbricks_endpoints(
                         request=mock_request,
                         ready_only=True,
                         search_query="matching",
-                        group_context=mock_group_context
+                        group_context=mock_group_context,
                     )
 
         assert result.filtered is True
@@ -119,24 +127,26 @@ class TestGetAgentBricksEndpoints:
     async def test_get_endpoints_empty_list(self, mock_request, mock_group_context):
         """Test get endpoints returns empty list."""
         mock_response = AgentBricksEndpointsResponse(
-            endpoints=[],
-            total_count=0,
-            filtered=False
+            endpoints=[], total_count=0, filtered=False
         )
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.get_endpoints.return_value = mock_response
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     result = await get_agentbricks_endpoints(
                         request=mock_request,
                         ready_only=True,
                         search_query=None,
-                        group_context=mock_group_context
+                        group_context=mock_group_context,
                     )
 
         assert len(result.endpoints) == 0
@@ -145,14 +155,16 @@ class TestGetAgentBricksEndpoints:
     async def test_get_endpoints_without_group_context(self, mock_request):
         """Test get endpoints without group context."""
         mock_response = AgentBricksEndpointsResponse(
-            endpoints=[],
-            total_count=0,
-            filtered=False
+            endpoints=[], total_count=0, filtered=False
         )
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.get_endpoints.return_value = mock_response
                 mock_service_class.return_value = mock_service
@@ -161,7 +173,7 @@ class TestGetAgentBricksEndpoints:
                     request=mock_request,
                     ready_only=True,
                     search_query=None,
-                    group_context=None
+                    group_context=None,
                 )
 
         assert result is not None
@@ -169,20 +181,24 @@ class TestGetAgentBricksEndpoints:
     @pytest.mark.asyncio
     async def test_get_endpoints_service_error(self, mock_request, mock_group_context):
         """Test get endpoints handles service errors."""
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.get_endpoints.side_effect = Exception("Service error")
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     with pytest.raises(Exception) as exc_info:
                         await get_agentbricks_endpoints(
                             request=mock_request,
                             ready_only=True,
                             search_query=None,
-                            group_context=mock_group_context
+                            group_context=mock_group_context,
                         )
 
         assert "Service error" in str(exc_info.value)
@@ -209,59 +225,66 @@ class TestSearchAgentBricksEndpoints:
     async def test_search_endpoints_success(self, mock_request, mock_group_context):
         """Test successful search of endpoints."""
         search_request = AgentBricksEndpointsRequest(
-            search_query="agent",
-            ready_only=True
+            search_query="agent", ready_only=True
         )
         mock_response = AgentBricksEndpointsResponse(
             endpoints=[AgentBricksEndpoint(id="ep-1", name="agent-endpoint")],
             total_count=1,
-            filtered=True
+            filtered=True,
         )
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.get_endpoints.return_value = mock_response
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     result = await search_agentbricks_endpoints(
                         request=mock_request,
                         endpoints_request=search_request,
-                        group_context=mock_group_context
+                        group_context=mock_group_context,
                     )
 
         assert len(result.endpoints) == 1
         assert result.filtered is True
 
     @pytest.mark.asyncio
-    async def test_search_endpoints_with_multiple_filters(self, mock_request, mock_group_context):
+    async def test_search_endpoints_with_multiple_filters(
+        self, mock_request, mock_group_context
+    ):
         """Test search with multiple filters."""
         search_request = AgentBricksEndpointsRequest(
             search_query="test",
             endpoint_ids=["ep-1", "ep-2"],
             ready_only=False,
-            creator_filter="user@example.com"
+            creator_filter="user@example.com",
         )
         mock_response = AgentBricksEndpointsResponse(
-            endpoints=[],
-            total_count=0,
-            filtered=True
+            endpoints=[], total_count=0, filtered=True
         )
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.get_endpoints.return_value = mock_response
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     result = await search_agentbricks_endpoints(
                         request=mock_request,
                         endpoints_request=search_request,
-                        group_context=mock_group_context
+                        group_context=mock_group_context,
                     )
 
         assert result.filtered is True
@@ -271,19 +294,23 @@ class TestSearchAgentBricksEndpoints:
         """Test search endpoints handles errors."""
         search_request = AgentBricksEndpointsRequest(search_query="test")
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.get_endpoints.side_effect = Exception("Search error")
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     with pytest.raises(Exception) as exc_info:
                         await search_agentbricks_endpoints(
                             request=mock_request,
                             endpoints_request=search_request,
-                            group_context=mock_group_context
+                            group_context=mock_group_context,
                         )
 
         assert "Search error" in str(exc_info.value)
@@ -314,67 +341,85 @@ class TestGetAgentBricksEndpointDetails:
             id="ep-123",
             name=endpoint_name,
             creator="user@example.com",
-            task="llm/v1/chat"
+            task="llm/v1/chat",
         )
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.get_endpoint_by_name.return_value = mock_endpoint
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     result = await get_agentbricks_endpoint_details(
                         endpoint_name=endpoint_name,
                         request=mock_request,
-                        group_context=mock_group_context
+                        group_context=mock_group_context,
                     )
 
         assert result.name == endpoint_name
         assert result.id == "ep-123"
 
     @pytest.mark.asyncio
-    async def test_get_endpoint_details_not_found(self, mock_request, mock_group_context):
+    async def test_get_endpoint_details_not_found(
+        self, mock_request, mock_group_context
+    ):
         """Test get endpoint details when endpoint not found."""
         endpoint_name = "non-existent"
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.get_endpoint_by_name.return_value = None
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     with pytest.raises(NotFoundError) as exc_info:
                         await get_agentbricks_endpoint_details(
                             endpoint_name=endpoint_name,
                             request=mock_request,
-                            group_context=mock_group_context
+                            group_context=mock_group_context,
                         )
 
         assert exc_info.value.status_code == 404
         assert endpoint_name in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_get_endpoint_details_service_error(self, mock_request, mock_group_context):
+    async def test_get_endpoint_details_service_error(
+        self, mock_request, mock_group_context
+    ):
         """Test get endpoint details handles service errors."""
         endpoint_name = "test-endpoint"
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
-                mock_service.get_endpoint_by_name.side_effect = Exception("Service error")
+                mock_service.get_endpoint_by_name.side_effect = Exception(
+                    "Service error"
+                )
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     with pytest.raises(Exception) as exc_info:
                         await get_agentbricks_endpoint_details(
                             endpoint_name=endpoint_name,
                             request=mock_request,
-                            group_context=mock_group_context
+                            group_context=mock_group_context,
                         )
 
         assert "Service error" in str(exc_info.value)
@@ -402,57 +447,66 @@ class TestQueryAgentBricksEndpoint:
         """Test successful query to endpoint."""
         query_request = AgentBricksQueryRequest(
             endpoint_name="test-endpoint",
-            messages=[AgentBricksMessage(role="user", content="Hello")]
+            messages=[AgentBricksMessage(role="user", content="Hello")],
         )
         mock_response = AgentBricksQueryResponse(
-            response="Hi there!",
-            status=AgentBricksQueryStatus.SUCCESS
+            response="Hi there!", status=AgentBricksQueryStatus.SUCCESS
         )
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.query_endpoint.return_value = mock_response
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     result = await query_agentbricks_endpoint(
                         request=mock_request,
                         query_request=query_request,
-                        group_context=mock_group_context
+                        group_context=mock_group_context,
                     )
 
         assert result.response == "Hi there!"
         assert result.status == "SUCCESS"
 
     @pytest.mark.asyncio
-    async def test_query_endpoint_with_custom_inputs(self, mock_request, mock_group_context):
+    async def test_query_endpoint_with_custom_inputs(
+        self, mock_request, mock_group_context
+    ):
         """Test query with custom inputs."""
         query_request = AgentBricksQueryRequest(
             endpoint_name="test-endpoint",
             messages=[AgentBricksMessage(role="user", content="Hello")],
             custom_inputs={"context": "test context"},
-            return_trace=True
+            return_trace=True,
         )
         mock_response = AgentBricksQueryResponse(
             response="Response with context",
             status=AgentBricksQueryStatus.SUCCESS,
-            trace={"steps": ["step1"]}
+            trace={"steps": ["step1"]},
         )
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.query_endpoint.return_value = mock_response
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     result = await query_agentbricks_endpoint(
                         request=mock_request,
                         query_request=query_request,
-                        group_context=mock_group_context
+                        group_context=mock_group_context,
                     )
 
         assert result.trace is not None
@@ -462,22 +516,26 @@ class TestQueryAgentBricksEndpoint:
         """Test query endpoint handles errors."""
         query_request = AgentBricksQueryRequest(
             endpoint_name="test-endpoint",
-            messages=[AgentBricksMessage(role="user", content="Hello")]
+            messages=[AgentBricksMessage(role="user", content="Hello")],
         )
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.query_endpoint.side_effect = Exception("Query error")
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     with pytest.raises(Exception) as exc_info:
                         await query_agentbricks_endpoint(
                             request=mock_request,
                             query_request=query_request,
-                            group_context=mock_group_context
+                            group_context=mock_group_context,
                         )
 
         assert "Query error" in str(exc_info.value)
@@ -504,27 +562,30 @@ class TestExecuteAgentBricksQuery:
     async def test_execute_query_success(self, mock_request, mock_group_context):
         """Test successful query execution."""
         execution_request = AgentBricksExecutionRequest(
-            endpoint_name="test-endpoint",
-            question="What is the weather?"
+            endpoint_name="test-endpoint", question="What is the weather?"
         )
         mock_response = AgentBricksExecutionResponse(
             endpoint_name="test-endpoint",
             status=AgentBricksQueryStatus.SUCCESS,
-            result="The weather is sunny"
+            result="The weather is sunny",
         )
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.execute_query.return_value = mock_response
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     result = await execute_agentbricks_query(
                         request=mock_request,
                         execution_request=execution_request,
-                        group_context=mock_group_context
+                        group_context=mock_group_context,
                     )
 
         assert result.result == "The weather is sunny"
@@ -538,27 +599,31 @@ class TestExecuteAgentBricksQuery:
             question="What is the weather?",
             custom_inputs={"location": "NYC"},
             return_trace=True,
-            timeout=60
+            timeout=60,
         )
         mock_response = AgentBricksExecutionResponse(
             endpoint_name="test-endpoint",
             status=AgentBricksQueryStatus.SUCCESS,
             result="The weather in NYC is sunny",
-            trace={"execution_time": 1.5}
+            trace={"execution_time": 1.5},
         )
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.execute_query.return_value = mock_response
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     result = await execute_agentbricks_query(
                         request=mock_request,
                         execution_request=execution_request,
-                        group_context=mock_group_context
+                        group_context=mock_group_context,
                     )
 
         assert result.trace is not None
@@ -567,62 +632,70 @@ class TestExecuteAgentBricksQuery:
             question="What is the weather?",
             custom_inputs={"location": "NYC"},
             return_trace=True,
-            timeout=60
+            timeout=60,
         )
 
     @pytest.mark.asyncio
-    async def test_execute_query_default_timeout(self, mock_request, mock_group_context):
+    async def test_execute_query_default_timeout(
+        self, mock_request, mock_group_context
+    ):
         """Test execute query uses default timeout."""
         execution_request = AgentBricksExecutionRequest(
-            endpoint_name="test-endpoint",
-            question="Hello"
+            endpoint_name="test-endpoint", question="Hello"
         )
         mock_response = AgentBricksExecutionResponse(
             endpoint_name="test-endpoint",
             status=AgentBricksQueryStatus.SUCCESS,
-            result="Hi"
+            result="Hi",
         )
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.execute_query.return_value = mock_response
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     await execute_agentbricks_query(
                         request=mock_request,
                         execution_request=execution_request,
-                        group_context=mock_group_context
+                        group_context=mock_group_context,
                     )
 
         # Default timeout should be 120
         mock_service.execute_query.assert_called_once()
         call_kwargs = mock_service.execute_query.call_args[1]
-        assert call_kwargs['timeout'] == 120
+        assert call_kwargs["timeout"] == 120
 
     @pytest.mark.asyncio
     async def test_execute_query_error(self, mock_request, mock_group_context):
         """Test execute query handles errors."""
         execution_request = AgentBricksExecutionRequest(
-            endpoint_name="test-endpoint",
-            question="Hello"
+            endpoint_name="test-endpoint", question="Hello"
         )
 
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "test-token"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.execute_query.side_effect = Exception("Execution error")
                 mock_service_class.return_value = mock_service
 
-                with patch('src.api.agentbricks_router.UserContext.set_group_context'):
+                with patch("src.api.agentbricks_router.UserContext.set_group_context"):
                     with pytest.raises(Exception) as exc_info:
                         await execute_agentbricks_query(
                             request=mock_request,
                             execution_request=execution_request,
-                            group_context=mock_group_context
+                            group_context=mock_group_context,
                         )
 
         assert "Execution error" in str(exc_info.value)
@@ -641,9 +714,13 @@ class TestAuthConfigCreation:
     @pytest.mark.asyncio
     async def test_auth_config_with_user_token(self, mock_request):
         """Test auth config is created with user token."""
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = "obo-token-123"
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.get_endpoints.return_value = AgentBricksEndpointsResponse()
                 mock_service_class.return_value = mock_service
@@ -652,7 +729,7 @@ class TestAuthConfigCreation:
                     request=mock_request,
                     ready_only=True,
                     search_query=None,
-                    group_context=None
+                    group_context=None,
                 )
 
         # Check that service was created with auth config containing user token
@@ -663,9 +740,13 @@ class TestAuthConfigCreation:
     @pytest.mark.asyncio
     async def test_auth_config_without_user_token(self, mock_request):
         """Test auth config when no user token available."""
-        with patch('src.api.agentbricks_router.extract_user_token_from_request') as mock_extract:
+        with patch(
+            "src.api.agentbricks_router.extract_user_token_from_request"
+        ) as mock_extract:
             mock_extract.return_value = None
-            with patch('src.api.agentbricks_router.AgentBricksService') as mock_service_class:
+            with patch(
+                "src.api.agentbricks_router.AgentBricksService"
+            ) as mock_service_class:
                 mock_service = AsyncMock()
                 mock_service.get_endpoints.return_value = AgentBricksEndpointsResponse()
                 mock_service_class.return_value = mock_service
@@ -674,7 +755,7 @@ class TestAuthConfigCreation:
                     request=mock_request,
                     ready_only=True,
                     search_query=None,
-                    group_context=None
+                    group_context=None,
                 )
 
         # Service should still be created

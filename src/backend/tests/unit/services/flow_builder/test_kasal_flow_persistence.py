@@ -10,6 +10,7 @@ Covers:
    (incl. init_db failure), other-error propagation, attempt exhaustion
  - load_state JSON decode failure -> None
 """
+
 import json
 
 import pytest
@@ -22,10 +23,11 @@ from src.services.flow_builder.kasal_flow_persistence import KasalFlowPersistenc
 @pytest.fixture
 def persistence(tmp_path, monkeypatch):
     """A persistence instance wired to a fresh on-disk SQLite DB with the table created."""
-    import src.db.session as session_mod
-    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import NullPool
+
+    import src.db.session as session_mod
 
     db_file = tmp_path / "fp.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}", poolclass=NullPool)
@@ -41,15 +43,18 @@ def persistence(tmp_path, monkeypatch):
 # _run_async
 # ---------------------------------------------------------------------------
 
+
 class TestRunAsync:
     def test_returns_value(self):
         async def coro():
             return 42
+
         assert mod._run_async(lambda: coro()) == 42
 
     def test_propagates_error(self):
         async def coro():
             raise RuntimeError("boom")
+
         with pytest.raises(RuntimeError, match="boom"):
             mod._run_async(lambda: coro())
 
@@ -57,6 +62,7 @@ class TestRunAsync:
 # ---------------------------------------------------------------------------
 # Real DB round-trip
 # ---------------------------------------------------------------------------
+
 
 class TestSaveLoadRealDB:
     def test_dict_round_trip_latest_wins(self, persistence):
@@ -68,6 +74,7 @@ class TestSaveLoadRealDB:
         class StateModel(BaseModel):
             id: str = "u2"
             n: int = 5
+
         persistence.save_state("u2", "m", StateModel())
         assert persistence.load_state("u2") == {"id": "u2", "n": 5}
 
@@ -89,6 +96,7 @@ class TestSaveLoadRealDB:
 # ---------------------------------------------------------------------------
 # _execute_with_retry branches
 # ---------------------------------------------------------------------------
+
 
 class TestExecuteWithRetry:
     def test_success_passthrough(self, monkeypatch):
@@ -175,6 +183,7 @@ class TestExecuteWithRetry:
 # ---------------------------------------------------------------------------
 # load_state parsing
 # ---------------------------------------------------------------------------
+
 
 class TestLoadStateParsing:
     def test_none_when_no_row(self, monkeypatch):

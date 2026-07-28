@@ -9,6 +9,7 @@ Tests cover the three public/private methods:
 All heavy dependencies are lazily imported inside method bodies, so patches
 target the canonical source modules where the symbols are defined.
 """
+
 import asyncio
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
@@ -30,12 +31,26 @@ EMBEDDING = [0.1] * 1024
 
 # Mirrors DatabricksIndexSchemas.DOCUMENT_SEARCH_COLUMNS
 DOCUMENT_SEARCH_COLUMNS = [
-    "id", "title", "content", "source", "document_type",
-    "section", "chunk_index", "chunk_size", "parent_document_id",
-    "agent_ids", "created_at", "updated_at", "doc_metadata", "group_id",
-    "embedding_model", "version",
+    "id",
+    "title",
+    "content",
+    "source",
+    "document_type",
+    "section",
+    "chunk_index",
+    "chunk_size",
+    "parent_document_id",
+    "agent_ids",
+    "created_at",
+    "updated_at",
+    "doc_metadata",
+    "group_id",
+    "embedding_model",
+    "version",
 ]
-DOCUMENT_COLUMN_POSITIONS = {col: idx for idx, col in enumerate(DOCUMENT_SEARCH_COLUMNS)}
+DOCUMENT_COLUMN_POSITIONS = {
+    col: idx for idx, col in enumerate(DOCUMENT_SEARCH_COLUMNS)
+}
 
 # Patch targets - local imports require patching at the source module
 SCHEMAS_MODULE = "src.schemas.databricks_index_schemas.DatabricksIndexSchemas"
@@ -328,7 +343,9 @@ class TestSearchSuccess:
         mock_doc_cls.return_value = self._doc_service([_pg_row()])
 
         results = await self.service.search(
-            QUERY, file_paths=["/Volumes/cat/sch/vol/not-uploaded.pdf"], user_token=USER_TOKEN
+            QUERY,
+            file_paths=["/Volumes/cat/sch/vol/not-uploaded.pdf"],
+            user_token=USER_TOKEN,
         )
 
         assert results == []
@@ -366,7 +383,9 @@ class TestSearchSuccess:
     @pytest.mark.asyncio
     @patch(LLM_MODULE)
     @patch(DOC_SVC_MODULE)
-    async def test_search_with_execution_id_in_metadata(self, mock_doc_cls, mock_llm_cls):
+    async def test_search_with_execution_id_in_metadata(
+        self, mock_doc_cls, mock_llm_cls
+    ):
         """execution_id is passed through to each result's metadata."""
         self._setup_service()
         mock_llm_cls.get_embedding = AsyncMock(return_value=EMBEDDING)
@@ -386,8 +405,12 @@ class TestSearchSuccess:
         self._setup_service()
         mock_llm_cls.get_embedding = AsyncMock(return_value=EMBEDDING)
         row = SimpleNamespace(
-            content="c", title="t", source="s.md",
-            file_path=None, group_id=GROUP_ID, doc_metadata=None,
+            content="c",
+            title="t",
+            source="s.md",
+            file_path=None,
+            group_id=GROUP_ID,
+            doc_metadata=None,
         )
         mock_doc_cls.return_value = self._doc_service([row])
 
@@ -456,9 +479,7 @@ class TestSearchEmpty:
         mock_schemas_cls.get_column_positions.return_value = DOCUMENT_COLUMN_POSITIONS
         mock_llm_cls.get_embedding = AsyncMock(return_value=EMBEDDING)
 
-        storage.repository.get_index = AsyncMock(
-            return_value=_make_ready_index_info()
-        )
+        storage.repository.get_index = AsyncMock(return_value=_make_ready_index_info())
         storage.repository.similarity_search = AsyncMock(
             side_effect=asyncio.TimeoutError("timed out")
         )
@@ -481,9 +502,7 @@ class TestSearchEmpty:
         mock_schemas_cls.get_column_positions.return_value = DOCUMENT_COLUMN_POSITIONS
         mock_llm_cls.get_embedding = AsyncMock(return_value=EMBEDDING)
 
-        storage.repository.get_index = AsyncMock(
-            return_value=_make_ready_index_info()
-        )
+        storage.repository.get_index = AsyncMock(return_value=_make_ready_index_info())
         storage.repository.similarity_search = AsyncMock(
             side_effect=RuntimeError("connection failed")
         )
@@ -506,9 +525,7 @@ class TestSearchEmpty:
         mock_schemas_cls.get_column_positions.return_value = DOCUMENT_COLUMN_POSITIONS
         mock_llm_cls.get_embedding = AsyncMock(return_value=EMBEDDING)
 
-        storage.repository.get_index = AsyncMock(
-            return_value=_make_ready_index_info()
-        )
+        storage.repository.get_index = AsyncMock(return_value=_make_ready_index_info())
         empty_response: Dict[str, Any] = {"results": {"result": {"data_array": []}}}
         storage.repository.similarity_search = AsyncMock(return_value=empty_response)
 
@@ -741,8 +758,12 @@ class TestResolveFilePaths:
         paths = ["/Volumes/cat/sch/vol/a.pdf", "/Volumes/cat/sch/vol/b.pdf"]
 
         result = await self.service._resolve_file_paths(
-            paths, self.index_repo, self.doc_index, self.endpoint,
-            self.embedding, self.columns
+            paths,
+            self.index_repo,
+            self.doc_index,
+            self.endpoint,
+            self.embedding,
+            self.columns,
         )
 
         assert result == paths
@@ -778,8 +799,11 @@ class TestResolveFilePaths:
 
         result = await self.service._resolve_file_paths(
             ["report.pdf"],
-            self.index_repo, self.doc_index, self.endpoint,
-            self.embedding, self.columns
+            self.index_repo,
+            self.doc_index,
+            self.endpoint,
+            self.embedding,
+            self.columns,
         )
 
         assert result == ["/Volumes/cat/sch/vol/report.pdf"]
@@ -809,8 +833,11 @@ class TestResolveFilePaths:
 
         result = await self.service._resolve_file_paths(
             ["/Volumes/cat/sch/vol/existing.pdf", "notes.txt"],
-            self.index_repo, self.doc_index, self.endpoint,
-            self.embedding, self.columns
+            self.index_repo,
+            self.doc_index,
+            self.endpoint,
+            self.embedding,
+            self.columns,
         )
 
         assert "/Volumes/cat/sch/vol/existing.pdf" in result
@@ -827,8 +854,11 @@ class TestResolveFilePaths:
 
         result = await self.service._resolve_file_paths(
             ["unknown.pdf"],
-            self.index_repo, self.doc_index, self.endpoint,
-            self.embedding, self.columns
+            self.index_repo,
+            self.doc_index,
+            self.endpoint,
+            self.embedding,
+            self.columns,
         )
 
         assert result is None
@@ -843,8 +873,11 @@ class TestResolveFilePaths:
 
         result = await self.service._resolve_file_paths(
             ["missing.pdf"],
-            self.index_repo, self.doc_index, self.endpoint,
-            self.embedding, self.columns
+            self.index_repo,
+            self.doc_index,
+            self.endpoint,
+            self.embedding,
+            self.columns,
         )
 
         assert result is None
@@ -872,8 +905,11 @@ class TestResolveFilePaths:
 
         result = await self.service._resolve_file_paths(
             ["nonexistent.pdf"],
-            self.index_repo, self.doc_index, self.endpoint,
-            self.embedding, self.columns
+            self.index_repo,
+            self.doc_index,
+            self.endpoint,
+            self.embedding,
+            self.columns,
         )
 
         # No match found => combined list is empty => returns None
@@ -882,7 +918,11 @@ class TestResolveFilePaths:
 
 # --- Legacy Vector-Search storage builder (_get_vector_storage internals) ---
 from datetime import datetime as _dt  # noqa: E402
-from src.schemas.memory_backend import DatabricksMemoryConfig, MemoryBackendType  # noqa: E402
+
+from src.schemas.memory_backend import (  # noqa: E402
+    DatabricksMemoryConfig,
+    MemoryBackendType,
+)
 
 _SEARCH_DVS = "src.services.memory.databricks_vector_storage.DatabricksVectorStorage"
 
@@ -913,7 +953,9 @@ class TestSearchGetVectorStorageInternals:
             embedding_dimension=1024,
         )
         svc._memory_backend_service = AsyncMock()
-        svc._memory_backend_service.get_memory_backends = AsyncMock(return_value=[_search_databricks_backend(cfg)])
+        svc._memory_backend_service.get_memory_backends = AsyncMock(
+            return_value=[_search_databricks_backend(cfg)]
+        )
         with patch(_SEARCH_DVS) as MockStore:
             result = await svc._get_vector_storage(user_token="tok")
         assert result is MockStore.return_value
@@ -921,14 +963,22 @@ class TestSearchGetVectorStorageInternals:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_document_index(self):
         svc = self._svc()
-        cfg = DatabricksMemoryConfig(workspace_url="https://example.databricks.com", endpoint_name="ep", memory_index="cat.sch.mem")
+        cfg = DatabricksMemoryConfig(
+            workspace_url="https://example.databricks.com",
+            endpoint_name="ep",
+            memory_index="cat.sch.mem",
+        )
         svc._memory_backend_service = AsyncMock()
-        svc._memory_backend_service.get_memory_backends = AsyncMock(return_value=[_search_databricks_backend(cfg)])
+        svc._memory_backend_service.get_memory_backends = AsyncMock(
+            return_value=[_search_databricks_backend(cfg)]
+        )
         assert await svc._get_vector_storage() is None
 
     @pytest.mark.asyncio
     async def test_returns_none_when_databricks_config_missing(self):
         svc = self._svc()
         svc._memory_backend_service = AsyncMock()
-        svc._memory_backend_service.get_memory_backends = AsyncMock(return_value=[_search_databricks_backend(None)])
+        svc._memory_backend_service.get_memory_backends = AsyncMock(
+            return_value=[_search_databricks_backend(None)]
+        )
         assert await svc._get_vector_storage() is None

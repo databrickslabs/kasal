@@ -14,6 +14,7 @@ gpt-5.6, claude-5, gemini-3.x, deepseek-v4 — are in no built-in table, so a
 The lookup is by EXACT key, so the registered id has to match the
 ``prefixed_model`` that ``configure_crewai_llm`` builds for that provider.
 """
+
 import pytest
 
 # Importing llm_manager runs the registration at module scope.
@@ -21,7 +22,6 @@ import src.services.llm.manager  # noqa: F401
 from src.core.llm.transport import LLM_CONTEXT_WINDOW_SIZES
 from src.core.llm.transport.constants import DEFAULT_CONTEXT_WINDOW_SIZE
 from src.seeds.model_configs import DEFAULT_MODELS
-
 
 # Mirrors the prefixes in configure_crewai_llm. Duplicated on purpose: if the
 # call-time prefix changes without the registration following, this test fails
@@ -46,9 +46,9 @@ def test_seeded_model_window_is_registered_under_its_call_time_id(model_key):
     assert provider in PREFIXES, f"no litellm prefix known for provider {provider!r}"
 
     call_time_id = f"{PREFIXES[provider]}{model_key}"
-    assert LLM_CONTEXT_WINDOW_SIZES.get(call_time_id) == config["context_window"], (
-        f"{call_time_id} would fall back to {DEFAULT_CONTEXT_WINDOW_SIZE} tokens"
-    )
+    assert (
+        LLM_CONTEXT_WINDOW_SIZES.get(call_time_id) == config["context_window"]
+    ), f"{call_time_id} would fall back to {DEFAULT_CONTEXT_WINDOW_SIZE} tokens"
 
 
 @pytest.mark.parametrize("model_key", sorted(DEFAULT_MODELS))

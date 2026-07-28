@@ -5,8 +5,9 @@ Tests currency conversion logic for SQL and DAX measure generation.
 """
 
 import pytest
-from src.services.converters.common.transformers.currency import CurrencyConverter
+
 from src.services.converters.base.models import KPI
+from src.services.converters.common.transformers.currency import CurrencyConverter
 
 
 class TestCurrencyConverter:
@@ -25,7 +26,7 @@ class TestCurrencyConverter:
             technical_name="usd_sales",
             formula="SUM(sales.amount)",
             fixed_currency="USD",
-            target_currency="EUR"
+            target_currency="EUR",
         )
 
     @pytest.fixture
@@ -37,7 +38,7 @@ class TestCurrencyConverter:
             formula="SUM(sales.amount)",
             source_table="sales",
             currency_column="source_currency",
-            target_currency="EUR"
+            target_currency="EUR",
         )
 
     @pytest.fixture
@@ -46,7 +47,7 @@ class TestCurrencyConverter:
         return KPI(
             description="Simple Sales",
             technical_name="simple_sales",
-            formula="SUM(sales.amount)"
+            formula="SUM(sales.amount)",
         )
 
     # ========== Initialization Tests ==========
@@ -64,11 +65,15 @@ class TestCurrencyConverter:
 
     # ========== should_convert_currency Tests ==========
 
-    def test_should_convert_currency_with_fixed_currency(self, converter, kpi_with_fixed_currency):
+    def test_should_convert_currency_with_fixed_currency(
+        self, converter, kpi_with_fixed_currency
+    ):
         """Test currency conversion is needed for KPI with fixed currency and target"""
         assert converter.should_convert_currency(kpi_with_fixed_currency) is True
 
-    def test_should_convert_currency_with_dynamic_currency(self, converter, kpi_with_dynamic_currency):
+    def test_should_convert_currency_with_dynamic_currency(
+        self, converter, kpi_with_dynamic_currency
+    ):
         """Test currency conversion is needed for KPI with currency column and target"""
         assert converter.should_convert_currency(kpi_with_dynamic_currency) is True
 
@@ -78,7 +83,7 @@ class TestCurrencyConverter:
             description="Sales",
             technical_name="sales",
             formula="SUM(amount)",
-            target_currency="EUR"  # Has target but no source
+            target_currency="EUR",  # Has target but no source
         )
 
         assert converter.should_convert_currency(kpi) is False
@@ -89,7 +94,7 @@ class TestCurrencyConverter:
             description="Sales",
             technical_name="sales",
             formula="SUM(amount)",
-            fixed_currency="USD"  # Has source but no target
+            fixed_currency="USD",  # Has source but no target
         )
 
         assert converter.should_convert_currency(kpi) is False
@@ -102,21 +107,29 @@ class TestCurrencyConverter:
 
     def test_get_kbi_currency_recursive_fixed(self, converter, kpi_with_fixed_currency):
         """Test getting fixed currency from KPI"""
-        currency_type, currency_value = converter.get_kbi_currency_recursive(kpi_with_fixed_currency)
+        currency_type, currency_value = converter.get_kbi_currency_recursive(
+            kpi_with_fixed_currency
+        )
 
         assert currency_type == "fixed"
         assert currency_value == "USD"
 
-    def test_get_kbi_currency_recursive_dynamic(self, converter, kpi_with_dynamic_currency):
+    def test_get_kbi_currency_recursive_dynamic(
+        self, converter, kpi_with_dynamic_currency
+    ):
         """Test getting dynamic currency from KPI"""
-        currency_type, currency_value = converter.get_kbi_currency_recursive(kpi_with_dynamic_currency)
+        currency_type, currency_value = converter.get_kbi_currency_recursive(
+            kpi_with_dynamic_currency
+        )
 
         assert currency_type == "dynamic"
         assert currency_value == "source_currency"
 
     def test_get_kbi_currency_recursive_no_currency(self, converter, kpi_no_currency):
         """Test getting currency from KPI with no currency info"""
-        currency_type, currency_value = converter.get_kbi_currency_recursive(kpi_no_currency)
+        currency_type, currency_value = converter.get_kbi_currency_recursive(
+            kpi_no_currency
+        )
 
         assert currency_type is None
         assert currency_value is None
@@ -129,22 +142,22 @@ class TestCurrencyConverter:
             technical_name="base_sales",
             formula="SUM(sales.amount)",
             fixed_currency="USD",
-            target_currency="EUR"
+            target_currency="EUR",
         )
 
         # Create derived KPI that references base KPI
         derived_kpi = KPI(
             description="Derived Sales",
             technical_name="derived_sales",
-            formula="[base_sales] * 1.1"  # References base_sales
+            formula="[base_sales] * 1.1",  # References base_sales
             # No direct currency info
         )
 
-        kpi_lookup = {
-            "base_sales": base_kpi
-        }
+        kpi_lookup = {"base_sales": base_kpi}
 
-        currency_type, currency_value = converter.get_kbi_currency_recursive(derived_kpi, kpi_lookup)
+        currency_type, currency_value = converter.get_kbi_currency_recursive(
+            derived_kpi, kpi_lookup
+        )
 
         # Should find currency from dependency
         assert currency_type == "fixed"
@@ -156,39 +169,36 @@ class TestCurrencyConverter:
             description="KPI 1",
             technical_name="kpi1",
             formula="SUM(amount)",
-            fixed_currency="GBP"
+            fixed_currency="GBP",
         )
 
         kpi_no_currency = KPI(
-            description="KPI 2",
-            technical_name="kpi2",
-            formula="SUM(amount)"
+            description="KPI 2", technical_name="kpi2", formula="SUM(amount)"
         )
 
         derived = KPI(
-            description="Derived",
-            technical_name="derived",
-            formula="[kpi2] + [kpi1]"
+            description="Derived", technical_name="derived", formula="[kpi2] + [kpi1]"
         )
 
-        kpi_lookup = {
-            "kpi1": kpi_with_currency,
-            "kpi2": kpi_no_currency
-        }
+        kpi_lookup = {"kpi1": kpi_with_currency, "kpi2": kpi_no_currency}
 
-        currency_type, currency_value = converter.get_kbi_currency_recursive(derived, kpi_lookup)
+        currency_type, currency_value = converter.get_kbi_currency_recursive(
+            derived, kpi_lookup
+        )
 
         # Should find currency from kpi1
         assert currency_type == "fixed"
         assert currency_value == "GBP"
 
-    def test_get_kbi_currency_recursive_priority_direct_over_dependency(self, converter):
+    def test_get_kbi_currency_recursive_priority_direct_over_dependency(
+        self, converter
+    ):
         """Test direct currency info takes priority over dependencies"""
         base_kpi = KPI(
             description="Base",
             technical_name="base",
             formula="SUM(amount)",
-            fixed_currency="USD"
+            fixed_currency="USD",
         )
 
         # This KPI has both direct currency and a dependency with different currency
@@ -196,12 +206,14 @@ class TestCurrencyConverter:
             description="Derived",
             technical_name="derived",
             formula="[base] * 2",
-            currency_column="my_currency"  # Direct dynamic currency
+            currency_column="my_currency",  # Direct dynamic currency
         )
 
         kpi_lookup = {"base": base_kpi}
 
-        currency_type, currency_value = converter.get_kbi_currency_recursive(kpi, kpi_lookup)
+        currency_type, currency_value = converter.get_kbi_currency_recursive(
+            kpi, kpi_lookup
+        )
 
         # Should use direct currency_column, not dependency
         assert currency_type == "dynamic"
@@ -215,7 +227,7 @@ class TestCurrencyConverter:
             value_expression="sales_amount",
             source_currency="USD",
             target_currency="EUR",
-            currency_type="fixed"
+            currency_type="fixed",
         )
 
         assert "sales_amount" in sql
@@ -233,7 +245,7 @@ class TestCurrencyConverter:
             source_currency="GBP",
             target_currency="USD",
             currency_type="fixed",
-            exchange_rate_table="CustomRates"
+            exchange_rate_table="CustomRates",
         )
 
         assert "CustomRates" in sql
@@ -248,7 +260,7 @@ class TestCurrencyConverter:
             source_currency=None,
             target_currency="EUR",
             currency_type="dynamic",
-            currency_column="source_curr"
+            currency_column="source_curr",
         )
 
         # Dynamic conversion returns a placeholder for query-level handling
@@ -263,7 +275,7 @@ class TestCurrencyConverter:
             value_expression="amount",
             source_currency="USD",
             target_currency="EUR",
-            currency_type="fixed"
+            currency_type="fixed",
         )
 
         assert "effective_date" in sql
@@ -279,7 +291,7 @@ class TestCurrencyConverter:
             value_expression="[Amount]",
             source_currency="USD",
             target_currency="EUR",
-            currency_type="fixed"
+            currency_type="fixed",
         )
 
         assert "[Amount]" in dax
@@ -297,7 +309,7 @@ class TestCurrencyConverter:
             source_currency="GBP",
             target_currency="USD",
             currency_type="fixed",
-            exchange_rate_table="CustomRates"
+            exchange_rate_table="CustomRates",
         )
 
         assert "CustomRates" in dax
@@ -312,7 +324,7 @@ class TestCurrencyConverter:
             source_currency=None,
             target_currency="EUR",
             currency_type="dynamic",
-            currency_column="SourceCurrency"
+            currency_column="SourceCurrency",
         )
 
         assert "[Amount]" in dax
@@ -327,7 +339,7 @@ class TestCurrencyConverter:
             value_expression="[Value]",
             source_currency="USD",
             target_currency="EUR",
-            currency_type="fixed"
+            currency_type="fixed",
         )
 
         # Should multiply value by lookup
@@ -340,21 +352,25 @@ class TestCurrencyConverter:
         """Test no joins needed when no KPIs have currency conversion"""
         kpis = [
             KPI(description="KPI 1", technical_name="kpi1", formula="SUM(a)"),
-            KPI(description="KPI 2", technical_name="kpi2", formula="SUM(b)")
+            KPI(description="KPI 2", technical_name="kpi2", formula="SUM(b)"),
         ]
 
         joins = converter.get_required_joins(kpis)
 
         assert joins == []
 
-    def test_get_required_joins_fixed_currency(self, converter, kpi_with_fixed_currency):
+    def test_get_required_joins_fixed_currency(
+        self, converter, kpi_with_fixed_currency
+    ):
         """Test no joins needed for fixed currency (uses subquery)"""
         joins = converter.get_required_joins([kpi_with_fixed_currency])
 
         # Fixed currency doesn't need JOIN (uses subquery in SELECT)
         assert joins == []
 
-    def test_get_required_joins_dynamic_currency(self, converter, kpi_with_dynamic_currency):
+    def test_get_required_joins_dynamic_currency(
+        self, converter, kpi_with_dynamic_currency
+    ):
         """Test JOIN is generated for dynamic currency KPI"""
         joins = converter.get_required_joins([kpi_with_dynamic_currency])
 
@@ -376,7 +392,7 @@ class TestCurrencyConverter:
                 formula="SUM(sales.amount)",
                 source_table="sales",
                 currency_column="curr_code",
-                target_currency="EUR"
+                target_currency="EUR",
             ),
             KPI(
                 description="Cost USD",
@@ -384,8 +400,8 @@ class TestCurrencyConverter:
                 formula="SUM(cost.amount)",
                 source_table="cost",
                 currency_column="currency",
-                target_currency="USD"
-            )
+                target_currency="USD",
+            ),
         ]
 
         joins = converter.get_required_joins(kpis)
@@ -393,18 +409,21 @@ class TestCurrencyConverter:
         assert len(joins) == 2
         assert all("LEFT JOIN" in join for join in joins)
 
-    def test_get_required_joins_with_custom_table(self, converter, kpi_with_dynamic_currency):
+    def test_get_required_joins_with_custom_table(
+        self, converter, kpi_with_dynamic_currency
+    ):
         """Test JOIN uses custom exchange rate table"""
         joins = converter.get_required_joins(
-            [kpi_with_dynamic_currency],
-            exchange_rate_table="CustomRates"
+            [kpi_with_dynamic_currency], exchange_rate_table="CustomRates"
         )
 
         assert len(joins) == 1
         assert "CustomRates" in joins[0]
         assert "ExchangeRates" not in joins[0]
 
-    def test_get_required_joins_includes_latest_rate_logic(self, converter, kpi_with_dynamic_currency):
+    def test_get_required_joins_includes_latest_rate_logic(
+        self, converter, kpi_with_dynamic_currency
+    ):
         """Test JOIN includes logic to get latest exchange rate"""
         joins = converter.get_required_joins([kpi_with_dynamic_currency])
 
@@ -415,7 +434,9 @@ class TestCurrencyConverter:
         assert "SELECT MAX(effective_date)" in join
         assert join.count("SELECT") >= 1
 
-    def test_get_required_joins_mixed_currency_types(self, converter, kpi_with_fixed_currency, kpi_with_dynamic_currency):
+    def test_get_required_joins_mixed_currency_types(
+        self, converter, kpi_with_fixed_currency, kpi_with_dynamic_currency
+    ):
         """Test JOINs generated only for dynamic currency KPIs"""
         kpis = [kpi_with_fixed_currency, kpi_with_dynamic_currency]
 
@@ -433,7 +454,9 @@ class TestCurrencyConverter:
         assert converter.should_convert_currency(kpi_with_fixed_currency) is True
 
         # Get currency info
-        currency_type, currency_value = converter.get_kbi_currency_recursive(kpi_with_fixed_currency)
+        currency_type, currency_value = converter.get_kbi_currency_recursive(
+            kpi_with_fixed_currency
+        )
         assert currency_type == "fixed"
         assert currency_value == "USD"
 
@@ -442,7 +465,7 @@ class TestCurrencyConverter:
             "SUM(amount)",
             currency_value,
             kpi_with_fixed_currency.target_currency,
-            currency_type
+            currency_type,
         )
         assert "USD" in sql
         assert "EUR" in sql
@@ -452,7 +475,7 @@ class TestCurrencyConverter:
             "[Amount]",
             currency_value,
             kpi_with_fixed_currency.target_currency,
-            currency_type
+            currency_type,
         )
         assert "USD" in dax
         assert "EUR" in dax
@@ -461,13 +484,17 @@ class TestCurrencyConverter:
         joins = converter.get_required_joins([kpi_with_fixed_currency])
         assert joins == []
 
-    def test_full_conversion_workflow_dynamic(self, converter, kpi_with_dynamic_currency):
+    def test_full_conversion_workflow_dynamic(
+        self, converter, kpi_with_dynamic_currency
+    ):
         """Test complete workflow for dynamic currency conversion"""
         # Check if conversion needed
         assert converter.should_convert_currency(kpi_with_dynamic_currency) is True
 
         # Get currency info
-        currency_type, currency_value = converter.get_kbi_currency_recursive(kpi_with_dynamic_currency)
+        currency_type, currency_value = converter.get_kbi_currency_recursive(
+            kpi_with_dynamic_currency
+        )
         assert currency_type == "dynamic"
         assert currency_value == "source_currency"
 
@@ -477,7 +504,7 @@ class TestCurrencyConverter:
             None,
             kpi_with_dynamic_currency.target_currency,
             currency_type,
-            currency_column=currency_value
+            currency_column=currency_value,
         )
         assert "__CURRENCY_CONVERSION__" in sql
 
@@ -487,7 +514,7 @@ class TestCurrencyConverter:
             None,
             kpi_with_dynamic_currency.target_currency,
             currency_type,
-            currency_column=currency_value
+            currency_column=currency_value,
         )
         assert "source_currency" in dax
         assert "EUR" in dax

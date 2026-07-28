@@ -52,38 +52,49 @@ from src.repositories.prompt_optimization_run_repository import (
 from src.schemas.prompt_optimization import PromptOptimizationRequest
 from src.schemas.template import PromptTemplateUpdate
 from src.services.catalog.templates import TemplateService
-from src.utils.prompt_utils import robust_json_parser
-from src.utils.user_context import GroupContext
+from src.services.prompt_optimization import (  # noqa: E402,F401
+    CrewRunnerMixin,
+    JudgeOperationsMixin,
+    RunRegistryMixin,
+    TemplateRunnerMixin,
+    run_state,
+)
+from src.services.prompt_optimization.config import (  # noqa: E402,F401
+    DEFAULT_TARGET_MODEL,
+    MIN_EXAMPLES,
+    TEMPLATE_TASKS,
+    _pin_local_experiment,
+)
+from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
+    _CREW_DOC_FIELD_LABELS,
+    _distill_requirements,
+    _extract_user_from_log,
+    _parse_crew_doc,
+    _parse_requirement_lines,
+    _serialize_crew_doc,
+)
 
 # Helper library, extracted to ``gepa/`` — re-exported so this module stays
 # the single import point for them and no caller (or test) has to know where
 # they live.
 from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
-    _judge_value_to_grade,
-    _checklist_grade,
-    _grade_judge_verdict,
-    _parse_grade_from_text,
-    _job_name_score,
-    _intent_format_score,
-    _json_keys_score,
-    _median_sample,
-    _to_float,
     _CATEGORICAL_GRADES,
     JUDGE_SPREAD_WARN,
     VALID_INTENTS,
-)
-from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
-    _serialize_crew_doc,
-    _parse_crew_doc,
-    _parse_requirement_lines,
-    _distill_requirements,
-    _extract_user_from_log,
-    _CREW_DOC_FIELD_LABELS,
+    _checklist_grade,
+    _grade_judge_verdict,
+    _intent_format_score,
+    _job_name_score,
+    _json_keys_score,
+    _judge_value_to_grade,
+    _median_sample,
+    _parse_grade_from_text,
+    _to_float,
 )
 from src.services.prompt_optimization.gepa.judge_model import (  # noqa: E402
-    _stored_judge_model_to_key,
     _crew_target_model,
     _resolve_judge_model,
+    _stored_judge_model_to_key,
 )
 
 # Extracted modules, re-exported so this module stays the single import point
@@ -92,9 +103,9 @@ from src.services.prompt_optimization.gepa.judge_model import (  # noqa: E402
 # These are IMPORTS, not copies: ``_RUNS`` and ``_GEPA_REFLECTION_STATE`` are
 # shared mutable state and must remain one object across every importer.
 from src.services.prompt_optimization.gepa.reflection import (  # noqa: E402,F401
-    DEFAULT_JUDGE_SAMPLES,
     _GEPA_REFLECTION_STATE,
     _JUDGE_SYSTEM,
+    DEFAULT_JUDGE_SAMPLES,
     _install_gepa_reflection_bridge,
     _judge_sample_count,
     _make_reflection_fn,
@@ -102,32 +113,20 @@ from src.services.prompt_optimization.gepa.reflection import (  # noqa: E402,F40
     _sync_llm_completion,
     _sync_run_crew,
 )
-from src.services.prompt_optimization.config import (  # noqa: E402,F401
-    DEFAULT_TARGET_MODEL,
-    MIN_EXAMPLES,
-    TEMPLATE_TASKS,
-    _pin_local_experiment,
-)
 from src.services.prompt_optimization.run_state import (  # noqa: E402,F401
-    RUN_HEARTBEAT_SECONDS,
-    RUN_STALE_SECONDS,
     _LIVE_COUNTERS,
     _MAX_KEPT_RUNS,
     _PUBLIC_FIELDS,
     _RUN_COLUMNS,
     _RUNS,
+    RUN_HEARTBEAT_SECONDS,
+    RUN_STALE_SECONDS,
     _persist_run_changes,
     _row_to_public,
     _run_to_columns,
 )
-from src.services.prompt_optimization import (  # noqa: E402,F401
-    CrewRunnerMixin,
-    JudgeOperationsMixin,
-    RunRegistryMixin,
-    TemplateRunnerMixin,
-)
-
-from src.services.prompt_optimization import run_state
+from src.utils.prompt_utils import robust_json_parser
+from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
@@ -486,7 +485,6 @@ class PromptOptimizationService(
         finally:
             heartbeat.cancel()
 
-
     # ----------------------------------------------------------- crew (GEPA)
 
     async def start_crew_optimization(
@@ -674,7 +672,6 @@ class PromptOptimizationService(
         )
         return {"run_id": run_id, "status": "pending", "dataset_size": 1}
 
-
     # -------------------------------------------------- crew eval feedback
 
     @staticmethod
@@ -689,19 +686,12 @@ class PromptOptimizationService(
             return uri
         return None
 
-
     # ----------------------------------------------------------- LLM judges
-
 
     # ---------------------------------------------------------------- reads
 
-
     # ---------------------------------------------------------------- cancel
-
 
     # ---------------------------------------------------------------- apply
 
-
     # --------------------------------------------------------------- revert
-
-

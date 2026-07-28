@@ -1,8 +1,10 @@
 """Tests for metric_view_validation_utils.data_input_handler (DataInputHandler)."""
+
 import json
 import textwrap
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.services.tools.metric_view_validation_utils.data_input_handler import (
     DataInputHandler,
@@ -33,6 +35,7 @@ SAMPLE_MAPPINGS = [
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_handler(tmp_path) -> DataInputHandler:
     """Create a DataInputHandler backed by real temp files."""
     yaml_file = tmp_path / "mv.yaml"
@@ -47,6 +50,7 @@ def _make_handler(tmp_path) -> DataInputHandler:
 # ---------------------------------------------------------------------------
 # __init__ validation
 # ---------------------------------------------------------------------------
+
 
 class TestInit:
     def test_raises_on_empty_metrics_path(self, tmp_path):
@@ -79,13 +83,16 @@ class TestInit:
         yaml_file.write_text(SIMPLE_YAML)
         json_file = tmp_path / "m.json"
         json_file.write_text(json.dumps(SAMPLE_MAPPINGS))
-        h = DataInputHandler(str(yaml_file), str(json_file), table_mappings={"fact": "source"})
+        h = DataInputHandler(
+            str(yaml_file), str(json_file), table_mappings={"fact": "source"}
+        )
         assert h.table_mappings == {"fact": "source"}
 
 
 # ---------------------------------------------------------------------------
 # get_yaml_measure()
 # ---------------------------------------------------------------------------
+
 
 class TestGetYamlMeasure:
     def test_returns_measure(self, tmp_path):
@@ -113,6 +120,7 @@ class TestGetYamlMeasure:
 # get_dax_measure()
 # ---------------------------------------------------------------------------
 
+
 class TestGetDaxMeasure:
     def test_returns_measure(self, tmp_path):
         h = _make_handler(tmp_path)
@@ -138,6 +146,7 @@ class TestGetDaxMeasure:
 # get_all_yaml_measures() – cache behaviour
 # ---------------------------------------------------------------------------
 
+
 class TestGetAllYamlMeasures:
     def test_returns_list(self, tmp_path):
         h = _make_handler(tmp_path)
@@ -160,6 +169,7 @@ class TestGetAllYamlMeasures:
 # get_all_dax_measures() – cache behaviour
 # ---------------------------------------------------------------------------
 
+
 class TestGetAllDaxMeasures:
     def test_returns_list(self, tmp_path):
         h = _make_handler(tmp_path)
@@ -181,10 +191,15 @@ class TestGetAllDaxMeasures:
 # find_matching_dax_for_yaml_measure()
 # ---------------------------------------------------------------------------
 
+
 class TestFindMatchingDaxForYamlMeasure:
     def test_strategy1_exact_match(self, tmp_path):
         h = _make_handler(tmp_path)
-        yaml_measure = {"name": "total_sales", "expr": "SUM(source.amount)", "comment": ""}
+        yaml_measure = {
+            "name": "total_sales",
+            "expr": "SUM(source.amount)",
+            "comment": "",
+        }
         result = h.find_matching_dax_for_yaml_measure(yaml_measure)
         assert result is not None
         assert result["measure_name"] == "total_sales"
@@ -193,7 +208,11 @@ class TestFindMatchingDaxForYamlMeasure:
         # 'Total_Sales' (different case) should still find 'total_sales' via
         # the case-insensitive loop in strategy 2
         h = _make_handler(tmp_path)
-        yaml_measure = {"name": "Total_Sales", "expr": "SUM(source.amount)", "comment": ""}
+        yaml_measure = {
+            "name": "Total_Sales",
+            "expr": "SUM(source.amount)",
+            "comment": "",
+        }
         result = h.find_matching_dax_for_yaml_measure(yaml_measure)
         assert result is not None
 

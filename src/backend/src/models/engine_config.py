@@ -1,5 +1,14 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, UniqueConstraint
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 
 from src.db.base import Base
 
@@ -8,7 +17,7 @@ class EngineConfig(Base):
     """
     EngineConfig model for storing execution engine configurations.
     """
-    
+
     id = Column(Integer, primary_key=True)
     engine_name = Column(String, nullable=False)  # e.g., 'kasal'
     engine_type = Column(String, nullable=False)  # e.g., 'workflow', 'ai', 'processing'
@@ -18,6 +27,8 @@ class EngineConfig(Base):
     description = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     # Ensure unique combination of engine_name and config_key
-    __table_args__ = (UniqueConstraint('engine_name', 'config_key', name='_engine_config_uc'),) 
+    __table_args__ = (
+        UniqueConstraint("engine_name", "config_key", name="_engine_config_uc"),
+    )

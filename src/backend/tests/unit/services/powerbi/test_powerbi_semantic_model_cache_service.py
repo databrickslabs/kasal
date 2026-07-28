@@ -4,17 +4,19 @@ Unit tests for PowerBISemanticModelCacheService.
 Tests cache retrieval, save (create/update), cleanup, and metadata
 dictionary building logic.
 """
-import pytest
+
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.powerbi.semantic_model_cache import PowerBISemanticModelCacheService
-from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
+import pytest
 
+from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
+from src.services.powerbi.semantic_model_cache import PowerBISemanticModelCacheService
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_cache(valid_today=True, cache_data=None):
     obj = MagicMock(spec=PowerBISemanticModelCache)
@@ -27,6 +29,7 @@ def _make_cache(valid_today=True, cache_data=None):
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_session():
@@ -52,6 +55,7 @@ def service(mock_session, mock_repo):
 # ---------------------------------------------------------------------------
 # get_cached_metadata
 # ---------------------------------------------------------------------------
+
 
 class TestGetCachedMetadata:
     @pytest.mark.asyncio
@@ -132,6 +136,7 @@ class TestGetCachedMetadata:
 # save_metadata
 # ---------------------------------------------------------------------------
 
+
 class TestSaveMetadata:
     @pytest.mark.asyncio
     async def test_creates_new_when_no_existing_cache(self, service, mock_repo):
@@ -191,6 +196,7 @@ class TestSaveMetadata:
 # cleanup_old_caches
 # ---------------------------------------------------------------------------
 
+
 class TestCleanupOldCaches:
     @pytest.mark.asyncio
     async def test_delegates_to_repository(self, service, mock_repo):
@@ -221,6 +227,7 @@ class TestCleanupOldCaches:
 # ---------------------------------------------------------------------------
 # build_metadata_dict  (synchronous helper method)
 # ---------------------------------------------------------------------------
+
 
 class TestBuildMetadataDict:
     def test_basic_fields_included(self, service):
@@ -290,7 +297,14 @@ class TestBuildMetadataDict:
         )
 
         keys = set(result.keys())
-        assert keys == {"measures", "relationships", "schema", "sample_data", "default_filters", "slicers"}
+        assert keys == {
+            "measures",
+            "relationships",
+            "schema",
+            "sample_data",
+            "default_filters",
+            "slicers",
+        }
 
     def test_empty_collections_preserved(self, service):
         result = service.build_metadata_dict(

@@ -1,14 +1,20 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, DateTime, Enum, Boolean, ForeignKey, UniqueConstraint
-from sqlalchemy.orm import relationship
-from sqlalchemy import Enum as SQLAlchemyEnum
-import sqlalchemy as sa
-from src.db.base import Base
 from uuid import uuid4
-from src.models.enums import UserRole, UserStatus, IdentityProviderType
+
+import sqlalchemy as sa
+from sqlalchemy import Boolean, Column, DateTime
+from sqlalchemy import Enum
+from sqlalchemy import Enum as SQLAlchemyEnum
+from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy.orm import relationship
+
+from src.db.base import Base
+from src.models.enums import IdentityProviderType, UserRole, UserStatus
+
 
 def generate_uuid():
     return str(uuid4())
+
 
 class User(Base):
     __tablename__ = "users"
@@ -18,15 +24,23 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     display_name = Column(String, nullable=True)  # Moved from UserProfile
     # hashed_password removed - using OAuth proxy authentication
-    role = Column(SQLAlchemyEnum(UserRole, name="user_role_enum"), default=UserRole.REGULAR)
-    status = Column(SQLAlchemyEnum(UserStatus, name="user_status_enum"), default=UserStatus.ACTIVE)
+    role = Column(
+        SQLAlchemyEnum(UserRole, name="user_role_enum"), default=UserRole.REGULAR
+    )
+    status = Column(
+        SQLAlchemyEnum(UserStatus, name="user_status_enum"), default=UserStatus.ACTIVE
+    )
 
     # New user-level permission fields
     is_system_admin = Column(Boolean, default=False, nullable=False)
     is_personal_workspace_manager = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=datetime.now(timezone.utc),
+        onupdate=datetime.now(timezone.utc),
+    )
     last_login = Column(DateTime(timezone=True), nullable=True)
 
     # Complex auth relationships removed - using Databricks Apps proxy authentication

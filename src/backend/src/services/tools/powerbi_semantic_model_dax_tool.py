@@ -14,17 +14,17 @@ Date: 2026
 import asyncio
 import base64
 import contextvars
-import logging
 import json
+import logging
 import re
-from typing import Any, Optional, Type, Dict, List
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List, Optional, Type
 
-from src.services.tools.base import BaseTool
-from pydantic import BaseModel, Field, PrivateAttr
 import httpx
+from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.powerbi.dax_rag_retriever import DaxRagRetriever
+from src.services.tools.base import BaseTool
 from src.services.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,8 @@ def _dax_quote_table(name: str) -> str:
     if " " in name:
         return f"'{name}'"
     return name
+
+
 logger.setLevel(logging.DEBUG)
 
 _EXECUTOR = ThreadPoolExecutor(max_workers=5)
@@ -65,36 +67,33 @@ class PowerBISemanticModelDaxSchema(BaseModel):
 
     # ===== USER QUESTION =====
     user_question: Optional[str] = Field(
-        None,
-        description="The business question to answer using Power BI data."
+        None, description="The business question to answer using Power BI data."
     )
 
     # ===== MODEL CONTEXT (from Reducer or Fetcher output) =====
     model_context_json: Optional[str] = Field(
         None,
         description="[CRITICAL — REQUIRED] The JSON output from the previous task (Metadata Reducer or Fetcher). "
-                    "You MUST pass the full JSON output from the previous task here. "
-                    "If not provided, falls back to cached full metadata which may be too large."
+        "You MUST pass the full JSON output from the previous task here. "
+        "If not provided, falls back to cached full metadata which may be too large.",
     )
 
     # ===== POWER BI CONFIGURATION =====
     report_id: Optional[str] = Field(
         None,
-        description="[Power BI] Optional Report ID (GUID) for visual reference lookup."
+        description="[Power BI] Optional Report ID (GUID) for visual reference lookup.",
     )
 
     # ===== CONTEXT ENRICHMENT =====
     business_mappings: Optional[Dict[str, str]] = Field(
         None,
-        description="[Context] Business terminology mappings — natural language to DAX expressions."
+        description="[Context] Business terminology mappings — natural language to DAX expressions.",
     )
     field_synonyms: Optional[Dict[str, List[str]]] = Field(
-        None,
-        description="[Context] Field synonyms for natural language understanding."
+        None, description="[Context] Field synonyms for natural language understanding."
     )
     active_filters: Optional[Dict[str, Any]] = Field(
-        None,
-        description="[Context] Currently active filters/slicers to auto-apply."
+        None, description="[Context] Currently active filters/slicers to auto-apply."
     )
     session_id: Optional[str] = Field(
         None, description="[Context] Session ID for conversation history."
@@ -108,12 +107,12 @@ class PowerBISemanticModelDaxSchema(BaseModel):
     context_knowledge: Optional[str] = Field(
         None,
         description="[Context] Business context or domain knowledge to guide DAX generation. "
-                    "E.g., 'Complete CGR means the customer completed the full CGR process'."
+        "E.g., 'Complete CGR means the customer completed the full CGR process'.",
     )
     reference_dax: Optional[str] = Field(
         None,
         description="[Context] Reference working DAX queries as examples. "
-                    "Provide one or more EVALUATE statements that work against this model."
+        "Provide one or more EVALUATE statements that work against this model.",
     )
 
     # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
@@ -122,8 +121,12 @@ class PowerBISemanticModelDaxSchema(BaseModel):
     # bloated every LLM call and invited the model to echo credentials.
 
     # ===== OPTIONS =====
-    include_visual_references: bool = Field(True, description="[Options] Search for visual references.")
-    max_dax_retries: int = Field(5, description="[Options] Max retry attempts if DAX execution fails (1-10).")
+    include_visual_references: bool = Field(
+        True, description="[Options] Search for visual references."
+    )
+    max_dax_retries: int = Field(
+        5, description="[Options] Max retry attempts if DAX execution fails (1-10)."
+    )
     output_format: str = Field("markdown", description="[Output] 'markdown' or 'json'.")
 
 
@@ -157,6 +160,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
 
     def __init__(self, **kwargs: Any) -> None:
         import uuid
+
         instance_id = str(uuid.uuid4())[:8]
         logger.info(f"[DaxTool.__init__] Instance ID: {instance_id}")
 
@@ -199,10 +203,15 @@ class PowerBISemanticModelDaxTool(BaseTool):
         if not isinstance(value, str):
             return False
         placeholder_patterns = [
-            r'^[0-9]{8}-[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{12}$',
-            r'your_.*_here', r'your-.*-here', r'<.*>', r'\{.*\}',
-            r'placeholder', r'example\.com', r'^https://your-',
-            r'^https://.*-url\.com$',
+            r"^[0-9]{8}-[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{12}$",
+            r"your_.*_here",
+            r"your-.*-here",
+            r"<.*>",
+            r"\{.*\}",
+            r"placeholder",
+            r"example\.com",
+            r"^https://your-",
+            r"^https://.*-url\.com$",
         ]
         value_lower = value.lower()
         for pattern in placeholder_patterns:
@@ -217,7 +226,10 @@ class PowerBISemanticModelDaxTool(BaseTool):
 
             # Log what the agent actually passed — critical for debugging context flow
             kwarg_keys = list(kwargs.keys())
-            has_mcj = "model_context_json" in kwargs and kwargs["model_context_json"] is not None
+            has_mcj = (
+                "model_context_json" in kwargs
+                and kwargs["model_context_json"] is not None
+            )
             mcj_len = len(str(kwargs.get("model_context_json", ""))) if has_mcj else 0
             kwarg_question = kwargs.get("user_question")
             default_question = self._default_config.get("user_question")
@@ -228,7 +240,9 @@ class PowerBISemanticModelDaxTool(BaseTool):
                 f"default_user_question={'YES' if default_question else 'NULL'}"
             )
             if has_mcj:
-                logger.info(f"[DaxTool] model_context_json preview: {str(kwargs['model_context_json'])[:300]}...")
+                logger.info(
+                    f"[DaxTool] model_context_json preview: {str(kwargs['model_context_json'])[:300]}..."
+                )
 
             # Filter out placeholder values
             filtered_kwargs = {}
@@ -241,38 +255,69 @@ class PowerBISemanticModelDaxTool(BaseTool):
 
             # Connection/auth — default config takes precedence
             config_params = [
-                "workspace_id", "dataset_id", "report_id", "tenant_id", "client_id",
-                "client_secret", "username", "password", "auth_method", "access_token",
-                "llm_workspace_url", "llm_token", "llm_model",
+                "workspace_id",
+                "dataset_id",
+                "report_id",
+                "tenant_id",
+                "client_id",
+                "client_secret",
+                "username",
+                "password",
+                "auth_method",
+                "access_token",
+                "llm_workspace_url",
+                "llm_token",
+                "llm_model",
             ]
             for key in config_params:
                 default_val = self._default_config.get(key)
                 kwarg_val = filtered_kwargs.get(key)
-                merged_config[key] = default_val if default_val is not None else kwarg_val
+                merged_config[key] = (
+                    default_val if default_val is not None else kwarg_val
+                )
 
             # user_question — prefer default config (pre-configured) over agent input
             kwarg_question = filtered_kwargs.get("user_question")
             default_question = self._default_config.get("user_question")
-            merged_config["user_question"] = default_question if default_question is not None else kwarg_question
+            merged_config["user_question"] = (
+                default_question if default_question is not None else kwarg_question
+            )
 
             # Options
-            for key in ["include_visual_references", "max_dax_retries", "output_format"]:
+            for key in [
+                "include_visual_references",
+                "max_dax_retries",
+                "output_format",
+            ]:
                 kwarg_val = filtered_kwargs.get(key)
                 default_val = self._default_config.get(key)
                 merged_config[key] = kwarg_val if kwarg_val is not None else default_val
 
             # model_context_json from kwargs (not stored in default_config — always runtime)
-            merged_config["model_context_json"] = filtered_kwargs.get("model_context_json")
+            merged_config["model_context_json"] = filtered_kwargs.get(
+                "model_context_json"
+            )
 
             # Context enrichment
-            context_keys = ["business_mappings", "field_synonyms", "active_filters",
-                            "session_id", "visible_tables", "conversation_history",
-                            "context_knowledge", "reference_dax"]
+            context_keys = [
+                "business_mappings",
+                "field_synonyms",
+                "active_filters",
+                "session_id",
+                "visible_tables",
+                "conversation_history",
+                "context_knowledge",
+                "reference_dax",
+            ]
             for key in context_keys:
                 kwarg_val = filtered_kwargs.get(key)
                 default_val = self._default_config.get(key)
                 kwarg_has = kwarg_val is not None and kwarg_val not in ({}, [], "")
-                default_has = default_val is not None and default_val not in ({}, [], "")
+                default_has = default_val is not None and default_val not in (
+                    {},
+                    [],
+                    "",
+                )
 
                 if kwarg_has:
                     value = kwarg_val
@@ -287,7 +332,11 @@ class PowerBISemanticModelDaxTool(BaseTool):
                         value = None
 
                 # Parse JSON strings
-                if value and isinstance(value, str) and key in ["business_mappings", "field_synonyms", "active_filters"]:
+                if (
+                    value
+                    and isinstance(value, str)
+                    and key in ["business_mappings", "field_synonyms", "active_filters"]
+                ):
                     try:
                         value = json.loads(value)
                     except json.JSONDecodeError:
@@ -304,14 +353,32 @@ class PowerBISemanticModelDaxTool(BaseTool):
                 return "Error: dataset_id is required."
 
             # Auth validation
-            has_sp = all([merged_config.get("tenant_id"), merged_config.get("client_id"), merged_config.get("client_secret")])
-            has_sa = all([merged_config.get("tenant_id"), merged_config.get("client_id"),
-                          merged_config.get("username"), merged_config.get("password")])
+            has_sp = all(
+                [
+                    merged_config.get("tenant_id"),
+                    merged_config.get("client_id"),
+                    merged_config.get("client_secret"),
+                ]
+            )
+            has_sa = all(
+                [
+                    merged_config.get("tenant_id"),
+                    merged_config.get("client_id"),
+                    merged_config.get("username"),
+                    merged_config.get("password"),
+                ]
+            )
             has_oauth = bool(merged_config.get("access_token"))
 
-            auth_method = "SP" if has_sp else "SA" if has_sa else "OAuth" if has_oauth else "NONE"
+            auth_method = (
+                "SP" if has_sp else "SA" if has_sa else "OAuth" if has_oauth else "NONE"
+            )
             has_model_ctx = merged_config.get("model_context_json") is not None
-            ctx_len = len(str(merged_config.get("model_context_json", ""))) if has_model_ctx else 0
+            ctx_len = (
+                len(str(merged_config.get("model_context_json", "")))
+                if has_model_ctx
+                else 0
+            )
             logger.info(
                 f"[DaxTool] ═══ Config summary ═══ "
                 f"auth={auth_method} | question='{(merged_config.get('user_question') or '')[:80]}' | "
@@ -334,8 +401,12 @@ class PowerBISemanticModelDaxTool(BaseTool):
                 )
 
             logger.info(f"[DaxTool] ═══ Starting pipeline (auth={auth_method}) ═══")
-            result = _run_async_in_sync_context(self._execute_dax_pipeline(merged_config))
-            logger.info(f"[DaxTool] ═══ Pipeline complete (output={len(result)} chars) ═══")
+            result = _run_async_in_sync_context(
+                self._execute_dax_pipeline(merged_config)
+            )
+            logger.info(
+                f"[DaxTool] ═══ Pipeline complete (output={len(result)} chars) ═══"
+            )
             return result
 
         except Exception as e:
@@ -355,7 +426,12 @@ class PowerBISemanticModelDaxTool(BaseTool):
             "dataset_id": dataset_id,
             "model_context": {"measures": [], "relationships": [], "tables": []},
             "generated_dax": None,
-            "dax_execution": {"success": False, "data": [], "row_count": 0, "error": None},
+            "dax_execution": {
+                "success": False,
+                "data": [],
+                "row_count": 0,
+                "error": None,
+            },
             "visual_references": [],
             "errors": [],
         }
@@ -364,7 +440,9 @@ class PowerBISemanticModelDaxTool(BaseTool):
         logger.info("[DaxTool] Step 1/4: Acquiring access token...")
         try:
             access_token = await self._get_access_token(config)
-            logger.info(f"[DaxTool] Step 1/4: ✓ Access token acquired (length={len(access_token)})")
+            logger.info(
+                f"[DaxTool] Step 1/4: ✓ Access token acquired (length={len(access_token)})"
+            )
         except Exception as e:
             logger.error(f"[DaxTool] Step 1/4: ✗ Authentication failed: {e}")
             results["errors"].append(f"Authentication error: {str(e)}")
@@ -374,7 +452,9 @@ class PowerBISemanticModelDaxTool(BaseTool):
         logger.info("[DaxTool] Step 2/4: Resolving model context...")
         model_context = await self._resolve_model_context(config)
         if model_context is None:
-            logger.error("[DaxTool] Step 2/4: ✗ No model context — neither model_context_json nor cache hit")
+            logger.error(
+                "[DaxTool] Step 2/4: ✗ No model context — neither model_context_json nor cache hit"
+            )
             results["errors"].append(
                 "No model context available. Run the 'Power BI Semantic Model Fetcher' tool first, "
                 "or provide model_context_json."
@@ -386,7 +466,9 @@ class PowerBISemanticModelDaxTool(BaseTool):
         n_rels = len(model_context.get("relationships", []))
         n_slicers = len(model_context.get("slicers", []))
         n_samples = len(model_context.get("sample_data", {}))
-        context_source = model_context.get("_source", "AGENT_JSON" if config.get("model_context_json") else "CACHE")
+        context_source = model_context.get(
+            "_source", "AGENT_JSON" if config.get("model_context_json") else "CACHE"
+        )
         logger.info(
             f"[DaxTool] Step 2/4: ✓ Model context resolved (SOURCE={context_source}) — "
             f"tables={n_tables}, measures={n_measures}, relationships={n_rels}, "
@@ -395,7 +477,11 @@ class PowerBISemanticModelDaxTool(BaseTool):
         results["model_context"] = model_context
 
         # Merge default filters from context into active_filters
-        default_filters = model_context.get("default_filters") if isinstance(model_context.get("default_filters"), dict) else {}
+        default_filters = (
+            model_context.get("default_filters")
+            if isinstance(model_context.get("default_filters"), dict)
+            else {}
+        )
 
         # Normalize active_filters: UI may send list format
         # [{"table": "T", "column": "C", "value": "V"}] → {"T[C]": "V"} or {"T[C]": ["V1", "V2"]}
@@ -416,14 +502,18 @@ class PowerBISemanticModelDaxTool(BaseTool):
                             normalized[key] = [existing_val, value]
                     else:
                         normalized[key] = value
-            logger.info(f"[DaxTool] Normalized {len(existing)} list-format active_filters → {normalized}")
+            logger.info(
+                f"[DaxTool] Normalized {len(existing)} list-format active_filters → {normalized}"
+            )
             existing = normalized
         elif not isinstance(existing, dict):
             existing = {}
 
         if default_filters or existing:
             config["active_filters"] = {**default_filters, **existing}
-            logger.info(f"[DaxTool] Merged filters: {len(default_filters)} default + {len(existing)} active = {len(config['active_filters'])} total")
+            logger.info(
+                f"[DaxTool] Merged filters: {len(default_filters)} default + {len(existing)} active = {len(config['active_filters'])} total"
+            )
 
         # Ensure all filter tables are present in model_context
         # UI active_filters may reference tables not in the reduced cache.
@@ -438,9 +528,13 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     missing_tables.add(filter_table)
 
             if missing_tables:
-                logger.info(f"[DaxTool] Filter tables missing from model context: {missing_tables}. Fetching from full cache...")
+                logger.info(
+                    f"[DaxTool] Filter tables missing from model context: {missing_tables}. Fetching from full cache..."
+                )
                 try:
-                    full_cache = await self._fetch_full_cache_tables(config, missing_tables)
+                    full_cache = await self._fetch_full_cache_tables(
+                        config, missing_tables
+                    )
                     if full_cache:
                         for table_data in full_cache.get("tables", []):
                             model_context["tables"].append(table_data)
@@ -454,7 +548,9 @@ class PowerBISemanticModelDaxTool(BaseTool):
                             f"{[t['name'] for t in full_cache['tables']]}"
                         )
                 except Exception as e:
-                    logger.warning(f"[DaxTool] Failed to fetch missing filter tables from full cache: {e}")
+                    logger.warning(
+                        f"[DaxTool] Failed to fetch missing filter tables from full cache: {e}"
+                    )
 
         # Step 3: Generate + Execute DAX with retry
         # Strategy: attempt 1 = LLM, attempt 2 = LLM self-correction,
@@ -473,7 +569,9 @@ class PowerBISemanticModelDaxTool(BaseTool):
         )
 
         if model_context.get("measures") or model_context.get("tables"):
-            logger.info(f"[DaxTool] Step 3/4: DAX generation + execution (max_retries={max_retries})")
+            logger.info(
+                f"[DaxTool] Step 3/4: DAX generation + execution (max_retries={max_retries})"
+            )
             # Count consecutive LLM failures to trigger deterministic fallback
             consecutive_llm_failures = 0
 
@@ -485,23 +583,46 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     # If we have a previous LLM attempt that had good structure (measures, grouping)
                     # but failed due to invalid table references, patch it instead of starting from scratch.
                     if consecutive_llm_failures >= 2 and attempt >= 2:
-                        logger.info(f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — DETERMINISTIC fallback (LLM failed {consecutive_llm_failures}x)")
+                        logger.info(
+                            f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — DETERMINISTIC fallback (LLM failed {consecutive_llm_failures}x)"
+                        )
                         best_llm_dax = next(
-                            (a["dax"] for a in reversed(dax_attempts)
-                             if a.get("dax") and "SUMMARIZECOLUMNS" in (a.get("dax") or "").upper()),
-                            None
+                            (
+                                a["dax"]
+                                for a in reversed(dax_attempts)
+                                if a.get("dax")
+                                and "SUMMARIZECOLUMNS" in (a.get("dax") or "").upper()
+                            ),
+                            None,
                         )
                         if best_llm_dax and config.get("active_filters"):
-                            generated_dax = self._patch_dax_with_active_filters(best_llm_dax, config, model_context)
-                            logger.info(f"[DaxTool] Using patched LLM DAX with active_filters instead of full deterministic")
+                            generated_dax = self._patch_dax_with_active_filters(
+                                best_llm_dax, config, model_context
+                            )
+                            logger.info(
+                                f"[DaxTool] Using patched LLM DAX with active_filters instead of full deterministic"
+                            )
                         else:
-                            generated_dax = self._generate_deterministic_dax(user_question, model_context, config)
-                        consecutive_llm_failures = 0  # Reset so next attempt tries LLM again
+                            generated_dax = self._generate_deterministic_dax(
+                                user_question, model_context, config
+                            )
+                        consecutive_llm_failures = (
+                            0  # Reset so next attempt tries LLM again
+                        )
                     elif attempt == 0:
-                        logger.info(f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — generating DAX via LLM...")
-                        generated_dax = await self._generate_dax_with_llm(user_question, model_context, config, rag_examples=rag_examples)
+                        logger.info(
+                            f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — generating DAX via LLM..."
+                        )
+                        generated_dax = await self._generate_dax_with_llm(
+                            user_question,
+                            model_context,
+                            config,
+                            rag_examples=rag_examples,
+                        )
                     else:
-                        logger.info(f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — self-correction retry...")
+                        logger.info(
+                            f"[DaxTool] Step 3/4: Attempt {attempt + 1}/{max_retries} — self-correction retry..."
+                        )
                         generated_dax = await self._generate_dax_with_self_correction(
                             user_question, model_context, config, dax_attempts
                         )
@@ -512,21 +633,37 @@ class PowerBISemanticModelDaxTool(BaseTool):
                         results["llm_prompt"] = self._last_llm_prompt
 
                     if generated_dax:
-                        logger.info(f"[DaxTool] Step 3/4: Generated DAX ({len(generated_dax)} chars): {generated_dax[:200]}...")
+                        logger.info(
+                            f"[DaxTool] Step 3/4: Generated DAX ({len(generated_dax)} chars): {generated_dax[:200]}..."
+                        )
 
                         # Pre-execution validation: check all table references exist in schema
-                        validation_error = self._validate_dax_references(generated_dax, model_context)
+                        validation_error = self._validate_dax_references(
+                            generated_dax, model_context
+                        )
                         if validation_error:
-                            logger.warning(f"[DaxTool] Step 3/4: ✗ DAX VALIDATION FAILED attempt {attempt + 1} — {validation_error}")
-                            execution_result = {"success": False, "error": validation_error, "row_count": 0}
+                            logger.warning(
+                                f"[DaxTool] Step 3/4: ✗ DAX VALIDATION FAILED attempt {attempt + 1} — {validation_error}"
+                            )
+                            execution_result = {
+                                "success": False,
+                                "error": validation_error,
+                                "row_count": 0,
+                            }
                             consecutive_llm_failures += 1
                         else:
-                            logger.info("[DaxTool] Step 3/4: Executing DAX against Power BI API...")
+                            logger.info(
+                                "[DaxTool] Step 3/4: Executing DAX against Power BI API..."
+                            )
                             execution_result = await self._execute_dax_query(
                                 workspace_id, dataset_id, access_token, generated_dax
                             )
                         if not isinstance(execution_result, dict):
-                            execution_result = {"success": False, "error": f"Invalid result type: {type(execution_result).__name__}", "row_count": 0}
+                            execution_result = {
+                                "success": False,
+                                "error": f"Invalid result type: {type(execution_result).__name__}",
+                                "row_count": 0,
+                            }
 
                         if execution_result.get("success", False):
                             # Post-execution: check if DAX actually addresses the user question
@@ -537,25 +674,33 @@ class PowerBISemanticModelDaxTool(BaseTool):
                                 logger.warning(
                                     f"[DaxTool] Step 3/4: ✗ DAX executed but is INCOMPLETE on attempt {attempt + 1} — {completeness_error}"
                                 )
-                                dax_attempts.append({
-                                    "attempt": attempt + 1,
-                                    "dax": generated_dax,
-                                    "success": False,
-                                    "error": completeness_error,
-                                    "row_count": execution_result.get("row_count", 0),
-                                })
+                                dax_attempts.append(
+                                    {
+                                        "attempt": attempt + 1,
+                                        "dax": generated_dax,
+                                        "success": False,
+                                        "error": completeness_error,
+                                        "row_count": execution_result.get(
+                                            "row_count", 0
+                                        ),
+                                    }
+                                )
                                 consecutive_llm_failures += 1
                                 continue
                             # DAX is complete and valid
-                            dax_attempts.append({
-                                "attempt": attempt + 1,
-                                "dax": generated_dax,
-                                "success": True,
-                                "error": None,
-                                "row_count": execution_result.get("row_count", 0),
-                            })
+                            dax_attempts.append(
+                                {
+                                    "attempt": attempt + 1,
+                                    "dax": generated_dax,
+                                    "success": True,
+                                    "error": None,
+                                    "row_count": execution_result.get("row_count", 0),
+                                }
+                            )
                             results["dax_execution"] = execution_result
-                            logger.info(f"[DaxTool] Step 3/4: ✓ DAX SUCCESS on attempt {attempt + 1} — rows={execution_result.get('row_count', 0)}")
+                            logger.info(
+                                f"[DaxTool] Step 3/4: ✓ DAX SUCCESS on attempt {attempt + 1} — rows={execution_result.get('row_count', 0)}"
+                            )
 
                             # Store successful Q→DAX pair for future RAG retrieval
                             try:
@@ -570,59 +715,96 @@ class PowerBISemanticModelDaxTool(BaseTool):
 
                             break
                         else:
-                            dax_attempts.append({
-                                "attempt": attempt + 1,
-                                "dax": generated_dax,
-                                "success": False,
-                                "error": execution_result.get("error"),
-                                "row_count": execution_result.get("row_count", 0),
-                            })
+                            dax_attempts.append(
+                                {
+                                    "attempt": attempt + 1,
+                                    "dax": generated_dax,
+                                    "success": False,
+                                    "error": execution_result.get("error"),
+                                    "row_count": execution_result.get("row_count", 0),
+                                }
+                            )
                             results["dax_execution"] = execution_result
-                            logger.warning(f"[DaxTool] Step 3/4: ✗ DAX FAILED attempt {attempt + 1} — {execution_result.get('error', 'unknown')[:200]}")
+                            logger.warning(
+                                f"[DaxTool] Step 3/4: ✗ DAX FAILED attempt {attempt + 1} — {execution_result.get('error', 'unknown')[:200]}"
+                            )
                             consecutive_llm_failures += 1
                             if attempt == max_retries - 1:
-                                results["errors"].append(f"DAX failed after {max_retries} attempts: {execution_result.get('error')}")
+                                results["errors"].append(
+                                    f"DAX failed after {max_retries} attempts: {execution_result.get('error')}"
+                                )
                     else:
-                        logger.warning(f"[DaxTool] Step 3/4: ✗ LLM returned empty/garbage DAX on attempt {attempt + 1}")
-                        dax_attempts.append({
-                            "attempt": attempt + 1, "dax": "(empty)",
-                            "success": False, "error": "LLM returned empty or invalid response", "row_count": 0,
-                        })
+                        logger.warning(
+                            f"[DaxTool] Step 3/4: ✗ LLM returned empty/garbage DAX on attempt {attempt + 1}"
+                        )
+                        dax_attempts.append(
+                            {
+                                "attempt": attempt + 1,
+                                "dax": "(empty)",
+                                "success": False,
+                                "error": "LLM returned empty or invalid response",
+                                "row_count": 0,
+                            }
+                        )
                         consecutive_llm_failures += 1
                         if attempt == max_retries - 1:
-                            results["errors"].append("Failed to generate valid DAX query")
+                            results["errors"].append(
+                                "Failed to generate valid DAX query"
+                            )
 
                 except Exception as e:
-                    logger.error(f"[DaxTool] Step 3/4: ✗ Exception on attempt {attempt + 1}: {e}", exc_info=True)
-                    dax_attempts.append({
-                        "attempt": attempt + 1, "dax": results.get("generated_dax"),
-                        "success": False, "error": str(e), "row_count": 0,
-                    })
+                    logger.error(
+                        f"[DaxTool] Step 3/4: ✗ Exception on attempt {attempt + 1}: {e}",
+                        exc_info=True,
+                    )
+                    dax_attempts.append(
+                        {
+                            "attempt": attempt + 1,
+                            "dax": results.get("generated_dax"),
+                            "success": False,
+                            "error": str(e),
+                            "row_count": 0,
+                        }
+                    )
                     consecutive_llm_failures += 1
                     if attempt == max_retries - 1:
-                        results["errors"].append(f"DAX error after {max_retries} attempts: {str(e)}")
+                        results["errors"].append(
+                            f"DAX error after {max_retries} attempts: {str(e)}"
+                        )
         else:
-            logger.warning("[DaxTool] Step 3/4: SKIPPED — no measures and no tables in model context")
+            logger.warning(
+                "[DaxTool] Step 3/4: SKIPPED — no measures and no tables in model context"
+            )
 
         results["dax_attempts"] = dax_attempts
 
         # Step 4: Visual references
-        logger.info(f"[DaxTool] Step 4/4: Visual references (include={config.get('include_visual_references', True)})")
-        if config.get("include_visual_references", True) and model_context.get("measures"):
+        logger.info(
+            f"[DaxTool] Step 4/4: Visual references (include={config.get('include_visual_references', True)})"
+        )
+        if config.get("include_visual_references", True) and model_context.get(
+            "measures"
+        ):
             try:
                 used_measures = self._extract_measures_from_dax(
                     results["generated_dax"] or "",
                     [m["name"] for m in model_context["measures"]],
                 )
                 if used_measures:
-                    logger.info(f"[DaxTool] Step 4/4: Looking up visual refs for measures: {used_measures}")
+                    logger.info(
+                        f"[DaxTool] Step 4/4: Looking up visual refs for measures: {used_measures}"
+                    )
                     visual_refs = await self._find_visual_references(
                         workspace_id, dataset_id, access_token, used_measures
                     )
                     results["visual_references"] = visual_refs
-                    logger.info(f"[DaxTool] Step 4/4: ✓ Found {len(visual_refs)} visual references")
+                    logger.info(
+                        f"[DaxTool] Step 4/4: ✓ Found {len(visual_refs)} visual references"
+                    )
                 else:
-                    logger.info("[DaxTool] Step 4/4: No measures found in generated DAX, skipping visual refs")
+                    logger.info(
+                        "[DaxTool] Step 4/4: No measures found in generated DAX, skipping visual refs"
+                    )
             except Exception as e:
                 logger.warning(f"[DaxTool] Step 4/4: ✗ Visual reference error: {e}")
                 results["errors"].append(f"Visual reference error: {str(e)}")
@@ -650,6 +832,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
         """Persist DAX generation details to conversion_history (fail-open)."""
         try:
             from src.schemas.conversion import ConversionHistoryCreate
+
             # ConversionHistoryRepository is provided by ToolSessionProvider.conversion_repo()
 
             success = results.get("dax_execution", {}).get("success", False)
@@ -658,9 +841,8 @@ class PowerBISemanticModelDaxTool(BaseTool):
             llm_prompt = results.get("llm_prompt", "")
 
             history_data = ConversionHistoryCreate(
-                execution_id=config.get("execution_id") or (
-                    getattr(self, "trace_context", None) or {}
-                ).get("job_id"),
+                execution_id=config.get("execution_id")
+                or (getattr(self, "trace_context", None) or {}).get("job_id"),
                 source_format="nl_question",
                 target_format="dax",
                 input_data={
@@ -702,11 +884,9 @@ class PowerBISemanticModelDaxTool(BaseTool):
                 },
             )
 
-            group_id = (
-                config.get("group_id")
-                or (getattr(self, "trace_context", None) or {})
-                    .get("group_context", {}).get("primary_group_id")
-            )
+            group_id = config.get("group_id") or (
+                getattr(self, "trace_context", None) or {}
+            ).get("group_context", {}).get("primary_group_id")
 
             async with ToolSessionProvider.conversion_repo() as repo:
                 record = await repo.create(history_data.model_dump())
@@ -718,9 +898,13 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     f"(status={history_data.status}, filters={list(active_filters.keys())})"
                 )
         except Exception as e:
-            logger.warning(f"[DaxTool] Failed to save conversion_history (non-fatal): {e}")
+            logger.warning(
+                f"[DaxTool] Failed to save conversion_history (non-fatal): {e}"
+            )
 
-    async def _resolve_model_context(self, config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def _resolve_model_context(
+        self, config: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Resolve model context with 3-tier priority.
 
         Priority 1: model_context_json (agent passes reduced JSON directly)
@@ -730,16 +914,30 @@ class PowerBISemanticModelDaxTool(BaseTool):
         dataset_id = config.get("dataset_id")
         workspace_id = config.get("workspace_id")
         report_id = config.get("report_id")
-        group_id = config.get("group_id") or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id") or "default"
+        group_id = (
+            config.get("group_id")
+            or (getattr(self, "trace_context", None) or {})
+            .get("group_context", {})
+            .get("primary_group_id")
+            or "default"
+        )
 
         # ── Priority 1: model_context_json provided directly ──
         model_context_json = config.get("model_context_json")
         if model_context_json:
-            logger.info(f"[DaxTool] _resolve_model_context: Trying model_context_json ({len(str(model_context_json))} chars)")
+            logger.info(
+                f"[DaxTool] _resolve_model_context: Trying model_context_json ({len(str(model_context_json))} chars)"
+            )
             try:
-                parsed = json.loads(model_context_json) if isinstance(model_context_json, str) else model_context_json
+                parsed = (
+                    json.loads(model_context_json)
+                    if isinstance(model_context_json, str)
+                    else model_context_json
+                )
                 # Skip if this is a Reducer summary (no tables) — fall through to cache
-                if not parsed.get("tables") and not parsed.get("schema", {}).get("tables"):
+                if not parsed.get("tables") and not parsed.get("schema", {}).get(
+                    "tables"
+                ):
                     logger.info(
                         f"[DaxTool] _resolve_model_context: model_context_json has no tables "
                         f"(likely Reducer summary), falling through to cache. "
@@ -755,20 +953,28 @@ class PowerBISemanticModelDaxTool(BaseTool):
                     )
                     return result
             except (json.JSONDecodeError, TypeError) as e:
-                logger.warning(f"[DaxTool] _resolve_model_context: ✗ Failed to parse model_context_json: {e}")
+                logger.warning(
+                    f"[DaxTool] _resolve_model_context: ✗ Failed to parse model_context_json: {e}"
+                )
         else:
-            logger.info("[DaxTool] _resolve_model_context: No model_context_json from agent, trying reduced cache...")
+            logger.info(
+                "[DaxTool] _resolve_model_context: No model_context_json from agent, trying reduced cache..."
+            )
 
         if not dataset_id or not workspace_id:
-            logger.warning(f"[DaxTool] _resolve_model_context: ✗ Cannot do cache lookup — dataset_id={dataset_id}, workspace_id={workspace_id}")
+            logger.warning(
+                f"[DaxTool] _resolve_model_context: ✗ Cannot do cache lookup — dataset_id={dataset_id}, workspace_id={workspace_id}"
+            )
             return None
 
         # ── Priority 2: Reduced cache (saved by Metadata Reducer with report_id='reduced') ──
         try:
             async with ToolSessionProvider.cache_service() as cache_service:
                 reduced = await cache_service.get_cached_metadata(
-                    group_id=group_id, dataset_id=dataset_id,
-                    workspace_id=workspace_id, report_id="reduced",
+                    group_id=group_id,
+                    dataset_id=dataset_id,
+                    workspace_id=workspace_id,
+                    report_id="reduced",
                 )
             if reduced:
                 # Reduced output has tables/measures at top level (not nested under schema)
@@ -781,18 +987,26 @@ class PowerBISemanticModelDaxTool(BaseTool):
                 )
                 return result
             else:
-                logger.info("[DaxTool] _resolve_model_context: No reduced cache found, trying full cache...")
+                logger.info(
+                    "[DaxTool] _resolve_model_context: No reduced cache found, trying full cache..."
+                )
         except Exception as e:
-            logger.warning(f"[DaxTool] _resolve_model_context: Reduced cache lookup failed: {e}")
+            logger.warning(
+                f"[DaxTool] _resolve_model_context: Reduced cache lookup failed: {e}"
+            )
 
         # ── Priority 3: Full cache (Fetcher's original metadata) ──
         use_any_report = not report_id
-        logger.info(f"[DaxTool] _resolve_model_context: Full cache lookup — group={group_id}, dataset={dataset_id}, workspace={workspace_id[:12]}..., report_id={report_id or 'ANY'}")
+        logger.info(
+            f"[DaxTool] _resolve_model_context: Full cache lookup — group={group_id}, dataset={dataset_id}, workspace={workspace_id[:12]}..., report_id={report_id or 'ANY'}"
+        )
         try:
             async with ToolSessionProvider.cache_service() as cache_service:
                 cached = await cache_service.get_cached_metadata(
-                    group_id=group_id, dataset_id=dataset_id,
-                    workspace_id=workspace_id, report_id=report_id,
+                    group_id=group_id,
+                    dataset_id=dataset_id,
+                    workspace_id=workspace_id,
+                    report_id=report_id,
                     any_report_id=use_any_report,
                 )
             if cached:
@@ -815,9 +1029,13 @@ class PowerBISemanticModelDaxTool(BaseTool):
                 )
                 return result
             else:
-                logger.warning("[DaxTool] _resolve_model_context: ✗ No cache found at all")
+                logger.warning(
+                    "[DaxTool] _resolve_model_context: ✗ No cache found at all"
+                )
         except Exception as e:
-            logger.warning(f"[DaxTool] _resolve_model_context: Full cache lookup exception: {e}")
+            logger.warning(
+                f"[DaxTool] _resolve_model_context: Full cache lookup exception: {e}"
+            )
 
         return None
 
@@ -830,7 +1048,13 @@ class PowerBISemanticModelDaxTool(BaseTool):
         Returns dict with 'tables', 'relationships', 'sample_data' for the
         requested tables only.
         """
-        group_id = config.get("group_id") or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id") or "default"
+        group_id = (
+            config.get("group_id")
+            or (getattr(self, "trace_context", None) or {})
+            .get("group_context", {})
+            .get("primary_group_id")
+            or "default"
+        )
         dataset_id = config.get("dataset_id")
         workspace_id = config.get("workspace_id")
         if not dataset_id or not workspace_id:
@@ -838,8 +1062,10 @@ class PowerBISemanticModelDaxTool(BaseTool):
 
         async with ToolSessionProvider.cache_service() as cache_service:
             cached = await cache_service.get_cached_metadata(
-                group_id=group_id, dataset_id=dataset_id,
-                workspace_id=workspace_id, any_report_id=True,
+                group_id=group_id,
+                dataset_id=dataset_id,
+                workspace_id=workspace_id,
+                any_report_id=True,
             )
         if not cached:
             return None
@@ -851,7 +1077,8 @@ class PowerBISemanticModelDaxTool(BaseTool):
         found_tables = [t for t in all_tables if t.get("name") in needed_tables]
         found_names = {t["name"] for t in found_tables}
         found_rels = [
-            r for r in all_relationships
+            r
+            for r in all_relationships
             if r.get("from_table") in found_names or r.get("to_table") in found_names
         ]
         found_samples = {}
@@ -860,7 +1087,11 @@ class PowerBISemanticModelDaxTool(BaseTool):
             if table_name in found_names:
                 found_samples[k] = v
 
-        return {"tables": found_tables, "relationships": found_rels, "sample_data": found_samples}
+        return {
+            "tables": found_tables,
+            "relationships": found_rels,
+            "sample_data": found_samples,
+        }
 
     @staticmethod
     def _parse_context_dict(parsed: Dict[str, Any]) -> Dict[str, Any]:
@@ -888,7 +1119,10 @@ class PowerBISemanticModelDaxTool(BaseTool):
 
     async def _get_access_token(self, config: Dict[str, Any]) -> str:
         """Get OAuth access token using centralized auth utilities."""
-        from src.services.tools.powerbi_auth_utils import get_powerbi_access_token_from_config
+        from src.services.tools.powerbi_auth_utils import (
+            get_powerbi_access_token_from_config,
+        )
+
         return await get_powerbi_access_token_from_config(config)
 
     # =====================================================================
@@ -931,7 +1165,9 @@ class PowerBISemanticModelDaxTool(BaseTool):
             for col in columns:
                 col_type = column_types.get(col, "")
                 col_parts.append(f"{col} ({col_type})" if col_type else col)
-            sections.append(f"TABLE {_dax_quote_table(table_name)}: {', '.join(col_parts)}")
+            sections.append(
+                f"TABLE {_dax_quote_table(table_name)}: {', '.join(col_parts)}"
+            )
 
         sections.append("")
 
@@ -941,27 +1177,39 @@ class PowerBISemanticModelDaxTool(BaseTool):
         # internal measure formulas but are NOT in the ALLOWED TABLES list.
         if measures:
             for measure in measures:
-                sections.append(f"MEASURE [{measure['name']}] on {measure.get('table', '?')}")
+                sections.append(
+                    f"MEASURE [{measure['name']}] on {measure.get('table', '?')}"
+                )
             sections.append("")
 
         # ── Relationships ──
         if relationships:
-            relevant = [r for r in relationships if r['from_table'] in tables_seen or r['to_table'] in tables_seen]
+            relevant = [
+                r
+                for r in relationships
+                if r["from_table"] in tables_seen or r["to_table"] in tables_seen
+            ]
             if relevant:
                 sections.append("RELATIONSHIPS:")
                 for rel in relevant:
-                    sections.append(f"  {_dax_quote_table(rel['from_table'])}[{rel['from_column']}] -> {_dax_quote_table(rel['to_table'])}[{rel['to_column']}]")
+                    sections.append(
+                        f"  {_dax_quote_table(rel['from_table'])}[{rel['from_column']}] -> {_dax_quote_table(rel['to_table'])}[{rel['to_column']}]"
+                    )
                 sections.append("")
 
         # ── Sample data (ALL from reduced context — critical for filter matching) ──
-        sample_values = model_context.get("sample_data", {}) or model_context.get("sample_values", {})
+        sample_values = model_context.get("sample_data", {}) or model_context.get(
+            "sample_values", {}
+        )
         if sample_values:
             sections.append("SAMPLE VALUES:")
             for column, value_info in sample_values.items():
                 if value_info.get("type") in ("categorical", "slicer_values"):
                     values = value_info.get("sample_values", [])
                     # Show up to 15 values per column (enough for filter matching)
-                    sections.append(f"  {column}: {', '.join([str(v) for v in values[:15]])}")
+                    sections.append(
+                        f"  {column}: {', '.join([str(v) for v in values[:15]])}"
+                    )
             sections.append("")
 
         # ── Active filters (only for tables in the model) ──
@@ -983,7 +1231,9 @@ class PowerBISemanticModelDaxTool(BaseTool):
                 )
 
             if relevant_filters:
-                sections.append("ACTIVE FILTERS — include ALL of these as TREATAS in SUMMARIZECOLUMNS:")
+                sections.append(
+                    "ACTIVE FILTERS — include ALL of these as TREATAS in SUMMARIZECOLUMNS:"
+                )
                 for filter_name, filter_value in relevant_filters.items():
                     # Render as DAX TREATAS hint when filter is table-qualified (Table[Column])
                     if "[" in filter_name:
@@ -1000,27 +1250,41 @@ class PowerBISemanticModelDaxTool(BaseTool):
                         elif isinstance(filter_value, str):
                             val = filter_value.strip()
                             if val.upper() == "NOT NULL":
-                                sections.append(f"  FILTER(ALL({table_col}), NOT ISBLANK({table_col}))")
+                                sections.append(
+                                    f"  FILTER(ALL({table_col}), NOT ISBLANK({table_col}))"
+                                )
                             elif val.upper().startswith("NOT STARTS WITH"):
-                                prefix = val[len("NOT STARTS WITH"):].strip().strip("'\"")
-                                sections.append(f'  FILTER(ALL({table_col}), LEFT({table_col}, {len(prefix)}) <> "{prefix}")')
+                                prefix = (
+                                    val[len("NOT STARTS WITH") :].strip().strip("'\"")
+                                )
+                                sections.append(
+                                    f'  FILTER(ALL({table_col}), LEFT({table_col}, {len(prefix)}) <> "{prefix}")'
+                                )
                             elif val.upper().startswith("STARTS WITH"):
-                                prefix = val[len("STARTS WITH"):].strip().strip("'\"")
-                                sections.append(f'  FILTER(ALL({table_col}), LEFT({table_col}, {len(prefix)}) = "{prefix}")')
+                                prefix = val[len("STARTS WITH") :].strip().strip("'\"")
+                                sections.append(
+                                    f'  FILTER(ALL({table_col}), LEFT({table_col}, {len(prefix)}) = "{prefix}")'
+                                )
                             else:
                                 sections.append(f'  TREATAS({{"{val}"}}, {table_col})')
                         else:
-                            sections.append(f'  TREATAS({{"{filter_value}"}}, {table_col})')
+                            sections.append(
+                                f'  TREATAS({{"{filter_value}"}}, {table_col})'
+                            )
                     else:
                         # Unqualified key — give hint so LLM knows to find the right table
                         if isinstance(filter_value, list):
                             values = ", ".join([f'"{v}"' for v in filter_value])
-                            sections.append(f"  [{filter_name}] — multi-value: use TREATAS({{{values}}}, CorrectTable[{filter_name}])")
+                            sections.append(
+                                f"  [{filter_name}] — multi-value: use TREATAS({{{values}}}, CorrectTable[{filter_name}])"
+                            )
                         elif isinstance(filter_value, str):
                             val = filter_value.strip()
-                            sections.append(f'  [{filter_name}] = "{val}" — use TREATAS({{"{val}"}}, CorrectTable[{filter_name}])')
+                            sections.append(
+                                f'  [{filter_name}] = "{val}" — use TREATAS({{"{val}"}}, CorrectTable[{filter_name}])'
+                            )
                         else:
-                            sections.append(f'  [{filter_name}] = {filter_value}')
+                            sections.append(f"  [{filter_name}] = {filter_value}")
                 sections.append("")
 
         # ── Business terminology ──
@@ -1052,19 +1316,25 @@ class PowerBISemanticModelDaxTool(BaseTool):
         # ── Dimension bindings (explicit keyword → table-qualified column mapping) ──
         dimension_bindings = model_context.get("dimension_bindings", [])
         if dimension_bindings:
-            sections.append("DIMENSION BINDINGS (use these exact table-qualified columns for GROUP BY):")
+            sections.append(
+                "DIMENSION BINDINGS (use these exact table-qualified columns for GROUP BY):"
+            )
             for b in dimension_bindings:
                 tbl = b.get("resolved_table", "")
                 col = b.get("resolved_column", "")
                 term = b.get("user_term", "")
                 sample = b.get("sample_values", [])
-                sample_str = f" [e.g. {', '.join(str(v) for v in sample[:3])}]" if sample else ""
+                sample_str = (
+                    f" [e.g. {', '.join(str(v) for v in sample[:3])}]" if sample else ""
+                )
                 sections.append(f"  \"{term}\" → '{tbl}'[{col}]{sample_str}")
             sections.append("")
 
         # ── RAG few-shot examples ──
         if rag_examples:
-            sections.append("SIMILAR QUESTIONS WITH WORKING DAX (use as structural reference only):")
+            sections.append(
+                "SIMILAR QUESTIONS WITH WORKING DAX (use as structural reference only):"
+            )
             for ex in rag_examples:
                 sections.append(f"Q: {ex.get('question', '')}")
                 sections.append(f"DAX:\n{ex.get('dax', '')}")
@@ -1074,13 +1344,17 @@ class PowerBISemanticModelDaxTool(BaseTool):
         # ── DAX Skeleton (from Metadata Reducer) ──
         dax_skeleton = model_context.get("dax_skeleton", {})
         if dax_skeleton and dax_skeleton.get("skeleton"):
-            sections.append("DAX SKELETON (use as starting point — fill in placeholders):")
+            sections.append(
+                "DAX SKELETON (use as starting point — fill in placeholders):"
+            )
             sections.append(dax_skeleton["skeleton"])
             if dax_skeleton.get("strategy_notes"):
                 for note in dax_skeleton["strategy_notes"]:
                     sections.append(f"  NOTE: {note}")
             if dax_skeleton.get("open_placeholders"):
-                sections.append(f"  PLACEHOLDERS TO FILL: {', '.join(dax_skeleton['open_placeholders'])}")
+                sections.append(
+                    f"  PLACEHOLDERS TO FILL: {', '.join(dax_skeleton['open_placeholders'])}"
+                )
             sections.append("")
 
         # ── Measure Resolution Flags ──
@@ -1109,7 +1383,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
             sections.append("RECENT HISTORY:")
             for i, turn in enumerate(conversation_history[-3:], 1):
                 sections.append(f"  Q{i}: {turn.get('question', '')}")
-                if turn.get('answer'):
+                if turn.get("answer"):
                     sections.append(f"  A{i}: {turn['answer']}")
             sections.append("")
 
@@ -1147,7 +1421,9 @@ class PowerBISemanticModelDaxTool(BaseTool):
                 # Find the dim table object to get a non-key column
                 for t in tables:
                     if t["name"] == rel["to_table"]:
-                        non_key_cols = [c for c in t.get("columns", []) if c != rel["to_column"]]
+                        non_key_cols = [
+                            c for c in t.get("columns", []) if c != rel["to_column"]
+                        ]
                         if non_key_cols:
                             dim_table = t["name"]
                             dim_col = non_key_cols[0]
@@ -1184,14 +1460,18 @@ class PowerBISemanticModelDaxTool(BaseTool):
         llm_model = config.get("llm_model", "databricks-claude-sonnet-4-5")
 
         if not llm_workspace_url or not llm_token:
-            return self._generate_deterministic_dax(user_question, model_context, config)
+            return self._generate_deterministic_dax(
+                user_question, model_context, config
+            )
 
         measures = model_context.get("measures", [])
         if not measures:
             logger.warning("[DAX Generation] No measures available")
             return None
 
-        enriched_context = self._build_enriched_semantic_context(model_context, config, rag_examples=rag_examples)
+        enriched_context = self._build_enriched_semantic_context(
+            model_context, config, rag_examples=rag_examples
+        )
         example_dax = self._build_example_dax(model_context)
 
         has_filters = "ACTIVE FILTERS" in enriched_context
@@ -1225,13 +1505,20 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
         prompt = f"[SYSTEM]\n{system_prompt}\n\n[USER]\n{user_prompt}"
         self._last_llm_prompt = prompt
 
-        logger.info(f"[DaxTool] ═══ LLM PROMPT (system={len(system_prompt)} chars, user={len(user_prompt)} chars) ═══")
+        logger.info(
+            f"[DaxTool] ═══ LLM PROMPT (system={len(system_prompt)} chars, user={len(user_prompt)} chars) ═══"
+        )
         logger.info(f"[DaxTool] PROMPT START ═══\n{prompt}\n═══ PROMPT END")
 
-        self._emit_llm_trace(event_context="DAX Generation - Prompt", prompt=prompt, model=llm_model, operation="generate_dax")
+        self._emit_llm_trace(
+            event_context="DAX Generation - Prompt",
+            prompt=prompt,
+            model=llm_model,
+            operation="generate_dax",
+        )
 
         from src.services.llm.manager import LLMManager
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
 
         try:
             content = await LLMManager.completion(
@@ -1246,27 +1533,41 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
                 fallback_drop_system_on_400=True,
             )
 
-            logger.info(f"[DaxTool] RAW LLM RESPONSE ({len(content)} chars): {content[:500]}")
+            logger.info(
+                f"[DaxTool] RAW LLM RESPONSE ({len(content)} chars): {content[:500]}"
+            )
 
             self._emit_llm_trace(
-                event_context="DAX Generation - Response", prompt=prompt,
-                response=content, model=llm_model, operation="generate_dax"
+                event_context="DAX Generation - Response",
+                prompt=prompt,
+                response=content,
+                model=llm_model,
+                operation="generate_dax",
             )
 
             dax = self._extract_dax_from_llm_response(content)
             if not dax:
-                logger.warning(f"[DaxTool] LLM returned no extractable DAX, trying deterministic fallback")
-                return self._generate_deterministic_dax(user_question, model_context, config)
+                logger.warning(
+                    f"[DaxTool] LLM returned no extractable DAX, trying deterministic fallback"
+                )
+                return self._generate_deterministic_dax(
+                    user_question, model_context, config
+                )
             dax = self._auto_wrap_with_report_filters(dax, config)
             return dax
 
         except Exception as e:
             logger.error(f"LLM DAX generation error: {e}")
-            return self._generate_deterministic_dax(user_question, model_context, config)
+            return self._generate_deterministic_dax(
+                user_question, model_context, config
+            )
 
     async def _generate_dax_with_self_correction(
-        self, user_question: str, model_context: Dict[str, Any],
-        config: Dict[str, Any], previous_attempts: List[Dict[str, Any]]
+        self,
+        user_question: str,
+        model_context: Dict[str, Any],
+        config: Dict[str, Any],
+        previous_attempts: List[Dict[str, Any]],
     ) -> Optional[str]:
         """Generate DAX with self-correction based on previous failed attempts."""
         llm_workspace_url = config.get("llm_workspace_url")
@@ -1279,7 +1580,7 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
         # Build compact error summary from previous attempts
         attempts_parts = []
         for att in previous_attempts:
-            error_msg = str(att.get('error', ''))[:200] if not att['success'] else ""
+            error_msg = str(att.get("error", ""))[:200] if not att["success"] else ""
             part = f"Attempt {att['attempt']}: {att['dax']}"
             if error_msg:
                 part += f"\nERROR: {error_msg}"
@@ -1312,7 +1613,8 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text."""
         if active_filters and previous_attempts:
             last_dax = previous_attempts[-1].get("dax", "") or ""
             import re as _re
-            treatas_calls = _re.findall(r'TREATAS\([^)]+\)', last_dax, _re.IGNORECASE)
+
+            treatas_calls = _re.findall(r"TREATAS\([^)]+\)", last_dax, _re.IGNORECASE)
             for call in treatas_calls:
                 for af_key in active_filters:
                     table = af_key.split("[")[0] if "[" in af_key else ""
@@ -1328,10 +1630,16 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text."""
                     vals = ", ".join([f'"{x}"' for x in v])
                     filter_lines.append(f"  {k}: TREATAS({{{vals}}}, ...)")
                 else:
-                    filter_lines.append(f"  {k} = \"{v}\"")
-            filter_reminder = f"\n\nMANDATORY — these active_filters MUST appear in the new query, exactly as shown:\n" + "\n".join(filter_lines)
+                    filter_lines.append(f'  {k} = "{v}"')
+            filter_reminder = (
+                f"\n\nMANDATORY — these active_filters MUST appear in the new query, exactly as shown:\n"
+                + "\n".join(filter_lines)
+            )
             if preserved_treatas:
-                filter_reminder += f"\n\nCOPY these TREATAS expressions from the previous attempt unchanged:\n" + "\n".join(f"  {t}" for t in preserved_treatas)
+                filter_reminder += (
+                    f"\n\nCOPY these TREATAS expressions from the previous attempt unchanged:\n"
+                    + "\n".join(f"  {t}" for t in preserved_treatas)
+                )
             filter_reminder += "\n\nFix ONLY what the error says. Do NOT remove any of the above TREATAS expressions."
 
         user_prompt = f"""SELF-CORRECTION: Previous attempts failed. Generate a DIFFERENT query.
@@ -1347,11 +1655,13 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         prompt = f"[SYSTEM]\n{system_prompt}\n\n[USER]\n{user_prompt}"
         self._last_llm_prompt = prompt
 
-        logger.info(f"[DaxTool] ═══ SELF-CORRECTION PROMPT (system={len(system_prompt)} chars, user={len(user_prompt)} chars) ═══")
+        logger.info(
+            f"[DaxTool] ═══ SELF-CORRECTION PROMPT (system={len(system_prompt)} chars, user={len(user_prompt)} chars) ═══"
+        )
         logger.info(f"[DaxTool] PROMPT START ═══\n{prompt}\n═══ PROMPT END")
 
         from src.services.llm.manager import LLMManager
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
 
         try:
             content = await LLMManager.completion(
@@ -1366,7 +1676,9 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 fallback_drop_system_on_400=True,
             )
 
-            logger.info(f"[DaxTool] RAW SELF-CORRECTION RESPONSE ({len(content)} chars): {content[:500]}")
+            logger.info(
+                f"[DaxTool] RAW SELF-CORRECTION RESPONSE ({len(content)} chars): {content[:500]}"
+            )
             dax = self._extract_dax_from_llm_response(content)
             if dax:
                 return dax
@@ -1382,8 +1694,10 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         self, dax: str, config: Dict[str, Any], model_context: Dict[str, Any]
     ) -> str:
         """Take the best LLM DAX attempt, strip TREATAS calls for tables not in the model,
-        and inject the active_filter TREATAS expressions. Preserves grouping columns and measures."""
+        and inject the active_filter TREATAS expressions. Preserves grouping columns and measures.
+        """
         import re as _re
+
         tables_seen = {t["name"] for t in model_context.get("tables", [])}
         active_filters = config.get("active_filters", {})
 
@@ -1394,11 +1708,15 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             for line in lines:
                 if "TREATAS" in line.upper():
                     # Extract table name from TREATAS({"val"}, TableName[col]) or 'TableName'[col]
-                    table_match = _re.search(r"TREATAS\([^,]+,\s*'?([^'\[]+)'?\[", line, _re.IGNORECASE)
+                    table_match = _re.search(
+                        r"TREATAS\([^,]+,\s*'?([^'\[]+)'?\[", line, _re.IGNORECASE
+                    )
                     if table_match:
                         table_name = table_match.group(1).strip()
                         if table_name not in tables_seen:
-                            logger.info(f"[DaxTool] Patch: removing invalid TREATAS for '{table_name}'")
+                            logger.info(
+                                f"[DaxTool] Patch: removing invalid TREATAS for '{table_name}'"
+                            )
                             continue  # skip this line
                 cleaned.append(line)
             return "\n".join(cleaned)
@@ -1418,14 +1736,20 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 continue
             # Skip if this table's TREATAS already exists in the patched DAX
             if "TREATAS(" in dax_upper and table_part.upper() in dax_upper:
-                logger.info(f"[DaxTool] Patch: skipping already-present TREATAS for '{table_part}'")
+                logger.info(
+                    f"[DaxTool] Patch: skipping already-present TREATAS for '{table_part}'"
+                )
                 continue
-            table_col = f"'{table_part}'[{col_part}]" if " " in table_part else filter_name
+            table_col = (
+                f"'{table_part}'[{col_part}]" if " " in table_part else filter_name
+            )
             if isinstance(filter_value, list):
                 vals = ", ".join([f'"{v}"' for v in filter_value])
                 af_treatas_lines.append(f"    TREATAS({{{vals}}}, {table_col}),")
             elif isinstance(filter_value, str) and filter_value.upper() != "NOT NULL":
-                af_treatas_lines.append(f'    TREATAS({{"{filter_value}"}}, {table_col}),')
+                af_treatas_lines.append(
+                    f'    TREATAS({{"{filter_value}"}}, {table_col}),'
+                )
 
         # Inject active_filter TREATAS right after SUMMARIZECOLUMNS(
         if af_treatas_lines and "SUMMARIZECOLUMNS(" in patched.upper():
@@ -1437,11 +1761,18 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 count=1,
                 flags=_re.IGNORECASE,
             )
-            logger.info(f"[DaxTool] Patched DAX: injected {len(af_treatas_lines)} active_filter TREATAS")
+            logger.info(
+                f"[DaxTool] Patched DAX: injected {len(af_treatas_lines)} active_filter TREATAS"
+            )
 
         return patched.strip()
 
-    def _generate_deterministic_dax(self, user_question: str, model_context: Dict[str, Any], config: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    def _generate_deterministic_dax(
+        self,
+        user_question: str,
+        model_context: Dict[str, Any],
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
         """Build DAX deterministically by matching question terms to sample data.
 
         This is the fallback when the LLM keeps hallucinating. It parses the user
@@ -1491,16 +1822,26 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                     continue
                 table_part = filter_name.split("[")[0]
                 col_part = filter_name.split("[", 1)[1].rstrip("]")
-                table_col = f"'{table_part}'[{col_part}]" if " " in table_part else filter_name
+                table_col = (
+                    f"'{table_part}'[{col_part}]" if " " in table_part else filter_name
+                )
                 if isinstance(filter_value, list):
                     vals = ", ".join([f'"{v}"' for v in filter_value])
-                    treatas_parts.append(f'    TREATAS({{{vals}}}, {table_col})')
-                elif isinstance(filter_value, str) and filter_value.upper() != "NOT NULL":
-                    treatas_parts.append(f'    TREATAS({{"{filter_value}"}}, {table_col})')
-            logger.info(f"[DaxTool] Deterministic fallback using {len(treatas_parts)} active_filter TREATAS (skipping sample-data matching)")
+                    treatas_parts.append(f"    TREATAS({{{vals}}}, {table_col})")
+                elif (
+                    isinstance(filter_value, str) and filter_value.upper() != "NOT NULL"
+                ):
+                    treatas_parts.append(
+                        f'    TREATAS({{"{filter_value}"}}, {table_col})'
+                    )
+            logger.info(
+                f"[DaxTool] Deterministic fallback using {len(treatas_parts)} active_filter TREATAS (skipping sample-data matching)"
+            )
         else:
             # No active_filters — match sample data values against question
-            for val_lower, col_ref in sorted(value_to_col.items(), key=lambda x: -len(x[0])):
+            for val_lower, col_ref in sorted(
+                value_to_col.items(), key=lambda x: -len(x[0])
+            ):
                 if val_lower in question_lower and val_lower not in matched_values:
                     # Find original case value
                     original_val = val_lower
@@ -1512,21 +1853,30 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                     if "[" in col_ref:
                         tbl, rest = col_ref.split("[", 1)
                         quoted_col_ref = f"{_dax_quote_table(tbl)}[{rest}"
-                    treatas_parts.append(f'    TREATAS({{"{original_val}"}}, {quoted_col_ref})')
+                    treatas_parts.append(
+                        f'    TREATAS({{"{original_val}"}}, {quoted_col_ref})'
+                    )
                     matched_values.add(val_lower)
 
         # Check for numeric patterns like "Week 3", "Month 5" — only when no active_filters
-        number_patterns = re.findall(r'(?:week|month|year|quarter)\s+(\d+)', question_lower)
+        number_patterns = re.findall(
+            r"(?:week|month|year|quarter)\s+(\d+)", question_lower
+        )
         if not active_filters and number_patterns:
             for num in number_patterns:
                 # Find a column that matches this concept
                 for col_lower, col_ref in col_to_ref.items():
-                    if col_lower in ("week", "month", "year", "quarter") and col_lower in question_lower:
+                    if (
+                        col_lower in ("week", "month", "year", "quarter")
+                        and col_lower in question_lower
+                    ):
                         quoted_num_ref = col_ref
                         if "[" in col_ref:
                             tbl, rest = col_ref.split("[", 1)
                             quoted_num_ref = f"{_dax_quote_table(tbl)}[{rest}"
-                        treatas_parts.append(f'    TREATAS({{{num}}}, {quoted_num_ref})')
+                        treatas_parts.append(
+                            f"    TREATAS({{{num}}}, {quoted_num_ref})"
+                        )
                         break
 
         # Check for direct column value matches — only when no active_filters
@@ -1542,7 +1892,11 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                         if sv_col_ref == col_ref:
                             for sv in sv_info.get("sample_values", []):
                                 sv_lower = str(sv).lower()
-                                if sv_lower in question_lower and sv_lower not in matched_values and len(sv_lower) > 2:
+                                if (
+                                    sv_lower in question_lower
+                                    and sv_lower not in matched_values
+                                    and len(sv_lower) > 2
+                                ):
                                     filter_parts.append(
                                         f'    FILTER(VALUES({quoted_col_ref}), {quoted_col_ref} = "{sv}")'
                                     )
@@ -1562,11 +1916,15 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         else:
             dax = f'EVALUATE\nSUMMARIZECOLUMNS(\n    "Result", [{best_measure["name"]}]\n)'
 
-        logger.info(f"[DaxTool] Deterministic DAX fallback ({len(parts)} filters): {dax}")
+        logger.info(
+            f"[DaxTool] Deterministic DAX fallback ({len(parts)} filters): {dax}"
+        )
         return dax
 
     @staticmethod
-    def _validate_dax_references(dax: str, model_context: Dict[str, Any]) -> Optional[str]:
+    def _validate_dax_references(
+        dax: str, model_context: Dict[str, Any]
+    ) -> Optional[str]:
         """Validate that all table references in DAX exist in the model schema.
 
         Returns an error string if invalid references found, None if valid.
@@ -1579,15 +1937,37 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         # Extract all table[column] references from DAX
         # Match both 'Table Name'[col] (quoted) and TableName[col] (unquoted)
         refs_quoted = re.findall(r"'([^']+)'\[([^\]]+)\]", dax)
-        refs_unquoted = re.findall(r'(\w+)\[([^\]]+)\]', dax)
+        refs_unquoted = re.findall(r"(\w+)\[([^\]]+)\]", dax)
 
         dax_functions = {
-            "EVALUATE", "SUMMARIZECOLUMNS", "CALCULATETABLE", "CALCULATE",
-            "FILTER", "VALUES", "ALL", "ALLEXCEPT", "TREATAS", "ADDCOLUMNS",
-            "SELECTCOLUMNS", "TOPN", "RELATED", "RELATEDTABLE", "REMOVEFILTERS",
-            "KEEPFILTERS", "USERELATIONSHIP", "CROSSFILTER", "DISTINCT",
-            "DATATABLE", "ROW", "UNION", "INTERSECT", "EXCEPT", "GENERATE",
-            "GENERATESERIES", "NATURALINNERJOIN", "NATURALLEFTOUTERJOIN",
+            "EVALUATE",
+            "SUMMARIZECOLUMNS",
+            "CALCULATETABLE",
+            "CALCULATE",
+            "FILTER",
+            "VALUES",
+            "ALL",
+            "ALLEXCEPT",
+            "TREATAS",
+            "ADDCOLUMNS",
+            "SELECTCOLUMNS",
+            "TOPN",
+            "RELATED",
+            "RELATEDTABLE",
+            "REMOVEFILTERS",
+            "KEEPFILTERS",
+            "USERELATIONSHIP",
+            "CROSSFILTER",
+            "DISTINCT",
+            "DATATABLE",
+            "ROW",
+            "UNION",
+            "INTERSECT",
+            "EXCEPT",
+            "GENERATE",
+            "GENERATESERIES",
+            "NATURALINNERJOIN",
+            "NATURALLEFTOUTERJOIN",
         }
 
         unknown_tables = set()
@@ -1611,7 +1991,7 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             )
 
         # Check for empty CALCULATETABLE first argument
-        if re.search(r'CALCULATETABLE\s*\(\s*,', dax, re.IGNORECASE):
+        if re.search(r"CALCULATETABLE\s*\(\s*,", dax, re.IGNORECASE):
             return (
                 "SYNTAX VALIDATION ERROR: CALCULATETABLE has an empty first argument. "
                 "CALCULATETABLE requires a table expression as its first argument, e.g. "
@@ -1649,7 +2029,9 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             for col in table.get("columns", []):
                 col_lower = col.lower()
                 # If the question mentions a column name as a whole word, DAX should reference it
-                if len(col_lower) > 3 and re.search(r'\b' + re.escape(col_lower) + r'\b', question_lower):
+                if len(col_lower) > 3 and re.search(
+                    r"\b" + re.escape(col_lower) + r"\b", question_lower
+                ):
                     col_ref = f"{table['name']}[{col}]"
                     if col_ref not in value_to_columns.get(col_lower, []):
                         if col_lower not in value_to_columns:
@@ -1659,7 +2041,7 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         # Find question terms that match sample data values
         # Use word-boundary matching to avoid false positives from substring hits
         # (e.g. country code "it" matching inside "Italy", "pl" inside "complete")
-        question_words = set(re.findall(r'\b\w+\b', question_lower))
+        question_words = set(re.findall(r"\b\w+\b", question_lower))
         missing_filters = []
         for val_lower, col_refs in value_to_columns.items():
             # Skip very short values (2-letter codes cause too many false positives)
@@ -1685,11 +2067,19 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 missing_filters.append(f'"{val_lower}" (from {col_refs[0]})')
 
         # Check for numeric filters (e.g., "Week 3" → dim_weeks[Week])
-        number_patterns = re.findall(r'(?:week|month|year|quarter)\s+(\d+)', question_lower)
+        number_patterns = re.findall(
+            r"(?:week|month|year|quarter)\s+(\d+)", question_lower
+        )
         if number_patterns:
-            has_any_filter = any(kw in dax_upper for kw in [
-                "TREATAS", "FILTER", "CALCULATETABLE", "WHERE",
-            ])
+            has_any_filter = any(
+                kw in dax_upper
+                for kw in [
+                    "TREATAS",
+                    "FILTER",
+                    "CALCULATETABLE",
+                    "WHERE",
+                ]
+            )
             if not has_any_filter:
                 missing_filters.append("numeric filter (e.g., Week number)")
 
@@ -1709,43 +2099,55 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
 
         Returns empty string if no valid DAX found (must contain EVALUATE + parens).
         """
-        logger.info(f"[DaxTool] Raw LLM response ({len(content)} chars): {content[:300]}...")
+        logger.info(
+            f"[DaxTool] Raw LLM response ({len(content)} chars): {content[:300]}..."
+        )
 
-        content = re.sub(r'```dax\s*', '', content)
-        content = re.sub(r'```\s*', '', content)
+        content = re.sub(r"```dax\s*", "", content)
+        content = re.sub(r"```\s*", "", content)
 
-        evaluate_match = re.search(r'(EVALUATE[\s\S]+?)(?:\n\n|$)', content, re.IGNORECASE)
+        evaluate_match = re.search(
+            r"(EVALUATE[\s\S]+?)(?:\n\n|$)", content, re.IGNORECASE
+        )
         if evaluate_match:
             dax_query = evaluate_match.group(1).strip()
         else:
             dax_query = content.strip()
 
-        lines = dax_query.split('\n')
+        lines = dax_query.split("\n")
         clean_lines = []
         paren_depth = 0
 
         for line in lines:
-            paren_depth += line.count('(') - line.count(')')
+            paren_depth += line.count("(") - line.count(")")
             clean_lines.append(line)
             if paren_depth == 0 and len(clean_lines) > 1:
                 break
 
-        dax_query = '\n'.join(clean_lines).strip()
+        dax_query = "\n".join(clean_lines).strip()
 
-        last_paren = dax_query.rfind(')')
+        last_paren = dax_query.rfind(")")
         if last_paren != -1:
-            after_paren = dax_query[last_paren + 1:].strip()
-            if after_paren and (after_paren.startswith('**') or after_paren.startswith('#') or after_paren.startswith('-')):
-                dax_query = dax_query[:last_paren + 1]
+            after_paren = dax_query[last_paren + 1 :].strip()
+            if after_paren and (
+                after_paren.startswith("**")
+                or after_paren.startswith("#")
+                or after_paren.startswith("-")
+            ):
+                dax_query = dax_query[: last_paren + 1]
 
         # Reject garbage responses — valid DAX must have EVALUATE + at least one function call
-        if len(dax_query) < 30 or '(' not in dax_query:
-            logger.warning(f"[DaxTool] Extracted DAX too short or missing parens ({len(dax_query)} chars): {dax_query}")
+        if len(dax_query) < 30 or "(" not in dax_query:
+            logger.warning(
+                f"[DaxTool] Extracted DAX too short or missing parens ({len(dax_query)} chars): {dax_query}"
+            )
             return ""
 
         return dax_query.strip()
 
-    def _auto_wrap_with_report_filters(self, dax_query: str, config: Dict[str, Any]) -> str:
+    def _auto_wrap_with_report_filters(
+        self, dax_query: str, config: Dict[str, Any]
+    ) -> str:
         """Wrap DAX with report-level filters if present."""
         active_filters = config.get("active_filters", {})
         if not active_filters:
@@ -1755,7 +2157,9 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         for filter_name, filter_description in active_filters.items():
             if filter_name in dax_query:
                 continue
-            dax_condition = self._generate_dax_filter_condition(filter_name, filter_description)
+            dax_condition = self._generate_dax_filter_condition(
+                filter_name, filter_description
+            )
             if dax_condition and not dax_condition.startswith("//"):
                 filter_conditions.append(dax_condition)
 
@@ -1779,25 +2183,27 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                         end_idx = i
                         break
             if end_idx > start_idx:
-                inner_content = inner_dax[start_idx + 1:end_idx]
+                inner_content = inner_dax[start_idx + 1 : end_idx]
                 wrapped_dax = f"EVALUATE\nCALCULATETABLE(\n    {inner_content},\n"
                 for condition in filter_conditions:
                     wrapped_dax += f"    {condition},\n"
-                wrapped_dax = wrapped_dax.rstrip(',\n') + "\n)"
+                wrapped_dax = wrapped_dax.rstrip(",\n") + "\n)"
             else:
                 wrapped_dax = f"EVALUATE\nCALCULATETABLE(\n    {inner_dax},\n"
                 for condition in filter_conditions:
                     wrapped_dax += f"    {condition},\n"
-                wrapped_dax = wrapped_dax.rstrip(',\n') + "\n)"
+                wrapped_dax = wrapped_dax.rstrip(",\n") + "\n)"
         else:
             wrapped_dax = f"EVALUATE\nCALCULATETABLE(\n    {inner_dax},\n"
             for condition in filter_conditions:
                 wrapped_dax += f"    {condition},\n"
-            wrapped_dax = wrapped_dax.rstrip(',\n') + "\n)"
+            wrapped_dax = wrapped_dax.rstrip(",\n") + "\n)"
 
         return wrapped_dax
 
-    def _generate_dax_filter_condition(self, filter_name: str, filter_description: str) -> str:
+    def _generate_dax_filter_condition(
+        self, filter_name: str, filter_description: str
+    ) -> str:
         """Generate a DAX filter condition from a filter name and description."""
         try:
             filter_desc = str(filter_description).strip()
@@ -1813,14 +2219,14 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             if filter_desc.startswith("IN ("):
                 values_str = filter_desc[4:-1]
                 values = [v.strip().strip("'\"") for v in values_str.split(",")]
-                values_list = ', '.join([f'"{v}"' for v in values])
-                return f'{filter_name} IN {{{values_list}}}'
+                values_list = ", ".join([f'"{v}"' for v in values])
+                return f"{filter_name} IN {{{values_list}}}"
             if not filter_desc.startswith("NOT") and not filter_desc.startswith("IN"):
                 value = filter_desc.strip("'\"")
                 return f'{filter_name} = "{value}"'
-            return f'// TODO: Apply filter {filter_name} {filter_desc}'
+            return f"// TODO: Apply filter {filter_name} {filter_desc}"
         except Exception:
-            return f'// Error: Could not apply filter {filter_name}'
+            return f"// Error: Could not apply filter {filter_name}"
 
     # =====================================================================
     # DAX Execution
@@ -1831,9 +2237,21 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
     ) -> Dict[str, Any]:
         """Execute DAX query via Power BI Execute Queries API."""
         url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
-        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-        payload = {"queries": [{"query": dax_query}], "serializerSettings": {"includeNulls": True}}
-        result: Dict[str, Any] = {"success": False, "data": [], "row_count": 0, "columns": [], "error": None}
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "queries": [{"query": dax_query}],
+            "serializerSettings": {"includeNulls": True},
+        }
+        result: Dict[str, Any] = {
+            "success": False,
+            "data": [],
+            "row_count": 0,
+            "columns": [],
+            "error": None,
+        }
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             try:
@@ -1859,7 +2277,9 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 result["error"] = str(e)
                 return result
 
-    def _extract_measures_from_dax(self, dax_query: str, available_measures: List[str]) -> List[str]:
+    def _extract_measures_from_dax(
+        self, dax_query: str, available_measures: List[str]
+    ) -> List[str]:
         """Extract measure names used in a DAX query."""
         return [m for m in available_measures if f"[{m}]" in dax_query]
 
@@ -1872,15 +2292,21 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
     ) -> List[Dict[str, Any]]:
         """Find reports, pages, and visuals that use the specified measures."""
         visual_refs: List[Dict[str, Any]] = []
-        reports_url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/reports"
-        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+        reports_url = (
+            f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/reports"
+        )
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             try:
                 reports_response = await client.get(reports_url, headers=headers)
                 reports_response.raise_for_status()
                 reports = [
-                    r for r in reports_response.json().get("value", [])
+                    r
+                    for r in reports_response.json().get("value", [])
                     if r.get("datasetId") == dataset_id
                 ]
                 for report in reports[:5]:
@@ -1889,38 +2315,64 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                     report_url = report.get("webUrl", "")
                     try:
                         page_refs = await self._get_measure_page_references(
-                            workspace_id, report_id, report_name, report_url,
-                            measures, access_token, client
+                            workspace_id,
+                            report_id,
+                            report_name,
+                            report_url,
+                            measures,
+                            access_token,
+                            client,
                         )
                         if page_refs:
                             visual_refs.extend(page_refs)
                         else:
                             for measure in measures:
-                                visual_refs.append({
-                                    "report_name": report_name, "report_url": report_url,
-                                    "page_name": None, "page_url": None, "measure": measure,
-                                    "visual_type": None, "note": "Report uses same dataset",
-                                })
+                                visual_refs.append(
+                                    {
+                                        "report_name": report_name,
+                                        "report_url": report_url,
+                                        "page_name": None,
+                                        "page_url": None,
+                                        "measure": measure,
+                                        "visual_type": None,
+                                        "note": "Report uses same dataset",
+                                    }
+                                )
                     except Exception:
                         for measure in measures:
-                            visual_refs.append({
-                                "report_name": report_name, "report_url": report_url,
-                                "page_name": None, "page_url": None, "measure": measure,
-                                "visual_type": None, "note": "Report uses same dataset",
-                            })
+                            visual_refs.append(
+                                {
+                                    "report_name": report_name,
+                                    "report_url": report_url,
+                                    "page_name": None,
+                                    "page_url": None,
+                                    "measure": measure,
+                                    "visual_type": None,
+                                    "note": "Report uses same dataset",
+                                }
+                            )
             except Exception as e:
                 logger.error(f"Visual reference search error: {e}")
 
         return visual_refs
 
     async def _get_measure_page_references(
-        self, workspace_id: str, report_id: str, report_name: str, report_url: str,
-        measures: List[str], access_token: str, client: httpx.AsyncClient
+        self,
+        workspace_id: str,
+        report_id: str,
+        report_name: str,
+        report_url: str,
+        measures: List[str],
+        access_token: str,
+        client: httpx.AsyncClient,
     ) -> List[Dict[str, Any]]:
         """Get page-level references for measures by parsing report definition."""
         refs: List[Dict[str, Any]] = []
         url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/reports/{report_id}/getDefinition"
-        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
 
         try:
             response = await client.post(url, headers=headers, timeout=60.0)
@@ -1938,7 +2390,11 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                         result_url = location + "/result"
                         result_response = await client.get(result_url, headers=headers)
                         result_response.raise_for_status()
-                        report_parts = result_response.json().get("definition", {}).get("parts", [])
+                        report_parts = (
+                            result_response.json()
+                            .get("definition", {})
+                            .get("parts", [])
+                        )
                         break
                     elif poll_data.get("status") == "Failed":
                         return []
@@ -1963,7 +2419,9 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 visual_type = visual.get("type", "unknown")
                 for measure in measures:
                     if measure in visual_measures:
-                        measure_locations.setdefault(measure, []).append({"page_id": page_id, "visual_type": visual_type})
+                        measure_locations.setdefault(measure, []).append(
+                            {"page_id": page_id, "visual_type": visual_type}
+                        )
 
             for measure in measures:
                 if measure in measure_locations:
@@ -1974,21 +2432,37 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                             continue
                         seen_pages.add(page_id)
                         page_info = page_lookup.get(page_id, {})
-                        page_name = page_info.get("displayName") or page_info.get("name") or page_id
-                        page_url = self._build_page_url(workspace_id, report_id, page_id)
-                        refs.append({
-                            "report_name": report_name, "report_url": report_url,
-                            "page_name": page_name, "page_url": page_url,
-                            "measure": measure, "visual_type": loc["visual_type"],
-                            "note": f"Measure found on page '{page_name}'",
-                        })
+                        page_name = (
+                            page_info.get("displayName")
+                            or page_info.get("name")
+                            or page_id
+                        )
+                        page_url = self._build_page_url(
+                            workspace_id, report_id, page_id
+                        )
+                        refs.append(
+                            {
+                                "report_name": report_name,
+                                "report_url": report_url,
+                                "page_name": page_name,
+                                "page_url": page_url,
+                                "measure": measure,
+                                "visual_type": loc["visual_type"],
+                                "note": f"Measure found on page '{page_name}'",
+                            }
+                        )
                 else:
-                    refs.append({
-                        "report_name": report_name, "report_url": report_url,
-                        "page_name": None, "page_url": None,
-                        "measure": measure, "visual_type": None,
-                        "note": "Measure in dataset but not detected in visuals",
-                    })
+                    refs.append(
+                        {
+                            "report_name": report_name,
+                            "report_url": report_url,
+                            "page_name": None,
+                            "page_url": None,
+                            "measure": measure,
+                            "visual_type": None,
+                            "note": "Measure in dataset but not detected in visuals",
+                        }
+                    )
             return refs
         except Exception as e:
             logger.warning(f"Error fetching report definition: {e}")
@@ -1999,16 +2473,17 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             return f"https://app.powerbi.com/groups/{workspace_id}/reports/{report_id}/ReportSection{page_id}"
         return f"https://app.powerbi.com/groups/{workspace_id}/reports/{report_id}"
 
-    def _parse_report_pages(self, report_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _parse_report_pages(
+        self, report_parts: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Parse page definitions from PBIR report structure."""
         pages = []
         for part in report_parts:
             path = part.get("path", "")
             path_lower = path.lower()
             is_page_file = (
-                ("/pages/" in path_lower and path_lower.endswith("/page.json")) or
-                path_lower.endswith("/page.json")
-            )
+                "/pages/" in path_lower and path_lower.endswith("/page.json")
+            ) or path_lower.endswith("/page.json")
             if is_page_file:
                 try:
                     payload = part.get("payload", "")
@@ -2023,12 +2498,16 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                             break
                     if not page_id:
                         page_id = path_parts[-2] if len(path_parts) >= 2 else "unknown"
-                    pages.append({
-                        "id": page_id,
-                        "name": page_data.get("name", page_id),
-                        "displayName": page_data.get("displayName", page_data.get("name", page_id)),
-                        "ordinal": page_data.get("ordinal", 0),
-                    })
+                    pages.append(
+                        {
+                            "id": page_id,
+                            "name": page_data.get("name", page_id),
+                            "displayName": page_data.get(
+                                "displayName", page_data.get("name", page_id)
+                            ),
+                            "ordinal": page_data.get("ordinal", 0),
+                        }
+                    )
                 except Exception:
                     pass
 
@@ -2037,7 +2516,9 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         pages.sort(key=lambda p: p.get("ordinal", 0))
         return pages
 
-    def _parse_pages_from_report_json(self, report_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _parse_pages_from_report_json(
+        self, report_parts: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         pages = []
         for part in report_parts:
             path = part.get("path", "")
@@ -2045,31 +2526,45 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 try:
                     content = base64.b64decode(part.get("payload", "")).decode("utf-8")
                     report_data = json.loads(content)
-                    pages_data = report_data.get("pages") or report_data.get("sections") or report_data.get("reportPages")
+                    pages_data = (
+                        report_data.get("pages")
+                        or report_data.get("sections")
+                        or report_data.get("reportPages")
+                    )
                     if pages_data and isinstance(pages_data, list):
                         for idx, page_data in enumerate(pages_data):
                             if isinstance(page_data, dict):
-                                page_id = page_data.get("name") or page_data.get("id") or f"page_{idx}"
-                                pages.append({
-                                    "id": page_id,
-                                    "name": page_data.get("name", page_id),
-                                    "displayName": page_data.get("displayName", page_data.get("name", page_id)),
-                                    "ordinal": page_data.get("ordinal", idx),
-                                })
+                                page_id = (
+                                    page_data.get("name")
+                                    or page_data.get("id")
+                                    or f"page_{idx}"
+                                )
+                                pages.append(
+                                    {
+                                        "id": page_id,
+                                        "name": page_data.get("name", page_id),
+                                        "displayName": page_data.get(
+                                            "displayName",
+                                            page_data.get("name", page_id),
+                                        ),
+                                        "ordinal": page_data.get("ordinal", idx),
+                                    }
+                                )
                 except Exception:
                     pass
         return pages
 
-    def _parse_report_visuals(self, report_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _parse_report_visuals(
+        self, report_parts: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Parse visual definitions from PBIR report structure."""
         visuals = []
         for part in report_parts:
             path = part.get("path", "")
             path_lower = path.lower()
             is_visual_file = (
-                ("/visuals/" in path_lower and path_lower.endswith("/visual.json")) or
-                ("/visuals/" in path_lower and path_lower.endswith(".json"))
-            )
+                "/visuals/" in path_lower and path_lower.endswith("/visual.json")
+            ) or ("/visuals/" in path_lower and path_lower.endswith(".json"))
             if is_visual_file:
                 try:
                     content = base64.b64decode(part.get("payload", "")).decode("utf-8")
@@ -2085,15 +2580,24 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                     for tag in ("visuals", "Visuals"):
                         if tag in path_parts:
                             idx = path_parts.index(tag) + 1
-                            visual_id = path_parts[idx] if idx < len(path_parts) else None
+                            visual_id = (
+                                path_parts[idx] if idx < len(path_parts) else None
+                            )
                             break
                     if not visual_id:
-                        visual_id = path_parts[-2] if len(path_parts) >= 2 else "unknown"
-                    visuals.append({
-                        "id": visual_id, "page_id": page_id,
-                        "type": visual_data.get("visual", {}).get("visualType", "unknown"),
-                        "config": visual_data,
-                    })
+                        visual_id = (
+                            path_parts[-2] if len(path_parts) >= 2 else "unknown"
+                        )
+                    visuals.append(
+                        {
+                            "id": visual_id,
+                            "page_id": page_id,
+                            "type": visual_data.get("visual", {}).get(
+                                "visualType", "unknown"
+                            ),
+                            "config": visual_data,
+                        }
+                    )
                 except Exception:
                     pass
 
@@ -2101,7 +2605,9 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             visuals = self._parse_visuals_from_report_json(report_parts)
         return visuals
 
-    def _parse_visuals_from_report_json(self, report_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _parse_visuals_from_report_json(
+        self, report_parts: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         visuals = []
         for part in report_parts:
             path = part.get("path", "")
@@ -2109,18 +2615,28 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 try:
                     content = base64.b64decode(part.get("payload", "")).decode("utf-8")
                     report_data = json.loads(content)
-                    pages_data = report_data.get("pages") or report_data.get("sections") or report_data.get("reportPages")
+                    pages_data = (
+                        report_data.get("pages")
+                        or report_data.get("sections")
+                        or report_data.get("reportPages")
+                    )
                     if pages_data and isinstance(pages_data, list):
                         for page_data in pages_data:
                             if not isinstance(page_data, dict):
                                 continue
                             page_id = page_data.get("name") or page_data.get("id")
-                            visuals_data = page_data.get("visualContainers") or page_data.get("visuals")
+                            visuals_data = page_data.get(
+                                "visualContainers"
+                            ) or page_data.get("visuals")
                             if visuals_data and isinstance(visuals_data, list):
                                 for vis_idx, vis_data in enumerate(visuals_data):
                                     if not isinstance(vis_data, dict):
                                         continue
-                                    visual_id = vis_data.get("name") or vis_data.get("id") or f"visual_{vis_idx}"
+                                    visual_id = (
+                                        vis_data.get("name")
+                                        or vis_data.get("id")
+                                        or f"visual_{vis_idx}"
+                                    )
                                     visual_type = "unknown"
                                     parsed_config = {}
                                     if "config" in vis_data:
@@ -2128,19 +2644,29 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                                         if isinstance(config_str, str):
                                             try:
                                                 parsed_config = json.loads(config_str)
-                                                visual_type = parsed_config.get("singleVisual", {}).get("visualType", "unknown")
+                                                visual_type = parsed_config.get(
+                                                    "singleVisual", {}
+                                                ).get("visualType", "unknown")
                                             except json.JSONDecodeError:
                                                 pass
                                         elif isinstance(config_str, dict):
                                             parsed_config = config_str
-                                            visual_type = parsed_config.get("singleVisual", {}).get("visualType", "unknown")
+                                            visual_type = parsed_config.get(
+                                                "singleVisual", {}
+                                            ).get("visualType", "unknown")
                                     elif "visualType" in vis_data:
-                                        visual_type = vis_data.get("visualType", "unknown")
+                                        visual_type = vis_data.get(
+                                            "visualType", "unknown"
+                                        )
                                         parsed_config = vis_data
-                                    visuals.append({
-                                        "id": visual_id, "page_id": page_id,
-                                        "type": visual_type, "config": parsed_config,
-                                    })
+                                    visuals.append(
+                                        {
+                                            "id": visual_id,
+                                            "page_id": page_id,
+                                            "type": visual_type,
+                                            "config": parsed_config,
+                                        }
+                                    )
                 except Exception:
                     pass
         return visuals
@@ -2171,8 +2697,12 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             if "Measure" in obj:
                 measure_ref = obj["Measure"]
                 if isinstance(measure_ref, dict):
-                    name = (measure_ref.get("Property") or measure_ref.get("property")
-                            or measure_ref.get("Name") or measure_ref.get("name"))
+                    name = (
+                        measure_ref.get("Property")
+                        or measure_ref.get("property")
+                        or measure_ref.get("Name")
+                        or measure_ref.get("name")
+                    )
                     if name:
                         measures.add(name)
             if obj.get("aggregation") and "property" in obj:
@@ -2190,36 +2720,55 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
     # =====================================================================
 
     def _emit_llm_trace(
-        self, event_context: str, prompt: str, model: str, operation: str, response: Optional[str] = None
+        self,
+        event_context: str,
+        prompt: str,
+        model: str,
+        operation: str,
+        response: Optional[str] = None,
     ) -> None:
         """Emit a trace event for LLM operations."""
         try:
-            trace_ctx = getattr(self, 'trace_context', None)
-            if not trace_ctx or not trace_ctx.get('job_id'):
+            trace_ctx = getattr(self, "trace_context", None)
+            if not trace_ctx or not trace_ctx.get("job_id"):
                 return
 
             from src.services.trace.queue import get_trace_queue
+
             queue = get_trace_queue()
             max_len = 3000
             trace_output: Dict[str, Any] = {
-                'operation': operation, 'model': model,
-                'prompt_length': len(prompt),
-                'prompt': prompt[:max_len] + ('...[truncated]' if len(prompt) > max_len else ''),
+                "operation": operation,
+                "model": model,
+                "prompt_length": len(prompt),
+                "prompt": prompt[:max_len]
+                + ("...[truncated]" if len(prompt) > max_len else ""),
             }
             if response:
-                trace_output['response_length'] = len(response)
-                trace_output['response'] = response[:max_len] + ('...[truncated]' if len(response) > max_len else '')
+                trace_output["response_length"] = len(response)
+                trace_output["response"] = response[:max_len] + (
+                    "...[truncated]" if len(response) > max_len else ""
+                )
 
-            queue.put_nowait({
-                'job_id': trace_ctx.get('job_id'),
-                'event_type': 'llm_call',
-                'event_source': 'PowerBI DAX Generator',
-                'event_context': event_context,
-                'output': trace_output,
-                'extra_data': {'agent_role': 'PowerBI DAX Generator', 'model': model},
-                'trace_metadata': {'tool_name': 'PowerBISemanticModelDaxTool', 'operation': operation, 'model': model},
-                'group_context': trace_ctx.get('group_context'),
-            })
+            queue.put_nowait(
+                {
+                    "job_id": trace_ctx.get("job_id"),
+                    "event_type": "llm_call",
+                    "event_source": "PowerBI DAX Generator",
+                    "event_context": event_context,
+                    "output": trace_output,
+                    "extra_data": {
+                        "agent_role": "PowerBI DAX Generator",
+                        "model": model,
+                    },
+                    "trace_metadata": {
+                        "tool_name": "PowerBISemanticModelDaxTool",
+                        "operation": operation,
+                        "model": model,
+                    },
+                    "group_context": trace_ctx.get("group_context"),
+                }
+            )
         except Exception as e:
             logger.error(f"[DaxTool] Failed to emit trace: {e}")
 
@@ -2252,7 +2801,9 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
 
         if results.get("llm_prompt"):
             output.append("## Full LLM Prompt Used for DAX Generation\n")
-            output.append("<details>\n<summary>Click to expand full prompt sent to LLM</summary>\n")
+            output.append(
+                "<details>\n<summary>Click to expand full prompt sent to LLM</summary>\n"
+            )
             output.append("```")
             output.append(results["llm_prompt"])
             output.append("```\n")
@@ -2265,7 +2816,7 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 output.append(f"**Attempts**: {len(dax_attempts)}\n")
                 for att in dax_attempts[:-1]:
                     output.append(f"**Attempt {att['attempt']}**: FAILED")
-                    if att.get('error'):
+                    if att.get("error"):
                         output.append(f"  - Error: {att['error'][:100]}...")
                 output.append(f"**Attempt {dax_attempts[-1]['attempt']}**: SUCCESS\n")
             output.append("```dax")
@@ -2275,11 +2826,21 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
         exec_result = results.get("dax_execution", {})
         output.append("## Execution Results\n")
         if exec_result.get("success"):
-            output.append(f"**Success** - {exec_result.get('row_count', 0)} rows returned\n")
+            output.append(
+                f"**Success** - {exec_result.get('row_count', 0)} rows returned\n"
+            )
             data = exec_result.get("data", [])
             if data:
-                columns = exec_result.get("columns", list(data[0].keys()) if data else [])
-                output.append("| " + " | ".join(str(c).replace("[", "").replace("]", "") for c in columns) + " |")
+                columns = exec_result.get(
+                    "columns", list(data[0].keys()) if data else []
+                )
+                output.append(
+                    "| "
+                    + " | ".join(
+                        str(c).replace("[", "").replace("]", "") for c in columns
+                    )
+                    + " |"
+                )
                 output.append("| " + " | ".join(["---"] * len(columns)) + " |")
                 for row in data[:20]:
                     values = [str(row.get(c, ""))[:50] for c in columns]
@@ -2296,21 +2857,32 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             for ref in results["visual_references"]:
                 rn = ref.get("report_name", "Unknown")
                 if rn not in report_refs:
-                    report_refs[rn] = {"report_url": ref.get("report_url", ""), "pages": {}}
+                    report_refs[rn] = {
+                        "report_url": ref.get("report_url", ""),
+                        "pages": {},
+                    }
                 page_name = ref.get("page_name")
                 measure = ref.get("measure", "Unknown")
                 visual_type = ref.get("visual_type")
                 if page_name:
                     if page_name not in report_refs[rn]["pages"]:
                         report_refs[rn]["pages"][page_name] = {
-                            "page_url": ref.get("page_url"), "measures": [], "visual_types": set()
+                            "page_url": ref.get("page_url"),
+                            "measures": [],
+                            "visual_types": set(),
                         }
                     report_refs[rn]["pages"][page_name]["measures"].append(measure)
                     if visual_type:
-                        report_refs[rn]["pages"][page_name]["visual_types"].add(visual_type)
+                        report_refs[rn]["pages"][page_name]["visual_types"].add(
+                            visual_type
+                        )
                 else:
                     if "_no_page_" not in report_refs[rn]["pages"]:
-                        report_refs[rn]["pages"]["_no_page_"] = {"page_url": None, "measures": [], "visual_types": set()}
+                        report_refs[rn]["pages"]["_no_page_"] = {
+                            "page_url": None,
+                            "measures": [],
+                            "visual_types": set(),
+                        }
                     report_refs[rn]["pages"]["_no_page_"]["measures"].append(measure)
 
             for rn, rd in report_refs.items():
@@ -2318,11 +2890,15 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
                 output.append(f"[Open Report]({rd['report_url']})\n")
                 for pn, pd in rd["pages"].items():
                     if pn == "_no_page_":
-                        output.append(f"- Measures in report: {', '.join(set(pd['measures']))}")
+                        output.append(
+                            f"- Measures in report: {', '.join(set(pd['measures']))}"
+                        )
                     else:
                         output.append(f"- **{pn}**: [Open Page]({pd['page_url']})")
                         output.append(f"  - Measures: {', '.join(set(pd['measures']))}")
                         if pd["visual_types"]:
-                            output.append(f"  - Visual types: {', '.join(pd['visual_types'])}")
+                            output.append(
+                                f"  - Visual types: {', '.join(pd['visual_types'])}"
+                            )
 
         return "\n".join(output)

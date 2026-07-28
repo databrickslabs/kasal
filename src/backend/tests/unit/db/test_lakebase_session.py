@@ -14,11 +14,13 @@ Tests cover:
 - dispose_lakebase_factory() global teardown
 - get_lakebase_session() full lifecycle (commit, rollback, GeneratorExit, close failures)
 """
+
 import asyncio
 import os
 import time
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 
 # ---------------------------------------------------------------------------
@@ -191,8 +193,12 @@ class TestGetWorkspaceClient:
         }
         mock_ws = MagicMock()
 
-        with patch.dict(os.environ, env, clear=False), \
-             patch("src.db.lakebase_session.WorkspaceClient", return_value=mock_ws) as mock_cls:
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch(
+                "src.db.lakebase_session.WorkspaceClient", return_value=mock_ws
+            ) as mock_cls,
+        ):
             result = await factory._get_workspace_client()
 
             assert result is mock_ws
@@ -224,12 +230,18 @@ class TestGetWorkspaceClient:
         assert _mod._SPN_CREDS_CACHE.get("client_id") == "cid"
 
         # 2) Now the env is stripped (concurrent _clean_environment window).
-        for v in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET", "DATABRICKS_HOST"):
+        for v in (
+            "DATABRICKS_CLIENT_ID",
+            "DATABRICKS_CLIENT_SECRET",
+            "DATABRICKS_HOST",
+        ):
             os.environ.pop(v, None)
 
         factory = LakebaseSessionFactory()
         mock_ws = MagicMock()
-        with patch("src.db.lakebase_session.WorkspaceClient", return_value=mock_ws) as mock_cls:
+        with patch(
+            "src.db.lakebase_session.WorkspaceClient", return_value=mock_ws
+        ) as mock_cls:
             result = await factory._get_workspace_client()
 
         # SPN path still taken using the CACHED creds — no PAT fallback, no ValueError.
@@ -251,8 +263,12 @@ class TestGetWorkspaceClient:
         }
         mock_ws = MagicMock()
 
-        with patch.dict(os.environ, env, clear=False), \
-             patch("src.db.lakebase_session.WorkspaceClient", return_value=mock_ws) as mock_cls:
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch(
+                "src.db.lakebase_session.WorkspaceClient", return_value=mock_ws
+            ) as mock_cls,
+        ):
             first = await factory._get_workspace_client()
             second = await factory._get_workspace_client()
 
@@ -268,12 +284,14 @@ class TestGetWorkspaceClient:
         mock_client = MagicMock()
 
         # Only CLIENT_ID set, no SECRET — should fall back to PAT
-        with patch.dict(os.environ, {"DATABRICKS_CLIENT_ID": "id"}, clear=True), \
-             patch(
-                 "src.utils.databricks_auth.get_workspace_client",
-                 new_callable=AsyncMock,
-                 return_value=mock_client,
-             ) as mock_get:
+        with (
+            patch.dict(os.environ, {"DATABRICKS_CLIENT_ID": "id"}, clear=True),
+            patch(
+                "src.utils.databricks_auth.get_workspace_client",
+                new_callable=AsyncMock,
+                return_value=mock_client,
+            ) as mock_get,
+        ):
             result = await factory._get_workspace_client()
             assert result is mock_client
             # OBO is never used — always passes user_token=None
@@ -322,7 +340,12 @@ class TestGetUsername:
         mock_client = MagicMock()
         mock_client.current_user.me.return_value = mock_user
 
-        with patch.object(factory, "_get_workspace_client", new_callable=AsyncMock, return_value=mock_client):
+        with patch.object(
+            factory,
+            "_get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=mock_client,
+        ):
             result = await factory._get_username()
             assert result == "workspace-user@example.com"
 
@@ -337,7 +360,12 @@ class TestGetUsername:
         mock_client = MagicMock()
         mock_client.current_user.me.side_effect = Exception("no user")
 
-        with patch.object(factory, "_get_workspace_client", new_callable=AsyncMock, return_value=mock_client):
+        with patch.object(
+            factory,
+            "_get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=mock_client,
+        ):
             with pytest.raises(ValueError, match="Cannot determine PG username"):
                 await factory._get_username()
 
@@ -355,7 +383,12 @@ class TestGetUsername:
         mock_client = MagicMock()
         mock_client.current_user.me.return_value = mock_user
 
-        with patch.object(factory, "_get_workspace_client", new_callable=AsyncMock, return_value=mock_client):
+        with patch.object(
+            factory,
+            "_get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=mock_client,
+        ):
             with pytest.raises(ValueError, match="Cannot determine PG username"):
                 await factory._get_username()
 
@@ -378,7 +411,12 @@ class TestRefreshToken:
         mock_client = MagicMock()
         mock_client.database.generate_database_credential.return_value = mock_cred
 
-        with patch.object(factory, "_get_workspace_client", new_callable=AsyncMock, return_value=mock_client):
+        with patch.object(
+            factory,
+            "_get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=mock_client,
+        ):
             before_time = time.time()
             result = await factory._refresh_token()
             after_time = time.time()
@@ -405,9 +443,14 @@ class TestScheduleTokenRefresh:
 
         factory = LakebaseSessionFactory()
 
-        with patch.object(factory, "_refresh_token", new_callable=AsyncMock) as mock_refresh:
+        with patch.object(
+            factory, "_refresh_token", new_callable=AsyncMock
+        ) as mock_refresh:
             # Patch sleep to immediately raise CancelledError
-            with patch("src.db.lakebase_session.asyncio.sleep", side_effect=asyncio.CancelledError):
+            with patch(
+                "src.db.lakebase_session.asyncio.sleep",
+                side_effect=asyncio.CancelledError,
+            ):
                 await factory._schedule_token_refresh()
 
             # _refresh_token should not have been called because sleep raises first
@@ -434,7 +477,9 @@ class TestScheduleTokenRefresh:
             new_callable=AsyncMock,
             side_effect=RuntimeError("network error"),
         ):
-            with patch("src.db.lakebase_session.asyncio.sleep", side_effect=controlled_sleep):
+            with patch(
+                "src.db.lakebase_session.asyncio.sleep", side_effect=controlled_sleep
+            ):
                 await factory._schedule_token_refresh()
 
         # Should have gone through the error path and retry sleep
@@ -461,12 +506,27 @@ class TestGetConnectionString:
         mock_client = MagicMock()
         mock_client.database.get_database_instance.return_value = mock_instance
 
-        with patch.object(factory, "_get_workspace_client", new_callable=AsyncMock, return_value=mock_client):
-            with patch.object(factory, "_get_username", new_callable=AsyncMock, return_value="myuser"):
-                with patch.object(factory, "_refresh_token", new_callable=AsyncMock, return_value="tok"):
+        with patch.object(
+            factory,
+            "_get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=mock_client,
+        ):
+            with patch.object(
+                factory, "_get_username", new_callable=AsyncMock, return_value="myuser"
+            ):
+                with patch.object(
+                    factory,
+                    "_refresh_token",
+                    new_callable=AsyncMock,
+                    return_value="tok",
+                ):
                     url = await factory.get_connection_string()
 
-        assert url == "postgresql+asyncpg://myuser" ":placeholder@lb-host.example.com:5432/databricks_postgres"
+        assert (
+            url == "postgresql+asyncpg://myuser"
+            ":placeholder@lb-host.example.com:5432/databricks_postgres"
+        )
 
     @pytest.mark.asyncio
     async def test_raises_when_instance_not_ready(self):
@@ -482,7 +542,12 @@ class TestGetConnectionString:
         mock_client = MagicMock()
         mock_client.database.get_database_instance.return_value = mock_instance
 
-        with patch.object(factory, "_get_workspace_client", new_callable=AsyncMock, return_value=mock_client):
+        with patch.object(
+            factory,
+            "_get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=mock_client,
+        ):
             with pytest.raises(ValueError, match="not ready"):
                 await factory.get_connection_string()
 
@@ -500,9 +565,18 @@ class TestGetConnectionString:
         mock_client = MagicMock()
         mock_client.database.get_database_instance.return_value = mock_instance
 
-        with patch.object(factory, "_get_workspace_client", new_callable=AsyncMock, return_value=mock_client):
-            with patch.object(factory, "_get_username", new_callable=AsyncMock, return_value="u"):
-                with patch.object(factory, "_refresh_token", new_callable=AsyncMock, return_value="t"):
+        with patch.object(
+            factory,
+            "_get_workspace_client",
+            new_callable=AsyncMock,
+            return_value=mock_client,
+        ):
+            with patch.object(
+                factory, "_get_username", new_callable=AsyncMock, return_value="u"
+            ):
+                with patch.object(
+                    factory, "_refresh_token", new_callable=AsyncMock, return_value="t"
+                ):
                     url = await factory.get_connection_string()
 
         assert "host.example.com" in url
@@ -541,11 +615,23 @@ class TestCreateEngine:
         mock_sf = MagicMock()
         mock_task = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
-            with patch("src.db.lakebase_session.create_async_engine", return_value=mock_engine) as mock_cae:
-                with patch("src.db.lakebase_session.async_sessionmaker", return_value=mock_sf):
+        with patch.object(
+            factory,
+            "get_connection_string",
+            new_callable=AsyncMock,
+            return_value="postgresql+asyncpg://u" ":p@h/d",
+        ):
+            with patch(
+                "src.db.lakebase_session.create_async_engine", return_value=mock_engine
+            ) as mock_cae:
+                with patch(
+                    "src.db.lakebase_session.async_sessionmaker", return_value=mock_sf
+                ):
                     with patch("src.db.lakebase_session.event") as mock_event:
-                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=mock_task):
+                        with patch(
+                            "src.db.lakebase_session.asyncio.create_task",
+                            return_value=mock_task,
+                        ):
                             await factory.create_engine()
 
         assert factory._engine is mock_engine
@@ -572,11 +658,24 @@ class TestCreateEngine:
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
-            with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
-                with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
+        with patch.object(
+            factory,
+            "get_connection_string",
+            new_callable=AsyncMock,
+            return_value="postgresql+asyncpg://u" ":p@h/d",
+        ):
+            with patch(
+                "src.db.lakebase_session.create_async_engine", return_value=new_engine
+            ):
+                with patch(
+                    "src.db.lakebase_session.async_sessionmaker",
+                    return_value=MagicMock(),
+                ):
                     with patch("src.db.lakebase_session.event"):
-                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=MagicMock()):
+                        with patch(
+                            "src.db.lakebase_session.asyncio.create_task",
+                            return_value=MagicMock(),
+                        ):
                             await factory.create_engine()
 
         old_engine.dispose.assert_awaited_once()
@@ -595,11 +694,24 @@ class TestCreateEngine:
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
-            with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
-                with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
+        with patch.object(
+            factory,
+            "get_connection_string",
+            new_callable=AsyncMock,
+            return_value="postgresql+asyncpg://u" ":p@h/d",
+        ):
+            with patch(
+                "src.db.lakebase_session.create_async_engine", return_value=new_engine
+            ):
+                with patch(
+                    "src.db.lakebase_session.async_sessionmaker",
+                    return_value=MagicMock(),
+                ):
                     with patch("src.db.lakebase_session.event"):
-                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=MagicMock()):
+                        with patch(
+                            "src.db.lakebase_session.asyncio.create_task",
+                            return_value=MagicMock(),
+                        ):
                             await factory.create_engine()
 
         old_task.cancel.assert_called_once()
@@ -617,11 +729,24 @@ class TestCreateEngine:
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
-            with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
-                with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
+        with patch.object(
+            factory,
+            "get_connection_string",
+            new_callable=AsyncMock,
+            return_value="postgresql+asyncpg://u" ":p@h/d",
+        ):
+            with patch(
+                "src.db.lakebase_session.create_async_engine", return_value=new_engine
+            ):
+                with patch(
+                    "src.db.lakebase_session.async_sessionmaker",
+                    return_value=MagicMock(),
+                ):
                     with patch("src.db.lakebase_session.event"):
-                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=MagicMock()):
+                        with patch(
+                            "src.db.lakebase_session.asyncio.create_task",
+                            return_value=MagicMock(),
+                        ):
                             await factory.create_engine()
 
         old_task.cancel.assert_not_called()
@@ -651,11 +776,21 @@ class TestCreateEngine:
         mock_engine = MagicMock()
         mock_engine.sync_engine = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
-            with patch("src.db.lakebase_session.create_async_engine", return_value=mock_engine):
+        with patch.object(
+            factory,
+            "get_connection_string",
+            new_callable=AsyncMock,
+            return_value="postgresql+asyncpg://u" ":p@h/d",
+        ):
+            with patch(
+                "src.db.lakebase_session.create_async_engine", return_value=mock_engine
+            ):
                 with patch("src.db.lakebase_session.async_sessionmaker") as mock_asm:
                     with patch("src.db.lakebase_session.event"):
-                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=MagicMock()):
+                        with patch(
+                            "src.db.lakebase_session.asyncio.create_task",
+                            return_value=MagicMock(),
+                        ):
                             await factory.create_engine()
 
         from sqlalchemy.ext.asyncio import AsyncSession as RealAsyncSession
@@ -714,7 +849,12 @@ class TestGetSession:
             factory._engine = MagicMock()
             factory._session_factory = mock_sf
 
-        with patch.object(factory, "create_engine", new_callable=AsyncMock, side_effect=fake_create_engine):
+        with patch.object(
+            factory,
+            "create_engine",
+            new_callable=AsyncMock,
+            side_effect=fake_create_engine,
+        ):
             async with factory.get_session() as session:
                 assert session is mock_session
             factory.create_engine.assert_awaited_once()
@@ -736,7 +876,12 @@ class TestGetSession:
         async def fake_create_engine():
             factory._session_factory = mock_sf
 
-        with patch.object(factory, "create_engine", new_callable=AsyncMock, side_effect=fake_create_engine):
+        with patch.object(
+            factory,
+            "create_engine",
+            new_callable=AsyncMock,
+            side_effect=fake_create_engine,
+        ):
             async with factory.get_session() as session:
                 assert session is mock_session
 
@@ -1135,20 +1280,22 @@ class TestGetLakebaseSession:
         try:
             mod._lakebase_factory = None
 
-            with patch(
-                "src.db.lakebase_session.LakebaseSessionFactory"
-            ) as MockFactory:
+            with patch("src.db.lakebase_session.LakebaseSessionFactory") as MockFactory:
                 mock_factory_instance = MagicMock()
                 mock_factory_instance.instance_name = "env-instance"
                 mock_factory_instance.user_token = None
                 mock_factory_instance.user_email = None
-                mock_factory_instance.get_session = MagicMock(return_value=mock_inner_ctx)
+                mock_factory_instance.get_session = MagicMock(
+                    return_value=mock_inner_ctx
+                )
                 MockFactory.return_value = mock_factory_instance
 
                 async with mod.get_lakebase_session() as session:
                     assert session is mock_session
 
-                MockFactory.assert_called_once_with("env-instance", user_email=None, group_id=None)
+                MockFactory.assert_called_once_with(
+                    "env-instance", user_email=None, group_id=None
+                )
         finally:
             mod._lakebase_factory = original
 
@@ -1169,19 +1316,23 @@ class TestGetLakebaseSession:
         try:
             mod._lakebase_factory = old_factory
 
-            with patch(
-                "src.db.lakebase_session.LakebaseSessionFactory"
-            ) as MockFactory:
+            with patch("src.db.lakebase_session.LakebaseSessionFactory") as MockFactory:
                 mock_factory_instance = MagicMock()
                 mock_factory_instance.instance_name = "new-instance"
                 mock_factory_instance.user_email = None
-                mock_factory_instance.get_session = MagicMock(return_value=mock_inner_ctx)
+                mock_factory_instance.get_session = MagicMock(
+                    return_value=mock_inner_ctx
+                )
                 MockFactory.return_value = mock_factory_instance
 
-                async with mod.get_lakebase_session(instance_name="new-instance") as session:
+                async with mod.get_lakebase_session(
+                    instance_name="new-instance"
+                ) as session:
                     pass
 
-                MockFactory.assert_called_once_with("new-instance", user_email=None, group_id=None)
+                MockFactory.assert_called_once_with(
+                    "new-instance", user_email=None, group_id=None
+                )
         finally:
             mod._lakebase_factory = original
 
@@ -1234,7 +1385,9 @@ class TestGetLakebaseSession:
         try:
             mod._lakebase_factory = mock_factory
 
-            async with mod.get_lakebase_session(user_email="new@example.com") as session:
+            async with mod.get_lakebase_session(
+                user_email="new@example.com"
+            ) as session:
                 pass
 
             mock_factory.create_engine.assert_awaited_once()
@@ -1286,20 +1439,22 @@ class TestGetLakebaseSession:
         try:
             mod._lakebase_factory = None
 
-            with patch(
-                "src.db.lakebase_session.LakebaseSessionFactory"
-            ) as MockFactory:
+            with patch("src.db.lakebase_session.LakebaseSessionFactory") as MockFactory:
                 mock_factory_instance = MagicMock()
                 mock_factory_instance.instance_name = "custom-from-env"
                 mock_factory_instance.user_token = None
                 mock_factory_instance.user_email = None
-                mock_factory_instance.get_session = MagicMock(return_value=mock_inner_ctx)
+                mock_factory_instance.get_session = MagicMock(
+                    return_value=mock_inner_ctx
+                )
                 MockFactory.return_value = mock_factory_instance
 
                 async with mod.get_lakebase_session() as session:
                     pass
 
-                MockFactory.assert_called_once_with("custom-from-env", user_email=None, group_id=None)
+                MockFactory.assert_called_once_with(
+                    "custom-from-env", user_email=None, group_id=None
+                )
         finally:
             mod._lakebase_factory = original
 
@@ -1319,20 +1474,22 @@ class TestGetLakebaseSession:
         try:
             mod._lakebase_factory = None
 
-            with patch(
-                "src.db.lakebase_session.LakebaseSessionFactory"
-            ) as MockFactory:
+            with patch("src.db.lakebase_session.LakebaseSessionFactory") as MockFactory:
                 mock_factory_instance = MagicMock()
                 mock_factory_instance.instance_name = "kasal-lakebase"
                 mock_factory_instance.user_token = None
                 mock_factory_instance.user_email = None
-                mock_factory_instance.get_session = MagicMock(return_value=mock_inner_ctx)
+                mock_factory_instance.get_session = MagicMock(
+                    return_value=mock_inner_ctx
+                )
                 MockFactory.return_value = mock_factory_instance
 
                 async with mod.get_lakebase_session() as session:
                     pass
 
-                MockFactory.assert_called_once_with("kasal-lakebase", user_email=None, group_id=None)
+                MockFactory.assert_called_once_with(
+                    "kasal-lakebase", user_email=None, group_id=None
+                )
         finally:
             mod._lakebase_factory = original
 
@@ -1356,9 +1513,7 @@ class TestGetLakebaseSession:
         try:
             mod._lakebase_factory = mock_factory
 
-            with patch(
-                "src.db.lakebase_session.LakebaseSessionFactory"
-            ) as MockFactory:
+            with patch("src.db.lakebase_session.LakebaseSessionFactory") as MockFactory:
                 async with mod.get_lakebase_session() as session:
                     pass
 
@@ -1450,7 +1605,9 @@ class TestMissingCoverage:
                 raise asyncio.CancelledError
             # first sleep returns normally
 
-        with patch.object(factory, "_refresh_token", new_callable=AsyncMock) as mock_refresh:
+        with patch.object(
+            factory, "_refresh_token", new_callable=AsyncMock
+        ) as mock_refresh:
             with patch("src.db.lakebase_session.asyncio.sleep", side_effect=fake_sleep):
                 await factory._schedule_token_refresh()
 
@@ -1471,18 +1628,33 @@ class TestMissingCoverage:
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
-            with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
-                with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
+        with patch.object(
+            factory,
+            "get_connection_string",
+            new_callable=AsyncMock,
+            return_value="postgresql+asyncpg://u" ":p@h/d",
+        ):
+            with patch(
+                "src.db.lakebase_session.create_async_engine", return_value=new_engine
+            ):
+                with patch(
+                    "src.db.lakebase_session.async_sessionmaker",
+                    return_value=MagicMock(),
+                ):
                     with patch("src.db.lakebase_session.event"):
-                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=MagicMock()):
+                        with patch(
+                            "src.db.lakebase_session.asyncio.create_task",
+                            return_value=MagicMock(),
+                        ):
                             await factory.create_engine()
 
         old_engine.dispose.assert_awaited_once()
         assert factory._engine is new_engine
 
     @pytest.mark.asyncio
-    async def test_create_engine_uses_nullpool_and_starts_refresh_task(self, monkeypatch):
+    async def test_create_engine_uses_nullpool_and_starts_refresh_task(
+        self, monkeypatch
+    ):
         """NullPool branch still starts the background refresh task.
 
         Regression: deployed apps set USE_NULLPOOL=true and hand the raw
@@ -1492,8 +1664,9 @@ class TestMissingCoverage:
         surfacing as "password authentication failed" / "Failed to create
         execution record".
         """
-        from src.db.lakebase_session import LakebaseSessionFactory
         from sqlalchemy.pool import NullPool
+
+        from src.db.lakebase_session import LakebaseSessionFactory
 
         monkeypatch.setenv("USE_NULLPOOL", "true")
         factory = LakebaseSessionFactory()
@@ -1501,11 +1674,24 @@ class TestMissingCoverage:
         new_engine.sync_engine = MagicMock()
         mock_task = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
-            with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine) as mock_cae:
-                with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
+        with patch.object(
+            factory,
+            "get_connection_string",
+            new_callable=AsyncMock,
+            return_value="postgresql+asyncpg://u" ":p@h/d",
+        ):
+            with patch(
+                "src.db.lakebase_session.create_async_engine", return_value=new_engine
+            ) as mock_cae:
+                with patch(
+                    "src.db.lakebase_session.async_sessionmaker",
+                    return_value=MagicMock(),
+                ):
                     with patch("src.db.lakebase_session.event"):
-                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=mock_task) as mock_create_task:
+                        with patch(
+                            "src.db.lakebase_session.asyncio.create_task",
+                            return_value=mock_task,
+                        ) as mock_create_task:
                             await factory.create_engine()
 
         # NullPool path: poolclass=NullPool, no pool_size, refresh task STARTED
@@ -1529,11 +1715,24 @@ class TestMissingCoverage:
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
-            with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
-                with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
+        with patch.object(
+            factory,
+            "get_connection_string",
+            new_callable=AsyncMock,
+            return_value="postgresql+asyncpg://u" ":p@h/d",
+        ):
+            with patch(
+                "src.db.lakebase_session.create_async_engine", return_value=new_engine
+            ):
+                with patch(
+                    "src.db.lakebase_session.async_sessionmaker",
+                    return_value=MagicMock(),
+                ):
                     with patch("src.db.lakebase_session.event"):
-                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=MagicMock()):
+                        with patch(
+                            "src.db.lakebase_session.asyncio.create_task",
+                            return_value=MagicMock(),
+                        ):
                             await factory.create_engine()
 
         assert factory._engine is new_engine
@@ -1554,13 +1753,30 @@ class TestMissingCoverage:
             def decorator(fn):
                 captured["fn"] = fn
                 return fn
+
             return decorator
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
-            with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
-                with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
-                    with patch("src.db.lakebase_session.event.listens_for", side_effect=fake_listens_for):
-                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=MagicMock()):
+        with patch.object(
+            factory,
+            "get_connection_string",
+            new_callable=AsyncMock,
+            return_value="postgresql+asyncpg://u" ":p@h/d",
+        ):
+            with patch(
+                "src.db.lakebase_session.create_async_engine", return_value=new_engine
+            ):
+                with patch(
+                    "src.db.lakebase_session.async_sessionmaker",
+                    return_value=MagicMock(),
+                ):
+                    with patch(
+                        "src.db.lakebase_session.event.listens_for",
+                        side_effect=fake_listens_for,
+                    ):
+                        with patch(
+                            "src.db.lakebase_session.asyncio.create_task",
+                            return_value=MagicMock(),
+                        ):
                             await factory.create_engine()
 
         cparams = {}
@@ -1576,12 +1792,28 @@ class TestMissingCoverage:
         new_engine = MagicMock()
         new_engine.sync_engine = MagicMock()
 
-        with patch.object(factory, "get_connection_string", new_callable=AsyncMock, return_value="postgresql+asyncpg://u" ":p@h/d"):
-            with patch("src.db.lakebase_session.create_async_engine", return_value=new_engine):
-                with patch("src.db.lakebase_session.async_sessionmaker", return_value=MagicMock()):
+        with patch.object(
+            factory,
+            "get_connection_string",
+            new_callable=AsyncMock,
+            return_value="postgresql+asyncpg://u" ":p@h/d",
+        ):
+            with patch(
+                "src.db.lakebase_session.create_async_engine", return_value=new_engine
+            ):
+                with patch(
+                    "src.db.lakebase_session.async_sessionmaker",
+                    return_value=MagicMock(),
+                ):
                     with patch("src.db.lakebase_session.event"):
-                        with patch("src.db.lakebase_session.asyncio.create_task", return_value=MagicMock()):
-                            with patch("src.db.lakebase_session.asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
+                        with patch(
+                            "src.db.lakebase_session.asyncio.create_task",
+                            return_value=MagicMock(),
+                        ):
+                            with patch(
+                                "src.db.lakebase_session.asyncio.get_running_loop",
+                                side_effect=RuntimeError("no loop"),
+                            ):
                                 await factory.create_engine()
 
         assert factory._engine_loop_id is None
@@ -1594,7 +1826,10 @@ class TestMissingCoverage:
         factory._engine = MagicMock()
         factory._engine_loop_id = 12345  # not None so we reach the loop check
 
-        with patch("src.db.lakebase_session.asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
+        with patch(
+            "src.db.lakebase_session.asyncio.get_running_loop",
+            side_effect=RuntimeError("no loop"),
+        ):
             assert factory._is_engine_loop_stale() is True
 
     @pytest.mark.asyncio
@@ -1663,10 +1898,14 @@ class TestMissingCoverage:
             mock_factory_instance.get_session = MagicMock(return_value=mock_inner_ctx)
             MockFactory.return_value = mock_factory_instance
 
-            async with mod.get_lakebase_session(instance_name="crew-inst", group_id="g1") as session:
+            async with mod.get_lakebase_session(
+                instance_name="crew-inst", group_id="g1"
+            ) as session:
                 assert session is mock_session
 
-            MockFactory.assert_called_once_with("crew-inst", user_email=None, group_id="g1")
+            MockFactory.assert_called_once_with(
+                "crew-inst", user_email=None, group_id="g1"
+            )
             # The thread-local factory was stored
             assert mod._thread_local.factory is mock_factory_instance
 
@@ -1724,7 +1963,9 @@ class TestMissingCoverage:
             MockFactory.return_value = mock_factory_instance
 
             with pytest.raises(ValueError, match="boom"):
-                async with mod.get_lakebase_session(instance_name="crew-inst") as session:
+                async with mod.get_lakebase_session(
+                    instance_name="crew-inst"
+                ) as session:
                     raise ValueError("boom")
 
         mock_session.rollback.assert_awaited_once()
@@ -1796,6 +2037,7 @@ class TestLazyTokenRefresh:
 
     def _factory_with_session(self):
         from src.db.lakebase_session import LakebaseSessionFactory
+
         factory = LakebaseSessionFactory()
         mock_sf = MagicMock()
         mock_ctx = AsyncMock()
@@ -1812,7 +2054,9 @@ class TestLazyTokenRefresh:
         factory._engine_loop_id = id(asyncio.get_running_loop())
         factory._refresh_task = None  # NullPool mode: no background refresher
         factory._token_holder["refreshed_at"] = 0.0  # ancient
-        with patch.object(factory, "_refresh_token", new_callable=AsyncMock) as mock_refresh:
+        with patch.object(
+            factory, "_refresh_token", new_callable=AsyncMock
+        ) as mock_refresh:
             async with factory.get_session():
                 pass
         mock_refresh.assert_awaited_once()
@@ -1820,11 +2064,14 @@ class TestLazyTokenRefresh:
     @pytest.mark.asyncio
     async def test_fresh_token_skips_refresh(self):
         import time as _time
+
         factory = self._factory_with_session()
         factory._engine_loop_id = id(asyncio.get_running_loop())
         factory._refresh_task = None
         factory._token_holder["refreshed_at"] = _time.time()  # just refreshed
-        with patch.object(factory, "_refresh_token", new_callable=AsyncMock) as mock_refresh:
+        with patch.object(
+            factory, "_refresh_token", new_callable=AsyncMock
+        ) as mock_refresh:
             async with factory.get_session():
                 pass
         mock_refresh.assert_not_awaited()
@@ -1837,7 +2084,9 @@ class TestLazyTokenRefresh:
         factory._engine_loop_id = id(asyncio.get_running_loop())
         factory._refresh_task = MagicMock()  # task exists but token aged out anyway
         factory._token_holder["refreshed_at"] = 0.0
-        with patch.object(factory, "_refresh_token", new_callable=AsyncMock) as mock_refresh:
+        with patch.object(
+            factory, "_refresh_token", new_callable=AsyncMock
+        ) as mock_refresh:
             async with factory.get_session():
                 pass
         mock_refresh.assert_awaited_once()
@@ -1845,11 +2094,14 @@ class TestLazyTokenRefresh:
     @pytest.mark.asyncio
     async def test_fresh_token_with_background_task_skips_refresh(self):
         import time as _time
+
         factory = self._factory_with_session()
         factory._engine_loop_id = id(asyncio.get_running_loop())
         factory._refresh_task = MagicMock()
         factory._token_holder["refreshed_at"] = _time.time()
-        with patch.object(factory, "_refresh_token", new_callable=AsyncMock) as mock_refresh:
+        with patch.object(
+            factory, "_refresh_token", new_callable=AsyncMock
+        ) as mock_refresh:
             async with factory.get_session():
                 pass
         mock_refresh.assert_not_awaited()
@@ -1860,16 +2112,27 @@ class TestLazyTokenRefresh:
         factory._engine_loop_id = id(asyncio.get_running_loop())
         factory._refresh_task = None
         factory._token_holder["refreshed_at"] = 0.0
-        with patch.object(factory, "_refresh_token", new_callable=AsyncMock,
-                          side_effect=Exception("control plane down")):
+        with patch.object(
+            factory,
+            "_refresh_token",
+            new_callable=AsyncMock,
+            side_effect=Exception("control plane down"),
+        ):
             async with factory.get_session() as session:
                 assert session is not None  # old token may still be valid; proceed
 
     def test_is_token_stale_boundary(self):
         import time as _time
-        from src.db.lakebase_session import LakebaseSessionFactory, TOKEN_REFRESH_INTERVAL_SECONDS
+
+        from src.db.lakebase_session import (
+            TOKEN_REFRESH_INTERVAL_SECONDS,
+            LakebaseSessionFactory,
+        )
+
         factory = LakebaseSessionFactory()
-        factory._token_holder["refreshed_at"] = _time.time() - TOKEN_REFRESH_INTERVAL_SECONDS - 1
+        factory._token_holder["refreshed_at"] = (
+            _time.time() - TOKEN_REFRESH_INTERVAL_SECONDS - 1
+        )
         assert factory._is_token_stale() is True
         factory._token_holder["refreshed_at"] = _time.time()
         assert factory._is_token_stale() is False

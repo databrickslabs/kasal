@@ -13,12 +13,13 @@ Strategy:
 
 import base64
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.services.tools.powerbi_semantic_model_fetcher_tool import (
-    PowerBISemanticModelFetcherTool,
     PowerBISemanticModelFetcherSchema,
+    PowerBISemanticModelFetcherTool,
     _run_async_in_sync_context,
 )
 from src.services.tools.tool_session_provider import ToolSessionProvider
@@ -40,7 +41,12 @@ MOCK_CACHED_METADATA = {
         {"name": "YoY Growth", "expression": "...", "table": "Sales"},
     ],
     "relationships": [
-        {"from_table": "Sales", "from_column": "DateKey", "to_table": "Date", "to_column": "DateKey"}
+        {
+            "from_table": "Sales",
+            "from_column": "DateKey",
+            "to_table": "Date",
+            "to_column": "DateKey",
+        }
     ],
     "schema": {
         "tables": [
@@ -75,15 +81,18 @@ def _mock_cache_service_ctx(mock_service):
 # Module-level helper
 # ===========================================================================
 
+
 class TestRunAsyncInSyncContextFetcher:
     def test_simple_return(self):
         async def coro():
             return "value"
+
         assert _run_async_in_sync_context(coro()) == "value"
 
     def test_exception_propagated(self):
         async def coro():
             raise RuntimeError("oops")
+
         with pytest.raises(RuntimeError, match="oops"):
             _run_async_in_sync_context(coro())
 
@@ -91,6 +100,7 @@ class TestRunAsyncInSyncContextFetcher:
 # ===========================================================================
 # Schema tests
 # ===========================================================================
+
 
 class TestPowerBISemanticModelFetcherSchema:
     def test_all_fields_optional(self):
@@ -101,11 +111,20 @@ class TestPowerBISemanticModelFetcherSchema:
         # Connection/auth/LLM plumbing is injected via tool_configs in
         # __init__ and must never be LLM-fillable schema fields.
         forbidden = {
-            "workspace_id", "dataset_id",
-            "tenant_id", "client_id", "client_secret",
-            "username", "password", "auth_method",
-            "access_token", "llm_token", "api_key", "token",
-            "llm_workspace_url", "llm_model",
+            "workspace_id",
+            "dataset_id",
+            "tenant_id",
+            "client_id",
+            "client_secret",
+            "username",
+            "password",
+            "auth_method",
+            "access_token",
+            "llm_token",
+            "api_key",
+            "token",
+            "llm_workspace_url",
+            "llm_model",
         }
         assert not forbidden & set(PowerBISemanticModelFetcherSchema.model_fields)
 
@@ -129,6 +148,7 @@ class TestPowerBISemanticModelFetcherSchema:
 # ===========================================================================
 # Init tests
 # ===========================================================================
+
 
 class TestPowerBISemanticModelFetcherToolInit:
     def test_tool_name(self):
@@ -177,6 +197,7 @@ class TestPowerBISemanticModelFetcherToolInit:
 # _is_placeholder_value tests
 # ===========================================================================
 
+
 class TestIsPlaceholderValueFetcher:
     def setup_method(self):
         self.tool = PowerBISemanticModelFetcherTool()
@@ -188,7 +209,10 @@ class TestIsPlaceholderValueFetcher:
         assert self.tool._is_placeholder_value(42) is False
 
     def test_all_digit_guid(self):
-        assert self.tool._is_placeholder_value("12345678-1234-1234-1234-123456789012") is True
+        assert (
+            self.tool._is_placeholder_value("12345678-1234-1234-1234-123456789012")
+            is True
+        )
 
     def test_your_here(self):
         assert self.tool._is_placeholder_value("your_value_here") is True
@@ -216,6 +240,7 @@ class TestIsPlaceholderValueFetcher:
 # _run validation tests
 # ===========================================================================
 
+
 class TestFetcherRunValidation:
     def test_missing_workspace_id_returns_error(self):
         tool = PowerBISemanticModelFetcherTool(
@@ -232,33 +257,37 @@ class TestFetcherRunValidation:
         assert "error" in result.lower() or "dataset_id" in result.lower()
 
     def test_missing_auth_returns_error(self):
-        tool = PowerBISemanticModelFetcherTool(
-            workspace_id=WS_ID, dataset_id=DS_ID
-        )
+        tool = PowerBISemanticModelFetcherTool(workspace_id=WS_ID, dataset_id=DS_ID)
         result = tool._run()
         assert "authentication" in result.lower() or "error" in result.lower()
 
     def test_sp_auth_accepted(self):
         tool = PowerBISemanticModelFetcherTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
-            tenant_id=TENANT_ID, client_id=CLIENT_ID, client_secret=CLIENT_SECRET,
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            tenant_id=TENANT_ID,
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
         )
         with patch(
             "src.services.tools.powerbi_semantic_model_fetcher_tool._run_async_in_sync_context",
-            return_value='{"model": "context"}'
+            return_value='{"model": "context"}',
         ):
             result = tool._run()
         assert result == '{"model": "context"}'
 
     def test_sa_auth_accepted(self):
         tool = PowerBISemanticModelFetcherTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
-            tenant_id=TENANT_ID, client_id=CLIENT_ID,
-            username="svc@example.com", password="pass",
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            tenant_id=TENANT_ID,
+            client_id=CLIENT_ID,
+            username="svc@example.com",
+            password="pass",
         )
         with patch(
             "src.services.tools.powerbi_semantic_model_fetcher_tool._run_async_in_sync_context",
-            return_value='{"model": "sa_context"}'
+            return_value='{"model": "sa_context"}',
         ):
             result = tool._run()
         assert result == '{"model": "sa_context"}'
@@ -267,7 +296,7 @@ class TestFetcherRunValidation:
         tool = _make_tool()
         with patch(
             "src.services.tools.powerbi_semantic_model_fetcher_tool._run_async_in_sync_context",
-            return_value='{"model": "oauth_context"}'
+            return_value='{"model": "oauth_context"}',
         ):
             result = tool._run()
         assert result == '{"model": "oauth_context"}'
@@ -276,7 +305,7 @@ class TestFetcherRunValidation:
         tool = _make_tool()
         with patch(
             "src.services.tools.powerbi_semantic_model_fetcher_tool._run_async_in_sync_context",
-            return_value="ok"
+            return_value="ok",
         ):
             result = tool._run(workspace_id="your_workspace_here")
         assert result == "ok"
@@ -285,7 +314,7 @@ class TestFetcherRunValidation:
         tool = _make_tool()
         with patch(
             "src.services.tools.powerbi_semantic_model_fetcher_tool._run_async_in_sync_context",
-            side_effect=Exception("network failure")
+            side_effect=Exception("network failure"),
         ):
             result = tool._run()
         assert "error" in result.lower() or "network failure" in result.lower()
@@ -295,10 +324,12 @@ class TestFetcherRunValidation:
 # Config merging tests
 # ===========================================================================
 
+
 class TestFetcherConfigMerging:
     def test_default_config_takes_precedence_for_auth(self):
         tool = PowerBISemanticModelFetcherTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
             access_token=ACCESS_TOKEN,
         )
         assert tool._default_config["workspace_id"] == WS_ID
@@ -319,6 +350,7 @@ class TestFetcherConfigMerging:
 # ===========================================================================
 # _parse_tmdl_for_measures_and_tables tests (shared with analysis tool)
 # ===========================================================================
+
 
 class TestFetcherParseTmdl:
     """The fetcher also has _parse_tmdl_for_measures_and_tables (called inside pipeline)."""
@@ -342,8 +374,10 @@ class TestFetcherParseTmdl:
 
     def test_instantiation_with_report_id(self):
         tool = PowerBISemanticModelFetcherTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
-            report_id="rpt-abc", access_token=ACCESS_TOKEN,
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            report_id="rpt-abc",
+            access_token=ACCESS_TOKEN,
         )
         assert tool._default_config["report_id"] == "rpt-abc"
 
@@ -351,6 +385,7 @@ class TestFetcherParseTmdl:
 # ===========================================================================
 # Cache interaction tests
 # ===========================================================================
+
 
 class TestFetcherCacheInteraction:
     def test_cache_hit_returns_cached_data(self):
@@ -361,10 +396,16 @@ class TestFetcherCacheInteraction:
 
         tool = _make_tool()
         # Mock the token acquisition too
-        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch(
-            "src.services.tools.powerbi_semantic_model_fetcher_tool._run_async_in_sync_context",
-            return_value=json.dumps({"measures": [{"name": "Total Revenue"}]})
+        with (
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool._run_async_in_sync_context",
+                return_value=json.dumps({"measures": [{"name": "Total Revenue"}]}),
+            ),
         ):
             result = tool._run()
         assert isinstance(result, str)
@@ -372,12 +413,16 @@ class TestFetcherCacheInteraction:
 
     def test_db_error_returns_error_string(self):
         mock_service = MagicMock()
-        mock_service.get_cached_metadata = AsyncMock(side_effect=Exception("DB connection failed"))
+        mock_service.get_cached_metadata = AsyncMock(
+            side_effect=Exception("DB connection failed")
+        )
         mock_service.save_metadata = AsyncMock(return_value=None)
         mock_service.build_metadata_dict = MagicMock(return_value={})
 
         tool = _make_tool()
-        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
+        with patch.object(
+            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)
+        ):
             result = tool._run()
         assert isinstance(result, str)
         assert len(result) > 0
@@ -386,6 +431,7 @@ class TestFetcherCacheInteraction:
 # ===========================================================================
 # Integration: _run pipeline output structure tests
 # ===========================================================================
+
 
 class TestFetcherOutputStructure:
     def test_output_is_string(self):
@@ -400,12 +446,15 @@ class TestFetcherOutputStructure:
 
     def test_with_sp_auth_output_is_string(self):
         tool = PowerBISemanticModelFetcherTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
-            tenant_id=TENANT_ID, client_id=CLIENT_ID, client_secret=CLIENT_SECRET,
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            tenant_id=TENANT_ID,
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
         )
         with patch(
             "src.services.tools.powerbi_semantic_model_fetcher_tool._run_async_in_sync_context",
-            return_value='{"status": "ok", "measures": [], "tables": []}'
+            return_value='{"status": "ok", "measures": [], "tables": []}',
         ):
             result = tool._run()
         assert isinstance(result, str)
@@ -415,7 +464,7 @@ class TestFetcherOutputStructure:
         json_result = json.dumps({"measures": [], "tables": [], "workspace_id": WS_ID})
         with patch(
             "src.services.tools.powerbi_semantic_model_fetcher_tool._run_async_in_sync_context",
-            return_value=json_result
+            return_value=json_result,
         ):
             result = tool._run()
         assert result == json_result
@@ -446,7 +495,9 @@ class TestFetcherPipelineAsync:
             "access_token": ACCESS_TOKEN,
             "output_format": "json",
         }
-        with patch.object(self.tool, "_get_access_token", side_effect=Exception("Auth failed")):
+        with patch.object(
+            self.tool, "_get_access_token", side_effect=Exception("Auth failed")
+        ):
             result = self._run(self.tool._execute_fetcher_pipeline(config))
         data = json.loads(result)
         assert "error" in data
@@ -463,8 +514,14 @@ class TestFetcherPipelineAsync:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(return_value=None)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+        ):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -482,10 +539,11 @@ class TestFetcherPipelineAsync:
         }
 
         import base64 as _b64
+
         tmdl_content = "table Sales\n\tmeasure 'Revenue' = SUM(Sales[Amount])\n"
         tmdl_part = {
             "path": "definition/tables/Sales.tmdl",
-            "payload": _b64.b64encode(tmdl_content.encode()).decode()
+            "payload": _b64.b64encode(tmdl_content.encode()).decode(),
         }
 
         mock_service = MagicMock()
@@ -493,12 +551,20 @@ class TestFetcherPipelineAsync:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(return_value=None)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[tmdl_part]), \
-             patch.object(self.tool, "_fetch_relationships", return_value=[]), \
-             patch.object(self.tool, "_enrich_model_context_with_metadata", return_value={}), \
-             patch.object(self.tool, "_fetch_sample_column_values", return_value={}):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[tmdl_part]),
+            patch.object(self.tool, "_fetch_relationships", return_value=[]),
+            patch.object(
+                self.tool, "_enrich_model_context_with_metadata", return_value={}
+            ),
+            patch.object(self.tool, "_fetch_sample_column_values", return_value={}),
+        ):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -516,8 +582,14 @@ class TestFetcherPipelineAsync:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(return_value=None)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+        ):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -532,9 +604,10 @@ class TestFetcherParseTmdlMeasuresAndTables:
 
     def _make_part(self, table_name: str, content: str) -> dict:
         import base64 as _b64
+
         return {
             "path": f"definition/tables/{table_name}.tmdl",
-            "payload": _b64.b64encode(content.encode()).decode()
+            "payload": _b64.b64encode(content.encode()).decode(),
         }
 
     def test_fetcher_has_parse_tmdl_method(self):
@@ -579,10 +652,10 @@ class TestFetcherParseTmdlMeasuresAndTables:
 
 import asyncio
 
-
 # ===========================================================================
 # _merge_slicer_defaults_into_filters tests
 # ===========================================================================
+
 
 class TestMergeSlicerDefaultsIntoFilters:
     """Tests for _merge_slicer_defaults_into_filters."""
@@ -641,6 +714,7 @@ class TestMergeSlicerDefaultsIntoFilters:
 # _format_as_markdown tests
 # ===========================================================================
 
+
 class TestFormatAsMarkdown:
     """Tests for _format_as_markdown."""
 
@@ -682,11 +756,20 @@ class TestFormatAsMarkdown:
 
     def test_measures_shown(self):
         output = self._make_output(
-            measures=[{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            measures=[
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             summary={
-                "measure_count": 1, "table_count": 0, "relationship_count": 0,
-                "filter_count": 0, "slicer_count": 0
-            }
+                "measure_count": 1,
+                "table_count": 0,
+                "relationship_count": 0,
+                "filter_count": 0,
+                "slicer_count": 0,
+            },
         )
         result = self.tool._format_as_markdown(output)
         assert "Revenue" in result
@@ -696,9 +779,12 @@ class TestFormatAsMarkdown:
         output = self._make_output(
             tables=[{"name": "Sales", "columns": ["Amount", "Region"]}],
             summary={
-                "measure_count": 0, "table_count": 1, "relationship_count": 0,
-                "filter_count": 0, "slicer_count": 0
-            }
+                "measure_count": 0,
+                "table_count": 1,
+                "relationship_count": 0,
+                "filter_count": 0,
+                "slicer_count": 0,
+            },
         )
         result = self.tool._format_as_markdown(output)
         assert "Sales" in result
@@ -708,9 +794,12 @@ class TestFormatAsMarkdown:
         output = self._make_output(
             default_filters={"Sales[Region]": "North"},
             summary={
-                "measure_count": 0, "table_count": 0, "relationship_count": 0,
-                "filter_count": 1, "slicer_count": 0
-            }
+                "measure_count": 0,
+                "table_count": 0,
+                "relationship_count": 0,
+                "filter_count": 1,
+                "slicer_count": 0,
+            },
         )
         result = self.tool._format_as_markdown(output)
         assert "Sales[Region]" in result
@@ -718,11 +807,21 @@ class TestFormatAsMarkdown:
 
     def test_slicers_shown(self):
         output = self._make_output(
-            slicers=[{"title": "BU Slicer", "page_name": "Overview", "table": "Sales", "column": "BU"}],
+            slicers=[
+                {
+                    "title": "BU Slicer",
+                    "page_name": "Overview",
+                    "table": "Sales",
+                    "column": "BU",
+                }
+            ],
             summary={
-                "measure_count": 0, "table_count": 0, "relationship_count": 0,
-                "filter_count": 0, "slicer_count": 1
-            }
+                "measure_count": 0,
+                "table_count": 0,
+                "relationship_count": 0,
+                "filter_count": 0,
+                "slicer_count": 1,
+            },
         )
         result = self.tool._format_as_markdown(output)
         assert "BU Slicer" in result
@@ -738,6 +837,7 @@ class TestFormatAsMarkdown:
 # ===========================================================================
 # _is_parameter_table tests
 # ===========================================================================
+
 
 class TestIsParameterTable:
     """Tests for _is_parameter_table."""
@@ -763,6 +863,7 @@ class TestIsParameterTable:
 # ===========================================================================
 # _is_parameter_filter tests
 # ===========================================================================
+
 
 class TestIsParameterFilter:
     """Tests for _is_parameter_filter."""
@@ -798,10 +899,10 @@ class TestIsParameterFilter:
             "expression": {
                 "Column": {
                     "Expression": {"SourceRef": {"Entity": "Sales"}},
-                    "Property": "Region"
+                    "Property": "Region",
                 }
             },
-            "type": "Categorical"
+            "type": "Categorical",
         }
         result = self.tool._is_parameter_filter(filter_def)
         assert result == ""
@@ -810,6 +911,7 @@ class TestIsParameterFilter:
 # ===========================================================================
 # _validate_filter_datatype tests
 # ===========================================================================
+
 
 class TestValidateFilterDatatype:
     """Tests for _validate_filter_datatype."""
@@ -854,6 +956,7 @@ class TestValidateFilterDatatype:
 # _extract_filter_from_definition tests (fetcher version)
 # ===========================================================================
 
+
 class TestFetcherExtractFilterFromDefinition:
     """Tests for _extract_filter_from_definition on the fetcher tool."""
 
@@ -870,12 +973,18 @@ class TestFetcherExtractFilterFromDefinition:
             "expression": {
                 "Column": {
                     "Expression": {"SourceRef": {"Entity": "Sales"}},
-                    "Property": "Region"
+                    "Property": "Region",
                 }
             },
             "filter": {
-                "Where": [{"Condition": {"In": {"Values": [[{"Literal": {"Value": "'North'"}}]]}}}]
-            }
+                "Where": [
+                    {
+                        "Condition": {
+                            "In": {"Values": [[{"Literal": {"Value": "'North'"}}]]}
+                        }
+                    }
+                ]
+            },
         }
         name, desc = self.tool._extract_filter_from_definition(filter_def)
         assert name == "Sales[Region]"
@@ -884,12 +993,9 @@ class TestFetcherExtractFilterFromDefinition:
     def test_missing_table_returns_none(self):
         filter_def = {
             "expression": {
-                "Column": {
-                    "Expression": {"SourceRef": {}},
-                    "Property": "Region"
-                }
+                "Column": {"Expression": {"SourceRef": {}}, "Property": "Region"}
             },
-            "filter": {"Where": []}
+            "filter": {"Where": []},
         }
         name, desc = self.tool._extract_filter_from_definition(filter_def)
         assert name is None
@@ -899,10 +1005,10 @@ class TestFetcherExtractFilterFromDefinition:
             "expression": {
                 "Column": {
                     "Expression": {"SourceRef": {"Entity": "Sales"}},
-                    "Property": "Region"
+                    "Property": "Region",
                 }
             },
-            "filter": {"Where": []}
+            "filter": {"Where": []},
         }
         name, desc = self.tool._extract_filter_from_definition(filter_def)
         assert name == "Sales[Region]"
@@ -912,6 +1018,7 @@ class TestFetcherExtractFilterFromDefinition:
 # ===========================================================================
 # _parse_filter_condition tests (fetcher version)
 # ===========================================================================
+
 
 class TestFetcherParseFilterCondition:
     """Tests for _parse_filter_condition on the fetcher tool."""
@@ -927,11 +1034,7 @@ class TestFetcherParseFilterCondition:
     def test_not_null_condition(self):
         condition = {
             "Not": {
-                "Expression": {
-                    "In": {
-                        "Values": [[{"Literal": {"Value": "null"}}]]
-                    }
-                }
+                "Expression": {"In": {"Values": [[{"Literal": {"Value": "null"}}]]}}
             }
         }
         result = self.tool._parse_filter_condition(condition)
@@ -944,7 +1047,7 @@ class TestFetcherParseFilterCondition:
                     "In": {
                         "Values": [
                             [{"Literal": {"Value": "'North'"}}],
-                            [{"Literal": {"Value": "'South'"}}]
+                            [{"Literal": {"Value": "'South'"}}],
                         ]
                     }
                 }
@@ -957,11 +1060,7 @@ class TestFetcherParseFilterCondition:
     def test_not_starts_with(self):
         condition = {
             "Not": {
-                "Expression": {
-                    "StartsWith": {
-                        "Right": {"Literal": {"Value": "'7'"}}
-                    }
-                }
+                "Expression": {"StartsWith": {"Right": {"Literal": {"Value": "'7'"}}}}
             }
         }
         result = self.tool._parse_filter_condition(condition)
@@ -969,11 +1068,7 @@ class TestFetcherParseFilterCondition:
         assert "7" in result
 
     def test_in_single_value_returns_equals(self):
-        condition = {
-            "In": {
-                "Values": [[{"Literal": {"Value": "'Italy'"}}]]
-            }
-        }
+        condition = {"In": {"Values": [[{"Literal": {"Value": "'Italy'"}}]]}}
         result = self.tool._parse_filter_condition(condition)
         assert "Italy" in result
 
@@ -982,7 +1077,7 @@ class TestFetcherParseFilterCondition:
             "In": {
                 "Values": [
                     [{"Literal": {"Value": "'A'"}}],
-                    [{"Literal": {"Value": "'B'"}}]
+                    [{"Literal": {"Value": "'B'"}}],
                 ]
             }
         }
@@ -991,10 +1086,7 @@ class TestFetcherParseFilterCondition:
 
     def test_comparison_equals(self):
         condition = {
-            "Comparison": {
-                "ComparisonKind": 0,
-                "Right": {"Literal": {"Value": "100"}}
-            }
+            "Comparison": {"ComparisonKind": 0, "Right": {"Literal": {"Value": "100"}}}
         }
         result = self.tool._parse_filter_condition(condition)
         assert "=" in result
@@ -1002,10 +1094,7 @@ class TestFetcherParseFilterCondition:
 
     def test_comparison_greater_than(self):
         condition = {
-            "Comparison": {
-                "ComparisonKind": 2,
-                "Right": {"Literal": {"Value": "50"}}
-            }
+            "Comparison": {"ComparisonKind": 2, "Right": {"Literal": {"Value": "50"}}}
         }
         result = self.tool._parse_filter_condition(condition)
         assert ">" in result
@@ -1014,6 +1103,7 @@ class TestFetcherParseFilterCondition:
 # ===========================================================================
 # _parse_tmdl_for_filters tests (fetcher version)
 # ===========================================================================
+
 
 class TestFetcherParseTmdlForFilters:
     """Tests for _parse_tmdl_for_filters on the fetcher tool."""
@@ -1039,17 +1129,22 @@ class TestFetcherParseTmdlForFilters:
             "expression": {
                 "Column": {
                     "Expression": {"SourceRef": {"Entity": "Sales"}},
-                    "Property": "Region"
+                    "Property": "Region",
                 }
             },
             "filter": {
-                "Where": [{"Condition": {"In": {"Values": [[{"Literal": {"Value": "'North'"}}]]}}}]
+                "Where": [
+                    {
+                        "Condition": {
+                            "In": {"Values": [[{"Literal": {"Value": "'North'"}}]]}
+                        }
+                    }
+                ]
             },
-            "type": "Categorical"
+            "type": "Categorical",
         }
         part = self._make_part(
-            "definition/report.json",
-            {"filters": json.dumps([filter_def])}
+            "definition/report.json", {"filters": json.dumps([filter_def])}
         )
         result = self.tool._parse_tmdl_for_filters([part])
         assert "Sales[Region]" in result
@@ -1059,17 +1154,23 @@ class TestFetcherParseTmdlForFilters:
             "expression": {
                 "Column": {
                     "Expression": {"SourceRef": {"Entity": "Date"}},
-                    "Property": "Year"
+                    "Property": "Year",
                 }
             },
             "filter": {
-                "Where": [{"Condition": {"In": {"Values": [[{"Literal": {"Value": "2024"}}]]}}}]
+                "Where": [
+                    {
+                        "Condition": {
+                            "In": {"Values": [[{"Literal": {"Value": "2024"}}]]}
+                        }
+                    }
+                ]
             },
-            "type": "Categorical"
+            "type": "Categorical",
         }
         part = self._make_part(
             "definition/pages/Page1/page.json",
-            {"displayName": "Overview", "filters": json.dumps([filter_def])}
+            {"displayName": "Overview", "filters": json.dumps([filter_def])},
         )
         result = self.tool._parse_tmdl_for_filters([part])
         assert "Date[Year]" in result
@@ -1080,14 +1181,13 @@ class TestFetcherParseTmdlForFilters:
             "expression": {
                 "Column": {
                     "Expression": {"SourceRef": {"Entity": "Date"}},
-                    "Property": "Date"
+                    "Property": "Date",
                 }
             },
-            "filter": {"Where": []}
+            "filter": {"Where": []},
         }
         part = self._make_part(
-            "definition/report.json",
-            {"filters": json.dumps([param_filter])}
+            "definition/report.json", {"filters": json.dumps([param_filter])}
         )
         result = self.tool._parse_tmdl_for_filters([part])
         assert "Date[Date]" not in result
@@ -1096,6 +1196,7 @@ class TestFetcherParseTmdlForFilters:
 # ===========================================================================
 # _log_model_context_details tests
 # ===========================================================================
+
 
 class TestLogModelContextDetails:
     """Tests for _log_model_context_details (just verify no crash)."""
@@ -1108,13 +1209,39 @@ class TestLogModelContextDetails:
 
     def test_full_context_no_crash(self):
         model_context = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
-            "relationships": [{"fromTable": "Sales", "fromColumn": "DateKey", "toTable": "Date", "toColumn": "DateKey", "crossFilteringBehavior": "Both"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
+            "relationships": [
+                {
+                    "fromTable": "Sales",
+                    "fromColumn": "DateKey",
+                    "toTable": "Date",
+                    "toColumn": "DateKey",
+                    "crossFilteringBehavior": "Both",
+                }
+            ],
             "tables": [{"name": "Sales", "columns": ["Amount", "Region"]}],
-            "sample_data": {"Sales[Region]": {"type": "categorical", "sample_values": ["North", "South"]}},
+            "sample_data": {
+                "Sales[Region]": {
+                    "type": "categorical",
+                    "sample_values": ["North", "South"],
+                }
+            },
         }
         default_filters = {"Sales[Region]": "North"}
-        slicers = [{"title": "BU Slicer", "page_name": "Overview", "table": "Sales", "column": "BU"}]
+        slicers = [
+            {
+                "title": "BU Slicer",
+                "page_name": "Overview",
+                "table": "Sales",
+                "column": "BU",
+            }
+        ]
         # Should not raise
         self.tool._log_model_context_details(model_context, default_filters, slicers)
 
@@ -1122,6 +1249,7 @@ class TestLogModelContextDetails:
 # ===========================================================================
 # _parse_tmdl_for_measures_and_tables extended tests
 # ===========================================================================
+
 
 class TestFetcherParseTmdlForMeasuresAndTablesExtended:
     """Extended tests for _parse_tmdl_for_measures_and_tables."""
@@ -1151,14 +1279,18 @@ class TestFetcherParseTmdlForMeasuresAndTablesExtended:
         content = "table Sales\n\tmeasure 'Total Revenue' = SUM(Sales[Amount])\n\t\tlineageTag: abc123\n"
         part = self._make_tmdl_part("Sales", content)
         measures, tables = self.tool._parse_tmdl_for_measures_and_tables([part], {})
-        revenue_measure = next((m for m in measures if m.get("name") == "Total Revenue"), None)
+        revenue_measure = next(
+            (m for m in measures if m.get("name") == "Total Revenue"), None
+        )
         assert revenue_measure is not None
         assert "SUM" in revenue_measure.get("expression", "")
 
     def test_date_table_template_skipped(self):
         content = "table DateTableTemplate_abc\n\tcolumn Date\n"
         part = self._make_tmdl_part("DateTableTemplate_abc", content)
-        measures, tables = self.tool._parse_tmdl_for_measures_and_tables([part], {"skip_system_tables": True})
+        measures, tables = self.tool._parse_tmdl_for_measures_and_tables(
+            [part], {"skip_system_tables": True}
+        )
         assert not any("DateTableTemplate" in t.get("name", "") for t in tables)
 
     def test_multiple_tables_parsed(self):
@@ -1176,6 +1308,7 @@ class TestFetcherParseTmdlForMeasuresAndTablesExtended:
 # ===========================================================================
 # Fetcher async method tests: _fetch_tmdl_via_fabric
 # ===========================================================================
+
 
 class TestFetcherTmdlViaFabric:
     """Tests for _fetch_tmdl_via_fabric on the fetcher tool."""
@@ -1197,8 +1330,13 @@ class TestFetcherTmdlViaFabric:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN))
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN)
+            )
 
         assert result is not None
         assert isinstance(result, list)
@@ -1212,8 +1350,13 @@ class TestFetcherTmdlViaFabric:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN))
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN)
+            )
 
         assert result is None
 
@@ -1223,8 +1366,13 @@ class TestFetcherTmdlViaFabric:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("connection error"))
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN))
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN)
+            )
 
         assert result is None
 
@@ -1238,8 +1386,13 @@ class TestFetcherTmdlViaFabric:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN))
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN)
+            )
 
         assert result is None
 
@@ -1247,6 +1400,7 @@ class TestFetcherTmdlViaFabric:
 # ===========================================================================
 # Fetcher async method tests: _fetch_model_via_admin_scanner
 # ===========================================================================
+
 
 class TestFetcherModelViaAdminScanner:
     """Tests for _fetch_model_via_admin_scanner on the fetcher tool."""
@@ -1266,7 +1420,10 @@ class TestFetcherModelViaAdminScanner:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             measures, tables = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -1280,7 +1437,10 @@ class TestFetcherModelViaAdminScanner:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             measures, tables = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -1299,7 +1459,10 @@ class TestFetcherModelViaAdminScanner:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             measures, tables = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -1318,17 +1481,28 @@ class TestFetcherModelViaAdminScanner:
         poll_resp.raise_for_status = MagicMock()
 
         result_data = {
-            "workspaces": [{
-                "id": WS_ID,
-                "datasets": [{
-                    "id": DS_ID,
-                    "tables": [{
-                        "name": "Sales",
-                        "columns": [{"name": "Amount"}],
-                        "measures": [{"name": "Revenue", "expression": "SUM(Sales[Amount])"}]
-                    }]
-                }]
-            }]
+            "workspaces": [
+                {
+                    "id": WS_ID,
+                    "datasets": [
+                        {
+                            "id": DS_ID,
+                            "tables": [
+                                {
+                                    "name": "Sales",
+                                    "columns": [{"name": "Amount"}],
+                                    "measures": [
+                                        {
+                                            "name": "Revenue",
+                                            "expression": "SUM(Sales[Amount])",
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
         }
         result_resp = MagicMock()
         result_resp.json.return_value = result_data
@@ -1348,10 +1522,18 @@ class TestFetcherModelViaAdminScanner:
         mock_client.post = AsyncMock(return_value=post_resp)
         mock_client.get = AsyncMock(side_effect=get_side)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
-            with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep", return_value=None):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            with patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep",
+                return_value=None,
+            ):
                 measures, tables = self._run(
-                    self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
+                    self.tool._fetch_model_via_admin_scanner(
+                        WS_ID, DS_ID, ACCESS_TOKEN, {}
+                    )
                 )
 
         assert len(tables) == 1
@@ -1364,6 +1546,7 @@ class TestFetcherModelViaAdminScanner:
 # Fetcher async method tests: _fetch_relationships
 # ===========================================================================
 
+
 class TestFetcherFetchRelationships:
     """Tests for _fetch_relationships on the fetcher tool."""
 
@@ -1375,9 +1558,16 @@ class TestFetcherFetchRelationships:
 
     def test_successful_relationships_parsed(self):
         rows = [
-            {"[ID]": 1, "[FromTable]": "Sales", "[FromColumn]": "DateKey",
-             "[ToTable]": "Date", "[ToColumn]": "DateKey", "[IsActive]": True,
-             "[CrossFilteringBehavior]": 1, "[Cardinality]": 2}
+            {
+                "[ID]": 1,
+                "[FromTable]": "Sales",
+                "[FromColumn]": "DateKey",
+                "[ToTable]": "Date",
+                "[ToColumn]": "DateKey",
+                "[IsActive]": True,
+                "[CrossFilteringBehavior]": 1,
+                "[Cardinality]": 2,
+            }
         ]
         mock_response = MagicMock()
         mock_response.json.return_value = {"results": [{"tables": [{"rows": rows}]}]}
@@ -1388,7 +1578,10 @@ class TestFetcherFetchRelationships:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._fetch_relationships(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -1402,7 +1595,10 @@ class TestFetcherFetchRelationships:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._fetch_relationships(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -1414,6 +1610,7 @@ class TestFetcherFetchRelationships:
 # Fetcher async method tests: _enrich_model_context_with_metadata
 # ===========================================================================
 
+
 class TestFetcherEnrichModelContext:
     """Tests for _enrich_model_context_with_metadata on the fetcher tool."""
 
@@ -1424,7 +1621,10 @@ class TestFetcherEnrichModelContext:
         return asyncio.run(coro)
 
     def test_enable_info_columns_false_skips_enrichment(self):
-        model_context = {"tables": [{"name": "Sales", "columns": ["Amount"]}], "measures": []}
+        model_context = {
+            "tables": [{"name": "Sales", "columns": ["Amount"]}],
+            "measures": [],
+        }
         config = {"enable_info_columns": False}
 
         with patch.object(self.tool, "_fetch_sample_column_values", return_value={}):
@@ -1437,11 +1637,18 @@ class TestFetcherEnrichModelContext:
         assert "tables" in result
 
     def test_sample_values_added(self):
-        model_context = {"tables": [{"name": "Sales", "columns": ["Region"]}], "measures": []}
+        model_context = {
+            "tables": [{"name": "Sales", "columns": ["Region"]}],
+            "measures": [],
+        }
         config = {"enable_info_columns": False}
-        sample_values = {"Sales[Region]": {"type": "categorical", "sample_values": ["North"]}}
+        sample_values = {
+            "Sales[Region]": {"type": "categorical", "sample_values": ["North"]}
+        }
 
-        with patch.object(self.tool, "_fetch_sample_column_values", return_value=sample_values):
+        with patch.object(
+            self.tool, "_fetch_sample_column_values", return_value=sample_values
+        ):
             result = self._run(
                 self.tool._enrich_model_context_with_metadata(
                     model_context, WS_ID, DS_ID, ACCESS_TOKEN, config
@@ -1459,6 +1666,7 @@ class TestFetcherEnrichModelContext:
 # ===========================================================================
 # _execute_dax_query tests
 # ===========================================================================
+
 
 class TestFetcherExecuteDaxQuery:
     """Tests for _execute_dax_query on the fetcher tool."""
@@ -1480,8 +1688,15 @@ class TestFetcherExecuteDaxQuery:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"))
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._execute_dax_query(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"
+                )
+            )
 
         assert result["success"] is True
         assert result["row_count"] == 2
@@ -1497,19 +1712,27 @@ class TestFetcherExecuteDaxQuery:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "bad"))
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "bad")
+            )
 
         assert result["success"] is False
         assert "Invalid DAX" in result["error"]
 
     def test_http_status_error(self):
         import httpx
+
         mock_response = MagicMock()
         mock_response.status_code = 401
         mock_response.text = "Unauthorized"
         mock_response.raise_for_status = MagicMock(
-            side_effect=httpx.HTTPStatusError("401", request=MagicMock(), response=mock_response)
+            side_effect=httpx.HTTPStatusError(
+                "401", request=MagicMock(), response=mock_response
+            )
         )
 
         mock_client = MagicMock()
@@ -1517,8 +1740,15 @@ class TestFetcherExecuteDaxQuery:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"))
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._execute_dax_query(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"
+                )
+            )
 
         assert result["success"] is False
         assert "401" in result["error"]
@@ -1529,8 +1759,15 @@ class TestFetcherExecuteDaxQuery:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("network timeout"))
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"))
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._execute_dax_query(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"
+                )
+            )
 
         assert result["success"] is False
         assert "network timeout" in result["error"]
@@ -1545,8 +1782,15 @@ class TestFetcherExecuteDaxQuery:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"))
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._execute_dax_query(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"
+                )
+            )
 
         assert result["success"] is False
 
@@ -1554,6 +1798,7 @@ class TestFetcherExecuteDaxQuery:
 # ===========================================================================
 # _fetch_column_metadata_for_table tests
 # ===========================================================================
+
 
 class TestFetchColumnMetadataForTable:
     """Tests for _fetch_column_metadata_for_table."""
@@ -1566,7 +1811,12 @@ class TestFetchColumnMetadataForTable:
 
     def test_successful_column_metadata(self):
         rows = [
-            {"[ExplicitName]": "Amount", "[DataType]": "2", "[IsHidden]": False, "[Description]": ""}
+            {
+                "[ExplicitName]": "Amount",
+                "[DataType]": "2",
+                "[IsHidden]": False,
+                "[Description]": "",
+            }
         ]
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -1578,9 +1828,14 @@ class TestFetchColumnMetadataForTable:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._fetch_column_metadata_for_table(WS_ID, DS_ID, ACCESS_TOKEN, "Sales", {})
+                self.tool._fetch_column_metadata_for_table(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "Sales", {}
+                )
             )
 
         assert len(result) == 1
@@ -1595,9 +1850,14 @@ class TestFetchColumnMetadataForTable:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._fetch_column_metadata_for_table(WS_ID, DS_ID, ACCESS_TOKEN, "Sales", {})
+                self.tool._fetch_column_metadata_for_table(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "Sales", {}
+                )
             )
 
         assert result == []
@@ -1608,9 +1868,14 @@ class TestFetchColumnMetadataForTable:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._fetch_column_metadata_for_table(WS_ID, DS_ID, ACCESS_TOKEN, "Sales", {})
+                self.tool._fetch_column_metadata_for_table(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "Sales", {}
+                )
             )
 
         assert result == []
@@ -1619,6 +1884,7 @@ class TestFetchColumnMetadataForTable:
 # ===========================================================================
 # _fetch_sample_column_values tests
 # ===========================================================================
+
 
 class TestFetcherSampleColumnValues:
     """Tests for _fetch_sample_column_values."""
@@ -1632,14 +1898,18 @@ class TestFetcherSampleColumnValues:
     def test_empty_tables_returns_empty(self):
         model_context = {"tables": []}
         result = self._run(
-            self.tool._fetch_sample_column_values(WS_ID, DS_ID, ACCESS_TOKEN, model_context, {})
+            self.tool._fetch_sample_column_values(
+                WS_ID, DS_ID, ACCESS_TOKEN, model_context, {}
+            )
         )
         assert result == {}
 
     def test_table_without_columns_skipped(self):
         model_context = {"tables": [{"name": "Sales", "columns": []}]}
         result = self._run(
-            self.tool._fetch_sample_column_values(WS_ID, DS_ID, ACCESS_TOKEN, model_context, {})
+            self.tool._fetch_sample_column_values(
+                WS_ID, DS_ID, ACCESS_TOKEN, model_context, {}
+            )
         )
         assert result == {}
 
@@ -1656,9 +1926,14 @@ class TestFetcherSampleColumnValues:
 
         model_context = {"tables": [{"name": "Sales", "columns": ["Region"]}]}
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._fetch_sample_column_values(WS_ID, DS_ID, ACCESS_TOKEN, model_context, {})
+                self.tool._fetch_sample_column_values(
+                    WS_ID, DS_ID, ACCESS_TOKEN, model_context, {}
+                )
             )
 
         assert "Sales[Region]" in result
@@ -1676,9 +1951,14 @@ class TestFetcherSampleColumnValues:
 
         model_context = {"tables": [{"name": "Sales", "columns": ["Region"]}]}
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._fetch_sample_column_values(WS_ID, DS_ID, ACCESS_TOKEN, model_context, {})
+                self.tool._fetch_sample_column_values(
+                    WS_ID, DS_ID, ACCESS_TOKEN, model_context, {}
+                )
             )
 
         # No sample values on error, but should not raise
@@ -1688,6 +1968,7 @@ class TestFetcherSampleColumnValues:
 # ===========================================================================
 # _fetch_slicer_distinct_values tests
 # ===========================================================================
+
 
 class TestFetcherSlicerDistinctValues:
     """Tests for _fetch_slicer_distinct_values."""
@@ -1701,7 +1982,9 @@ class TestFetcherSlicerDistinctValues:
     def test_empty_slicers_no_change(self):
         model_context = {"sample_data": {}}
         self._run(
-            self.tool._fetch_slicer_distinct_values(WS_ID, DS_ID, ACCESS_TOKEN, [], model_context)
+            self.tool._fetch_slicer_distinct_values(
+                WS_ID, DS_ID, ACCESS_TOKEN, [], model_context
+            )
         )
         assert model_context["sample_data"] == {}
 
@@ -1709,7 +1992,9 @@ class TestFetcherSlicerDistinctValues:
         slicers = [{"column": "BU"}]  # no table
         model_context = {"sample_data": {}}
         self._run(
-            self.tool._fetch_slicer_distinct_values(WS_ID, DS_ID, ACCESS_TOKEN, slicers, model_context)
+            self.tool._fetch_slicer_distinct_values(
+                WS_ID, DS_ID, ACCESS_TOKEN, slicers, model_context
+            )
         )
         assert model_context["sample_data"] == {}
 
@@ -1727,13 +2012,20 @@ class TestFetcherSlicerDistinctValues:
         slicers = [{"table": "dim_country", "column": "BU"}]
         model_context = {"sample_data": {}}
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             self._run(
-                self.tool._fetch_slicer_distinct_values(WS_ID, DS_ID, ACCESS_TOKEN, slicers, model_context)
+                self.tool._fetch_slicer_distinct_values(
+                    WS_ID, DS_ID, ACCESS_TOKEN, slicers, model_context
+                )
             )
 
         assert "dim_country[BU]" in model_context["sample_data"]
-        assert model_context["sample_data"]["dim_country[BU]"]["type"] == "slicer_values"
+        assert (
+            model_context["sample_data"]["dim_country[BU]"]["type"] == "slicer_values"
+        )
 
     def test_duplicate_slicer_columns_deduplicated(self):
         rows = [{"[BU]": "Italy"}]
@@ -1759,9 +2051,13 @@ class TestFetcherSlicerDistinctValues:
             call_count[0] += 1
             return {"success": True, "data": [{"[BU]": "Italy"}]}
 
-        with patch.object(self.tool, "_execute_dax_query", side_effect=counting_execute):
+        with patch.object(
+            self.tool, "_execute_dax_query", side_effect=counting_execute
+        ):
             self._run(
-                self.tool._fetch_slicer_distinct_values(WS_ID, DS_ID, ACCESS_TOKEN, slicers, model_context)
+                self.tool._fetch_slicer_distinct_values(
+                    WS_ID, DS_ID, ACCESS_TOKEN, slicers, model_context
+                )
             )
 
         assert call_count[0] == 1  # Only called once due to dedup
@@ -1770,6 +2066,7 @@ class TestFetcherSlicerDistinctValues:
 # ===========================================================================
 # _extract_report_definition_parts tests
 # ===========================================================================
+
 
 class TestFetcherExtractReportDefinitionParts:
     """Tests for _extract_report_definition_parts."""
@@ -1791,8 +2088,13 @@ class TestFetcherExtractReportDefinitionParts:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._extract_report_definition_parts(WS_ID, "rpt-1", ACCESS_TOKEN))
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._extract_report_definition_parts(WS_ID, "rpt-1", ACCESS_TOKEN)
+            )
 
         assert result == parts
 
@@ -1805,18 +2107,26 @@ class TestFetcherExtractReportDefinitionParts:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._extract_report_definition_parts(WS_ID, "rpt-1", ACCESS_TOKEN))
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._extract_report_definition_parts(WS_ID, "rpt-1", ACCESS_TOKEN)
+            )
 
         assert result == []
 
     def test_202_with_location_succeeds(self):
         import json as _json
+
         parts = [{"path": "report.json", "payload": "abc"}]
 
         init_response = MagicMock()
         init_response.status_code = 202
-        init_response.headers = {"Location": "https://api.fabric.microsoft.com/poll/123"}
+        init_response.headers = {
+            "Location": "https://api.fabric.microsoft.com/poll/123"
+        }
 
         poll_response = MagicMock()
         poll_response.json.return_value = {"status": "Succeeded"}
@@ -1839,16 +2149,28 @@ class TestFetcherExtractReportDefinitionParts:
         mock_client.post = AsyncMock(return_value=init_response)
         mock_client.get = AsyncMock(side_effect=mock_get)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep", return_value=None):
-            result = self._run(self.tool._extract_report_definition_parts(WS_ID, "rpt-1", ACCESS_TOKEN))
+        with (
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
+            result = self._run(
+                self.tool._extract_report_definition_parts(WS_ID, "rpt-1", ACCESS_TOKEN)
+            )
 
         assert result == parts
 
     def test_202_failed_returns_empty(self):
         init_response = MagicMock()
         init_response.status_code = 202
-        init_response.headers = {"Location": "https://api.fabric.microsoft.com/poll/123"}
+        init_response.headers = {
+            "Location": "https://api.fabric.microsoft.com/poll/123"
+        }
 
         poll_response = MagicMock()
         poll_response.json.return_value = {"status": "Failed"}
@@ -1859,9 +2181,19 @@ class TestFetcherExtractReportDefinitionParts:
         mock_client.post = AsyncMock(return_value=init_response)
         mock_client.get = AsyncMock(return_value=poll_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep", return_value=None):
-            result = self._run(self.tool._extract_report_definition_parts(WS_ID, "rpt-1", ACCESS_TOKEN))
+        with (
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
+            result = self._run(
+                self.tool._extract_report_definition_parts(WS_ID, "rpt-1", ACCESS_TOKEN)
+            )
 
         assert result == []
 
@@ -1869,6 +2201,7 @@ class TestFetcherExtractReportDefinitionParts:
 # ===========================================================================
 # _extract_default_filters tests
 # ===========================================================================
+
 
 class TestFetcherExtractDefaultFilters:
     """Tests for _extract_default_filters."""
@@ -1884,28 +2217,45 @@ class TestFetcherExtractDefaultFilters:
             "expression": {
                 "Column": {
                     "Expression": {"SourceRef": {"Entity": "Sales"}},
-                    "Property": "Region"
+                    "Property": "Region",
                 }
             },
             "filter": {
-                "Where": [{"Condition": {"In": {"Values": [[{"Literal": {"Value": "'North'"}}]]}}}]
+                "Where": [
+                    {
+                        "Condition": {
+                            "In": {"Values": [[{"Literal": {"Value": "'North'"}}]]}
+                        }
+                    }
+                ]
             },
-            "type": "Categorical"
+            "type": "Categorical",
         }
-        import json as _json
         import base64 as _b64
-        payload = _b64.b64encode(_json.dumps({"filters": _json.dumps([filter_def])}).encode()).decode()
+        import json as _json
+
+        payload = _b64.b64encode(
+            _json.dumps({"filters": _json.dumps([filter_def])}).encode()
+        ).decode()
         parts = [{"path": "definition/report.json", "payload": payload}]
 
         result = self._run(
-            self.tool._extract_default_filters(WS_ID, "rpt-1", ACCESS_TOKEN, report_parts=parts)
+            self.tool._extract_default_filters(
+                WS_ID, "rpt-1", ACCESS_TOKEN, report_parts=parts
+            )
         )
         assert "Sales[Region]" in result
 
     def test_exception_returns_empty(self):
-        with patch.object(self.tool, "_extract_report_definition_parts", side_effect=Exception("network error")):
+        with patch.object(
+            self.tool,
+            "_extract_report_definition_parts",
+            side_effect=Exception("network error"),
+        ):
             result = self._run(
-                self.tool._extract_default_filters(WS_ID, "rpt-1", ACCESS_TOKEN, report_parts=None)
+                self.tool._extract_default_filters(
+                    WS_ID, "rpt-1", ACCESS_TOKEN, report_parts=None
+                )
             )
         assert result == {}
 
@@ -1915,20 +2265,35 @@ class TestFetcherExtractDefaultFilters:
             "expression": {
                 "Column": {
                     "Expression": {"SourceRef": {"Entity": "Date"}},
-                    "Property": "Year"
+                    "Property": "Year",
                 }
             },
-            "filter": {"Where": [{"Condition": {"In": {"Values": [[{"Literal": {"Value": "2024"}}]]}}}]},
-            "type": "Categorical"
+            "filter": {
+                "Where": [
+                    {
+                        "Condition": {
+                            "In": {"Values": [[{"Literal": {"Value": "2024"}}]]}
+                        }
+                    }
+                ]
+            },
+            "type": "Categorical",
         }
-        import json as _json
         import base64 as _b64
-        payload = _b64.b64encode(_json.dumps({"filters": _json.dumps([filter_def])}).encode()).decode()
+        import json as _json
+
+        payload = _b64.b64encode(
+            _json.dumps({"filters": _json.dumps([filter_def])}).encode()
+        ).decode()
         parts = [{"path": "definition/report.json", "payload": payload}]
 
-        with patch.object(self.tool, "_extract_report_definition_parts", return_value=parts):
+        with patch.object(
+            self.tool, "_extract_report_definition_parts", return_value=parts
+        ):
             result = self._run(
-                self.tool._extract_default_filters(WS_ID, "rpt-1", ACCESS_TOKEN, report_parts=None)
+                self.tool._extract_default_filters(
+                    WS_ID, "rpt-1", ACCESS_TOKEN, report_parts=None
+                )
             )
         assert "Date[Year]" in result
 
@@ -1937,6 +2302,7 @@ class TestFetcherExtractDefaultFilters:
 # _extract_slicers_from_report tests
 # ===========================================================================
 
+
 class TestFetcherExtractSlicersFromReport:
     """Tests for _extract_slicers_from_report."""
 
@@ -1944,8 +2310,9 @@ class TestFetcherExtractSlicersFromReport:
         self.tool = PowerBISemanticModelFetcherTool()
 
     def _make_b64_part(self, path, content_dict):
-        import json as _json
         import base64 as _b64
+        import json as _json
+
         payload = _b64.b64encode(_json.dumps(content_dict).encode()).decode()
         return {"path": path, "payload": payload}
 
@@ -1969,16 +2336,20 @@ class TestFetcherExtractSlicersFromReport:
                         {
                             "column": {
                                 "expression": {"sourceRef": {"source": "d"}},
-                                "property": "BU"
+                                "property": "BU",
                             }
                         }
-                    ]
-                }
+                    ],
+                },
             }
         }
         parts = [
-            self._make_b64_part("definition/pages/Page1/page.json", {"displayName": "Overview"}),
-            self._make_b64_part("definition/pages/Page1/visuals/Vis1/visual.json", visual_data),
+            self._make_b64_part(
+                "definition/pages/Page1/page.json", {"displayName": "Overview"}
+            ),
+            self._make_b64_part(
+                "definition/pages/Page1/visuals/Vis1/visual.json", visual_data
+            ),
         ]
         result = self.tool._extract_slicers_from_report(parts)
         assert len(result) >= 1
@@ -1986,7 +2357,11 @@ class TestFetcherExtractSlicersFromReport:
 
     def test_non_slicer_visual_skipped(self):
         visual_data = {"visual": {"visualType": "barChart"}}
-        parts = [self._make_b64_part("definition/pages/Page1/visuals/Vis1/visual.json", visual_data)]
+        parts = [
+            self._make_b64_part(
+                "definition/pages/Page1/visuals/Vis1/visual.json", visual_data
+            )
+        ]
         result = self.tool._extract_slicers_from_report(parts)
         assert result == []
 
@@ -1994,14 +2369,17 @@ class TestFetcherExtractSlicersFromReport:
         """No visual.json found → falls back to report.json."""
         slicer_config = {"singleVisual": {"visualType": "slicer"}}
         import json as _json
+
         report_data = {
-            "pages": [{
-                "name": "Overview",
-                "displayName": "Overview",
-                "visualContainers": [
-                    {"name": "vis1", "config": _json.dumps(slicer_config)}
-                ]
-            }]
+            "pages": [
+                {
+                    "name": "Overview",
+                    "displayName": "Overview",
+                    "visualContainers": [
+                        {"name": "vis1", "config": _json.dumps(slicer_config)}
+                    ],
+                }
+            ]
         }
         parts = [self._make_b64_part("report.json", report_data)]
         result = self.tool._extract_slicers_from_report(parts)
@@ -2011,6 +2389,7 @@ class TestFetcherExtractSlicersFromReport:
 # ===========================================================================
 # _extract_slicer_binding and _extract_slicer_binding_embedded tests
 # ===========================================================================
+
 
 class TestFetcherSlicerBindings:
     """Tests for _extract_slicer_binding and _extract_slicer_binding_embedded."""
@@ -2026,10 +2405,10 @@ class TestFetcherSlicerBindings:
                     {
                         "column": {
                             "expression": {"sourceRef": {"source": "d"}},
-                            "property": "BU"
+                            "property": "BU",
                         }
                     }
-                ]
+                ],
             }
         }
         table, column = self.tool._extract_slicer_binding(visual)
@@ -2039,9 +2418,7 @@ class TestFetcherSlicerBindings:
     def test_fallback_to_data_transforms(self):
         visual = {
             "queryDefinition": {},
-            "dataTransforms": {
-                "selects": [{"queryRef": "d.BU"}]
-            }
+            "dataTransforms": {"selects": [{"queryRef": "d.BU"}]},
         }
         table, column = self.tool._extract_slicer_binding(visual)
         assert column == "BU"
@@ -2049,9 +2426,7 @@ class TestFetcherSlicerBindings:
     def test_data_transforms_display_name_fallback(self):
         visual = {
             "queryDefinition": {"from": [{"name": "d", "entity": "Sales"}]},
-            "dataTransforms": {
-                "selects": [{"displayName": "Region"}]
-            }
+            "dataTransforms": {"selects": [{"displayName": "Region"}]},
         }
         table, column = self.tool._extract_slicer_binding(visual)
         assert column == "Region"
@@ -2070,10 +2445,10 @@ class TestFetcherSlicerBindings:
                         {
                             "Column": {
                                 "Expression": {"SourceRef": {"Source": "d"}},
-                                "Property": "BU"
+                                "Property": "BU",
                             }
                         }
-                    ]
+                    ],
                 }
             }
         }
@@ -2085,9 +2460,7 @@ class TestFetcherSlicerBindings:
         parsed_config = {
             "singleVisual": {
                 "prototypeQuery": {},
-                "dataTransforms": {
-                    "selects": [{"queryRef": "d.Year"}]
-                }
+                "dataTransforms": {"selects": [{"queryRef": "d.Year"}]},
             }
         }
         table, column = self.tool._extract_slicer_binding_embedded(parsed_config)
@@ -2102,6 +2475,7 @@ class TestFetcherSlicerBindings:
 # ===========================================================================
 # _extract_slicer_selection tests
 # ===========================================================================
+
 
 class TestFetcherExtractSlicerSelection:
     """Tests for _extract_slicer_selection."""
@@ -2118,12 +2492,17 @@ class TestFetcherExtractSlicerSelection:
             {
                 "filter": {
                     "Where": [
-                        {"Condition": {"In": {"Values": [[{"Literal": {"Value": "'Italy'"}}]]}}}
+                        {
+                            "Condition": {
+                                "In": {"Values": [[{"Literal": {"Value": "'Italy'"}}]]}
+                            }
+                        }
                     ]
                 }
             }
         ]
         import json as _json
+
         vis_data = {"filters": _json.dumps(filter_data)}
         result = self.tool._extract_slicer_selection(vis_data, {})
         assert "Italy" in result
@@ -2138,7 +2517,14 @@ class TestFetcherExtractSlicerSelection:
             {
                 "filter": {
                     "Where": [
-                        {"Condition": {"Comparison": {"ComparisonKind": 0, "Right": {"Literal": {"Value": "100"}}}}}
+                        {
+                            "Condition": {
+                                "Comparison": {
+                                    "ComparisonKind": 0,
+                                    "Right": {"Literal": {"Value": "100"}},
+                                }
+                            }
+                        }
                     ]
                 }
             }
@@ -2156,6 +2542,7 @@ class TestFetcherExtractSlicerSelection:
 # ===========================================================================
 # _fetch_model_via_powerbi_dax tests
 # ===========================================================================
+
 
 class TestFetcherModelViaPowerBiDax:
     """Tests for _fetch_model_via_powerbi_dax."""
@@ -2191,7 +2578,10 @@ class TestFetcherModelViaPowerBiDax:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=mock_post)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             measures, tables = self._run(
                 self.tool._fetch_model_via_powerbi_dax(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -2206,7 +2596,10 @@ class TestFetcherModelViaPowerBiDax:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             measures, tables = self._run(
                 self.tool._fetch_model_via_powerbi_dax(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -2218,6 +2611,7 @@ class TestFetcherModelViaPowerBiDax:
 # ===========================================================================
 # _enrich_model_context_with_metadata — enable_info_columns=True path
 # ===========================================================================
+
 
 class TestFetcherEnrichWithInfoColumns:
     """Test _enrich_model_context_with_metadata with enable_info_columns=True."""
@@ -2235,12 +2629,21 @@ class TestFetcherEnrichWithInfoColumns:
         }
         config = {"enable_info_columns": True, "skip_system_tables": True}
         col_metadata = [
-            {"table_name": "Sales", "column_name": "Amount", "data_type": "2",
-             "is_hidden": False, "description": "Sales amount"}
+            {
+                "table_name": "Sales",
+                "column_name": "Amount",
+                "data_type": "2",
+                "is_hidden": False,
+                "description": "Sales amount",
+            }
         ]
 
-        with patch.object(self.tool, "_fetch_column_metadata_for_table", return_value=col_metadata), \
-             patch.object(self.tool, "_fetch_sample_column_values", return_value={}):
+        with (
+            patch.object(
+                self.tool, "_fetch_column_metadata_for_table", return_value=col_metadata
+            ),
+            patch.object(self.tool, "_fetch_sample_column_values", return_value={}),
+        ):
             result = self._run(
                 self.tool._enrich_model_context_with_metadata(
                     model_context, WS_ID, DS_ID, ACCESS_TOKEN, config
@@ -2267,8 +2670,14 @@ class TestFetcherEnrichWithInfoColumns:
             call_log.append(table_name)
             return []
 
-        with patch.object(self.tool, "_fetch_column_metadata_for_table", side_effect=mock_col_metadata), \
-             patch.object(self.tool, "_fetch_sample_column_values", return_value={}):
+        with (
+            patch.object(
+                self.tool,
+                "_fetch_column_metadata_for_table",
+                side_effect=mock_col_metadata,
+            ),
+            patch.object(self.tool, "_fetch_sample_column_values", return_value={}),
+        ):
             self._run(
                 self.tool._enrich_model_context_with_metadata(
                     model_context, WS_ID, DS_ID, ACCESS_TOKEN, config
@@ -2281,6 +2690,7 @@ class TestFetcherEnrichWithInfoColumns:
 # ===========================================================================
 # _fetch_model_via_admin_scanner — scan failed / no workspace
 # ===========================================================================
+
 
 class TestFetcherAdminScannerExtra:
     """Extra admin scanner tests."""
@@ -2314,8 +2724,16 @@ class TestFetcherAdminScannerExtra:
         mock_client.post = AsyncMock(return_value=post_resp)
         mock_client.get = AsyncMock(side_effect=get_side)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             measures, tables = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -2352,8 +2770,16 @@ class TestFetcherAdminScannerExtra:
         mock_client.post = AsyncMock(return_value=post_resp)
         mock_client.get = AsyncMock(side_effect=get_side)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             measures, tables = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -2363,10 +2789,13 @@ class TestFetcherAdminScannerExtra:
 
     def test_http_status_error_returns_empty(self):
         import httpx
+
         mock_response = MagicMock()
         mock_response.status_code = 500
         mock_response.raise_for_status = MagicMock(
-            side_effect=httpx.HTTPStatusError("500", request=MagicMock(), response=mock_response)
+            side_effect=httpx.HTTPStatusError(
+                "500", request=MagicMock(), response=mock_response
+            )
         )
 
         mock_client = MagicMock()
@@ -2374,7 +2803,10 @@ class TestFetcherAdminScannerExtra:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             measures, tables = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -2387,6 +2819,7 @@ class TestFetcherAdminScannerExtra:
 # _parse_llm_json tests (fetcher tool has this static method)
 # ===========================================================================
 
+
 class TestFetcherParseLlmJson:
     """Tests for _parse_llm_json static method on the fetcher."""
 
@@ -2395,17 +2828,20 @@ class TestFetcherParseLlmJson:
         assert result == {"key": "value"}
 
     def test_markdown_code_fence_stripped(self):
-        result = PowerBISemanticModelFetcherTool._parse_llm_json("```json\n{\"key\": 1}\n```")
+        result = PowerBISemanticModelFetcherTool._parse_llm_json(
+            '```json\n{"key": 1}\n```'
+        )
         assert result == {"key": 1}
 
     def test_generic_code_fence_stripped(self):
-        result = PowerBISemanticModelFetcherTool._parse_llm_json("```\n{\"x\": 2}\n```")
+        result = PowerBISemanticModelFetcherTool._parse_llm_json('```\n{"x": 2}\n```')
         assert result == {"x": 2}
 
 
 # ===========================================================================
 # _generate_semantic_enrichment — missing token/url path
 # ===========================================================================
+
 
 class TestFetcherGenerateSemanticEnrichment:
     """Tests for _generate_semantic_enrichment."""
@@ -2432,6 +2868,7 @@ class TestFetcherGenerateSemanticEnrichment:
 # _execute_fetcher_pipeline — markdown output / cache miss with report
 # ===========================================================================
 
+
 class TestFetcherPipelineMarkdownOutput:
     """Tests for markdown output format from _execute_fetcher_pipeline."""
 
@@ -2446,8 +2883,12 @@ class TestFetcherPipelineMarkdownOutput:
     def test_cache_miss_returns_compact_json_after_cache_save(self):
         """Cache miss → extraction → save → compact JSON returned."""
         import base64 as _b64
+
         tmdl = "table Sales\n\tcolumn Amount\n"
-        part = {"path": "definition/tables/Sales.tmdl", "payload": _b64.b64encode(tmdl.encode()).decode()}
+        part = {
+            "path": "definition/tables/Sales.tmdl",
+            "payload": _b64.b64encode(tmdl.encode()).decode(),
+        }
 
         config = {
             "workspace_id": WS_ID,
@@ -2462,13 +2903,27 @@ class TestFetcherPipelineMarkdownOutput:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(return_value=None)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[part]), \
-             patch.object(self.tool, "_fetch_relationships", return_value=[]), \
-             patch.object(self.tool, "_enrich_model_context_with_metadata",
-                          return_value={"measures": [], "tables": [{"name": "Sales", "columns": ["Amount"]}],
-                                        "relationships": [], "columns": [], "sample_data": {}}):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[part]),
+            patch.object(self.tool, "_fetch_relationships", return_value=[]),
+            patch.object(
+                self.tool,
+                "_enrich_model_context_with_metadata",
+                return_value={
+                    "measures": [],
+                    "tables": [{"name": "Sales", "columns": ["Amount"]}],
+                    "relationships": [],
+                    "columns": [],
+                    "sample_data": {},
+                },
+            ),
+        ):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2479,8 +2934,12 @@ class TestFetcherPipelineMarkdownOutput:
     def test_cache_miss_cache_save_fails_returns_full_json(self):
         """Cache miss + save exception → full fallback JSON returned."""
         import base64 as _b64
+
         tmdl = "table Sales\n\tcolumn Amount\n"
-        part = {"path": "definition/tables/Sales.tmdl", "payload": _b64.b64encode(tmdl.encode()).decode()}
+        part = {
+            "path": "definition/tables/Sales.tmdl",
+            "payload": _b64.b64encode(tmdl.encode()).decode(),
+        }
 
         config = {
             "workspace_id": WS_ID,
@@ -2495,13 +2954,27 @@ class TestFetcherPipelineMarkdownOutput:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(side_effect=Exception("DB write error"))
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[part]), \
-             patch.object(self.tool, "_fetch_relationships", return_value=[]), \
-             patch.object(self.tool, "_enrich_model_context_with_metadata",
-                          return_value={"measures": [], "tables": [{"name": "Sales", "columns": ["Amount"]}],
-                                        "relationships": [], "columns": [], "sample_data": {}}):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[part]),
+            patch.object(self.tool, "_fetch_relationships", return_value=[]),
+            patch.object(
+                self.tool,
+                "_enrich_model_context_with_metadata",
+                return_value={
+                    "measures": [],
+                    "tables": [{"name": "Sales", "columns": ["Amount"]}],
+                    "relationships": [],
+                    "columns": [],
+                    "sample_data": {},
+                },
+            ),
+        ):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2514,6 +2987,7 @@ class TestFetcherPipelineMarkdownOutput:
 # ===========================================================================
 # _parse_tmdl_for_measures_and_tables — exception and calculation item
 # ===========================================================================
+
 
 class TestFetcherParseTmdlExtended:
     """Extra tests for _parse_tmdl_for_measures_and_tables."""
@@ -2549,6 +3023,7 @@ class TestFetcherParseTmdlExtended:
 # ===========================================================================
 # _fetch_tmdl_via_fabric — 202 with poll succeeded
 # ===========================================================================
+
 
 class TestFetcherTmdlFabricPolling:
     """Extra tests for _fetch_tmdl_via_fabric covering poll paths."""
@@ -2587,9 +3062,19 @@ class TestFetcherTmdlFabricPolling:
         mock_client.post = AsyncMock(return_value=init_resp)
         mock_client.get = AsyncMock(side_effect=mock_get)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep", return_value=None):
-            result = self._run(self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN))
+        with (
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
+            result = self._run(
+                self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN)
+            )
 
         assert result == parts
 
@@ -2607,9 +3092,19 @@ class TestFetcherTmdlFabricPolling:
         mock_client.post = AsyncMock(return_value=init_resp)
         mock_client.get = AsyncMock(return_value=poll_resp)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep", return_value=None):
-            result = self._run(self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN))
+        with (
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
+            result = self._run(
+                self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN)
+            )
 
         assert result is None
 
@@ -2617,6 +3112,7 @@ class TestFetcherTmdlFabricPolling:
 # ===========================================================================
 # Pipeline cache hit branch - sample data re-fetch, slicer re-fetch, etc.
 # ===========================================================================
+
 
 class TestFetcherPipelineCacheHitBranches:
     """Tests for cache hit branches in _execute_fetcher_pipeline."""
@@ -2659,9 +3155,21 @@ class TestFetcherPipelineCacheHitBranches:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(return_value=None)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_fetch_sample_column_values", return_value={"Sales[Amount]": {"type": "categorical", "sample_values": [100]}}):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool,
+                "_fetch_sample_column_values",
+                return_value={
+                    "Sales[Amount]": {"type": "categorical", "sample_values": [100]}
+                },
+            ),
+        ):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2678,7 +3186,9 @@ class TestFetcherPipelineCacheHitBranches:
                 "tables": [{"name": "Sales", "columns": ["Amount"]}],
                 "columns": [],
             },
-            "sample_data": {"Sales[Amount]": {"type": "categorical", "sample_values": [100]}},
+            "sample_data": {
+                "Sales[Amount]": {"type": "categorical", "sample_values": [100]}
+            },
             # No "slicers" key → triggers re-fetch
         }
         config = self._base_config(report_id="rpt-abc")
@@ -2688,10 +3198,18 @@ class TestFetcherPipelineCacheHitBranches:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(return_value=None)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_extract_report_definition_parts", return_value=[]), \
-             patch.object(self.tool, "_extract_slicers_from_report", return_value=[]):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool, "_extract_report_definition_parts", return_value=[]
+            ),
+            patch.object(self.tool, "_extract_slicers_from_report", return_value=[]),
+        ):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2706,7 +3224,9 @@ class TestFetcherPipelineCacheHitBranches:
                 "tables": [{"name": "Sales", "columns": ["Amount", "Region"]}],
                 "columns": [],  # empty top-level columns
             },
-            "sample_data": {"Sales[Amount]": {"type": "categorical", "sample_values": [100]}},
+            "sample_data": {
+                "Sales[Amount]": {"type": "categorical", "sample_values": [100]}
+            },
             "slicers": [],
         }
         config = self._base_config()
@@ -2716,8 +3236,14 @@ class TestFetcherPipelineCacheHitBranches:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(return_value=None)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+        ):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2732,7 +3258,9 @@ class TestFetcherPipelineCacheHitBranches:
                 "tables": [{"name": "Sales", "columns": ["Amount"]}],
                 "columns": [],
             },
-            "sample_data": {"Sales[Amount]": {"type": "categorical", "sample_values": [100]}},
+            "sample_data": {
+                "Sales[Amount]": {"type": "categorical", "sample_values": [100]}
+            },
             "slicers": [],
             "default_filters": {"Sales[Region]": "North"},
             "_filters_validated": True,  # avoid re-validation
@@ -2744,8 +3272,14 @@ class TestFetcherPipelineCacheHitBranches:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(return_value=None)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+        ):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2755,6 +3289,7 @@ class TestFetcherPipelineCacheHitBranches:
 # ===========================================================================
 # Pipeline slicer gap recovery tests
 # ===========================================================================
+
 
 class TestFetcherPipelineSlicerGapRecovery:
     """Tests for slicer gap recovery in _execute_fetcher_pipeline."""
@@ -2776,10 +3311,10 @@ class TestFetcherPipelineSlicerGapRecovery:
                 "tables": [{"name": "Sales", "columns": ["Amount"]}],
                 "columns": [],
             },
-            "sample_data": {"Sales[Amount]": {"type": "categorical", "sample_values": [100]}},
-            "slicers": [
-                {"table": "dim_filter", "column": "BU", "default_value": ""}
-            ],
+            "sample_data": {
+                "Sales[Amount]": {"type": "categorical", "sample_values": [100]}
+            },
+            "slicers": [{"table": "dim_filter", "column": "BU", "default_value": ""}],
         }
         config = {
             "workspace_id": WS_ID,
@@ -2794,9 +3329,17 @@ class TestFetcherPipelineSlicerGapRecovery:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(return_value=None)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_fetch_column_metadata_for_table", return_value=[]):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool, "_fetch_column_metadata_for_table", return_value=[]
+            ),
+        ):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2809,6 +3352,7 @@ class TestFetcherPipelineSlicerGapRecovery:
 # ===========================================================================
 # Pipeline SP fallback tests in cache miss path
 # ===========================================================================
+
 
 class TestFetcherPipelineSPFallback:
     """Tests for SP fallback in cache miss path (report extraction)."""
@@ -2824,8 +3368,12 @@ class TestFetcherPipelineSPFallback:
     def test_sp_fallback_for_empty_filters_and_slicers(self):
         """Cache miss + SA returns empty filters/slicers → SP fallback triggered."""
         import base64 as _b64
+
         tmdl = "table Sales\n\tcolumn Amount\n"
-        part = {"path": "definition/tables/Sales.tmdl", "payload": _b64.b64encode(tmdl.encode()).decode()}
+        part = {
+            "path": "definition/tables/Sales.tmdl",
+            "payload": _b64.b64encode(tmdl.encode()).decode(),
+        }
 
         config = {
             "workspace_id": WS_ID,
@@ -2844,17 +3392,33 @@ class TestFetcherPipelineSPFallback:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(return_value=None)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[part]), \
-             patch.object(self.tool, "_fetch_relationships", return_value=[]), \
-             patch.object(self.tool, "_enrich_model_context_with_metadata",
-                          return_value={"measures": [], "tables": [{"name": "Sales", "columns": ["Amount"]}],
-                                        "relationships": [], "columns": [], "sample_data": {}}), \
-             patch.object(self.tool, "_extract_report_definition_parts", return_value=[]), \
-             patch.object(self.tool, "_extract_default_filters", return_value={}), \
-             patch.object(self.tool, "_extract_slicers_from_report", return_value=[]), \
-             patch.object(self.tool, "_get_fabric_token", return_value=ACCESS_TOKEN):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[part]),
+            patch.object(self.tool, "_fetch_relationships", return_value=[]),
+            patch.object(
+                self.tool,
+                "_enrich_model_context_with_metadata",
+                return_value={
+                    "measures": [],
+                    "tables": [{"name": "Sales", "columns": ["Amount"]}],
+                    "relationships": [],
+                    "columns": [],
+                    "sample_data": {},
+                },
+            ),
+            patch.object(
+                self.tool, "_extract_report_definition_parts", return_value=[]
+            ),
+            patch.object(self.tool, "_extract_default_filters", return_value={}),
+            patch.object(self.tool, "_extract_slicers_from_report", return_value=[]),
+            patch.object(self.tool, "_get_fabric_token", return_value=ACCESS_TOKEN),
+        ):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2874,9 +3438,19 @@ class TestFetcherPipelineSPFallback:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(return_value=None)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_extract_model_context", side_effect=Exception("model extraction failed")):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool,
+                "_extract_model_context",
+                side_effect=Exception("model extraction failed"),
+            ),
+        ):
 
             result = self._run(self.tool._execute_fetcher_pipeline(config))
 
@@ -2888,6 +3462,7 @@ class TestFetcherPipelineSPFallback:
 # ===========================================================================
 # _extract_model_context — SP fallback paths
 # ===========================================================================
+
 
 class TestFetcherExtractModelContextSPFallback:
     """Tests for SP fallback in _extract_model_context."""
@@ -2910,14 +3485,17 @@ class TestFetcherExtractModelContextSPFallback:
         sp_tmdl = "table Sales\n\tcolumn Amount\n\tmeasure Revenue = SUM(Sales[Amount])\n\t\tlineageTag: x\n"
         sp_part = {
             "path": "definition/tables/Sales.tmdl",
-            "payload": base64.b64encode(sp_tmdl.encode()).decode()
+            "payload": base64.b64encode(sp_tmdl.encode()).decode(),
         }
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(self.tool, "_get_fabric_token", return_value=ACCESS_TOKEN), \
-             patch.object(self.tool, "_fetch_tmdl_via_fabric",
-                          side_effect=[None, [sp_part]]), \
-             patch.object(self.tool, "_fetch_relationships", return_value=[]):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(self.tool, "_get_fabric_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                self.tool, "_fetch_tmdl_via_fabric", side_effect=[None, [sp_part]]
+            ),
+            patch.object(self.tool, "_fetch_relationships", return_value=[]),
+        ):
             result = self._run(
                 self.tool._extract_model_context(WS_ID, DS_ID, ACCESS_TOKEN, config)
             )
@@ -2935,13 +3513,25 @@ class TestFetcherExtractModelContextSPFallback:
             "skip_system_tables": True,
         }
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(self.tool, "_get_fabric_token",
-                          side_effect=[Exception("Fabric token failed"), Exception("Fabric token failed")]), \
-             patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=None), \
-             patch.object(self.tool, "_fetch_model_via_admin_scanner", return_value=([], [])), \
-             patch.object(self.tool, "_fetch_model_via_powerbi_dax", return_value=([], [])), \
-             patch.object(self.tool, "_fetch_relationships", return_value=[]):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                self.tool,
+                "_get_fabric_token",
+                side_effect=[
+                    Exception("Fabric token failed"),
+                    Exception("Fabric token failed"),
+                ],
+            ),
+            patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=None),
+            patch.object(
+                self.tool, "_fetch_model_via_admin_scanner", return_value=([], [])
+            ),
+            patch.object(
+                self.tool, "_fetch_model_via_powerbi_dax", return_value=([], [])
+            ),
+            patch.object(self.tool, "_fetch_relationships", return_value=[]),
+        ):
             result = self._run(
                 self.tool._extract_model_context(WS_ID, DS_ID, ACCESS_TOKEN, config)
             )
@@ -2952,12 +3542,20 @@ class TestFetcherExtractModelContextSPFallback:
         """SP fallback exception should not propagate."""
         config = {"client_secret": "s3cr3t", "skip_system_tables": True}
 
-        with patch.object(self.tool, "_get_access_token", side_effect=Exception("SP auth failed")), \
-             patch.object(self.tool, "_get_fabric_token", return_value=ACCESS_TOKEN), \
-             patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=None), \
-             patch.object(self.tool, "_fetch_model_via_admin_scanner", return_value=([], [])), \
-             patch.object(self.tool, "_fetch_model_via_powerbi_dax", return_value=([], [])), \
-             patch.object(self.tool, "_fetch_relationships", return_value=[]):
+        with (
+            patch.object(
+                self.tool, "_get_access_token", side_effect=Exception("SP auth failed")
+            ),
+            patch.object(self.tool, "_get_fabric_token", return_value=ACCESS_TOKEN),
+            patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=None),
+            patch.object(
+                self.tool, "_fetch_model_via_admin_scanner", return_value=([], [])
+            ),
+            patch.object(
+                self.tool, "_fetch_model_via_powerbi_dax", return_value=([], [])
+            ),
+            patch.object(self.tool, "_fetch_relationships", return_value=[]),
+        ):
             result = self._run(
                 self.tool._extract_model_context(WS_ID, DS_ID, ACCESS_TOKEN, config)
             )
@@ -2968,6 +3566,7 @@ class TestFetcherExtractModelContextSPFallback:
 # ===========================================================================
 # _enrich_tables_semantic tests
 # ===========================================================================
+
 
 class TestFetcherEnrichTablesSemantic:
     """Tests for _enrich_tables_semantic."""
@@ -3011,16 +3610,13 @@ class TestFetcherEnrichTablesSemantic:
             )
 
     def test_empty_tables_no_error(self):
-        self._run(
-            self.tool._enrich_tables_semantic(
-                "databricks-claude-sonnet-4", []
-            )
-        )
+        self._run(self.tool._enrich_tables_semantic("databricks-claude-sonnet-4", []))
 
 
 # ===========================================================================
 # _enrich_columns_and_measures_semantic tests
 # ===========================================================================
+
 
 class TestFetcherEnrichColumnsAndMeasuresSemantic:
     """Tests for _enrich_columns_and_measures_semantic."""
@@ -3033,7 +3629,9 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
 
     def test_string_columns_skipped(self):
         """Tables with string columns (not dict) are skipped in column enrichment."""
-        tables = [{"name": "Sales", "columns": ["Amount", "Region"]}]  # strings, not dicts
+        tables = [
+            {"name": "Sales", "columns": ["Amount", "Region"]}
+        ]  # strings, not dicts
         measures = []
 
         mock_completion = AsyncMock(return_value='{"columns": []}')
@@ -3042,7 +3640,9 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
             self._run(
                 self.tool._enrich_columns_and_measures_semantic(
                     "databricks-claude-sonnet-4",
-                    tables, measures, {},
+                    tables,
+                    measures,
+                    {},
                 )
             )
         # No LLM call should be made for string columns
@@ -3053,7 +3653,7 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
             {
                 "name": "Sales",
                 "purpose": "Fact table",
-                "columns": [{"name": "Amount"}, {"name": "Region"}]
+                "columns": [{"name": "Amount"}, {"name": "Region"}],
             }
         ]
         measures = []
@@ -3066,7 +3666,9 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
             self._run(
                 self.tool._enrich_columns_and_measures_semantic(
                     "databricks-claude-sonnet-4",
-                    tables, measures, {},
+                    tables,
+                    measures,
+                    {},
                 )
             )
 
@@ -3086,7 +3688,9 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
             self._run(
                 self.tool._enrich_columns_and_measures_semantic(
                     "databricks-claude-sonnet-4",
-                    tables, measures, {},
+                    tables,
+                    measures,
+                    {},
                 )
             )
 
@@ -3097,6 +3701,7 @@ class TestFetcherEnrichColumnsAndMeasuresSemantic:
 # ===========================================================================
 # _get_fabric_token tests
 # ===========================================================================
+
 
 class TestFetcherGetFabricToken:
     """Tests for _get_fabric_token."""
@@ -3110,10 +3715,11 @@ class TestFetcherGetFabricToken:
     def test_get_fabric_token_calls_helper(self):
         """_get_fabric_token exists and can be called with a mocked auth helper."""
         from unittest.mock import AsyncMock, patch
+
         config = {"tenant_id": "t1", "client_id": "c1", "client_secret": "s1"}
         with patch(
             "src.services.tools.powerbi_semantic_model_fetcher_tool.PowerBISemanticModelFetcherTool._get_fabric_token",
-            new_callable=lambda: AsyncMock(return_value="fabric-token")
+            new_callable=lambda: AsyncMock(return_value="fabric-token"),
         ):
             assert hasattr(self.tool, "_get_fabric_token")
 
@@ -3124,6 +3730,7 @@ class TestFetcherGetFabricToken:
 # ===========================================================================
 # _relationships — system table filter
 # ===========================================================================
+
 
 class TestFetcherRelationshipsSystemTableFilter:
     """Tests for _fetch_relationships with system table filtering."""
@@ -3136,10 +3743,22 @@ class TestFetcherRelationshipsSystemTableFilter:
 
     def test_local_date_table_filtered_when_skip_system(self):
         rows = [
-            {"[ID]": 1, "[FromTable]": "LocalDateTable_123", "[FromColumn]": "Date",
-             "[ToTable]": "Sales", "[ToColumn]": "DateKey", "[IsActive]": True},
-            {"[ID]": 2, "[FromTable]": "Sales", "[FromColumn]": "DateKey",
-             "[ToTable]": "Date", "[ToColumn]": "DateKey", "[IsActive]": True},
+            {
+                "[ID]": 1,
+                "[FromTable]": "LocalDateTable_123",
+                "[FromColumn]": "Date",
+                "[ToTable]": "Sales",
+                "[ToColumn]": "DateKey",
+                "[IsActive]": True,
+            },
+            {
+                "[ID]": 2,
+                "[FromTable]": "Sales",
+                "[FromColumn]": "DateKey",
+                "[ToTable]": "Date",
+                "[ToColumn]": "DateKey",
+                "[IsActive]": True,
+            },
         ]
         mock_response = MagicMock()
         mock_response.json.return_value = {"results": [{"tables": [{"rows": rows}]}]}
@@ -3150,21 +3769,40 @@ class TestFetcherRelationshipsSystemTableFilter:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._fetch_relationships(WS_ID, DS_ID, ACCESS_TOKEN, {"skip_system_tables": True})
+                self.tool._fetch_relationships(
+                    WS_ID, DS_ID, ACCESS_TOKEN, {"skip_system_tables": True}
+                )
             )
 
         # LocalDateTable relationship should be filtered
-        local_date_rels = [r for r in result if "LocalDateTable" in r.get("from_table", "")]
+        local_date_rels = [
+            r for r in result if "LocalDateTable" in r.get("from_table", "")
+        ]
         assert local_date_rels == []
 
     def test_duplicate_relationship_ids_deduplicated(self):
         rows = [
-            {"[ID]": 1, "[FromTable]": "Sales", "[FromColumn]": "DateKey",
-             "[ToTable]": "Date", "[ToColumn]": "DateKey", "[IsActive]": True},
-            {"[ID]": 1, "[FromTable]": "Sales", "[FromColumn]": "DateKey",
-             "[ToTable]": "Date", "[ToColumn]": "DateKey", "[IsActive]": True},  # duplicate
+            {
+                "[ID]": 1,
+                "[FromTable]": "Sales",
+                "[FromColumn]": "DateKey",
+                "[ToTable]": "Date",
+                "[ToColumn]": "DateKey",
+                "[IsActive]": True,
+            },
+            {
+                "[ID]": 1,
+                "[FromTable]": "Sales",
+                "[FromColumn]": "DateKey",
+                "[ToTable]": "Date",
+                "[ToColumn]": "DateKey",
+                "[IsActive]": True,
+            },  # duplicate
         ]
         mock_response = MagicMock()
         mock_response.json.return_value = {"results": [{"tables": [{"rows": rows}]}]}
@@ -3175,7 +3813,10 @@ class TestFetcherRelationshipsSystemTableFilter:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._fetch_relationships(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -3186,6 +3827,7 @@ class TestFetcherRelationshipsSystemTableFilter:
 # ===========================================================================
 # Admin scanner — system table filtering + skip_system=False
 # ===========================================================================
+
 
 class TestAdminScannerSystemTableFilter:
     """Test system table filtering in admin scanner."""
@@ -3207,24 +3849,33 @@ class TestAdminScannerSystemTableFilter:
         poll_resp.raise_for_status = MagicMock()
 
         result_data = {
-            "workspaces": [{
-                "id": WS_ID,
-                "datasets": [{
-                    "id": DS_ID,
-                    "tables": [
+            "workspaces": [
+                {
+                    "id": WS_ID,
+                    "datasets": [
                         {
-                            "name": "LocalDateTable_123",
-                            "columns": [{"name": "Date"}],
-                            "measures": []
-                        },
-                        {
-                            "name": "Sales",
-                            "columns": [{"name": "Amount"}],
-                            "measures": [{"name": "Revenue", "expression": "SUM(Sales[Amount])"}]
+                            "id": DS_ID,
+                            "tables": [
+                                {
+                                    "name": "LocalDateTable_123",
+                                    "columns": [{"name": "Date"}],
+                                    "measures": [],
+                                },
+                                {
+                                    "name": "Sales",
+                                    "columns": [{"name": "Amount"}],
+                                    "measures": [
+                                        {
+                                            "name": "Revenue",
+                                            "expression": "SUM(Sales[Amount])",
+                                        }
+                                    ],
+                                },
+                            ],
                         }
-                    ]
-                }]
-            }]
+                    ],
+                }
+            ]
         }
         result_resp = MagicMock()
         result_resp.json.return_value = result_data
@@ -3244,10 +3895,20 @@ class TestAdminScannerSystemTableFilter:
         mock_client.post = AsyncMock(return_value=post_resp)
         mock_client.get = AsyncMock(side_effect=get_side)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             measures, tables = self._run(
-                self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {"skip_system_tables": True})
+                self.tool._fetch_model_via_admin_scanner(
+                    WS_ID, DS_ID, ACCESS_TOKEN, {"skip_system_tables": True}
+                )
             )
 
         # LocalDateTable should be filtered, Sales should remain
@@ -3265,20 +3926,32 @@ class TestAdminScannerSystemTableFilter:
         poll_resp.raise_for_status = MagicMock()
 
         result_data = {
-            "workspaces": [{
-                "id": WS_ID,
-                "datasets": [{
-                    "id": DS_ID,
-                    "tables": [{
-                        "name": "Sales",
-                        "columns": [{"name": "Amount"}],
-                        "measures": [
-                            {"name": "No Expression", "expression": ""},  # empty → skipped
-                            {"name": "Revenue", "expression": "SUM(Sales[Amount])"},
-                        ]
-                    }]
-                }]
-            }]
+            "workspaces": [
+                {
+                    "id": WS_ID,
+                    "datasets": [
+                        {
+                            "id": DS_ID,
+                            "tables": [
+                                {
+                                    "name": "Sales",
+                                    "columns": [{"name": "Amount"}],
+                                    "measures": [
+                                        {
+                                            "name": "No Expression",
+                                            "expression": "",
+                                        },  # empty → skipped
+                                        {
+                                            "name": "Revenue",
+                                            "expression": "SUM(Sales[Amount])",
+                                        },
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
         }
         result_resp = MagicMock()
         result_resp.json.return_value = result_data
@@ -3298,8 +3971,16 @@ class TestAdminScannerSystemTableFilter:
         mock_client.post = AsyncMock(return_value=post_resp)
         mock_client.get = AsyncMock(side_effect=get_side)
 
-        with patch("src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_semantic_model_fetcher_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             measures, tables = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )

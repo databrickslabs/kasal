@@ -1,5 +1,14 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, UniqueConstraint
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 
 from src.db.base import Base
 
@@ -9,8 +18,9 @@ class PromptTemplate(Base):
     PromptTemplate model for storing reusable prompt templates.
     Enhanced with group isolation for multi-group deployments.
     """
+
     __table_args__ = (
-        UniqueConstraint('name', 'group_id', name='uq_prompttemplate_name_group'),
+        UniqueConstraint("name", "group_id", name="uq_prompttemplate_name_group"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -25,8 +35,12 @@ class PromptTemplate(Base):
     created_by_email = Column(String(255), nullable=True)  # Creator email for audit
 
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)  # Use timezone-naive UTC time
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # Use timezone-naive UTC time
+    created_at = Column(
+        DateTime, default=datetime.utcnow
+    )  # Use timezone-naive UTC time
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )  # Use timezone-naive UTC time
 
     def __init__(self, **kwargs):
         super(PromptTemplate, self).__init__(**kwargs)

@@ -8,20 +8,22 @@ Covers:
   AI Gateway is off and /ai-gateway/mlflow/v1 when DATABRICKS_ENABLE_AI_GATEWAY
   is "true".
 """
+
 import os
+
 import pytest
 
 from src.utils.databricks_auth import (
     AuthContext,
-    reset_auth_config_cache,
     _databricks_auth,
+    reset_auth_config_cache,
 )
 from src.utils.databricks_url_utils import DatabricksURLUtils
-
 
 # ---------------------------------------------------------------------------
 # reset_auth_config_cache
 # ---------------------------------------------------------------------------
+
 
 class TestResetAuthConfigCache:
     """Tests for the module-level reset_auth_config_cache() helper."""
@@ -63,6 +65,7 @@ class TestResetAuthConfigCache:
 # ---------------------------------------------------------------------------
 # AuthContext.get_litellm_params
 # ---------------------------------------------------------------------------
+
 
 class TestGetLitellmParams:
     """Tests for AuthContext.get_litellm_params() api_base routing."""

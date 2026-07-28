@@ -3,13 +3,15 @@ Comprehensive unit tests for FlowExecution and FlowNodeExecution SQLAlchemy mode
 
 Tests all models in flow_execution.py including table structure and initialization logic.
 """
-import pytest
+
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, JSON, ForeignKey, DateTime, Text
+
+import pytest
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 
-from src.models.flow_execution import FlowExecution, FlowNodeExecution
 from src.db.base import Base
+from src.models.flow_execution import FlowExecution, FlowNodeExecution
 
 
 class TestFlowExecution:
@@ -26,10 +28,18 @@ class TestFlowExecution:
     def test_flow_execution_columns_exist(self):
         """Test FlowExecution has expected columns."""
         expected_columns = [
-            'id', 'flow_id', 'job_id', 'status', 'config', 'result', 'error',
-            'created_at', 'updated_at', 'completed_at'
+            "id",
+            "flow_id",
+            "job_id",
+            "status",
+            "config",
+            "result",
+            "error",
+            "created_at",
+            "updated_at",
+            "completed_at",
         ]
-        
+
         for column_name in expected_columns:
             assert hasattr(FlowExecution, column_name)
 
@@ -122,13 +132,11 @@ class TestFlowExecutionInitialization:
     def test_flow_execution_minimal_initialization(self):
         """Test FlowExecution initialization with minimal required fields."""
         import uuid
+
         flow_id = uuid.uuid4()
-        
-        execution = FlowExecution(
-            flow_id=flow_id,
-            job_id="job-123"
-        )
-        
+
+        execution = FlowExecution(flow_id=flow_id, job_id="job-123")
+
         assert execution.flow_id == flow_id
         assert execution.job_id == "job-123"
         assert execution.config == {}  # Default applied in __init__
@@ -136,11 +144,12 @@ class TestFlowExecutionInitialization:
     def test_flow_execution_initialization_with_all_fields(self):
         """Test FlowExecution initialization with all fields."""
         import uuid
+
         flow_id = uuid.uuid4()
         created_time = datetime.utcnow()
         updated_time = datetime.utcnow()
         completed_time = datetime.utcnow()
-        
+
         execution = FlowExecution(
             flow_id=flow_id,
             job_id="job-123",
@@ -150,9 +159,9 @@ class TestFlowExecutionInitialization:
             error="Error message",
             created_at=created_time,
             updated_at=updated_time,
-            completed_at=completed_time
+            completed_at=completed_time,
         )
-        
+
         assert execution.flow_id == flow_id
         assert execution.job_id == "job-123"
         assert execution.status == "running"
@@ -166,26 +175,21 @@ class TestFlowExecutionInitialization:
     def test_flow_execution_initialization_with_none_config(self):
         """Test FlowExecution initialization handles None config."""
         import uuid
+
         flow_id = uuid.uuid4()
-        
-        execution = FlowExecution(
-            flow_id=flow_id,
-            job_id="job-123",
-            config=None
-        )
-        
+
+        execution = FlowExecution(flow_id=flow_id, job_id="job-123", config=None)
+
         assert execution.config == {}  # None replaced with empty dict
 
     def test_flow_execution_default_values(self):
         """Test FlowExecution default values (applied at database level)."""
         import uuid
+
         flow_id = uuid.uuid4()
-        
-        execution = FlowExecution(
-            flow_id=flow_id,
-            job_id="job-123"
-        )
-        
+
+        execution = FlowExecution(flow_id=flow_id, job_id="job-123")
+
         # These should be None until saved to database (defaults are applied at DB level)
         assert execution.status is None  # Will be "pending" when saved to DB
         assert execution.result is None
@@ -207,10 +211,19 @@ class TestFlowNodeExecution:
     def test_flow_node_execution_columns_exist(self):
         """Test FlowNodeExecution has expected columns."""
         expected_columns = [
-            'id', 'flow_execution_id', 'node_id', 'status', 'agent_id', 'task_id',
-            'result', 'error', 'created_at', 'updated_at', 'completed_at'
+            "id",
+            "flow_execution_id",
+            "node_id",
+            "status",
+            "agent_id",
+            "task_id",
+            "result",
+            "error",
+            "created_at",
+            "updated_at",
+            "completed_at",
         ]
-        
+
         for column_name in expected_columns:
             assert hasattr(FlowNodeExecution, column_name)
 
@@ -306,11 +319,8 @@ class TestFlowNodeExecutionInitialization:
 
     def test_flow_node_execution_minimal_initialization(self):
         """Test FlowNodeExecution initialization with minimal required fields."""
-        node_execution = FlowNodeExecution(
-            flow_execution_id=1,
-            node_id="node-123"
-        )
-        
+        node_execution = FlowNodeExecution(flow_execution_id=1, node_id="node-123")
+
         assert node_execution.flow_execution_id == 1
         assert node_execution.node_id == "node-123"
 
@@ -319,7 +329,7 @@ class TestFlowNodeExecutionInitialization:
         created_time = datetime.utcnow()
         updated_time = datetime.utcnow()
         completed_time = datetime.utcnow()
-        
+
         node_execution = FlowNodeExecution(
             flow_execution_id=1,
             node_id="node-123",
@@ -330,9 +340,9 @@ class TestFlowNodeExecutionInitialization:
             error="Node error message",
             created_at=created_time,
             updated_at=updated_time,
-            completed_at=completed_time
+            completed_at=completed_time,
         )
-        
+
         assert node_execution.flow_execution_id == 1
         assert node_execution.node_id == "node-123"
         assert node_execution.status == "completed"
@@ -346,11 +356,8 @@ class TestFlowNodeExecutionInitialization:
 
     def test_flow_node_execution_default_values(self):
         """Test FlowNodeExecution default values (applied at database level)."""
-        node_execution = FlowNodeExecution(
-            flow_execution_id=1,
-            node_id="node-123"
-        )
-        
+        node_execution = FlowNodeExecution(flow_execution_id=1, node_id="node-123")
+
         # These should be None until saved to database (defaults are applied at DB level)
         assert node_execution.status is None  # Will be "pending" when saved to DB
         assert node_execution.agent_id is None
@@ -365,25 +372,25 @@ class TestFlowExecutionTableStructure:
 
     def test_flow_execution_table_exists(self):
         """Test FlowExecution table exists in metadata."""
-        assert hasattr(FlowExecution, '__table__')
+        assert hasattr(FlowExecution, "__table__")
         assert FlowExecution.__table__.name == "flow_executions"
 
     def test_flow_node_execution_table_exists(self):
         """Test FlowNodeExecution table exists in metadata."""
-        assert hasattr(FlowNodeExecution, '__table__')
+        assert hasattr(FlowNodeExecution, "__table__")
         assert FlowNodeExecution.__table__.name == "flow_node_executions"
 
     def test_flow_execution_primary_key(self):
         """Test FlowExecution primary key."""
         table = FlowExecution.__table__
         primary_key_columns = [col.name for col in table.primary_key.columns]
-        assert primary_key_columns == ['id']
+        assert primary_key_columns == ["id"]
 
     def test_flow_node_execution_primary_key(self):
         """Test FlowNodeExecution primary key."""
         table = FlowNodeExecution.__table__
         primary_key_columns = [col.name for col in table.primary_key.columns]
-        assert primary_key_columns == ['id']
+        assert primary_key_columns == ["id"]
 
     def test_flow_execution_foreign_keys(self):
         """Test FlowExecution foreign keys.
@@ -392,7 +399,7 @@ class TestFlowExecutionTableStructure:
         """
         table = FlowExecution.__table__
 
-        flow_id_column = table.columns['flow_id']
+        flow_id_column = table.columns["flow_id"]
         foreign_keys = list(flow_id_column.foreign_keys)
         # No FK constraint in current model
         assert len(foreign_keys) == 0
@@ -400,8 +407,8 @@ class TestFlowExecutionTableStructure:
     def test_flow_node_execution_foreign_keys(self):
         """Test FlowNodeExecution foreign keys."""
         table = FlowNodeExecution.__table__
-        
-        flow_execution_id_column = table.columns['flow_execution_id']
+
+        flow_execution_id_column = table.columns["flow_execution_id"]
         foreign_keys = list(flow_execution_id_column.foreign_keys)
         assert len(foreign_keys) == 1
         fk = foreign_keys[0]
@@ -410,8 +417,8 @@ class TestFlowExecutionTableStructure:
     def test_flow_execution_unique_constraints(self):
         """Test FlowExecution unique constraints."""
         table = FlowExecution.__table__
-        
-        job_id_column = table.columns['job_id']
+
+        job_id_column = table.columns["job_id"]
         assert job_id_column.unique is True
 
     def test_flow_execution_nullable_columns(self):
@@ -419,13 +426,13 @@ class TestFlowExecutionTableStructure:
         table = FlowExecution.__table__
 
         # Non-nullable columns
-        non_nullable = ['id', 'job_id', 'status']
+        non_nullable = ["id", "job_id", "status"]
         for col_name in non_nullable:
             column = table.columns[col_name]
             assert not column.nullable, f"Column {col_name} should not be nullable"
 
         # Nullable columns (flow_id is nullable in current model)
-        nullable = ['flow_id', 'result', 'error', 'completed_at']
+        nullable = ["flow_id", "result", "error", "completed_at"]
         for col_name in nullable:
             column = table.columns[col_name]
             assert column.nullable, f"Column {col_name} should be nullable"
@@ -433,15 +440,15 @@ class TestFlowExecutionTableStructure:
     def test_flow_node_execution_nullable_columns(self):
         """Test FlowNodeExecution nullable column configuration."""
         table = FlowNodeExecution.__table__
-        
+
         # Non-nullable columns
-        non_nullable = ['id', 'flow_execution_id', 'node_id', 'status']
+        non_nullable = ["id", "flow_execution_id", "node_id", "status"]
         for col_name in non_nullable:
             column = table.columns[col_name]
             assert not column.nullable, f"Column {col_name} should not be nullable"
-        
+
         # Nullable columns
-        nullable = ['agent_id', 'task_id', 'result', 'error', 'completed_at']
+        nullable = ["agent_id", "task_id", "result", "error", "completed_at"]
         for col_name in nullable:
             column = table.columns[col_name]
             assert column.nullable, f"Column {col_name} should be nullable"
@@ -449,8 +456,8 @@ class TestFlowExecutionTableStructure:
     def test_all_models_have_sqlalchemy_attributes(self):
         """Test all models have SQLAlchemy attributes."""
         models = [FlowExecution, FlowNodeExecution]
-        
+
         for model in models:
-            assert hasattr(model, '__table__')
-            assert hasattr(model, '__mapper__')
-            assert hasattr(model, 'metadata')
+            assert hasattr(model, "__table__")
+            assert hasattr(model, "__mapper__")
+            assert hasattr(model, "metadata")

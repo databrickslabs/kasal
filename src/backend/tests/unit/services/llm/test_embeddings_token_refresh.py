@@ -56,29 +56,49 @@ def databricks_auth():
 
 @pytest.mark.asyncio
 async def test_401_refreshes_auth_and_retries(databricks_auth):
-    session = _Session([
-        _Response(401),
-        _Response(200, {"data": [{"embedding": [0.1, 0.2, 0.3]}]}),
-    ])
+    session = _Session(
+        [
+            _Response(401),
+            _Response(200, {"data": [{"embedding": [0.1, 0.2, 0.3]}]}),
+        ]
+    )
 
     @asynccontextmanager
     async def _shared_session():
         yield session
 
-    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock,
-               return_value=databricks_auth), \
-         patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"), \
-         patch("src.utils.aiohttp_session.shared_client_session", _shared_session), \
-         patch.object(embeddings, "_get_group_id_from_context", return_value="group-1"), \
-         patch.object(embeddings.DatabricksURLUtils, "construct_llm_base_url",
-                      return_value="https://example.com/serving-endpoints"), \
-         patch.object(embeddings.DatabricksURLUtils, "extract_workspace_from_endpoint",
-                      return_value="https://example.com"), \
-         patch.object(embeddings.DatabricksURLUtils, "construct_embeddings_url",
-                      return_value=("https://example.com/embeddings", "m")):
+    with (
+        patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=databricks_auth,
+        ),
+        patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"),
+        patch("src.utils.aiohttp_session.shared_client_session", _shared_session),
+        patch.object(embeddings, "_get_group_id_from_context", return_value="group-1"),
+        patch.object(
+            embeddings.DatabricksURLUtils,
+            "construct_llm_base_url",
+            return_value="https://example.com/serving-endpoints",
+        ),
+        patch.object(
+            embeddings.DatabricksURLUtils,
+            "extract_workspace_from_endpoint",
+            return_value="https://example.com",
+        ),
+        patch.object(
+            embeddings.DatabricksURLUtils,
+            "construct_embeddings_url",
+            return_value=("https://example.com/embeddings", "m"),
+        ),
+    ):
         result = await embeddings.get_embedding("hello")
 
-    assert result == [0.1, 0.2, 0.3], "the retry after refresh must return the embedding"
+    assert result == [
+        0.1,
+        0.2,
+        0.3,
+    ], "the retry after refresh must return the embedding"
     assert len(session.headers_seen) == 2, "a second request must actually be made"
     assert session.headers_seen[1]["Authorization"] == "Bearer refreshed-token"
 
@@ -97,16 +117,27 @@ async def test_401_without_usable_auth_gives_up_quietly(databricks_auth):
     async def _auth(*args, **kwargs):
         return auth_calls.pop(0)
 
-    with patch("src.utils.databricks_auth.get_auth_context", _auth), \
-         patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"), \
-         patch("src.utils.aiohttp_session.shared_client_session", _shared_session), \
-         patch.object(embeddings, "_get_group_id_from_context", return_value="group-1"), \
-         patch.object(embeddings.DatabricksURLUtils, "construct_llm_base_url",
-                      return_value="https://example.com/serving-endpoints"), \
-         patch.object(embeddings.DatabricksURLUtils, "extract_workspace_from_endpoint",
-                      return_value="https://example.com"), \
-         patch.object(embeddings.DatabricksURLUtils, "construct_embeddings_url",
-                      return_value=("https://example.com/embeddings", "m")):
+    with (
+        patch("src.utils.databricks_auth.get_auth_context", _auth),
+        patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"),
+        patch("src.utils.aiohttp_session.shared_client_session", _shared_session),
+        patch.object(embeddings, "_get_group_id_from_context", return_value="group-1"),
+        patch.object(
+            embeddings.DatabricksURLUtils,
+            "construct_llm_base_url",
+            return_value="https://example.com/serving-endpoints",
+        ),
+        patch.object(
+            embeddings.DatabricksURLUtils,
+            "extract_workspace_from_endpoint",
+            return_value="https://example.com",
+        ),
+        patch.object(
+            embeddings.DatabricksURLUtils,
+            "construct_embeddings_url",
+            return_value=("https://example.com/embeddings", "m"),
+        ),
+    ):
         result = await embeddings.get_embedding("hello")
 
     assert result is None

@@ -1,15 +1,16 @@
 """Unit tests for DaxSkeletonBuilder in metadata_reduction package."""
 
 import pytest
+
 from src.services.tools.metadata_reduction.dax_skeleton_builder import (
+    _DATE_COLUMN_HINTS,
+    _DATE_TABLE_NAMES,
     DaxSkeleton,
     DaxSkeletonBuilder,
-    _DATE_TABLE_NAMES,
-    _DATE_COLUMN_HINTS,
 )
 
-
 # ─── Helpers ────────────────────────────────────────────────────────────────
+
 
 def _model_measure(name, **extra):
     """Return a minimal model-measure dict with optional _resolution override."""
@@ -50,6 +51,7 @@ def _composite_measure(name, base, siblings):
 
 # ─── DaxSkeleton dataclass ───────────────────────────────────────────────────
 
+
 class TestDaxSkeletonDataclass:
     def test_default_values(self):
         s = DaxSkeleton()
@@ -83,6 +85,7 @@ class TestDaxSkeletonDataclass:
 
 # ─── build() — empty / no measures ─────────────────────────────────────────
 
+
 class TestBuildNoMeasures:
     def setup_method(self):
         self.builder = DaxSkeletonBuilder()
@@ -99,6 +102,7 @@ class TestBuildNoMeasures:
 
 
 # ─── build() — single model measure ─────────────────────────────────────────
+
 
 class TestBuildSingleModelMeasure:
     def setup_method(self):
@@ -142,6 +146,7 @@ class TestBuildSingleModelMeasure:
 
 
 # ─── build() — single filtered measure ──────────────────────────────────────
+
 
 class TestBuildSingleFilteredMeasure:
     def setup_method(self):
@@ -195,6 +200,7 @@ class TestBuildSingleFilteredMeasure:
 
 # ─── build() — composite measure ─────────────────────────────────────────────
 
+
 class TestBuildCompositeMeasure:
     def setup_method(self):
         self.builder = DaxSkeletonBuilder()
@@ -228,10 +234,14 @@ class TestBuildCompositeMeasure:
         composite = _composite_measure("Total", "Base", ["S1", "S2"])
         result = self.builder.build([composite, sibling_a, sibling_b])
         assert len(result.strategy_notes) > 0
-        assert "2" in result.strategy_notes[0] or "siblings" in result.strategy_notes[0].lower()
+        assert (
+            "2" in result.strategy_notes[0]
+            or "siblings" in result.strategy_notes[0].lower()
+        )
 
 
 # ─── build() — multiple model measures ──────────────────────────────────────
+
 
 class TestBuildMultiMeasure:
     def setup_method(self):
@@ -264,6 +274,7 @@ class TestBuildMultiMeasure:
 
 # ─── build() — multiple filtered only ───────────────────────────────────────
 
+
 class TestBuildFilteredOnly:
     def setup_method(self):
         self.builder = DaxSkeletonBuilder()
@@ -285,6 +296,7 @@ class TestBuildFilteredOnly:
 
 # ─── active_filters (TREATAS) ─────────────────────────────────────────────────
 
+
 class TestActiveFilters:
     def setup_method(self):
         self.builder = DaxSkeletonBuilder()
@@ -293,7 +305,9 @@ class TestActiveFilters:
         measure = _model_measure("Revenue")
         intent = {"dimensions": ["'Sales'[Country]"]}
         filters = {"Sales[Region]": "Europe"}
-        result = self.builder.build([measure], question_intent=intent, active_filters=filters)
+        result = self.builder.build(
+            [measure], question_intent=intent, active_filters=filters
+        )
         assert "TREATAS" in result.skeleton
         assert '"Europe"' in result.skeleton
 
@@ -301,7 +315,9 @@ class TestActiveFilters:
         measure = _model_measure("Revenue")
         intent = {"dimensions": ["'Sales'[Country]"]}
         filters = {"Sales[Region]": ["Europe", "Asia"]}
-        result = self.builder.build([measure], question_intent=intent, active_filters=filters)
+        result = self.builder.build(
+            [measure], question_intent=intent, active_filters=filters
+        )
         assert "TREATAS" in result.skeleton
         assert '"Europe"' in result.skeleton
         assert '"Asia"' in result.skeleton
@@ -310,25 +326,32 @@ class TestActiveFilters:
         measure = _model_measure("Revenue")
         intent = {"dimensions": ["'Sales'[Country]"]}
         filters = {"Sales[Channel]": "NOT NULL"}
-        result = self.builder.build([measure], question_intent=intent, active_filters=filters)
+        result = self.builder.build(
+            [measure], question_intent=intent, active_filters=filters
+        )
         assert "ISBLANK" in result.skeleton
 
     def test_filter_without_brackets_is_ignored(self):
         measure = _model_measure("Revenue")
         intent = {"dimensions": ["'Sales'[Country]"]}
         filters = {"NoColumnBracket": "Value"}
-        result = self.builder.build([measure], question_intent=intent, active_filters=filters)
+        result = self.builder.build(
+            [measure], question_intent=intent, active_filters=filters
+        )
         # No TREATAS since key has no brackets
         assert "TREATAS" not in result.skeleton
 
     def test_empty_filters_produces_no_treatas(self):
         measure = _model_measure("Revenue")
         intent = {"dimensions": ["'Sales'[Country]"]}
-        result = self.builder.build([measure], question_intent=intent, active_filters={})
+        result = self.builder.build(
+            [measure], question_intent=intent, active_filters={}
+        )
         assert "TREATAS" not in result.skeleton
 
 
 # ─── dimension_bindings (group column qualification) ─────────────────────────
+
 
 class TestDimensionBindings:
     def setup_method(self):
@@ -361,6 +384,7 @@ class TestDimensionBindings:
 
 
 # ─── _detect_date_table ──────────────────────────────────────────────────────
+
 
 class TestDetectDateTable:
     def test_finds_canonical_date_table(self):
@@ -415,6 +439,7 @@ class TestDetectDateTable:
 
 # ─── time intelligence injection ─────────────────────────────────────────────
 
+
 class TestTimeIntelligence:
     def setup_method(self):
         self.builder = DaxSkeletonBuilder()
@@ -424,7 +449,10 @@ class TestTimeIntelligence:
 
     def test_ytd_injects_comment_hint(self):
         measure = _model_measure("Revenue")
-        intent = {"dimensions": ["'Date'[Month]"], "time_intelligence": {"has_ytd": True}}
+        intent = {
+            "dimensions": ["'Date'[Month]"],
+            "time_intelligence": {"has_ytd": True},
+        }
         result = self.builder.build(
             [measure], question_intent=intent, tables=self._make_tables()
         )
@@ -468,6 +496,7 @@ class TestTimeIntelligence:
 
 # ─── _extract_group_columns ──────────────────────────────────────────────────
 
+
 class TestExtractGroupColumns:
     def test_returns_empty_without_intent(self):
         cols = DaxSkeletonBuilder._extract_group_columns(None)
@@ -505,6 +534,7 @@ class TestExtractGroupColumns:
 
 # ─── _format_group_cols ──────────────────────────────────────────────────────
 
+
 class TestFormatGroupCols:
     def test_empty_cols_appends_placeholder(self):
         placeholders = []
@@ -514,7 +544,9 @@ class TestFormatGroupCols:
 
     def test_qualified_col_passes_through(self):
         placeholders = []
-        result = DaxSkeletonBuilder._format_group_cols(["'Sales'[Country]"], placeholders)
+        result = DaxSkeletonBuilder._format_group_cols(
+            ["'Sales'[Country]"], placeholders
+        )
         assert "'Sales'[Country]" in result
         assert placeholders == []
 
@@ -536,6 +568,7 @@ class TestFormatGroupCols:
 
 # ─── _format_filter_lines ────────────────────────────────────────────────────
 
+
 class TestFormatFilterLines:
     def test_none_returns_empty_string(self):
         assert DaxSkeletonBuilder._format_filter_lines(None) == ""
@@ -549,7 +582,9 @@ class TestFormatFilterLines:
         assert '"Europe"' in result
 
     def test_list_value_emits_treatas_multiple(self):
-        result = DaxSkeletonBuilder._format_filter_lines({"Sales[Region]": ["EU", "US"]})
+        result = DaxSkeletonBuilder._format_filter_lines(
+            {"Sales[Region]": ["EU", "US"]}
+        )
         assert '"EU"' in result
         assert '"US"' in result
 
@@ -563,6 +598,7 @@ class TestFormatFilterLines:
 
 
 # ─── _build_date_filter ──────────────────────────────────────────────────────
+
 
 class TestBuildDateFilter:
     def test_empty_time_intelligence_returns_empty(self):

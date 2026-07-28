@@ -1,6 +1,6 @@
 import logging
-from typing import List, Dict
 from datetime import datetime
+from typing import Dict, List
 
 from src.db.session import async_session_factory
 from src.repositories.api_key_repository import ApiKeyRepository
@@ -21,8 +21,12 @@ PLACEHOLDER_API_KEYS: List[Dict[str, str]] = [
     {"name": "DEEPSEEK_API_KEY", "description": "DeepSeek API Key"},
     {"name": "GEMINI_API_KEY", "description": "Google Gemini API Key"},
     {"name": "KIMI_API_KEY", "description": "Moonshot AI Kimi API Key"},
-    {"name": "DATABRICKS_API_KEY", "description": "Databricks personal access token (if used)"},
+    {
+        "name": "DATABRICKS_API_KEY",
+        "description": "Databricks personal access token (if used)",
+    },
 ]
+
 
 async def seed():
     logger.info("Seeding placeholder API keys (no secret values)...")
@@ -48,4 +52,3 @@ async def seed():
             await repo.create(model_dict)
             created += 1
         logger.info(f"API Keys seeder completed. Created {created} placeholder keys.")
-

@@ -2,8 +2,9 @@
 COUNT(*) unless asked — every hot-path caller discarded the count, doubling
 DB round trips on the most-polled endpoint."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from src.repositories.execution_repository import ExecutionRepository
 

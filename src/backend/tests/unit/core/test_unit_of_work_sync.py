@@ -1,8 +1,10 @@
 """
 Tests for SyncUnitOfWork which is skipped in the main test file.
 """
-import pytest
+
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.core.unit_of_work import SyncUnitOfWork
 
@@ -61,7 +63,9 @@ class TestSyncUnitOfWork:
         """initialize does nothing when already initialized."""
         uow = SyncUnitOfWork()
         mock_session = self._make_mock_session()
-        with patch("src.db.session.sync_session_factory", return_value=mock_session) as mock_factory:
+        with patch(
+            "src.db.session.sync_session_factory", return_value=mock_session
+        ) as mock_factory:
             uow.initialize()
             uow.initialize()  # second call
         mock_factory.assert_called_once()

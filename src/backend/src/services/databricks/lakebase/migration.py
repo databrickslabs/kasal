@@ -22,7 +22,7 @@ from src.db.base import Base
 logger = logging.getLogger(__name__)
 
 # --- SQL injection prevention helpers ---
-_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+_SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _validate_identifier(name: str, kind: str = "identifier") -> str:
@@ -36,7 +36,6 @@ def _validate_identifier(name: str, kind: str = "identifier") -> str:
     if not name or not _SAFE_IDENTIFIER_RE.match(name):
         raise ValueError(f"Invalid SQL {kind}: {name!r}")
     return name
-
 
 
 class LakebaseMigrationService(BaseService):
@@ -223,12 +222,8 @@ class LakebaseMigrationService(BaseService):
         # migration failures.  For each table we list the WHERE clause that
         # filters out orphans.
         self.fk_existence_filters: Dict[str, str] = {
-            "execution_trace": (
-                'job_id IN (SELECT job_id FROM "executionhistory")'
-            ),
-            "taskstatus": (
-                'job_id IN (SELECT job_id FROM "executionhistory")'
-            ),
+            "execution_trace": ('job_id IN (SELECT job_id FROM "executionhistory")'),
+            "taskstatus": ('job_id IN (SELECT job_id FROM "executionhistory")'),
             "llm_usage_billing": (
                 'execution_id IN (SELECT job_id FROM "executionhistory")'
             ),
@@ -260,15 +255,11 @@ class LakebaseMigrationService(BaseService):
                 tables = [row[0] for row in result]
             else:
                 # For PostgreSQL source, check both kasal and public schemas
-                result = await session.execute(
-                    text(
-                        """
+                result = await session.execute(text("""
                         SELECT tablename FROM pg_tables
                         WHERE schemaname IN ('kasal', 'public')
                         AND tablename NOT LIKE 'alembic_%'
-                    """
-                    )
-                )
+                    """))
                 tables = [row[0] for row in result]
 
             logger.info(f"Found {len(tables)} tables in source database")
@@ -373,8 +364,7 @@ class LakebaseMigrationService(BaseService):
 
         while len(assigned) < len(deps):
             wave = [
-                n for n, d in deps.items()
-                if n not in assigned and d.issubset(assigned)
+                n for n, d in deps.items() if n not in assigned and d.issubset(assigned)
             ]
             if not wave:
                 # Circular deps — force remaining into final wave
@@ -622,16 +612,26 @@ class LakebaseMigrationService(BaseService):
                         result = conn.execute(text(_doc_embed_sql))
                         rows = result.fetchall()
                         columns = [
-                            "id", "source", "title", "content",
-                            "doc_metadata", "created_at", "updated_at",
+                            "id",
+                            "source",
+                            "title",
+                            "content",
+                            "doc_metadata",
+                            "created_at",
+                            "updated_at",
                         ]
                 else:
                     with source_engine.begin() as conn:
                         result = conn.execute(text(_doc_embed_sql))
                         rows = result.fetchall()
                         columns = [
-                            "id", "source", "title", "content",
-                            "doc_metadata", "created_at", "updated_at",
+                            "id",
+                            "source",
+                            "title",
+                            "content",
+                            "doc_metadata",
+                            "created_at",
+                            "updated_at",
                         ]
             else:
                 # Get data from source
@@ -657,7 +657,9 @@ class LakebaseMigrationService(BaseService):
 
             if not rows:
                 elapsed = time.monotonic() - t0
-                logger.info(f"  ↳ Table {table_name} is empty (0 rows) [{elapsed:.2f}s]")
+                logger.info(
+                    f"  ↳ Table {table_name} is empty (0 rows) [{elapsed:.2f}s]"
+                )
                 return 0, None
 
             logger.info(f"  ↳ Table {table_name}: {len(rows)} rows to migrate")
@@ -748,9 +750,7 @@ class LakebaseMigrationService(BaseService):
                         lakebase_conn.commit()
                     except Exception as trunc_err:
                         lakebase_conn.rollback()
-                        logger.warning(
-                            f"  ↳ Could not clear {table_name}: {trunc_err}"
-                        )
+                        logger.warning(f"  ↳ Could not clear {table_name}: {trunc_err}")
                 logger.debug(f"  ↳ Cleared existing data from {table_name}")
 
                 for batch_start in range(0, len(converted_rows), batch_size):
@@ -780,13 +780,17 @@ class LakebaseMigrationService(BaseService):
                         )
 
             elapsed = time.monotonic() - t0
-            logger.info(f"  ✓ Migrated {len(rows)} rows from {table_name} [{elapsed:.2f}s]")
+            logger.info(
+                f"  ✓ Migrated {len(rows)} rows from {table_name} [{elapsed:.2f}s]"
+            )
             return len(rows), None
 
         except Exception as e:
             elapsed = time.monotonic() - t0
             error_msg = f"{type(e).__name__}: {str(e)}"
-            logger.error(f"❌ Error migrating table {table_name} [{elapsed:.2f}s]: {error_msg}")
+            logger.error(
+                f"❌ Error migrating table {table_name} [{elapsed:.2f}s]: {error_msg}"
+            )
             return 0, error_msg
 
     def reset_sequences_sync(
@@ -812,10 +816,12 @@ class LakebaseMigrationService(BaseService):
                 conn.commit()
 
                 # Find all sequences owned by columns in the kasal schema
-                seq_rows = conn.execute(text(
-                    "SELECT sequencename FROM pg_sequences "
-                    "WHERE schemaname = 'kasal'"
-                )).fetchall()
+                seq_rows = conn.execute(
+                    text(
+                        "SELECT sequencename FROM pg_sequences "
+                        "WHERE schemaname = 'kasal'"
+                    )
+                ).fetchall()
 
                 if not seq_rows:
                     logger.info("No sequences found in kasal schema — nothing to reset")
@@ -841,14 +847,20 @@ class LakebaseMigrationService(BaseService):
 
                         if row and row > 0:
                             conn.execute(
-                                text(f"SELECT setval('\"kasal\".\"{safe_seq}\"', {int(row)})")
+                                text(
+                                    f'SELECT setval(\'"kasal"."{safe_seq}"\', {int(row)})'
+                                )
                             )
                             logger.info(f"  ✓ Reset sequence {seq_name} to {row}")
                         else:
                             conn.execute(
-                                text(f"SELECT setval('\"kasal\".\"{safe_seq}\"', 1, false)")
+                                text(
+                                    f'SELECT setval(\'"kasal"."{safe_seq}"\', 1, false)'
+                                )
                             )
-                            logger.info(f"  ✓ Reset sequence {seq_name} to 1 (empty table)")
+                            logger.info(
+                                f"  ✓ Reset sequence {seq_name} to 1 (empty table)"
+                            )
                         conn.commit()
                         results.append((seq_name, True, None))
                     except Exception as e:

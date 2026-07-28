@@ -39,8 +39,12 @@ def test_usage_dict_lands_on_span():
 
 def test_cached_prompt_tokens_included_when_present():
     event = SimpleNamespace(
-        usage={"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110,
-               "cached_prompt_tokens": 90},
+        usage={
+            "prompt_tokens": 100,
+            "completion_tokens": 10,
+            "total_tokens": 110,
+            "cached_prompt_tokens": 90,
+        },
     )
 
     attrs = _attributes_for(event)

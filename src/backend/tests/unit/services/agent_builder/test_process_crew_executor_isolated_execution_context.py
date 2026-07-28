@@ -1,203 +1,213 @@
-import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from typing import Optional, Dict, Any, List
 import multiprocessing as mp
+from typing import Any, Dict, List, Optional
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
+
+from src.services.agent_builder.process_executor import (
+    ExecutionMode,
+    ProcessCrewExecutor,
+)
 
 # Test ProcessCrewExecutor - based on actual code inspection
-
-from src.services.agent_builder.process_executor import ProcessCrewExecutor, ExecutionMode
 
 
 class TestProcessCrewExecutorInit:
     """Test ProcessCrewExecutor initialization"""
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_process_crew_executor_init_default(self, mock_get_context):
         """Test ProcessCrewExecutor __init__ with default parameters"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
+
         executor = ProcessCrewExecutor()
-        
+
         assert executor._max_concurrent == 4  # Default value
         assert executor._ctx == mock_ctx
         assert isinstance(executor._running_processes, dict)
         assert isinstance(executor._running_futures, dict)
         assert isinstance(executor._running_executors, dict)
         assert isinstance(executor._metrics, dict)
-        mock_get_context.assert_called_once_with('spawn')
+        mock_get_context.assert_called_once_with("spawn")
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_process_crew_executor_init_custom_concurrent(self, mock_get_context):
         """Test ProcessCrewExecutor __init__ with custom max_concurrent"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
         max_concurrent = 8
-        
+
         executor = ProcessCrewExecutor(max_concurrent)
-        
+
         assert executor._max_concurrent == max_concurrent
         assert executor._ctx == mock_ctx
-        mock_get_context.assert_called_once_with('spawn')
+        mock_get_context.assert_called_once_with("spawn")
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_process_crew_executor_init_creates_empty_tracking(self, mock_get_context):
         """Test ProcessCrewExecutor __init__ creates empty tracking dictionaries"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
+
         executor = ProcessCrewExecutor()
-        
+
         assert len(executor._running_processes) == 0
         assert len(executor._running_futures) == 0
         assert len(executor._running_executors) == 0
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_process_crew_executor_init_creates_metrics(self, mock_get_context):
         """Test ProcessCrewExecutor __init__ creates metrics dictionary"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
+
         executor = ProcessCrewExecutor()
-        
+
         expected_metrics = {
-            'total_executions': 0,
-            'active_executions': 0,
-            'completed_executions': 0,
-            'failed_executions': 0,
-            'terminated_executions': 0
+            "total_executions": 0,
+            "active_executions": 0,
+            "completed_executions": 0,
+            "failed_executions": 0,
+            "terminated_executions": 0,
         }
         assert executor._metrics == expected_metrics
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch.dict('src.services.agent_builder.process_executor.os.environ', {}, clear=True)
-    def test_process_crew_executor_init_sets_environment_variables(self, mock_get_context):
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch.dict(
+        "src.services.agent_builder.process_executor.os.environ", {}, clear=True
+    )
+    def test_process_crew_executor_init_sets_environment_variables(
+        self, mock_get_context
+    ):
         """Test ProcessCrewExecutor __init__ sets environment variables"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
-        with patch('src.services.agent_builder.process_executor.os.environ', {}) as mock_environ:
+
+        with patch(
+            "src.services.agent_builder.process_executor.os.environ", {}
+        ) as mock_environ:
             ProcessCrewExecutor()
-            
-            assert mock_environ['PYTHONUNBUFFERED'] == '0'
-            assert mock_environ['CREWAI_VERBOSE'] == 'false'
+
+            assert mock_environ["PYTHONUNBUFFERED"] == "0"
+            assert mock_environ["CREWAI_VERBOSE"] == "false"
 
 
 class TestProcessCrewExecutorGetMetrics:
     """Test ProcessCrewExecutor get_metrics method"""
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_get_metrics_returns_copy(self, mock_get_context):
         """Test get_metrics returns a copy of metrics"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
+
         executor = ProcessCrewExecutor()
-        
+
         metrics = executor.get_metrics()
-        
+
         # Should return a copy, not the original
         assert metrics == executor._metrics
         assert metrics is not executor._metrics
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_get_metrics_contains_expected_keys(self, mock_get_context):
         """Test get_metrics contains all expected metric keys"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
+
         executor = ProcessCrewExecutor()
-        
+
         metrics = executor.get_metrics()
-        
+
         expected_keys = {
-            'total_executions',
-            'active_executions',
-            'completed_executions',
-            'failed_executions',
-            'terminated_executions'
+            "total_executions",
+            "active_executions",
+            "completed_executions",
+            "failed_executions",
+            "terminated_executions",
         }
         assert set(metrics.keys()) == expected_keys
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_get_metrics_modification_doesnt_affect_original(self, mock_get_context):
         """Test modifying returned metrics doesn't affect original"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
+
         executor = ProcessCrewExecutor()
-        original_total = executor._metrics['total_executions']
-        
+        original_total = executor._metrics["total_executions"]
+
         metrics = executor.get_metrics()
-        metrics['total_executions'] = 999
-        
-        assert executor._metrics['total_executions'] == original_total
+        metrics["total_executions"] = 999
+
+        assert executor._metrics["total_executions"] == original_total
 
 
 class TestProcessCrewExecutorContextManager:
     """Test ProcessCrewExecutor context manager methods"""
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_context_manager_enter(self, mock_get_context):
         """Test ProcessCrewExecutor __enter__ method"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
+
         executor = ProcessCrewExecutor()
-        
+
         result = executor.__enter__()
-        
+
         assert result is executor
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_context_manager_exit(self, mock_get_context):
         """Test ProcessCrewExecutor __exit__ method"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
+
         executor = ProcessCrewExecutor()
         executor.shutdown = Mock()
-        
+
         result = executor.__exit__(None, None, None)
-        
+
         executor.shutdown.assert_called_once_with(wait=True)
         assert result is False
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_context_manager_exit_with_exception(self, mock_get_context):
         """Test ProcessCrewExecutor __exit__ method with exception"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
+
         executor = ProcessCrewExecutor()
         executor.shutdown = Mock()
-        
+
         result = executor.__exit__(Exception, Exception("test"), None)
-        
+
         executor.shutdown.assert_called_once_with(wait=True)
         assert result is False
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_context_manager_usage(self, mock_get_context):
         """Test ProcessCrewExecutor can be used as context manager"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
-        with patch.object(ProcessCrewExecutor, 'shutdown') as mock_shutdown:
+
+        with patch.object(ProcessCrewExecutor, "shutdown") as mock_shutdown:
             with ProcessCrewExecutor() as executor:
                 assert isinstance(executor, ProcessCrewExecutor)
-            
+
             mock_shutdown.assert_called_once_with(wait=True)
 
 
@@ -212,18 +222,18 @@ class TestExecutionMode:
     def test_should_use_process_basic(self):
         """Test should_use_process with basic crew config"""
         crew_config = {"agents": [], "tasks": []}
-        
+
         result = ExecutionMode.should_use_process(crew_config)
-        
+
         # Should return a boolean
         assert isinstance(result, bool)
 
     def test_should_use_process_empty_config(self):
         """Test should_use_process with empty config"""
         crew_config = {}
-        
+
         result = ExecutionMode.should_use_process(crew_config)
-        
+
         # Should return a boolean
         assert isinstance(result, bool)
 
@@ -241,32 +251,32 @@ class TestExecutionMode:
         """Test should_use_process is a static method"""
         # Can be called on class without instance
         crew_config = {"test": "value"}
-        
+
         result = ExecutionMode.should_use_process(crew_config)
-        
+
         assert isinstance(result, bool)
 
 
 class TestProcessCrewExecutorAttributes:
     """Test ProcessCrewExecutor attribute access"""
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_executor_has_required_attributes(self, mock_get_context):
         """Test that executor has all required attributes after initialization"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
+
         executor = ProcessCrewExecutor()
-        
+
         # Check all required attributes exist
-        assert hasattr(executor, '_ctx')
-        assert hasattr(executor, '_max_concurrent')
-        assert hasattr(executor, '_running_processes')
-        assert hasattr(executor, '_running_futures')
-        assert hasattr(executor, '_running_executors')
-        assert hasattr(executor, '_metrics')
-        
+        assert hasattr(executor, "_ctx")
+        assert hasattr(executor, "_max_concurrent")
+        assert hasattr(executor, "_running_processes")
+        assert hasattr(executor, "_running_futures")
+        assert hasattr(executor, "_running_executors")
+        assert hasattr(executor, "_metrics")
+
         # Check attribute types
         assert executor._ctx == mock_ctx
         assert isinstance(executor._max_concurrent, int)
@@ -275,15 +285,15 @@ class TestProcessCrewExecutorAttributes:
         assert isinstance(executor._running_executors, dict)
         assert isinstance(executor._metrics, dict)
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_executor_tracking_dictionaries_are_separate(self, mock_get_context):
         """Test that tracking dictionaries are separate instances"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
+
         executor = ProcessCrewExecutor()
-        
+
         # Should be separate dictionary instances
         assert executor._running_processes is not executor._running_futures
         assert executor._running_processes is not executor._running_executors
@@ -324,43 +334,43 @@ class TestProcessCrewExecutorConstants:
     def test_global_instance_exists(self):
         """Test that global process_crew_executor instance exists"""
         from src.services.agent_builder.process_executor import process_crew_executor
-        
+
         assert process_crew_executor is not None
         assert isinstance(process_crew_executor, ProcessCrewExecutor)
 
     def test_execution_mode_class_exists(self):
         """Test that ExecutionMode class is properly defined"""
         assert ExecutionMode is not None
-        assert hasattr(ExecutionMode, 'THREAD')
-        assert hasattr(ExecutionMode, 'PROCESS')
-        assert hasattr(ExecutionMode, 'should_use_process')
+        assert hasattr(ExecutionMode, "THREAD")
+        assert hasattr(ExecutionMode, "PROCESS")
+        assert hasattr(ExecutionMode, "should_use_process")
 
 
 class TestProcessCrewExecutorShutdown:
     """Test ProcessCrewExecutor shutdown method (basic tests only)"""
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_shutdown_method_exists(self, mock_get_context):
         """Test shutdown method exists and is callable"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
+
         executor = ProcessCrewExecutor()
-        
+
         # Should have shutdown method
-        assert hasattr(executor, 'shutdown')
+        assert hasattr(executor, "shutdown")
         assert callable(executor.shutdown)
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_shutdown_with_no_running_processes(self, mock_get_context):
         """Test shutdown with no running processes"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
+
         executor = ProcessCrewExecutor()
-        
+
         # Should not raise an exception
         try:
             executor.shutdown(wait=False)
@@ -369,20 +379,20 @@ class TestProcessCrewExecutorShutdown:
             # If it fails due to missing dependencies, that's acceptable
             assert "psutil" in str(e) or "import" in str(e).lower()
 
-    @patch('src.services.agent_builder.process_executor.mp.get_context')
-    @patch('src.services.agent_builder.process_executor.os.environ', {})
+    @patch("src.services.agent_builder.process_executor.mp.get_context")
+    @patch("src.services.agent_builder.process_executor.os.environ", {})
     def test_shutdown_clears_tracking_dictionaries(self, mock_get_context):
         """Test shutdown clears tracking dictionaries"""
         mock_ctx = Mock()
         mock_get_context.return_value = mock_ctx
-        
+
         executor = ProcessCrewExecutor()
-        
+
         # Add some mock data
-        executor._running_processes['test'] = Mock()
-        executor._running_futures['test'] = Mock()
-        executor._running_executors['test'] = Mock()
-        
+        executor._running_processes["test"] = Mock()
+        executor._running_futures["test"] = Mock()
+        executor._running_executors["test"] = Mock()
+
         try:
             executor.shutdown(wait=False)
 
@@ -400,8 +410,8 @@ class TestProcessCrewExecutorRunCrewIsolated:
 
     def setup_method(self):
         """Set up test fixtures"""
-        with patch('src.services.agent_builder.process_executor.mp.get_context'):
-            with patch('src.services.agent_builder.process_executor.os.environ', {}):
+        with patch("src.services.agent_builder.process_executor.mp.get_context"):
+            with patch("src.services.agent_builder.process_executor.os.environ", {}):
                 self.executor = ProcessCrewExecutor()
 
     def _setup_ctx_mocks(self, exitcode=0, queue_result=None):
@@ -413,6 +423,7 @@ class TestProcessCrewExecutorRunCrewIsolated:
         expected result (or raise queue.Empty for fallback to exitcode logic).
         """
         import queue as _queue
+
         mock_queue_instance = Mock()
         mock_log_queue_instance = Mock()
         mock_process_instance = Mock()
@@ -454,12 +465,22 @@ class TestProcessCrewExecutorRunCrewIsolated:
 
         mock_queue_instance, _ = self._setup_ctx_mocks(
             exitcode=0,
-            queue_result={"success": True, "result": "Test result", "status": "COMPLETED"},
+            queue_result={
+                "success": True,
+                "result": "Test result",
+                "status": "COMPLETED",
+            },
         )
 
-        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
-             patch.object(self.executor, "_process_log_queue", new_callable=AsyncMock), \
-             patch.object(self.executor, "_relay_task_events", new_callable=AsyncMock):
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(self.executor, "_process_log_queue", new_callable=AsyncMock),
+            patch.object(self.executor, "_relay_task_events", new_callable=AsyncMock),
+        ):
             result = await self.executor.run_crew_isolated(
                 execution_id, crew_config, group_context
             )
@@ -479,12 +500,22 @@ class TestProcessCrewExecutorRunCrewIsolated:
 
         self._setup_ctx_mocks(
             exitcode=0,
-            queue_result={"success": True, "result": "Test result", "status": "COMPLETED"},
+            queue_result={
+                "success": True,
+                "result": "Test result",
+                "status": "COMPLETED",
+            },
         )
 
-        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
-             patch.object(self.executor, "_process_log_queue", new_callable=AsyncMock), \
-             patch.object(self.executor, "_relay_task_events", new_callable=AsyncMock):
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(self.executor, "_process_log_queue", new_callable=AsyncMock),
+            patch.object(self.executor, "_relay_task_events", new_callable=AsyncMock),
+        ):
             result = await self.executor.run_crew_isolated(
                 execution_id, crew_config, group_context, inputs
             )
@@ -503,12 +534,22 @@ class TestProcessCrewExecutorRunCrewIsolated:
 
         self._setup_ctx_mocks(
             exitcode=0,
-            queue_result={"success": True, "result": "Test result", "status": "COMPLETED"},
+            queue_result={
+                "success": True,
+                "result": "Test result",
+                "status": "COMPLETED",
+            },
         )
 
-        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
-             patch.object(self.executor, "_process_log_queue", new_callable=AsyncMock), \
-             patch.object(self.executor, "_relay_task_events", new_callable=AsyncMock):
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(self.executor, "_process_log_queue", new_callable=AsyncMock),
+            patch.object(self.executor, "_relay_task_events", new_callable=AsyncMock),
+        ):
             result = await self.executor.run_crew_isolated(
                 execution_id, crew_config, group_context, timeout=timeout
             )
@@ -525,11 +566,15 @@ class TestProcessCrewExecutorRunCrewIsolated:
         crew_config = {"agents": [], "tasks": []}
         group_context = Mock()
 
-        initial_total = self.executor._metrics.get('total_executions', 0)
+        initial_total = self.executor._metrics.get("total_executions", 0)
 
-        with patch.object(self.executor, '_running_processes', {}):
-            with patch('src.services.agent_builder.process_executor.mp.Queue') as mock_queue:
-                with patch('src.services.agent_builder.process_executor.mp.Process') as mock_process:
+        with patch.object(self.executor, "_running_processes", {}):
+            with patch(
+                "src.services.agent_builder.process_executor.mp.Queue"
+            ) as mock_queue:
+                with patch(
+                    "src.services.agent_builder.process_executor.mp.Process"
+                ) as mock_process:
                     mock_queue_instance = Mock()
                     mock_process_instance = Mock()
                     mock_queue.return_value = mock_queue_instance
@@ -539,7 +584,7 @@ class TestProcessCrewExecutorRunCrewIsolated:
 
                     mock_queue_instance.get.return_value = {
                         "success": True,
-                        "result": "Test result"
+                        "result": "Test result",
                     }
 
                     await self.executor.run_crew_isolated(
@@ -547,7 +592,7 @@ class TestProcessCrewExecutorRunCrewIsolated:
                     )
 
                     # Metrics should be updated
-                    assert self.executor._metrics['total_executions'] >= initial_total
+                    assert self.executor._metrics["total_executions"] >= initial_total
 
 
 class TestProcessCrewExecutorTerminateExecution:
@@ -555,8 +600,8 @@ class TestProcessCrewExecutorTerminateExecution:
 
     def setup_method(self):
         """Set up test fixtures"""
-        with patch('src.services.agent_builder.process_executor.mp.get_context'):
-            with patch('src.services.agent_builder.process_executor.os.environ', {}):
+        with patch("src.services.agent_builder.process_executor.mp.get_context"):
+            with patch("src.services.agent_builder.process_executor.os.environ", {}):
                 self.executor = ProcessCrewExecutor()
 
     @pytest.mark.asyncio
@@ -587,7 +632,10 @@ class TestProcessCrewExecutorTerminateExecution:
         """Test terminate_execution with graceful termination"""
         execution_id = "test-execution-id"
         mock_process = Mock()
-        mock_process.is_alive.side_effect = [True, False]  # Alive first, then terminated
+        mock_process.is_alive.side_effect = [
+            True,
+            False,
+        ]  # Alive first, then terminated
         mock_process.pid = 12345
 
         self.executor._running_processes[execution_id] = mock_process
@@ -693,7 +741,7 @@ class TestProcessCrewExecutorAdvancedStaticMethods:
     def test_run_crew_wrapper_signature(self):
         """Test _run_crew_wrapper static method signature"""
         # Should be callable (even if it fails due to missing dependencies)
-        assert hasattr(ProcessCrewExecutor, '_run_crew_wrapper')
+        assert hasattr(ProcessCrewExecutor, "_run_crew_wrapper")
         assert callable(ProcessCrewExecutor._run_crew_wrapper)
 
 
@@ -703,7 +751,9 @@ class TestProcessCrewExecutorExecutionIdHandling:
     @pytest.fixture
     def executor(self):
         """Create a ProcessCrewExecutor instance with mocked context."""
-        with patch('src.services.agent_builder.process_executor.mp.get_context') as mock_get_context:
+        with patch(
+            "src.services.agent_builder.process_executor.mp.get_context"
+        ) as mock_get_context:
             mock_ctx = Mock()
             mock_get_context.return_value = mock_ctx
             executor = ProcessCrewExecutor()
@@ -719,7 +769,9 @@ class TestProcessCrewExecutorExecutionIdHandling:
         return context
 
     @pytest.mark.asyncio
-    async def test_execution_id_added_to_crew_config_with_group_context(self, executor, mock_group_context):
+    async def test_execution_id_added_to_crew_config_with_group_context(
+        self, executor, mock_group_context
+    ):
         """Test that execution_id is added to crew_config when group_context is provided."""
         execution_id = "exec_test_123"
         crew_config = {"agents": [], "tasks": [], "crew_settings": {}}
@@ -736,7 +788,7 @@ class TestProcessCrewExecutorExecutionIdHandling:
         def capture_process(*args, **kwargs):
             # Capture the crew_config passed to the process
             if args and len(args) >= 2:
-                captured_config['config'] = args[1]  # crew_config is second arg
+                captured_config["config"] = args[1]  # crew_config is second arg
             return mock_process
 
         executor._ctx.Process = Mock(side_effect=capture_process)
@@ -744,30 +796,31 @@ class TestProcessCrewExecutorExecutionIdHandling:
         # Mock the result queue
         mock_result_queue = Mock()
         mock_result_queue.empty = Mock(return_value=False)
-        mock_result_queue.get_nowait = Mock(return_value={
-            "status": "COMPLETED",
-            "result": "test_result"
-        })
+        mock_result_queue.get_nowait = Mock(
+            return_value={"status": "COMPLETED", "result": "test_result"}
+        )
 
         executor._ctx.Queue = Mock(return_value=mock_result_queue)
 
         # Mock log queue processing
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+        with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
             try:
                 await executor.run_crew_isolated(
                     execution_id=execution_id,
                     crew_config=crew_config,
                     group_context=mock_group_context,
-                    inputs={}
+                    inputs={},
                 )
             except Exception:
                 pass  # We just want to verify the config
 
         # Verify execution_id was added to crew_config
-        assert crew_config.get('execution_id') == execution_id
+        assert crew_config.get("execution_id") == execution_id
 
     @pytest.mark.asyncio
-    async def test_execution_id_added_to_crew_config_without_group_context(self, executor):
+    async def test_execution_id_added_to_crew_config_without_group_context(
+        self, executor
+    ):
         """Test that execution_id is added to crew_config as fallback without group_context."""
         execution_id = "exec_fallback_456"
         crew_config = {"agents": [], "tasks": [], "crew_settings": {}}
@@ -785,30 +838,31 @@ class TestProcessCrewExecutorExecutionIdHandling:
         # Mock the result queue
         mock_result_queue = Mock()
         mock_result_queue.empty = Mock(return_value=False)
-        mock_result_queue.get_nowait = Mock(return_value={
-            "status": "COMPLETED",
-            "result": "test_result"
-        })
+        mock_result_queue.get_nowait = Mock(
+            return_value={"status": "COMPLETED", "result": "test_result"}
+        )
 
         executor._ctx.Queue = Mock(return_value=mock_result_queue)
 
         # Mock log queue processing
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+        with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
             try:
                 await executor.run_crew_isolated(
                     execution_id=execution_id,
                     crew_config=crew_config,
                     group_context=None,  # No group context
-                    inputs={}
+                    inputs={},
                 )
             except Exception:
                 pass  # We just want to verify the config
 
         # Verify execution_id was added via fallback
-        assert crew_config.get('execution_id') == execution_id
+        assert crew_config.get("execution_id") == execution_id
 
     @pytest.mark.asyncio
-    async def test_execution_id_not_overwritten_if_already_present(self, executor, mock_group_context):
+    async def test_execution_id_not_overwritten_if_already_present(
+        self, executor, mock_group_context
+    ):
         """Test that execution_id is not overwritten if already in crew_config."""
         execution_id = "exec_new_789"
         existing_execution_id = "exec_existing_000"
@@ -827,31 +881,32 @@ class TestProcessCrewExecutorExecutionIdHandling:
         # Mock the result queue
         mock_result_queue = Mock()
         mock_result_queue.empty = Mock(return_value=False)
-        mock_result_queue.get_nowait = Mock(return_value={
-            "status": "COMPLETED",
-            "result": "test_result"
-        })
+        mock_result_queue.get_nowait = Mock(
+            return_value={"status": "COMPLETED", "result": "test_result"}
+        )
 
         executor._ctx.Queue = Mock(return_value=mock_result_queue)
 
         # Mock log queue processing
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+        with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
             try:
                 await executor.run_crew_isolated(
                     execution_id=execution_id,
                     crew_config=crew_config,
                     group_context=mock_group_context,
-                    inputs={}
+                    inputs={},
                 )
             except Exception:
                 pass
 
         # The execution_id SHOULD be the new one (it gets overwritten in the group_context block)
         # This is the expected behavior - the method sets execution_id
-        assert crew_config.get('execution_id') == execution_id
+        assert crew_config.get("execution_id") == execution_id
 
     @pytest.mark.asyncio
-    async def test_kasal_execution_id_env_var_set_and_restored(self, executor, mock_group_context):
+    async def test_kasal_execution_id_env_var_set_and_restored(
+        self, executor, mock_group_context
+    ):
         """Test that KASAL_EXECUTION_ID environment variable is set and restored."""
         execution_id = "exec_env_test_111"
         crew_config = {"agents": [], "tasks": []}
@@ -869,35 +924,37 @@ class TestProcessCrewExecutorExecutionIdHandling:
         # Mock the result queue
         mock_result_queue = Mock()
         mock_result_queue.empty = Mock(return_value=False)
-        mock_result_queue.get_nowait = Mock(return_value={
-            "status": "COMPLETED",
-            "result": "test_result"
-        })
+        mock_result_queue.get_nowait = Mock(
+            return_value={"status": "COMPLETED", "result": "test_result"}
+        )
 
         executor._ctx.Queue = Mock(return_value=mock_result_queue)
 
         # Set an initial env var value to test restoration
         import os
-        original_value = os.environ.get('KASAL_EXECUTION_ID')
+
+        original_value = os.environ.get("KASAL_EXECUTION_ID")
 
         # Mock log queue processing
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+        with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
             try:
                 await executor.run_crew_isolated(
                     execution_id=execution_id,
                     crew_config=crew_config,
                     group_context=mock_group_context,
-                    inputs={}
+                    inputs={},
                 )
             except Exception:
                 pass
 
         # After execution, the env var should be restored to original state
-        current_value = os.environ.get('KASAL_EXECUTION_ID')
+        current_value = os.environ.get("KASAL_EXECUTION_ID")
         assert current_value == original_value
 
     @pytest.mark.asyncio
-    async def test_group_id_and_user_token_added_with_group_context(self, executor, mock_group_context):
+    async def test_group_id_and_user_token_added_with_group_context(
+        self, executor, mock_group_context
+    ):
         """Test that group_id and user_token are added to crew_config with group_context."""
         execution_id = "exec_context_test_222"
         crew_config = {"agents": [], "tasks": []}
@@ -915,26 +972,25 @@ class TestProcessCrewExecutorExecutionIdHandling:
         # Mock the result queue
         mock_result_queue = Mock()
         mock_result_queue.empty = Mock(return_value=False)
-        mock_result_queue.get_nowait = Mock(return_value={
-            "status": "COMPLETED",
-            "result": "test_result"
-        })
+        mock_result_queue.get_nowait = Mock(
+            return_value={"status": "COMPLETED", "result": "test_result"}
+        )
 
         executor._ctx.Queue = Mock(return_value=mock_result_queue)
 
         # Mock log queue processing
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+        with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
             try:
                 await executor.run_crew_isolated(
                     execution_id=execution_id,
                     crew_config=crew_config,
                     group_context=mock_group_context,
-                    inputs={}
+                    inputs={},
                 )
             except Exception:
                 pass
 
         # Verify group_id, user_token, and execution_id were added
-        assert crew_config.get('group_id') == mock_group_context.primary_group_id
-        assert crew_config.get('user_token') == mock_group_context.access_token
-        assert crew_config.get('execution_id') == execution_id
+        assert crew_config.get("group_id") == mock_group_context.primary_group_id
+        assert crew_config.get("user_token") == mock_group_context.access_token
+        assert crew_config.get("execution_id") == execution_id

@@ -5,6 +5,7 @@ these indexes existed scan/sort executionhistory + execution_trace on every
 poll. Verifies the self-heal creates them on SQLite, is idempotent, and stays
 quiet when the tables don't exist yet (fresh DB → create_all handles them).
 """
+
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 

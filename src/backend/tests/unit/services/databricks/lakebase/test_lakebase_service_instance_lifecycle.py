@@ -14,23 +14,34 @@ Targets the uncovered paths in LakebaseService:
   - migrate_existing_data (unavailable)
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_service(with_session=True, user_token="tok", user_email="user@example.com"):
     """Build a LakebaseService with all external deps mocked."""
     mock_session = AsyncMock() if with_session else None
 
-    with patch("src.services.databricks.lakebase.service.LakebaseConnectionService") as mock_conn_svc, \
-         patch("src.services.databricks.lakebase.service.LakebaseSchemaService") as mock_schema_svc, \
-         patch("src.services.databricks.lakebase.service.LakebasePermissionService") as mock_perm_svc, \
-         patch("src.services.databricks.lakebase.service.DatabaseConfigRepository") as mock_repo:
+    with (
+        patch(
+            "src.services.databricks.lakebase.service.LakebaseConnectionService"
+        ) as mock_conn_svc,
+        patch(
+            "src.services.databricks.lakebase.service.LakebaseSchemaService"
+        ) as mock_schema_svc,
+        patch(
+            "src.services.databricks.lakebase.service.LakebasePermissionService"
+        ) as mock_perm_svc,
+        patch(
+            "src.services.databricks.lakebase.service.DatabaseConfigRepository"
+        ) as mock_repo,
+    ):
 
         mock_conn_svc.return_value = AsyncMock()
         mock_schema_svc.return_value = MagicMock()
@@ -38,7 +49,10 @@ def _make_service(with_session=True, user_token="tok", user_email="user@example.
         mock_repo.return_value = AsyncMock()
 
         from src.services.databricks.lakebase.service import LakebaseService
-        svc = LakebaseService(session=mock_session, user_token=user_token, user_email=user_email)
+
+        svc = LakebaseService(
+            session=mock_session, user_token=user_token, user_email=user_email
+        )
         svc.connection_service = AsyncMock()
         svc.schema_service = MagicMock()
         svc.permission_service = MagicMock()
@@ -50,40 +64,53 @@ def _make_service(with_session=True, user_token="tok", user_email="user@example.
 # __init__
 # ---------------------------------------------------------------------------
 
+
 class TestLakebaseServiceInit:
     def test_init_with_session(self):
         from src.services.databricks.lakebase.service import LakebaseService
+
         mock_session = AsyncMock()
-        with patch("src.services.databricks.lakebase.service.LakebaseConnectionService"), \
-             patch("src.services.databricks.lakebase.service.LakebaseSchemaService"), \
-             patch("src.services.databricks.lakebase.service.LakebasePermissionService"), \
-             patch("src.services.databricks.lakebase.service.DatabaseConfigRepository"):
+        with (
+            patch("src.services.databricks.lakebase.service.LakebaseConnectionService"),
+            patch("src.services.databricks.lakebase.service.LakebaseSchemaService"),
+            patch("src.services.databricks.lakebase.service.LakebasePermissionService"),
+            patch("src.services.databricks.lakebase.service.DatabaseConfigRepository"),
+        ):
             svc = LakebaseService(session=mock_session)
             assert svc.session is mock_session
 
     def test_init_without_session(self):
         from src.services.databricks.lakebase.service import LakebaseService
-        with patch("src.services.databricks.lakebase.service.LakebaseConnectionService"), \
-             patch("src.services.databricks.lakebase.service.LakebaseSchemaService"), \
-             patch("src.services.databricks.lakebase.service.LakebasePermissionService"):
+
+        with (
+            patch("src.services.databricks.lakebase.service.LakebaseConnectionService"),
+            patch("src.services.databricks.lakebase.service.LakebaseSchemaService"),
+            patch("src.services.databricks.lakebase.service.LakebasePermissionService"),
+        ):
             svc = LakebaseService()
             assert svc.session is None
             assert svc.config_repository is None
 
     def test_init_stores_user_token_and_email(self):
         from src.services.databricks.lakebase.service import LakebaseService
-        with patch("src.services.databricks.lakebase.service.LakebaseConnectionService"), \
-             patch("src.services.databricks.lakebase.service.LakebaseSchemaService"), \
-             patch("src.services.databricks.lakebase.service.LakebasePermissionService"):
+
+        with (
+            patch("src.services.databricks.lakebase.service.LakebaseConnectionService"),
+            patch("src.services.databricks.lakebase.service.LakebaseSchemaService"),
+            patch("src.services.databricks.lakebase.service.LakebasePermissionService"),
+        ):
             svc = LakebaseService(user_token="my-token", user_email="admin@example.com")
             assert svc.user_token == "my-token"
             assert svc.user_email == "admin@example.com"
 
     def test_migration_service_initially_none(self):
         from src.services.databricks.lakebase.service import LakebaseService
-        with patch("src.services.databricks.lakebase.service.LakebaseConnectionService"), \
-             patch("src.services.databricks.lakebase.service.LakebaseSchemaService"), \
-             patch("src.services.databricks.lakebase.service.LakebasePermissionService"):
+
+        with (
+            patch("src.services.databricks.lakebase.service.LakebaseConnectionService"),
+            patch("src.services.databricks.lakebase.service.LakebaseSchemaService"),
+            patch("src.services.databricks.lakebase.service.LakebasePermissionService"),
+        ):
             svc = LakebaseService()
             assert svc.migration_service is None
 
@@ -91,6 +118,7 @@ class TestLakebaseServiceInit:
 # ---------------------------------------------------------------------------
 # get_workspace_client (delegation)
 # ---------------------------------------------------------------------------
+
 
 class TestGetWorkspaceClient:
     @pytest.mark.asyncio
@@ -107,11 +135,14 @@ class TestGetWorkspaceClient:
 # list_instances
 # ---------------------------------------------------------------------------
 
+
 class TestListInstances:
     @pytest.mark.asyncio
     async def test_lakebase_not_available_returns_empty(self):
         svc = _make_service()
-        with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False):
+        with patch(
+            "src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False
+        ):
             result = await svc.list_instances()
         assert result["items"] == []
         assert result["total"] == 0
@@ -123,7 +154,11 @@ class TestListInstances:
         mock_w.config.workspace_id = "12345"
         mock_w.api_client.do.side_effect = [
             # First call: GET /database/instances
-            {"database_instances": [{"name": "my-inst", "state": "READY", "capacity": "CU_1"}]},
+            {
+                "database_instances": [
+                    {"name": "my-inst", "state": "READY", "capacity": "CU_1"}
+                ]
+            },
             # Second call: GET /postgres/projects
             {"projects": [], "next_page_token": None},
         ]
@@ -140,10 +175,12 @@ class TestListInstances:
         mock_w = MagicMock()
         mock_w.config.workspace_id = None
         mock_w.api_client.do.side_effect = [
-            {"database_instances": [
-                {"name": "kasal-prod"},
-                {"name": "other-db"},
-            ]},
+            {
+                "database_instances": [
+                    {"name": "kasal-prod"},
+                    {"name": "other-db"},
+                ]
+            },
             {"projects": [], "next_page_token": None},
         ]
         svc.connection_service.get_workspace_client = AsyncMock(return_value=mock_w)
@@ -173,7 +210,9 @@ class TestListInstances:
     @pytest.mark.asyncio
     async def test_workspace_client_exception_propagates(self):
         svc = _make_service()
-        svc.connection_service.get_workspace_client = AsyncMock(side_effect=RuntimeError("auth failed"))
+        svc.connection_service.get_workspace_client = AsyncMock(
+            side_effect=RuntimeError("auth failed")
+        )
         with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", True):
             with pytest.raises(RuntimeError, match="auth failed"):
                 await svc.list_instances()
@@ -186,10 +225,8 @@ class TestListInstances:
         mock_w.api_client.do.side_effect = [
             {"database_instances": []},  # no provisioned
             {
-                "projects": [
-                    {"name": "projects/auto-proj", "status": {}}
-                ],
-                "next_page_token": None
+                "projects": [{"name": "projects/auto-proj", "status": {}}],
+                "next_page_token": None,
             },
         ]
         svc.connection_service.get_workspace_client = AsyncMock(return_value=mock_w)
@@ -202,7 +239,11 @@ class TestListInstances:
         svc = _make_service()
         mock_w = MagicMock()
         mock_w.config.workspace_id = None
-        mock_w.api_client.do.return_value = {"database_instances": [], "projects": [], "next_page_token": None}
+        mock_w.api_client.do.return_value = {
+            "database_instances": [],
+            "projects": [],
+            "next_page_token": None,
+        }
         svc.connection_service.get_workspace_client = AsyncMock(return_value=mock_w)
         with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", True):
             result = await svc.list_instances(page_size=500)
@@ -212,6 +253,7 @@ class TestListInstances:
 # ---------------------------------------------------------------------------
 # get_config
 # ---------------------------------------------------------------------------
+
 
 class TestGetConfig:
     @pytest.mark.asyncio
@@ -247,7 +289,9 @@ class TestGetConfig:
     @pytest.mark.asyncio
     async def test_repository_error_propagates(self):
         svc = _make_service()
-        svc.config_repository.get_by_key = AsyncMock(side_effect=RuntimeError("db error"))
+        svc.config_repository.get_by_key = AsyncMock(
+            side_effect=RuntimeError("db error")
+        )
         with pytest.raises(RuntimeError, match="db error"):
             await svc.get_config()
 
@@ -255,6 +299,7 @@ class TestGetConfig:
 # ---------------------------------------------------------------------------
 # save_config
 # ---------------------------------------------------------------------------
+
 
 class TestSaveConfig:
     @pytest.mark.asyncio
@@ -286,7 +331,9 @@ class TestSaveConfig:
     @pytest.mark.asyncio
     async def test_save_error_triggers_rollback(self):
         svc = _make_service()
-        svc.config_repository.upsert = AsyncMock(side_effect=RuntimeError("write error"))
+        svc.config_repository.upsert = AsyncMock(
+            side_effect=RuntimeError("write error")
+        )
         svc.session.rollback = AsyncMock()
         config = {"enabled": True, "instance_name": "test"}
         with pytest.raises(RuntimeError, match="write error"):
@@ -298,11 +345,14 @@ class TestSaveConfig:
 # create_instance
 # ---------------------------------------------------------------------------
 
+
 class TestCreateInstance:
     @pytest.mark.asyncio
     async def test_create_instance_unavailable_raises(self):
         svc = _make_service()
-        with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False):
+        with patch(
+            "src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False
+        ):
             with pytest.raises(NotImplementedError):
                 await svc.create_instance("my-inst")
 
@@ -320,10 +370,14 @@ class TestCreateInstance:
         svc = _make_service()
         svc.get_instance = AsyncMock(return_value={"state": "NOT_FOUND"})
         mock_w = MagicMock()
-        mock_w.database.create_database_instance.side_effect = Exception("workspace limit exceeded")
+        mock_w.database.create_database_instance.side_effect = Exception(
+            "workspace limit exceeded"
+        )
         svc.connection_service.get_workspace_client = AsyncMock(return_value=mock_w)
-        with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", True), \
-             patch("src.services.databricks.lakebase.service.DatabaseInstance"):
+        with (
+            patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", True),
+            patch("src.services.databricks.lakebase.service.DatabaseInstance"),
+        ):
             with pytest.raises(ValueError, match="workspace limit"):
                 await svc.create_instance("my-inst")
 
@@ -332,10 +386,14 @@ class TestCreateInstance:
         svc = _make_service()
         svc.get_instance = AsyncMock(return_value={"state": "NOT_FOUND"})
         mock_w = MagicMock()
-        mock_w.database.create_database_instance.side_effect = RuntimeError("unexpected error")
+        mock_w.database.create_database_instance.side_effect = RuntimeError(
+            "unexpected error"
+        )
         svc.connection_service.get_workspace_client = AsyncMock(return_value=mock_w)
-        with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", True), \
-             patch("src.services.databricks.lakebase.service.DatabaseInstance"):
+        with (
+            patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", True),
+            patch("src.services.databricks.lakebase.service.DatabaseInstance"),
+        ):
             with pytest.raises(RuntimeError, match="unexpected error"):
                 await svc.create_instance("my-inst")
 
@@ -343,6 +401,7 @@ class TestCreateInstance:
     async def test_create_instance_success(self):
         """Test successful instance creation path (with asyncio.sleep mocked)."""
         import asyncio
+
         svc = _make_service()
         svc.get_instance = AsyncMock(return_value={"state": "NOT_FOUND"})
 
@@ -363,16 +422,25 @@ class TestCreateInstance:
         svc.get_config = AsyncMock(return_value={"enabled": False})
         svc.save_config = AsyncMock(return_value={"enabled": True})
 
-        with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", True), \
-             patch("src.services.databricks.lakebase.service.DatabaseInstance", MagicMock()), \
-             patch("asyncio.sleep", new_callable=lambda: lambda *_: asyncio.coroutine(lambda: None)()):
+        with (
+            patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", True),
+            patch(
+                "src.services.databricks.lakebase.service.DatabaseInstance", MagicMock()
+            ),
+            patch(
+                "asyncio.sleep",
+                new_callable=lambda: lambda *_: asyncio.coroutine(lambda: None)(),
+            ),
+        ):
             # Mock asyncio.sleep to not actually sleep
             with patch("asyncio.sleep", new=AsyncMock()):
                 # Make get_instance return READY after creation
-                svc.get_instance = AsyncMock(side_effect=[
-                    {"state": "NOT_FOUND"},  # initial check
-                    {"state": "READY", "name": "my-inst"},  # polling
-                ])
+                svc.get_instance = AsyncMock(
+                    side_effect=[
+                        {"state": "NOT_FOUND"},  # initial check
+                        {"state": "READY", "name": "my-inst"},  # polling
+                    ]
+                )
                 result = await svc.create_instance("my-inst", "CU_1")
         assert result["name"] == "my-inst"
 
@@ -380,6 +448,7 @@ class TestCreateInstance:
 # ---------------------------------------------------------------------------
 # _get_autoscaling_project
 # ---------------------------------------------------------------------------
+
 
 class TestGetAutoscalingProject:
     @pytest.mark.asyncio
@@ -400,7 +469,9 @@ class TestGetAutoscalingProject:
     async def test_returns_none_on_not_found(self):
         svc = _make_service()
         mock_w = MagicMock()
-        mock_w.postgres.get_project.side_effect = Exception("not_found: project does not exist")
+        mock_w.postgres.get_project.side_effect = Exception(
+            "not_found: project does not exist"
+        )
         result = await svc._get_autoscaling_project(mock_w, "missing-project")
         assert result is None
 
@@ -432,11 +503,14 @@ class TestGetAutoscalingProject:
 # get_instance
 # ---------------------------------------------------------------------------
 
+
 class TestGetInstance:
     @pytest.mark.asyncio
     async def test_lakebase_not_available(self):
         svc = _make_service()
-        with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False):
+        with patch(
+            "src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False
+        ):
             result = await svc.get_instance("inst")
         assert result["state"] == "NOT_FOUND"
         assert "not available" in result["message"].lower()
@@ -463,8 +537,15 @@ class TestGetInstance:
         mock_w = MagicMock()
         mock_w.database.get_database_instance.side_effect = Exception("not found")
         svc.connection_service.get_workspace_client = AsyncMock(return_value=mock_w)
-        auto_info = {"name": "inst", "state": "AVAILABLE", "type": "autoscaling",
-                     "capacity": None, "read_write_dns": None, "created_at": None, "node_count": None}
+        auto_info = {
+            "name": "inst",
+            "state": "AVAILABLE",
+            "type": "autoscaling",
+            "capacity": None,
+            "read_write_dns": None,
+            "created_at": None,
+            "node_count": None,
+        }
         svc._get_autoscaling_project = AsyncMock(return_value=auto_info)
         with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", True):
             result = await svc.get_instance("inst")
@@ -486,11 +567,14 @@ class TestGetInstance:
 # start_instance
 # ---------------------------------------------------------------------------
 
+
 class TestStartInstance:
     @pytest.mark.asyncio
     async def test_start_instance_unavailable_raises(self):
         svc = _make_service()
-        with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False):
+        with patch(
+            "src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False
+        ):
             with pytest.raises(NotImplementedError):
                 await svc.start_instance("inst")
 
@@ -504,8 +588,10 @@ class TestStartInstance:
         svc.get_instance = AsyncMock(return_value=ready_inst)
         svc.get_config = AsyncMock(return_value={"instance_status": "STARTING"})
         svc.save_config = AsyncMock(return_value=None)
-        with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", True), \
-             patch("asyncio.sleep", new=AsyncMock()):
+        with (
+            patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", True),
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
             result = await svc.start_instance("inst")
         assert result["state"] == "READY"
 
@@ -517,22 +603,29 @@ class TestStartInstance:
         svc.connection_service.get_workspace_client = AsyncMock(return_value=mock_w)
         # Never becomes READY
         svc.get_instance = AsyncMock(return_value={"name": "inst", "state": "STARTING"})
-        with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", True), \
-             patch("asyncio.sleep", new=AsyncMock()):
+        with (
+            patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", True),
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
             # Patch max_wait_seconds to 0 to force immediate timeout exit
             with patch.object(type(svc), "start_instance", wraps=svc.start_instance):
                 # We invoke the real method but override internal loop via elapsed manipulation
                 # Simplest: patch asyncio.sleep to advance elapsed past max by counting calls
                 call_count = {"n": 0}
+
                 async def fake_sleep(t):
                     call_count["n"] += 1
                     if call_count["n"] >= 13:  # 13 * 10 = 130 > 120
                         raise StopAsyncIteration
+
                 with patch("asyncio.sleep", side_effect=fake_sleep):
                     try:
                         result = await svc.start_instance("inst")
                         # Either returns STARTING dict or raises; both acceptable
-                        assert result.get("state") in ("STARTING", "READY") or "message" in result
+                        assert (
+                            result.get("state") in ("STARTING", "READY")
+                            or "message" in result
+                        )
                     except StopAsyncIteration:
                         pass
 
@@ -541,11 +634,14 @@ class TestStartInstance:
 # migrate_existing_data (LAKEBASE_AVAILABLE=False path)
 # ---------------------------------------------------------------------------
 
+
 class TestMigrateExistingData:
     @pytest.mark.asyncio
     async def test_migrate_unavailable_returns_failure(self):
         svc = _make_service()
-        with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False):
+        with patch(
+            "src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False
+        ):
             result = await svc.migrate_existing_data("inst", "endpoint.example.com")
         assert result["success"] is False
         assert "not available" in result["error"].lower()
@@ -555,17 +651,21 @@ class TestMigrateExistingData:
 # _validate_identifier (module-level helper)
 # ---------------------------------------------------------------------------
 
+
 class TestValidateIdentifierInLakebaseService:
     def test_valid_identifier(self):
         from src.services.databricks.lakebase.service import _validate_identifier
+
         assert _validate_identifier("kasal") == "kasal"
 
     def test_invalid_identifier_raises(self):
         from src.services.databricks.lakebase.service import _validate_identifier
+
         with pytest.raises(ValueError):
             _validate_identifier("drop; table")
 
     def test_empty_identifier_raises(self):
         from src.services.databricks.lakebase.service import _validate_identifier
+
         with pytest.raises(ValueError):
             _validate_identifier("")

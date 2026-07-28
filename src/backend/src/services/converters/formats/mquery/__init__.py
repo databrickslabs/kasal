@@ -47,48 +47,42 @@ Author: Kasal Team
 Date: 2025
 """
 
-from .models import (
-    ExpressionType,
+from .connector import MQueryConnector
+from .llm_converter import MQueryLLMConverter
+from .models import (  # Hierarchy models (kept for use by external tools like PowerBIHierarchiesTool)
+    CalculatedColumnResult,
     ColumnDataType,
+    ConversionResult,
+    ExpressionType,
+    Hierarchy,
+    HierarchyLevel,
+    MQueryConversionConfig,
+    MQueryExpression,
+    PowerBITable,
+    ScanStatus,
+    SemanticModel,
     StorageMode,
     TableColumn,
     TableMeasure,
-    MQueryExpression,
-    PowerBITable,
     TableRelationship,
-    SemanticModel,
-    ConversionResult,
-    CalculatedColumnResult,
-    ScanStatus,
-    MQueryConversionConfig,
-    # Hierarchy models (kept for use by external tools like PowerBIHierarchiesTool)
-    Hierarchy,
-    HierarchyLevel,
 )
-
-from .scanner import PowerBIAdminScanner
 from .parser import MQueryParser, TableFromRowsConverter
-from .llm_converter import MQueryLLMConverter
-from .connector import MQueryConnector
+from .scanner import PowerBIAdminScanner
 
 __all__ = [
     # Main connector
     "MQueryConnector",
-
     # Configuration
     "MQueryConversionConfig",
-
     # Supporting services
     "PowerBIAdminScanner",
     "MQueryParser",
     "TableFromRowsConverter",
     "MQueryLLMConverter",
-
     # Models - Expression types
     "ExpressionType",
     "ColumnDataType",
     "StorageMode",
-
     # Models - Data structures
     "TableColumn",
     "TableMeasure",
@@ -98,7 +92,6 @@ __all__ = [
     "Hierarchy",
     "HierarchyLevel",
     "SemanticModel",
-
     # Models - Results
     "ConversionResult",
     "CalculatedColumnResult",

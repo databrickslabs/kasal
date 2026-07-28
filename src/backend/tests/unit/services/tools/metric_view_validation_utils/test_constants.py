@@ -1,25 +1,27 @@
 """Tests for metric_view_validation_utils.constants."""
+
 import pytest
+
 from src.services.tools.metric_view_validation_utils.constants import (
-    SQL_KEYWORDS,
-    SQL_FUNCTIONS,
-    SQL_IDENTIFIER_EXCLUSIONS,
     AGGREGATION_FUNCTIONS,
+    COMPLEXITY_COMPLEX,
+    COMPLEXITY_MEDIUM,
+    COMPLEXITY_SIMPLE,
+    CONFIDENCE_HIGH,
+    CONFIDENCE_LOW,
+    CONFIDENCE_MEDIUM,
     DAX_FUNCTIONS,
     DAX_TO_DB_AGG_MAP,
     PBI_COMMENT_MARKER,
-    COMPLEXITY_SIMPLE,
-    COMPLEXITY_MEDIUM,
-    COMPLEXITY_COMPLEX,
-    STATUS_VALID,
-    STATUS_INVALID,
-    STATUS_SKIPPED,
-    STATUS_ERROR,
+    SQL_FUNCTIONS,
+    SQL_IDENTIFIER_EXCLUSIONS,
+    SQL_KEYWORDS,
     STATUS_EQUIVALENT,
+    STATUS_ERROR,
+    STATUS_INVALID,
     STATUS_REVIEW,
-    CONFIDENCE_HIGH,
-    CONFIDENCE_MEDIUM,
-    CONFIDENCE_LOW,
+    STATUS_SKIPPED,
+    STATUS_VALID,
 )
 
 
@@ -53,8 +55,8 @@ class TestSqlIdentifierExclusions:
         assert SQL_IDENTIFIER_EXCLUSIONS == SQL_KEYWORDS | SQL_FUNCTIONS
 
     def test_contains_members_from_both(self):
-        assert "WHERE" in SQL_IDENTIFIER_EXCLUSIONS   # from SQL_KEYWORDS
-        assert "UPPER" in SQL_IDENTIFIER_EXCLUSIONS   # from SQL_FUNCTIONS
+        assert "WHERE" in SQL_IDENTIFIER_EXCLUSIONS  # from SQL_KEYWORDS
+        assert "UPPER" in SQL_IDENTIFIER_EXCLUSIONS  # from SQL_FUNCTIONS
 
 
 class TestAggregationFunctions:

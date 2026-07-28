@@ -8,8 +8,8 @@ that are referenced by the LLM-selected ones.
 Borrows patterns from the IDOR_2.0 reference implementation.
 """
 
-import re
 import logging
+import re
 from typing import Dict, List, Set
 
 logger = logging.getLogger(__name__)
@@ -72,10 +72,7 @@ class MeasureDependencyResolver:
         if not dax_expression:
             return set()
         matches = _BRACKET_REF_PATTERN.findall(dax_expression)
-        return {
-            m for m in matches
-            if "." not in m and not m.startswith("@")
-        }
+        return {m for m in matches if "." not in m and not m.startswith("@")}
 
     def resolve(self, selected_measure_names: List[str]) -> List[dict]:
         """Given selected measure names, return all measures including
@@ -108,7 +105,8 @@ class MeasureDependencyResolver:
                 m_copy = dict(measure)
                 if name in dependencies_added:
                     m_copy["_dependency_of"] = [
-                        sel for sel in selected_measure_names
+                        sel
+                        for sel in selected_measure_names
                         if name in self._get_all_dependencies(sel)
                     ]
                 result.append(m_copy)

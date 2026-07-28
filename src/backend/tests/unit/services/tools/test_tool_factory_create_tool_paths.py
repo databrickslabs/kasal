@@ -9,17 +9,19 @@ Strategy:
   cleanup, _validate_databricks_auth.
 - All external I/O (DB, env, event loop) is mocked.
 """
+
 import asyncio
 import os
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, Mock, patch, PropertyMock
 
 from src.services.tools.tool_factory import ToolFactory
-
 
 # ============================================================================
 # Helpers
 # ============================================================================
+
 
 def _make_factory(config=None, api_keys_service=None, user_token=None):
     return ToolFactory(
@@ -41,6 +43,7 @@ def _make_tool_info(title="MyTool", tool_id=42, config=None, base_config=None):
 # __init__ / basic construction
 # ============================================================================
 
+
 class TestToolFactoryConstruction:
 
     def test_default_attributes(self):
@@ -54,7 +57,12 @@ class TestToolFactoryConstruction:
 
     def test_core_tools_always_registered(self):
         f = _make_factory()
-        always_present = ["PerplexityTool", "Image Generation Tool", "SerperDevTool", "ScrapeWebsiteTool"]
+        always_present = [
+            "PerplexityTool",
+            "Image Generation Tool",
+            "SerperDevTool",
+            "ScrapeWebsiteTool",
+        ]
         for name in always_present:
             assert name in f._tool_implementations
 
@@ -76,6 +84,7 @@ class TestToolFactoryConstruction:
 # ============================================================================
 # get_tool_info
 # ============================================================================
+
 
 class TestGetToolInfo:
 
@@ -119,6 +128,7 @@ class TestGetToolInfo:
 # register_tool_implementation / register_tool_implementations
 # ============================================================================
 
+
 class TestRegisterToolImplementation:
 
     def test_register_single_tool(self):
@@ -153,6 +163,7 @@ class TestRegisterToolImplementation:
 # create_tool – core scenarios
 # ============================================================================
 
+
 class TestCreateTool:
 
     def _setup_factory_with_tool(self, tool_name="MyTool", tool_id=1, base_config=None):
@@ -179,7 +190,9 @@ class TestCreateTool:
         assert result is None
 
     def test_generic_tool_created_successfully(self):
-        f, info, mock_cls, mock_instance = self._setup_factory_with_tool("ScrapeWebsiteTool")
+        f, info, mock_cls, mock_instance = self._setup_factory_with_tool(
+            "ScrapeWebsiteTool"
+        )
         result = f.create_tool("ScrapeWebsiteTool")
         assert result is mock_instance
 
@@ -187,7 +200,9 @@ class TestCreateTool:
         f, info, mock_cls, mock_instance = self._setup_factory_with_tool(
             "ScrapeWebsiteTool", base_config={"base_key": "base_val"}
         )
-        f.create_tool("ScrapeWebsiteTool", tool_config_override={"override_key": "override_val"})
+        f.create_tool(
+            "ScrapeWebsiteTool", tool_config_override={"override_key": "override_val"}
+        )
         call_kwargs = mock_cls.call_args[1]
         assert call_kwargs.get("base_key") == "base_val"
         assert call_kwargs.get("override_key") == "override_val"
@@ -201,22 +216,28 @@ class TestCreateTool:
         assert call_kwargs.get("key") == "overridden"
 
     def test_result_as_answer_passed_to_generic_tool(self):
-        f, info, mock_cls, mock_instance = self._setup_factory_with_tool("ScrapeWebsiteTool")
+        f, info, mock_cls, mock_instance = self._setup_factory_with_tool(
+            "ScrapeWebsiteTool"
+        )
         f.create_tool("ScrapeWebsiteTool", result_as_answer=True)
         call_kwargs = mock_cls.call_args[1]
         assert call_kwargs.get("result_as_answer") is True
 
     def test_placeholder_resolution_from_execution_inputs(self):
         """Tool config values like {placeholder} should be resolved from execution_inputs."""
-        f = _make_factory(config={
-            "group_id": "g1",
-            "inputs": {
+        f = _make_factory(
+            config={
+                "group_id": "g1",
                 "inputs": {
-                    "workspace_id": "ws-123",
-                }
+                    "inputs": {
+                        "workspace_id": "ws-123",
+                    }
+                },
             }
-        })
-        info = _make_tool_info("ScrapeWebsiteTool", base_config={"workspace": "{workspace_id}"})
+        )
+        info = _make_tool_info(
+            "ScrapeWebsiteTool", base_config={"workspace": "{workspace_id}"}
+        )
         f._available_tools["ScrapeWebsiteTool"] = info
         mock_cls = MagicMock(return_value=MagicMock())
         f._tool_implementations["ScrapeWebsiteTool"] = mock_cls
@@ -227,10 +248,9 @@ class TestCreateTool:
 
     def test_execution_inputs_removed_before_tool_instantiation(self):
         """execution_inputs key should not be passed to the tool constructor."""
-        f = _make_factory(config={
-            "group_id": "g1",
-            "inputs": {"inputs": {"some_key": "val"}}
-        })
+        f = _make_factory(
+            config={"group_id": "g1", "inputs": {"inputs": {"some_key": "val"}}}
+        )
         info = _make_tool_info("ScrapeWebsiteTool", base_config={})
         f._available_tools["ScrapeWebsiteTool"] = info
         mock_cls = MagicMock(return_value=MagicMock())
@@ -263,7 +283,9 @@ class TestCreateTool:
         call_kwargs = mock_cls.call_args[1]
         assert call_kwargs.get("search_type") == "search"
         # endpoint_type should be stripped
-        assert "endpoint_type" in call_kwargs or call_kwargs.get("search_type") == "search"
+        assert (
+            "endpoint_type" in call_kwargs or call_kwargs.get("search_type") == "search"
+        )
 
     def test_serperdevtool_news_endpoint_type_mapped(self):
         f = _make_factory()
@@ -312,7 +334,9 @@ class TestCreateTool:
         f._tool_implementations["PerplexityTool"] = mock_cls
 
         # Remove env key to force use of config
-        env_without_perplexity = {k: v for k, v in os.environ.items() if k != "PERPLEXITY_API_KEY"}
+        env_without_perplexity = {
+            k: v for k, v in os.environ.items() if k != "PERPLEXITY_API_KEY"
+        }
         with patch.dict(os.environ, env_without_perplexity, clear=True):
             f.create_tool("PerplexityTool")
 
@@ -384,6 +408,7 @@ class TestCreateTool:
 # _get_api_key_async
 # ============================================================================
 
+
 class TestGetApiKeyAsync:
 
     @pytest.mark.asyncio
@@ -401,7 +426,10 @@ class TestGetApiKeyAsync:
 
         f = _make_factory(api_keys_service=mock_svc)
 
-        with patch("src.services.tools.tool_factory.EncryptionUtils.decrypt_value", return_value="plain-key"):
+        with patch(
+            "src.services.tools.tool_factory.EncryptionUtils.decrypt_value",
+            return_value="plain-key",
+        ):
             result = await f._get_api_key_async("MY_KEY")
 
         assert result == "plain-key"
@@ -440,6 +468,7 @@ class TestGetApiKeyAsync:
 # _run_in_new_loop
 # ============================================================================
 
+
 class TestRunInNewLoop:
 
     def test_executes_coroutine_and_returns_result(self):
@@ -465,6 +494,7 @@ class TestRunInNewLoop:
 # update_tool_config
 # ============================================================================
 
+
 class TestUpdateToolConfig:
 
     def test_returns_false_when_tool_not_found(self):
@@ -476,6 +506,7 @@ class TestUpdateToolConfig:
 # ============================================================================
 # initialize / async lifecycle
 # ============================================================================
+
 
 class TestInitialize:
 
@@ -490,7 +521,9 @@ class TestInitialize:
     async def test_skips_when_already_initialized(self):
         f = _make_factory()
         f._initialized = True
-        with patch.object(f, "_load_available_tools_async", new_callable=AsyncMock) as mock_load:
+        with patch.object(
+            f, "_load_available_tools_async", new_callable=AsyncMock
+        ) as mock_load:
             await f.initialize()
         mock_load.assert_not_called()
 
@@ -508,7 +541,9 @@ class TestInitialize:
 
     @pytest.mark.asyncio
     async def test_create_classmethod_returns_initialized_factory(self):
-        with patch.object(ToolFactory, "initialize", new_callable=AsyncMock) as mock_init:
+        with patch.object(
+            ToolFactory, "initialize", new_callable=AsyncMock
+        ) as mock_init:
             factory = await ToolFactory.create({"group_id": "g"})
         assert isinstance(factory, ToolFactory)
         mock_init.assert_called_once()
@@ -517,6 +552,7 @@ class TestInitialize:
 # ============================================================================
 # cleanup / __del__
 # ============================================================================
+
 
 class TestCleanup:
 
@@ -535,6 +571,7 @@ class TestCleanup:
 # cleanup_after_crew_execution
 # ============================================================================
 
+
 class TestCleanupAfterCrewExecution:
 
     @pytest.mark.asyncio
@@ -546,6 +583,7 @@ class TestCleanupAfterCrewExecution:
 # ============================================================================
 # _validate_databricks_auth
 # ============================================================================
+
 
 class TestValidateDatabricksAuth:
 
@@ -594,7 +632,10 @@ class TestValidateDatabricksAuth:
 
             with (
                 patch("src.db.session.request_scoped_session", mock_sess_ctx),
-                patch("src.services.databricks.workspace.service.DatabricksService", mock_svc_cls),
+                patch(
+                    "src.services.databricks.workspace.service.DatabricksService",
+                    mock_svc_cls,
+                ),
             ):
                 valid, msg = await f._validate_databricks_auth()
 
@@ -604,6 +645,7 @@ class TestValidateDatabricksAuth:
 # ============================================================================
 # DatabricksJobsTool creation path (integration-style)
 # ============================================================================
+
 
 class TestDatabricksJobsToolCreation:
 
@@ -616,7 +658,10 @@ class TestDatabricksJobsToolCreation:
 
         with patch("src.utils.user_context.UserContext") as mock_ctx:
             mock_ctx.get_user_token.return_value = None
-            with patch("src.utils.databricks_auth.get_auth_context", side_effect=Exception("no auth")):
+            with patch(
+                "src.utils.databricks_auth.get_auth_context",
+                side_effect=Exception("no auth"),
+            ):
                 f.create_tool("DatabricksJobsTool")
 
         call_kwargs = mock_cls.call_args[1]
@@ -631,7 +676,10 @@ class TestDatabricksJobsToolCreation:
 
         with patch("src.utils.user_context.UserContext") as mock_ctx:
             mock_ctx.get_user_token.return_value = None
-            with patch("src.utils.databricks_auth.get_auth_context", side_effect=Exception("no auth")):
+            with patch(
+                "src.utils.databricks_auth.get_auth_context",
+                side_effect=Exception("no auth"),
+            ):
                 f.create_tool("DatabricksJobsTool")
 
         call_kwargs = mock_cls.call_args[1]
@@ -642,6 +690,7 @@ class TestDatabricksJobsToolCreation:
 # ============================================================================
 # GenieTool spaceId resolution paths
 # ============================================================================
+
 
 class TestGenieToolSpaceIdPaths:
 
@@ -667,7 +716,9 @@ class TestGenieToolSpaceIdPaths:
         with patch("src.utils.user_context.UserContext") as mock_ctx:
             mock_ctx.get_user_token.return_value = None
             mock_ctx.get_group_context.return_value = None
-            f.create_tool("GenieTool", tool_config_override={"space_id": "space-underscore"})
+            f.create_tool(
+                "GenieTool", tool_config_override={"space_id": "space-underscore"}
+            )
         call_kwargs = mock_cls.call_args[1]
         assert call_kwargs.get("tool_config", {}).get("spaceId") == "space-underscore"
 
@@ -699,7 +750,11 @@ class TestGenieToolSpaceIdPaths:
 
     def test_databricks_host_from_config(self):
         f = _make_factory(config={"group_id": "g"}, user_token="tok")
-        info = _make_tool_info("GenieTool", 10, config={"DATABRICKS_HOST": "https://my-host.databricks.com"})
+        info = _make_tool_info(
+            "GenieTool",
+            10,
+            config={"DATABRICKS_HOST": "https://my-host.databricks.com"},
+        )
         f._available_tools["GenieTool"] = info
         mock_cls = MagicMock(return_value=MagicMock())
         f._tool_implementations["GenieTool"] = mock_cls
@@ -710,12 +765,16 @@ class TestGenieToolSpaceIdPaths:
             f.create_tool("GenieTool")
 
         call_kwargs = mock_cls.call_args[1]
-        assert call_kwargs.get("tool_config", {}).get("DATABRICKS_HOST") == "https://my-host.databricks.com"
+        assert (
+            call_kwargs.get("tool_config", {}).get("DATABRICKS_HOST")
+            == "https://my-host.databricks.com"
+        )
 
 
 # ============================================================================
 # AgentBricksTool endpointName resolution paths
 # ============================================================================
+
 
 class TestAgentBricksToolEndpointPaths:
 
@@ -732,7 +791,9 @@ class TestAgentBricksToolEndpointPaths:
         with patch("src.utils.user_context.UserContext") as mock_ctx:
             mock_ctx.get_user_token.return_value = None
             mock_ctx.get_group_context.return_value = None
-            f.create_tool("AgentBricksTool", tool_config_override={"endpointName": "my-endpoint"})
+            f.create_tool(
+                "AgentBricksTool", tool_config_override={"endpointName": "my-endpoint"}
+            )
         call_kwargs = mock_cls.call_args[1]
         assert call_kwargs.get("tool_config", {}).get("endpointName") == "my-endpoint"
 
@@ -741,13 +802,18 @@ class TestAgentBricksToolEndpointPaths:
         with patch("src.utils.user_context.UserContext") as mock_ctx:
             mock_ctx.get_user_token.return_value = None
             mock_ctx.get_group_context.return_value = None
-            f.create_tool("AgentBricksTool", tool_config_override={"endpoint_name": "ep-underscore"})
+            f.create_tool(
+                "AgentBricksTool",
+                tool_config_override={"endpoint_name": "ep-underscore"},
+            )
         call_kwargs = mock_cls.call_args[1]
         assert call_kwargs.get("tool_config", {}).get("endpointName") == "ep-underscore"
 
     def test_endpoint_name_from_base_config(self):
         f = _make_factory(config={"group_id": "g"}, user_token="tok")
-        info = _make_tool_info("AgentBricksTool", 11, config={"endpointName": "base-ep"})
+        info = _make_tool_info(
+            "AgentBricksTool", 11, config={"endpointName": "base-ep"}
+        )
         f._available_tools["AgentBricksTool"] = info
         mock_cls = MagicMock(return_value=MagicMock())
         f._tool_implementations["AgentBricksTool"] = mock_cls
@@ -775,6 +841,7 @@ class TestAgentBricksToolEndpointPaths:
 # ============================================================================
 # DatabricksKnowledgeSearchTool creation path
 # ============================================================================
+
 
 class TestDatabricksKnowledgeSearchToolCreation:
 
@@ -819,14 +886,19 @@ class TestDatabricksKnowledgeSearchToolCreation:
 # PowerBIAnalysisTool creation path (generic fallthrough)
 # ============================================================================
 
+
 class TestPowerBIAnalysisToolCreation:
 
     def test_creates_powerbi_analysis_tool(self):
         f = _make_factory(config={"group_id": "g"})
-        info = _make_tool_info("Power BI Comprehensive Analysis Tool", 30, config={
-            "workspace_id": "ws1",
-            "dataset_id": "ds1",
-        })
+        info = _make_tool_info(
+            "Power BI Comprehensive Analysis Tool",
+            30,
+            config={
+                "workspace_id": "ws1",
+                "dataset_id": "ds1",
+            },
+        )
         f._available_tools["Power BI Comprehensive Analysis Tool"] = info
         mock_cls = MagicMock(return_value=MagicMock())
         f._tool_implementations["Power BI Comprehensive Analysis Tool"] = mock_cls
@@ -837,11 +909,15 @@ class TestPowerBIAnalysisToolCreation:
 
     def test_powerbi_analysis_workspace_id_passed(self):
         f = _make_factory(config={"group_id": "g"})
-        info = _make_tool_info("Power BI Comprehensive Analysis Tool", 30, config={
-            "workspace_id": "my-workspace",
-            "dataset_id": "my-dataset",
-            "tenant_id": "my-tenant",
-        })
+        info = _make_tool_info(
+            "Power BI Comprehensive Analysis Tool",
+            30,
+            config={
+                "workspace_id": "my-workspace",
+                "dataset_id": "my-dataset",
+                "tenant_id": "my-tenant",
+            },
+        )
         f._available_tools["Power BI Comprehensive Analysis Tool"] = info
         mock_cls = MagicMock(return_value=MagicMock())
         f._tool_implementations["Power BI Comprehensive Analysis Tool"] = mock_cls
@@ -855,6 +931,7 @@ class TestPowerBIAnalysisToolCreation:
 # ============================================================================
 # ScrapeWebsiteTool – the default generic path
 # ============================================================================
+
 
 class TestScrapeWebsiteToolCreation:
 
@@ -872,7 +949,9 @@ class TestScrapeWebsiteToolCreation:
 
     def test_creates_with_config_from_base(self):
         f = _make_factory()
-        info = _make_tool_info("ScrapeWebsiteTool", 50, config={"website_url": "https://example.com"})
+        info = _make_tool_info(
+            "ScrapeWebsiteTool", 50, config={"website_url": "https://example.com"}
+        )
         f._available_tools["ScrapeWebsiteTool"] = info
         mock_cls = MagicMock(return_value=MagicMock())
         f._tool_implementations["ScrapeWebsiteTool"] = mock_cls

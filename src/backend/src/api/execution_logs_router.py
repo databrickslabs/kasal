@@ -144,4 +144,6 @@ async def create_execution_log(
     group_context: GroupContextDep,
 ):
     """Create an execution log via main router."""
-    raise HTTPException(status_code=501, detail="Execution log creation not implemented")
+    raise HTTPException(
+        status_code=501, detail="Execution log creation not implemented"
+    )

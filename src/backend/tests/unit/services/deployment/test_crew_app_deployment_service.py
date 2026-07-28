@@ -136,7 +136,9 @@ class TestStartDeployment:
         assert tried["groups"] == ["g1", "g2"]
 
     @pytest.mark.asyncio
-    async def test_finds_pat_under_personal_workspace_with_strict_isolation(self, service):
+    async def test_finds_pat_under_personal_workspace_with_strict_isolation(
+        self, service
+    ):
         """With strict isolation, a request scoped to a shared workspace carries
         ONLY that group_id. A PAT under the user's PERSONAL workspace must still be
         found — deploy adds the personal workspace id (derived from the email)."""
@@ -352,7 +354,6 @@ class TestDeployBlocking:
         assert db_res and db_res[0].database.instance_name == "existing-lb"
         assert service.get_status("d-1").status == STATUS_SUCCEEDED
 
-
     def test_grants_explicit_uc_trace_permissions_to_app_sp(self, service):
         """The app SP gets EXPLICIT CREATE TABLE/MODIFY/SELECT (+USE) — ALL_PRIVILEGES
         is not sufficient for UC trace tables."""
@@ -375,7 +376,9 @@ class TestDeployBlocking:
         )
         # Run via the configured SQL warehouse.
         assert (
-            client.statement_execution.execute_statement.call_args.kwargs["warehouse_id"]
+            client.statement_execution.execute_statement.call_args.kwargs[
+                "warehouse_id"
+            ]
             == "wh-1"
         )
 

@@ -5,8 +5,11 @@ Tests UCMetricsGenerator for converting KPI definitions to Unity Catalog metrics
 """
 
 import pytest
-from src.services.converters.formats.uc_metrics.yaml_to_uc_metrics import UCMetricsGenerator
+
 from src.services.converters.base.models import KPI, KPIDefinition
+from src.services.converters.formats.uc_metrics.yaml_to_uc_metrics import (
+    UCMetricsGenerator,
+)
 
 
 class TestUCMetricsGenerator:
@@ -25,7 +28,7 @@ class TestUCMetricsGenerator:
             technical_name="revenue",
             formula="amount",
             aggregation_type="SUM",
-            source_table="Sales"
+            source_table="Sales",
         )
 
     @pytest.fixture
@@ -37,7 +40,7 @@ class TestUCMetricsGenerator:
             formula="amount",
             aggregation_type="SUM",
             source_table="Sales",
-            filters=["status = 'active'", "year = 2023"]
+            filters=["status = 'active'", "year = 2023"],
         )
 
     @pytest.fixture
@@ -52,9 +55,9 @@ class TestUCMetricsGenerator:
                     technical_name="revenue",
                     formula="amount",
                     aggregation_type="SUM",
-                    source_table="Sales"
+                    source_table="Sales",
                 )
-            ]
+            ],
         )
 
     @pytest.fixture
@@ -63,15 +66,8 @@ class TestUCMetricsGenerator:
         return {
             "name": "test_metrics",
             "description": "Test Metrics",
-            "default_variables": {
-                "year": 2023,
-                "region": "US"
-            },
-            "filters": {
-                "query_filter": {
-                    "year_filter": "year = $var_year"
-                }
-            }
+            "default_variables": {"year": 2023, "region": "US"},
+            "filters": {"query_filter": {"year_filter": "year = $var_year"}},
         }
 
     # ========== Initialization Tests ==========
@@ -87,17 +83,17 @@ class TestUCMetricsGenerator:
 
     def test_generator_has_aggregation_builder(self, generator):
         """Test generator has aggregation builder"""
-        assert hasattr(generator, 'aggregation_builder')
+        assert hasattr(generator, "aggregation_builder")
         assert generator.aggregation_builder is not None
 
     def test_generator_has_formula_parser(self, generator):
         """Test generator has formula parser"""
-        assert hasattr(generator, '_formula_parser')
+        assert hasattr(generator, "_formula_parser")
         assert generator._formula_parser is not None
 
     def test_generator_has_dependency_resolver(self, generator):
         """Test generator has dependency resolver"""
-        assert hasattr(generator, '_dependency_resolver')
+        assert hasattr(generator, "_dependency_resolver")
         assert generator._dependency_resolver is not None
 
     # ========== Build Source Reference Tests ==========
@@ -149,12 +145,16 @@ class TestUCMetricsGenerator:
 
     # ========== Build Filter Conditions Tests ==========
 
-    def test_build_filter_conditions_no_filters(self, generator, simple_kpi, yaml_metadata):
+    def test_build_filter_conditions_no_filters(
+        self, generator, simple_kpi, yaml_metadata
+    ):
         """Test building filter conditions with no filters"""
         result = generator._build_filter_conditions(simple_kpi, yaml_metadata)
         assert result is None
 
-    def test_build_filter_conditions_with_filters(self, generator, kpi_with_filters, yaml_metadata):
+    def test_build_filter_conditions_with_filters(
+        self, generator, kpi_with_filters, yaml_metadata
+    ):
         """Test building filter conditions with filters"""
         result = generator._build_filter_conditions(kpi_with_filters, yaml_metadata)
         assert result is not None
@@ -169,7 +169,7 @@ class TestUCMetricsGenerator:
             formula="amount",
             aggregation_type="SUM",
             source_table="Sales",
-            filters=["$query_filter"]
+            filters=["$query_filter"],
         )
         result = generator._build_filter_conditions(kpi, yaml_metadata)
         assert result is not None
@@ -179,17 +179,29 @@ class TestUCMetricsGenerator:
     # Note: generate_uc_metric is overwritten in the source and is now specific to constant selection KBIs
     # Regular KBIs should use generate_consolidated_uc_metrics
 
-    def test_generate_uc_metric_constant_selection(self, generator, simple_definition, yaml_metadata):
+    def test_generate_uc_metric_constant_selection(
+        self, generator, simple_definition, yaml_metadata
+    ):
         """Test generating UC metric for constant selection KBI"""
-        pytest.skip("generate_uc_metric is overwritten and specific to constant selection KBIs")
+        pytest.skip(
+            "generate_uc_metric is overwritten and specific to constant selection KBIs"
+        )
 
-    def test_generate_uc_metric_with_filters(self, generator, simple_definition, yaml_metadata):
+    def test_generate_uc_metric_with_filters(
+        self, generator, simple_definition, yaml_metadata
+    ):
         """Test generating UC metric with filters"""
-        pytest.skip("generate_uc_metric is overwritten and specific to constant selection KBIs")
+        pytest.skip(
+            "generate_uc_metric is overwritten and specific to constant selection KBIs"
+        )
 
-    def test_generate_uc_metric_source_reference(self, generator, simple_definition, yaml_metadata):
+    def test_generate_uc_metric_source_reference(
+        self, generator, simple_definition, yaml_metadata
+    ):
         """Test UC metric has correct source reference"""
-        pytest.skip("generate_uc_metric is overwritten and specific to constant selection KBIs")
+        pytest.skip(
+            "generate_uc_metric is overwritten and specific to constant selection KBIs"
+        )
 
     # ========== Generate Consolidated UC Metrics Tests ==========
 
@@ -201,15 +213,15 @@ class TestUCMetricsGenerator:
                 technical_name="revenue",
                 formula="amount",
                 aggregation_type="SUM",
-                source_table="Sales"
+                source_table="Sales",
             ),
             KPI(
                 description="Count",
                 technical_name="count",
                 formula="id",
                 aggregation_type="COUNT",
-                source_table="Sales"
-            )
+                source_table="Sales",
+            ),
         ]
 
         result = generator.generate_consolidated_uc_metrics(kbi_list, yaml_metadata)
@@ -219,7 +231,9 @@ class TestUCMetricsGenerator:
         assert "measures" in result
         assert len(result["measures"]) == 2
 
-    def test_generate_consolidated_uc_metrics_with_common_filters(self, generator, yaml_metadata):
+    def test_generate_consolidated_uc_metrics_with_common_filters(
+        self, generator, yaml_metadata
+    ):
         """Test consolidated UC metrics extracts common filters"""
         kbi_list = [
             KPI(
@@ -228,7 +242,7 @@ class TestUCMetricsGenerator:
                 formula="amount",
                 aggregation_type="SUM",
                 source_table="Sales",
-                filters=["$query_filter", "region = 'US'"]
+                filters=["$query_filter", "region = 'US'"],
             ),
             KPI(
                 description="Cost",
@@ -236,8 +250,8 @@ class TestUCMetricsGenerator:
                 formula="cost_amount",
                 aggregation_type="SUM",
                 source_table="Sales",
-                filters=["$query_filter", "region = 'US'"]
-            )
+                filters=["$query_filter", "region = 'US'"],
+            ),
         ]
 
         result = generator.generate_consolidated_uc_metrics(kbi_list, yaml_metadata)
@@ -247,7 +261,9 @@ class TestUCMetricsGenerator:
         assert "year = '2023'" in result["filter"]
         assert "region = 'US'" in result["filter"]
 
-    def test_generate_consolidated_uc_metrics_with_specific_filters(self, generator, yaml_metadata):
+    def test_generate_consolidated_uc_metrics_with_specific_filters(
+        self, generator, yaml_metadata
+    ):
         """Test consolidated UC metrics handles KBI-specific filters"""
         kbi_list = [
             KPI(
@@ -256,7 +272,7 @@ class TestUCMetricsGenerator:
                 formula="amount",
                 aggregation_type="SUM",
                 source_table="Sales",
-                filters=["status = 'active'"]
+                filters=["status = 'active'"],
             ),
             KPI(
                 description="Inactive Revenue",
@@ -264,8 +280,8 @@ class TestUCMetricsGenerator:
                 formula="amount",
                 aggregation_type="SUM",
                 source_table="Sales",
-                filters=["status = 'inactive'"]
-            )
+                filters=["status = 'inactive'"],
+            ),
         ]
 
         result = generator.generate_consolidated_uc_metrics(kbi_list, yaml_metadata)
@@ -273,7 +289,9 @@ class TestUCMetricsGenerator:
         # Each measure should have different filters in FILTER clause
         assert len(result["measures"]) == 2
 
-    def test_generate_consolidated_uc_metrics_description(self, generator, yaml_metadata):
+    def test_generate_consolidated_uc_metrics_description(
+        self, generator, yaml_metadata
+    ):
         """Test consolidated UC metrics includes description"""
         kbi_list = [
             KPI(
@@ -281,7 +299,7 @@ class TestUCMetricsGenerator:
                 technical_name="revenue",
                 formula="amount",
                 aggregation_type="SUM",
-                source_table="Sales"
+                source_table="Sales",
             )
         ]
 
@@ -297,9 +315,7 @@ class TestUCMetricsGenerator:
             "version": "0.1",
             "description": "Test Metrics",
             "source": "catalog.schema.Sales",
-            "measures": [
-                {"name": "revenue", "expr": "SUM(amount)"}
-            ]
+            "measures": [{"name": "revenue", "expr": "SUM(amount)"}],
         }
 
         result = generator.format_uc_metrics_yaml(uc_metrics)
@@ -318,9 +334,7 @@ class TestUCMetricsGenerator:
             "description": "Test Metrics",
             "source": "catalog.schema.Sales",
             "filter": "year = 2023",
-            "measures": [
-                {"name": "revenue", "expr": "SUM(amount)"}
-            ]
+            "measures": [{"name": "revenue", "expr": "SUM(amount)"}],
         }
 
         result = generator.format_uc_metrics_yaml(uc_metrics)
@@ -336,8 +350,8 @@ class TestUCMetricsGenerator:
             "description": "Test Metrics",
             "measures": [
                 {"name": "revenue", "expr": "SUM(amount)"},
-                {"name": "count", "expr": "COUNT(id)"}
-            ]
+                {"name": "count", "expr": "COUNT(id)"},
+            ],
         }
 
         result = generator.format_consolidated_uc_metrics_yaml(uc_metrics)
@@ -357,14 +371,10 @@ class TestUCMetricsGenerator:
                     "name": "balance",
                     "expr": "SUM(amount)",
                     "window": [
-                        {
-                            "order": "date",
-                            "range": "current",
-                            "semiadditive": "last"
-                        }
-                    ]
+                        {"order": "date", "range": "current", "semiadditive": "last"}
+                    ],
                 }
-            ]
+            ],
         }
 
         result = generator.format_consolidated_uc_metrics_yaml(uc_metrics)
@@ -393,22 +403,22 @@ class TestUCMetricsGenerator:
                     technical_name="revenue",
                     formula="amount",
                     aggregation_type="SUM",
-                    source_table="Finance"
+                    source_table="Finance",
                 ),
                 KPI(
                     description="Cost",
                     technical_name="cost",
                     formula="cost_amount",
                     aggregation_type="SUM",
-                    source_table="Finance"
+                    source_table="Finance",
                 ),
                 KPI(
                     description="Profit",
                     technical_name="profit",
                     formula="[revenue] - [cost]",
-                    aggregation_type="CALCULATED"
-                )
-            ]
+                    aggregation_type="CALCULATED",
+                ),
+            ],
         )
 
         generator.process_definition(definition)
@@ -431,7 +441,7 @@ class TestUCMetricsGenerator:
             technical_name="revenue",
             formula="amount",
             aggregation_type="SUM",
-            source_table="Sales"
+            source_table="Sales",
         )
         generator._dependency_resolver.build_kbi_lookup([base_kpi])
 
@@ -439,7 +449,7 @@ class TestUCMetricsGenerator:
             description="Doubled Revenue",
             technical_name="doubled_revenue",
             formula="[revenue] * 2",
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         result = generator._is_base_kbi(calc_kpi)
@@ -452,7 +462,7 @@ class TestUCMetricsGenerator:
             technical_name="count",
             formula="",
             aggregation_type="COUNT",
-            source_table="Sales"
+            source_table="Sales",
         )
         result = generator._is_base_kbi(kpi)
         assert result is True
@@ -467,7 +477,7 @@ class TestUCMetricsGenerator:
                 technical_name="revenue",
                 formula="amount",
                 aggregation_type="SUM",
-                source_table="Sales"
+                source_table="Sales",
             )
         ]
 
@@ -486,7 +496,7 @@ class TestUCMetricsGenerator:
                 technical_name="revenue",
                 formula="amount",
                 aggregation_type="SUM",
-                source_table="Sales"
+                source_table="Sales",
             )
         ]
 
@@ -503,7 +513,7 @@ class TestUCMetricsGenerator:
                 formula="amount",
                 aggregation_type="SUM",
                 source_table="Sales",
-                filters=["region = 'US'"]
+                filters=["region = 'US'"],
             ),
             KPI(
                 description="Cost",
@@ -511,8 +521,8 @@ class TestUCMetricsGenerator:
                 formula="cost_amount",
                 aggregation_type="SUM",
                 source_table="Sales",
-                filters=["region = 'US'"]
-            )
+                filters=["region = 'US'"],
+            ),
         ]
 
         result = generator._extract_common_filters(kbi_list, yaml_metadata)
@@ -520,9 +530,13 @@ class TestUCMetricsGenerator:
 
     # ========== Get KBI Specific Filters Tests ==========
 
-    def test_get_kbi_specific_filters_no_common(self, generator, kpi_with_filters, yaml_metadata):
+    def test_get_kbi_specific_filters_no_common(
+        self, generator, kpi_with_filters, yaml_metadata
+    ):
         """Test getting KBI specific filters when no common filters"""
-        result = generator._get_kbi_specific_filters(kpi_with_filters, None, yaml_metadata)
+        result = generator._get_kbi_specific_filters(
+            kpi_with_filters, None, yaml_metadata
+        )
 
         assert result is not None
         assert "status = 'active'" in result
@@ -536,7 +550,7 @@ class TestUCMetricsGenerator:
             formula="amount",
             aggregation_type="SUM",
             source_table="Sales",
-            filters=["region = 'US'", "status = 'active'"]
+            filters=["region = 'US'", "status = 'active'"],
         )
 
         common_filters = "region = 'US'"
@@ -545,7 +559,9 @@ class TestUCMetricsGenerator:
         assert result == "status = 'active'"
         assert "region = 'US'" not in result
 
-    def test_get_kbi_specific_filters_no_filters(self, generator, simple_kpi, yaml_metadata):
+    def test_get_kbi_specific_filters_no_filters(
+        self, generator, simple_kpi, yaml_metadata
+    ):
         """Test getting KBI specific filters when KBI has no filters"""
         result = generator._get_kbi_specific_filters(simple_kpi, None, yaml_metadata)
         assert result is None
@@ -566,15 +582,15 @@ class TestUCMetricsGenerator:
                 technical_name="revenue",
                 formula="amount",
                 aggregation_type="SUM",
-                source_table="Sales"
+                source_table="Sales",
             ),
             KPI(
                 description="Cost",
                 technical_name="cost",
                 formula="cost_amount",
                 aggregation_type="SUM",
-                source_table="Sales"
-            )
+                source_table="Sales",
+            ),
         ]
         generator._dependency_resolver.build_kbi_lookup(base_kpis)
 
@@ -582,7 +598,7 @@ class TestUCMetricsGenerator:
             description="Profit",
             technical_name="profit",
             formula="[revenue] - [cost]",
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         result = generator._extract_formula_kbis(calc_kpi)
@@ -596,7 +612,7 @@ class TestUCMetricsGenerator:
             description="Test",
             formula="amount",
             aggregation_type="SUM",
-            source_table="Sales"
+            source_table="Sales",
         )
         result = generator.generate_consolidated_uc_metrics([kpi], yaml_metadata)
 
@@ -609,7 +625,7 @@ class TestUCMetricsGenerator:
             technical_name="test",
             formula="amount",
             aggregation_type="SUM",
-            source_table="Sales"
+            source_table="Sales",
         )
         result = generator.generate_consolidated_uc_metrics([kpi], yaml_metadata)
 
@@ -643,15 +659,15 @@ class TestUCMetricsGenerator:
                 technical_name="revenue",
                 formula="amount",
                 aggregation_type="SUM",
-                source_table="Sales"
+                source_table="Sales",
             ),
             KPI(
                 description="Count",
                 technical_name="count",
                 formula="id",
                 aggregation_type="COUNT",
-                source_table="Sales"
-            )
+                source_table="Sales",
+            ),
         ]
 
         # Generate consolidated UC metrics
@@ -680,10 +696,12 @@ class TestUCMetricsGenerator:
                     source_table="Inventory",
                     fields_for_constant_selection=["fiscal_period"],
                 )
-            ]
+            ],
         )
 
-    def test_generate_uc_metric_constant_selection_direct(self, generator, yaml_metadata):
+    def test_generate_uc_metric_constant_selection_direct(
+        self, generator, yaml_metadata
+    ):
         """Test generate_uc_metric (constant selection version) called directly."""
         kpi = KPI(
             description="Inventory Balance",
@@ -707,7 +725,9 @@ class TestUCMetricsGenerator:
         assert result["measures"][0]["window"][0]["order"] == "fiscal_period"
         assert result["measures"][0]["window"][0]["semiadditive"] == "last"
 
-    def test_generate_uc_metric_constant_selection_with_filters_direct(self, generator, yaml_metadata):
+    def test_generate_uc_metric_constant_selection_with_filters_direct(
+        self, generator, yaml_metadata
+    ):
         """Test constant selection KBI with KBI-specific filters, calling generate_uc_metric directly."""
         kpi = KPI(
             description="Active Inventory",
@@ -729,7 +749,9 @@ class TestUCMetricsGenerator:
         assert "FILTER" in measure_expr
         assert "status = 'active'" in measure_expr
 
-    def test_generate_uc_metric_constant_selection_with_query_filter_direct(self, generator, yaml_metadata):
+    def test_generate_uc_metric_constant_selection_with_query_filter_direct(
+        self, generator, yaml_metadata
+    ):
         """Test constant selection KBI with $query_filter, calling generate_uc_metric directly."""
         kpi = KPI(
             description="Filtered Inventory",
@@ -751,7 +773,9 @@ class TestUCMetricsGenerator:
         assert "filter" in result
         assert "year = '2023'" in result["filter"]
 
-    def test_generate_uc_metric_constant_selection_display_sign_negative_direct(self, generator, yaml_metadata):
+    def test_generate_uc_metric_constant_selection_display_sign_negative_direct(
+        self, generator, yaml_metadata
+    ):
         """Test constant selection KBI with display_sign = -1."""
         kpi = KPI(
             description="Net Debt",
@@ -772,7 +796,9 @@ class TestUCMetricsGenerator:
         measure_expr = result["measures"][0]["expr"]
         assert "(-1) *" in measure_expr
 
-    def test_generate_uc_metric_constant_selection_multiple_fields_direct(self, generator, yaml_metadata):
+    def test_generate_uc_metric_constant_selection_multiple_fields_direct(
+        self, generator, yaml_metadata
+    ):
         """Test constant selection KBI with multiple constant selection fields."""
         kpi = KPI(
             description="Multi-Field Balance",
@@ -795,7 +821,9 @@ class TestUCMetricsGenerator:
         assert "fiscal_period" in orders
         assert "product_id" in orders
 
-    def test_generate_consolidated_constant_selection_multiple_kbis(self, generator, yaml_metadata):
+    def test_generate_consolidated_constant_selection_multiple_kbis(
+        self, generator, yaml_metadata
+    ):
         """Test consolidated constant selection with multiple KBIs calls _build_consolidated_constant_selection."""
         kbi_list = [
             KPI(
@@ -822,7 +850,9 @@ class TestUCMetricsGenerator:
         assert len(result["measures"]) == 2
         assert "dimensions" in result
 
-    def test_generate_consolidated_mixed_constant_and_regular_kbis(self, generator, yaml_metadata):
+    def test_generate_consolidated_mixed_constant_and_regular_kbis(
+        self, generator, yaml_metadata
+    ):
         """Test consolidated with both regular and constant selection KBIs uses consolidated format."""
         kbi_list = [
             KPI(
@@ -846,7 +876,9 @@ class TestUCMetricsGenerator:
         assert result is not None
         assert len(result["measures"]) == 2
 
-    def test_generate_uc_metric_constant_selection_with_count_direct(self, generator, yaml_metadata):
+    def test_generate_uc_metric_constant_selection_with_count_direct(
+        self, generator, yaml_metadata
+    ):
         """Test constant selection KBI with COUNT aggregation."""
         kpi = KPI(
             description="Count",
@@ -856,11 +888,15 @@ class TestUCMetricsGenerator:
             source_table="Sales",
             fields_for_constant_selection=["fiscal_period"],
         )
-        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
+        definition = KPIDefinition(
+            description="Test", technical_name="test", kpis=[kpi]
+        )
         result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
         assert "COUNT(id)" in result["measures"][0]["expr"]
 
-    def test_generate_uc_metric_constant_selection_with_average_direct(self, generator, yaml_metadata):
+    def test_generate_uc_metric_constant_selection_with_average_direct(
+        self, generator, yaml_metadata
+    ):
         """Test constant selection KBI with AVERAGE aggregation."""
         kpi = KPI(
             description="Average",
@@ -870,11 +906,15 @@ class TestUCMetricsGenerator:
             source_table="Sales",
             fields_for_constant_selection=["fiscal_period"],
         )
-        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
+        definition = KPIDefinition(
+            description="Test", technical_name="test", kpis=[kpi]
+        )
         result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
         assert "AVG(price)" in result["measures"][0]["expr"]
 
-    def test_generate_uc_metric_constant_selection_with_min_direct(self, generator, yaml_metadata):
+    def test_generate_uc_metric_constant_selection_with_min_direct(
+        self, generator, yaml_metadata
+    ):
         """Test constant selection KBI with MIN aggregation."""
         kpi = KPI(
             description="Minimum",
@@ -884,11 +924,15 @@ class TestUCMetricsGenerator:
             source_table="Sales",
             fields_for_constant_selection=["fiscal_period"],
         )
-        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
+        definition = KPIDefinition(
+            description="Test", technical_name="test", kpis=[kpi]
+        )
         result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
         assert "MIN(value)" in result["measures"][0]["expr"]
 
-    def test_generate_uc_metric_constant_selection_with_max_direct(self, generator, yaml_metadata):
+    def test_generate_uc_metric_constant_selection_with_max_direct(
+        self, generator, yaml_metadata
+    ):
         """Test constant selection KBI with MAX aggregation."""
         kpi = KPI(
             description="Maximum",
@@ -898,11 +942,15 @@ class TestUCMetricsGenerator:
             source_table="Sales",
             fields_for_constant_selection=["fiscal_period"],
         )
-        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
+        definition = KPIDefinition(
+            description="Test", technical_name="test", kpis=[kpi]
+        )
         result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
         assert "MAX(value)" in result["measures"][0]["expr"]
 
-    def test_generate_consolidated_constant_selection_with_query_filter_multiple(self, generator, yaml_metadata):
+    def test_generate_consolidated_constant_selection_with_query_filter_multiple(
+        self, generator, yaml_metadata
+    ):
         """Test consolidated constant selection (multiple KBIs) includes query filter."""
         kbi_list = [
             KPI(
@@ -927,7 +975,9 @@ class TestUCMetricsGenerator:
         assert "filter" in result
         assert "year = '2023'" in result["filter"]
 
-    def test_generate_uc_metric_constant_selection_qualified_source_direct(self, generator, yaml_metadata):
+    def test_generate_uc_metric_constant_selection_qualified_source_direct(
+        self, generator, yaml_metadata
+    ):
         """Test constant selection KBI with qualified source table."""
         kpi = KPI(
             description="Balance",
@@ -937,7 +987,9 @@ class TestUCMetricsGenerator:
             source_table="main.finance.table",
             fields_for_constant_selection=["fiscal_period"],
         )
-        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
+        definition = KPIDefinition(
+            description="Test", technical_name="test", kpis=[kpi]
+        )
         result = generator.generate_uc_metric(definition, kpi, yaml_metadata)
         assert result is not None
         assert result["source"] == "main.finance.table"
@@ -968,9 +1020,9 @@ class TestUCMetricsGenerator:
                 {
                     "name": "balance",
                     "expr": "SUM(amount)",
-                    "subquery": "SELECT * FROM t\nWHERE active = 1"
+                    "subquery": "SELECT * FROM t\nWHERE active = 1",
                 }
-            ]
+            ],
         }
         result = generator.format_consolidated_uc_metrics_yaml(uc_metrics)
         assert "subquery:" in result
@@ -985,9 +1037,7 @@ class TestUCMetricsGenerator:
                 {"name": "fiscal_period", "expr": "fiscal_period"},
                 {"name": "region", "expr": "region"},
             ],
-            "measures": [
-                {"name": "balance", "expr": "SUM(amount)"}
-            ]
+            "measures": [{"name": "balance", "expr": "SUM(amount)"}],
         }
         result = generator.format_consolidated_uc_metrics_yaml(uc_metrics)
         assert "dimensions:" in result

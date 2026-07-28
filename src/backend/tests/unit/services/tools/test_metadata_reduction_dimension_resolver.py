@@ -1,13 +1,14 @@
 """Unit tests for DimensionResolver in metadata_reduction package."""
 
 import pytest
+
 from src.services.tools.metadata_reduction.dimension_resolver import (
     DimensionBinding,
     DimensionResolver,
 )
 
-
 # ─── Fixtures ────────────────────────────────────────────────────────────────
+
 
 def _make_tables():
     """Minimal table set for resolver tests."""
@@ -40,6 +41,7 @@ def _make_tables():
 
 
 # ─── DimensionBinding dataclass ───────────────────────────────────────────────
+
 
 class TestDimensionBindingDataclass:
     def test_to_dict_has_all_fields(self):
@@ -81,6 +83,7 @@ class TestDimensionBindingDataclass:
 
 # ─── DimensionResolver.resolve — exact matches ──────────────────────────────
 
+
 class TestResolveExactMatch:
     def setup_method(self):
         self.resolver = DimensionResolver()
@@ -109,6 +112,7 @@ class TestResolveExactMatch:
 
 # ─── DimensionResolver.resolve — fuzzy matches ──────────────────────────────
 
+
 class TestResolveFuzzyMatch:
     def setup_method(self):
         self.resolver = DimensionResolver()
@@ -120,7 +124,9 @@ class TestResolveFuzzyMatch:
         assert isinstance(bindings, list)
 
     def test_no_match_below_threshold(self):
-        bindings = self.resolver.resolve(["xyz_unknown_xyz"], _make_tables(), threshold=0.99)
+        bindings = self.resolver.resolve(
+            ["xyz_unknown_xyz"], _make_tables(), threshold=0.99
+        )
         assert len(bindings) == 0
 
     def test_threshold_1_only_accepts_exact(self):
@@ -135,6 +141,7 @@ class TestResolveFuzzyMatch:
 
 
 # ─── DimensionResolver.resolve — multiple keywords ──────────────────────────
+
 
 class TestResolveMultipleKeywords:
     def setup_method(self):
@@ -162,6 +169,7 @@ class TestResolveMultipleKeywords:
 
 
 # ─── DimensionResolver.resolve — edge cases ──────────────────────────────────
+
 
 class TestResolveEdgeCases:
     def setup_method(self):
@@ -204,6 +212,7 @@ class TestResolveEdgeCases:
 
 # ─── DimensionResolver.resolve — sample_data ────────────────────────────────
 
+
 class TestResolveSampleData:
     def setup_method(self):
         self.resolver = DimensionResolver()
@@ -220,9 +229,7 @@ class TestResolveSampleData:
     def test_sample_values_truncated_to_5(self):
         tables = [{"name": "Geography", "columns": [{"name": "Country"}]}]
         sample_data = {
-            "Geography[Country]": {
-                "sample_values": ["A", "B", "C", "D", "E", "F", "G"]
-            }
+            "Geography[Country]": {"sample_values": ["A", "B", "C", "D", "E", "F", "G"]}
         }
         bindings = self.resolver.resolve(["Country"], tables, sample_data=sample_data)
         assert len(bindings[0].sample_values) <= 5
@@ -242,6 +249,7 @@ class TestResolveSampleData:
 
 
 # ─── DimensionResolver.resolve — field_synonyms ──────────────────────────────
+
 
 class TestResolveFieldSynonyms:
     def setup_method(self):
@@ -277,6 +285,7 @@ class TestResolveFieldSynonyms:
 
 
 # ─── DimensionResolver.resolve — user_term preserved ────────────────────────
+
 
 class TestResolveUserTerm:
     def setup_method(self):

@@ -9,21 +9,21 @@ Tests cover:
 
 import asyncio
 import queue
-import pytest
 from datetime import datetime
 from queue import Empty, Full
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
+import pytest
+
+from src.schemas.execution_logs import ExecutionLogResponse
 from src.services.execution.logs.writer import (
     ExecutionLogsService,
     logs_writer_loop,
     start_logs_writer,
     stop_logs_writer,
 )
-from src.schemas.execution_logs import ExecutionLogResponse
 from src.utils.user_context import GroupContext
-
 
 # ---------------------------------------------------------------------------
 # Helpers

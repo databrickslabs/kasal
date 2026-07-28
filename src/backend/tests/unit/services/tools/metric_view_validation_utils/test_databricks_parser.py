@@ -1,8 +1,10 @@
 """Tests for metric_view_validation_utils.databricks_parser (UCMetricsViewParser)."""
+
 import io
 import textwrap
-import pytest
 from unittest.mock import mock_open, patch
+
+import pytest
 
 from src.services.tools.metric_view_validation_utils.databricks_parser import (
     UCMetricsViewParser,
@@ -47,6 +49,7 @@ def _make_parser(yaml_content: str) -> UCMetricsViewParser:
     """Create a parser backed by an in-memory YAML string."""
     parser = UCMetricsViewParser("dummy_path.yaml")
     import yaml
+
     parser.data = yaml.safe_load(yaml_content)
     return parser
 
@@ -54,6 +57,7 @@ def _make_parser(yaml_content: str) -> UCMetricsViewParser:
 # ---------------------------------------------------------------------------
 # Initialisation
 # ---------------------------------------------------------------------------
+
 
 class TestInit:
     def test_raises_on_empty_path(self):
@@ -97,6 +101,7 @@ class TestCreateHeadless:
 # load()
 # ---------------------------------------------------------------------------
 
+
 class TestLoad:
     def test_load_reads_yaml(self, tmp_path):
         yaml_file = tmp_path / "mv.yaml"
@@ -117,6 +122,7 @@ class TestLoad:
 # ---------------------------------------------------------------------------
 # extract_measures()
 # ---------------------------------------------------------------------------
+
 
 class TestExtractMeasures:
     def test_extracts_all_measures(self):
@@ -158,6 +164,7 @@ class TestExtractMeasures:
 # get_measure_by_name()
 # ---------------------------------------------------------------------------
 
+
 class TestGetMeasureByName:
     def test_returns_correct_measure(self):
         parser = _make_parser(SIMPLE_YAML)
@@ -178,6 +185,7 @@ class TestGetMeasureByName:
 # ---------------------------------------------------------------------------
 # _parse_measure()
 # ---------------------------------------------------------------------------
+
 
 class TestParseMeasure:
     def _p(self):
@@ -223,6 +231,7 @@ class TestParseMeasure:
 # _extract_aggregations()
 # ---------------------------------------------------------------------------
 
+
 class TestExtractAggregations:
     def _p(self):
         return UCMetricsViewParser.create_headless()
@@ -258,6 +267,7 @@ class TestExtractAggregations:
 # ---------------------------------------------------------------------------
 # _extract_filters()
 # ---------------------------------------------------------------------------
+
 
 class TestExtractFilters:
     def _p(self):
@@ -296,6 +306,7 @@ class TestExtractFilters:
 # _extract_references()
 # ---------------------------------------------------------------------------
 
+
 class TestExtractReferences:
     def _p(self):
         return UCMetricsViewParser.create_headless()
@@ -305,7 +316,9 @@ class TestExtractReferences:
         assert "source.amount" in refs
 
     def test_string_literals_ignored(self):
-        refs = self._p()._extract_references("FILTER (WHERE source.status = 'active.value')")
+        refs = self._p()._extract_references(
+            "FILTER (WHERE source.status = 'active.value')"
+        )
         assert "active.value" not in refs
 
     def test_sql_keywords_not_in_refs(self):
@@ -322,6 +335,7 @@ class TestExtractReferences:
 # ---------------------------------------------------------------------------
 # _analyze_structure()
 # ---------------------------------------------------------------------------
+
 
 class TestAnalyzeStructure:
     def _p(self):
@@ -345,6 +359,7 @@ class TestAnalyzeStructure:
 # ---------------------------------------------------------------------------
 # _extract_balanced_parens()
 # ---------------------------------------------------------------------------
+
 
 class TestExtractBalancedParens:
     def _p(self):
@@ -376,6 +391,7 @@ class TestExtractBalancedParens:
 # ---------------------------------------------------------------------------
 # _parse_condition() — bare column support
 # ---------------------------------------------------------------------------
+
 
 class TestParseCondition:
     def _p(self):

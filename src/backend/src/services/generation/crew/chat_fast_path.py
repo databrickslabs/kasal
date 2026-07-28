@@ -6,8 +6,9 @@ a default assistant answering a message, so this skips them entirely."""
 
 import logging
 import traceback
-from typing import TYPE_CHECKING, Dict, Any, List, Tuple, Optional
-from src.core.sse_manager import sse_manager, SSEEvent
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+from src.core.sse_manager import SSEEvent, sse_manager
 from src.utils.user_context import GroupContext
 
 if TYPE_CHECKING:  # imported for the annotation only, no runtime cost
@@ -52,23 +53,27 @@ class ChatFastPathMixin:
         # task with the user's request, sets execution_type='agent' (light) and carries
         # session_id / memory_workspace_scope — identical to a generated chat agent,
         # only without the LLM generation.
-        agent_results = [{
-            "id": "chat",
-            "name": "Assistant",
-            "role": "Assistant",
-            "goal": "Answer the user's request helpfully, accurately and concisely.",
-            "backstory": "You are a helpful AI assistant.",
-            "tools": attached_tools,
-        }]
-        clean_tasks = [{
-            "id": "chat",
-            "name": "Chat response",
-            "description": "Respond directly and helpfully to the user's request.",
-            "expected_output": "A helpful, complete answer to the user's request.",
-            "agent_id": "chat",
-            "tools": attached_tools,
-            "context": [],
-        }]
+        agent_results = [
+            {
+                "id": "chat",
+                "name": "Assistant",
+                "role": "Assistant",
+                "goal": "Answer the user's request helpfully, accurately and concisely.",
+                "backstory": "You are a helpful AI assistant.",
+                "tools": attached_tools,
+            }
+        ]
+        clean_tasks = [
+            {
+                "id": "chat",
+                "name": "Chat response",
+                "description": "Respond directly and helpfully to the user's request.",
+                "expected_output": "A helpful, complete answer to the user's request.",
+                "agent_id": "chat",
+                "tools": attached_tools,
+                "context": [],
+            }
+        ]
 
         gen_complete_data: Dict[str, Any] = {
             "type": "generation_complete",
@@ -103,16 +108,20 @@ class ChatFastPathMixin:
             logger.error(traceback.format_exc())
             gen_complete_data["execution_error"] = str(exec_err)
 
-        await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-            data=gen_complete_data,
-            event="generation_complete",
-        ))
+        await sse_manager.broadcast_to_job(
+            generation_id,
+            SSEEvent(
+                data=gen_complete_data,
+                event="generation_complete",
+            ),
+        )
         logger.info(f"PROGRESSIVE [{generation_id}]: chat fast-path complete")
 
         try:
             from src.services.otel_tracing.mlflow_parent_setup import (
                 set_root_span_outputs,
             )
+
             set_root_span_outputs(root_span, gen_complete_data)
         except Exception:
             pass

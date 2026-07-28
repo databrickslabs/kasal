@@ -13,9 +13,11 @@ Test Coverage:
 5. Both parameters work together successfully
 6. Edge cases: empty string, False values, various format strings
 """
+
+from typing import Any, List
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
-from typing import List, Any
 
 from src.services.agent_builder.agent_adapter import create_agent
 
@@ -44,10 +46,7 @@ class TestCreateAgentDateAwareness:
     @pytest.fixture
     def mock_config(self):
         """Mock global config with required group_id."""
-        return {
-            "api_keys": {"openai": "test_key"},
-            "group_id": "test-group-123"
-        }
+        return {"api_keys": {"openai": "test_key"}, "group_id": "test-group-123"}
 
     @pytest.mark.asyncio
     async def test_inject_date_true_passed_to_agent(
@@ -57,9 +56,13 @@ class TestCreateAgentDateAwareness:
         agent_key = "test_agent"
         agent_config = {**base_agent_config, "inject_date": True}
 
-        with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+            patch("src.db.session.request_scoped_session") as mock_session_factory,
+        ):
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -74,15 +77,21 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
-                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
-                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
+            with (
+                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.tools.mcp_integration.MCPIntegration"
+                ) as mock_mcp_integration,
+            ):
+                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(
+                    return_value=[]
+                )
 
                 result = await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
-                    config=mock_config
+                    config=mock_config,
                 )
 
                 # Verify Agent was called with inject_date=True
@@ -99,9 +108,13 @@ class TestCreateAgentDateAwareness:
         agent_key = "test_agent"
         agent_config = {**base_agent_config, "inject_date": False}
 
-        with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+            patch("src.db.session.request_scoped_session") as mock_session_factory,
+        ):
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -115,15 +128,21 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
-                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
-                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
+            with (
+                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.tools.mcp_integration.MCPIntegration"
+                ) as mock_mcp_integration,
+            ):
+                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(
+                    return_value=[]
+                )
 
                 result = await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
-                    config=mock_config
+                    config=mock_config,
                 )
 
                 # Verify Agent was called with inject_date=False
@@ -141,9 +160,13 @@ class TestCreateAgentDateAwareness:
         date_format = "%Y-%m-%d"
         agent_config = {**base_agent_config, "date_format": date_format}
 
-        with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+            patch("src.db.session.request_scoped_session") as mock_session_factory,
+        ):
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -157,15 +180,21 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
-                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
-                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
+            with (
+                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.tools.mcp_integration.MCPIntegration"
+                ) as mock_mcp_integration,
+            ):
+                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(
+                    return_value=[]
+                )
 
                 result = await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
-                    config=mock_config
+                    config=mock_config,
                 )
 
                 # Verify Agent was called with date_format
@@ -182,9 +211,13 @@ class TestCreateAgentDateAwareness:
         agent_key = "test_agent"
         agent_config = {**base_agent_config, "inject_date": None}
 
-        with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+            patch("src.db.session.request_scoped_session") as mock_session_factory,
+        ):
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -198,15 +231,21 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
-                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
-                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
+            with (
+                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.tools.mcp_integration.MCPIntegration"
+                ) as mock_mcp_integration,
+            ):
+                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(
+                    return_value=[]
+                )
 
                 result = await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
-                    config=mock_config
+                    config=mock_config,
                 )
 
                 # Verify Agent was called WITHOUT inject_date
@@ -222,9 +261,13 @@ class TestCreateAgentDateAwareness:
         agent_key = "test_agent"
         agent_config = {**base_agent_config, "date_format": None}
 
-        with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+            patch("src.db.session.request_scoped_session") as mock_session_factory,
+        ):
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -238,15 +281,21 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
-                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
-                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
+            with (
+                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.tools.mcp_integration.MCPIntegration"
+                ) as mock_mcp_integration,
+            ):
+                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(
+                    return_value=[]
+                )
 
                 result = await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
-                    config=mock_config
+                    config=mock_config,
                 )
 
                 # Verify Agent was called WITHOUT date_format
@@ -262,9 +311,13 @@ class TestCreateAgentDateAwareness:
         agent_key = "test_agent"
         # base_agent_config does not include inject_date
 
-        with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+            patch("src.db.session.request_scoped_session") as mock_session_factory,
+        ):
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -278,15 +331,21 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
-                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
-                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
+            with (
+                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.tools.mcp_integration.MCPIntegration"
+                ) as mock_mcp_integration,
+            ):
+                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(
+                    return_value=[]
+                )
 
                 result = await create_agent(
                     agent_key=agent_key,
                     agent_config=base_agent_config,
                     tools=mock_tools,
-                    config=mock_config
+                    config=mock_config,
                 )
 
                 # Verify Agent was called WITHOUT inject_date
@@ -302,9 +361,13 @@ class TestCreateAgentDateAwareness:
         agent_key = "test_agent"
         # base_agent_config does not include date_format
 
-        with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+            patch("src.db.session.request_scoped_session") as mock_session_factory,
+        ):
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -318,15 +381,21 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
-                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
-                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
+            with (
+                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.tools.mcp_integration.MCPIntegration"
+                ) as mock_mcp_integration,
+            ):
+                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(
+                    return_value=[]
+                )
 
                 result = await create_agent(
                     agent_key=agent_key,
                     agent_config=base_agent_config,
                     tools=mock_tools,
-                    config=mock_config
+                    config=mock_config,
                 )
 
                 # Verify Agent was called WITHOUT date_format
@@ -344,12 +413,16 @@ class TestCreateAgentDateAwareness:
         agent_config = {
             **base_agent_config,
             "inject_date": True,
-            "date_format": date_format
+            "date_format": date_format,
         }
 
-        with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+            patch("src.db.session.request_scoped_session") as mock_session_factory,
+        ):
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -363,15 +436,21 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
-                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
-                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
+            with (
+                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.tools.mcp_integration.MCPIntegration"
+                ) as mock_mcp_integration,
+            ):
+                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(
+                    return_value=[]
+                )
 
                 result = await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
-                    config=mock_config
+                    config=mock_config,
                 )
 
                 # Verify Agent was called with both parameters
@@ -391,12 +470,16 @@ class TestCreateAgentDateAwareness:
         agent_config = {
             **base_agent_config,
             "inject_date": True,
-            "date_format": "%Y-%m-%d %H:%M:%S"
+            "date_format": "%Y-%m-%d %H:%M:%S",
         }
 
-        with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+            patch("src.db.session.request_scoped_session") as mock_session_factory,
+        ):
 
             mock_agent_instance = MagicMock()
             mock_agent_instance.role = agent_config["role"]
@@ -411,15 +494,21 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
-                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
-                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
+            with (
+                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.tools.mcp_integration.MCPIntegration"
+                ) as mock_mcp_integration,
+            ):
+                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(
+                    return_value=[]
+                )
 
                 result = await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
-                    config=mock_config
+                    config=mock_config,
                 )
 
                 # Verify agent was created and returned
@@ -450,15 +539,18 @@ class TestCreateAgentDateFormatVariations:
         return {"group_id": "test-group-123"}
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("date_format,description", [
-        ("%Y-%m-%d", "ISO format"),
-        ("%m/%d/%Y", "US format"),
-        ("%d/%m/%Y", "European format"),
-        ("%B %d, %Y", "Long month name format"),
-        ("%Y-%m-%d %H:%M:%S", "ISO with time"),
-        ("%A, %B %d, %Y", "Full weekday and month"),
-        ("%Y%m%d", "Compact date format"),
-    ])
+    @pytest.mark.parametrize(
+        "date_format,description",
+        [
+            ("%Y-%m-%d", "ISO format"),
+            ("%m/%d/%Y", "US format"),
+            ("%d/%m/%Y", "European format"),
+            ("%B %d, %Y", "Long month name format"),
+            ("%Y-%m-%d %H:%M:%S", "ISO with time"),
+            ("%A, %B %d, %Y", "Full weekday and month"),
+            ("%Y%m%d", "Compact date format"),
+        ],
+    )
     async def test_various_date_formats(
         self, base_agent_config, mock_tools, mock_config, date_format, description
     ):
@@ -466,9 +558,13 @@ class TestCreateAgentDateFormatVariations:
         agent_key = "test_agent"
         agent_config = {**base_agent_config, "date_format": date_format}
 
-        with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+            patch("src.db.session.request_scoped_session") as mock_session_factory,
+        ):
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -482,20 +578,27 @@ class TestCreateAgentDateFormatVariations:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
-                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
-                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
+            with (
+                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.tools.mcp_integration.MCPIntegration"
+                ) as mock_mcp_integration,
+            ):
+                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(
+                    return_value=[]
+                )
 
                 result = await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
-                    config=mock_config
+                    config=mock_config,
                 )
 
                 call_kwargs = mock_agent_class.call_args[1]
-                assert call_kwargs["date_format"] == date_format, \
-                    f"Failed for {description}"
+                assert (
+                    call_kwargs["date_format"] == date_format
+                ), f"Failed for {description}"
 
     @pytest.mark.asyncio
     async def test_date_format_empty_string_passed(
@@ -506,9 +609,13 @@ class TestCreateAgentDateFormatVariations:
         # Empty string is a non-None value, so it should be passed
         agent_config = {**base_agent_config, "date_format": ""}
 
-        with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+            patch("src.db.session.request_scoped_session") as mock_session_factory,
+        ):
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -522,15 +629,21 @@ class TestCreateAgentDateFormatVariations:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
-                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
-                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
+            with (
+                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.tools.mcp_integration.MCPIntegration"
+                ) as mock_mcp_integration,
+            ):
+                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(
+                    return_value=[]
+                )
 
                 result = await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=mock_tools,
-                    config=mock_config
+                    config=mock_config,
                 )
 
                 # Empty string is technically a valid value (non-None)
@@ -575,9 +688,13 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             "max_reasoning_attempts": 5,
         }
 
-        with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+            patch("src.db.session.request_scoped_session") as mock_session_factory,
+        ):
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -591,15 +708,21 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
-                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
-                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
+            with (
+                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.tools.mcp_integration.MCPIntegration"
+                ) as mock_mcp_integration,
+            ):
+                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(
+                    return_value=[]
+                )
 
                 result = await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=[],
-                    config=mock_config
+                    config=mock_config,
                 )
 
                 call_kwargs = mock_agent_class.call_args[1]
@@ -626,9 +749,13 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             "max_rpm": 20,
         }
 
-        with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+            patch("src.db.session.request_scoped_session") as mock_session_factory,
+        ):
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -642,15 +769,21 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
-                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
-                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
+            with (
+                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.tools.mcp_integration.MCPIntegration"
+                ) as mock_mcp_integration,
+            ):
+                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(
+                    return_value=[]
+                )
 
                 result = await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=[],
-                    config=mock_config
+                    config=mock_config,
                 )
 
                 call_kwargs = mock_agent_class.call_args[1]
@@ -662,9 +795,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
                 assert call_kwargs["max_rpm"] == 20
 
     @pytest.mark.asyncio
-    async def test_all_additional_params_together(
-        self, base_agent_config, mock_config
-    ):
+    async def test_all_additional_params_together(self, base_agent_config, mock_config):
         """Test all additional_params including date awareness work together."""
         agent_key = "test_agent"
         agent_config = {
@@ -682,9 +813,13 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             "date_format": "%Y-%m-%d %H:%M",
         }
 
-        with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-             patch('src.db.session.request_scoped_session') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+            patch("src.db.session.request_scoped_session") as mock_session_factory,
+        ):
 
             mock_agent_instance = MagicMock()
             mock_agent_class.return_value = mock_agent_instance
@@ -698,15 +833,21 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
-                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
-                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
+            with (
+                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.tools.mcp_integration.MCPIntegration"
+                ) as mock_mcp_integration,
+            ):
+                mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(
+                    return_value=[]
+                )
 
                 result = await create_agent(
                     agent_key=agent_key,
                     agent_config=agent_config,
                     tools=[],
-                    config=mock_config
+                    config=mock_config,
                 )
 
                 call_kwargs = mock_agent_class.call_args[1]

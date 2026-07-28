@@ -10,18 +10,21 @@ the definition module (src.utils.databricks_auth).
 """
 
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class GroupCtx:
     """Minimal GroupContext stand-in."""
 
-    def __init__(self, group_ids=None, group_email="test@example.com", access_token="token-abc"):
+    def __init__(
+        self, group_ids=None, group_email="test@example.com", access_token="token-abc"
+    ):
         # Use None sentinel to distinguish "no argument given" from "explicitly empty list"
         self.group_ids = ["grp-1"] if group_ids is None else group_ids
         self.group_email = group_email
@@ -45,6 +48,7 @@ def _patch_token(return_value=None):
 # Tests – upload_knowledge_file
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_upload_knowledge_file_success():
     """Successful upload returns service result dict."""
@@ -59,7 +63,9 @@ async def test_upload_knowledge_file_success():
     file_mock.filename = "file.txt"
     file_mock.content_type = "text/plain"
 
-    volume_config = json.dumps({"catalog": "main", "schema": "default", "volume": "data"})
+    volume_config = json.dumps(
+        {"catalog": "main", "schema": "default", "volume": "data"}
+    )
 
     with _patch_token("usr-token"):
         result = await upload_knowledge_file(
@@ -183,6 +189,7 @@ async def test_upload_knowledge_file_bad_agent_ids_json():
 # Tests – browse_volume_files
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_browse_volume_files_success():
     """browse_volume_files returns list from service."""
@@ -253,6 +260,7 @@ async def test_browse_volume_files_default_group_when_empty_context():
 # Tests – list_knowledge_files
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_list_knowledge_files_success():
     """list_knowledge_files returns files for the given execution_id."""
@@ -296,6 +304,7 @@ async def test_list_knowledge_files_empty():
 # ---------------------------------------------------------------------------
 # Tests – delete_knowledge_file
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_delete_knowledge_file_success():
@@ -341,6 +350,7 @@ async def test_delete_knowledge_file_calls_service_correctly():
 # ---------------------------------------------------------------------------
 # Tests – select_volume_file
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_select_volume_file_success():

@@ -7,10 +7,11 @@ EMPTY contextvars Context, so the UserContext group_id (and OBO token) were
 silently dropped and every completion raised
 ``ValueError: group_id is required``.
 """
+
 import asyncio
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, patch
 
 from src.services.tools.async_bridge import (
     run_async_with_context,
@@ -44,6 +45,7 @@ class TestRunAsyncWithContext:
 
     def test_running_loop_offloads_and_preserves_context(self):
         """The offloaded worker thread must see the caller's ContextVars."""
+
         async def _caller():
             _set_group("grp_offload")
             # We're inside a running loop → bridge offloads to a thread

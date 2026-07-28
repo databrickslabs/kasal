@@ -4,11 +4,13 @@ Unit tests for services/tools/custom/powerbi_connector_tool.py
 Tests CrewAI integration tool for Power BI dataset extraction and conversion.
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
+
 from src.services.tools.powerbi_connector_tool import (
+    PowerBIConnectorTool,
     PowerBIConnectorToolSchema,
-    PowerBIConnectorTool
 )
 
 
@@ -18,8 +20,7 @@ class TestPowerBIConnectorToolSchema:
     def test_schema_initialization_minimal(self):
         """Test schema with minimal required parameters"""
         schema = PowerBIConnectorToolSchema(
-            semantic_model_id="model123",
-            group_id="workspace456"
+            semantic_model_id="model123", group_id="workspace456"
         )
 
         assert schema.semantic_model_id == "model123"
@@ -38,10 +39,20 @@ class TestPowerBIConnectorToolSchema:
         not exposed as schema parameters.
         """
         forbidden = {
-            "client_secret", "password", "access_token", "llm_token",
-            "api_key", "token", "tenant_id", "client_id", "username",
-            "auth_method", "workspace_id", "dataset_id",
-            "llm_workspace_url", "llm_model",
+            "client_secret",
+            "password",
+            "access_token",
+            "llm_token",
+            "api_key",
+            "token",
+            "tenant_id",
+            "client_id",
+            "username",
+            "auth_method",
+            "workspace_id",
+            "dataset_id",
+            "llm_workspace_url",
+            "llm_model",
         }
         present = forbidden & set(PowerBIConnectorToolSchema.model_fields.keys())
         assert not present, f"Forbidden fields exposed in schema: {present}"
@@ -57,7 +68,7 @@ class TestPowerBIConnectorToolSchema:
             sql_dialect="postgresql",
             uc_catalog="test_catalog",
             uc_schema="test_schema",
-            info_table_name="Custom Measures"
+            info_table_name="Custom Measures",
         )
 
         assert schema.outbound_format == "sql"
@@ -85,43 +96,34 @@ class TestPowerBIConnectorTool:
         assert tool.name == "Power BI Connector"
         assert "Extract measures from Power BI" in tool.description
         assert tool.args_schema == PowerBIConnectorToolSchema
-        assert hasattr(tool, '_pipeline')
+        assert hasattr(tool, "_pipeline")
 
     def test_tool_has_required_attributes(self, tool):
         """Test tool has all required CrewAI tool attributes"""
-        assert hasattr(tool, 'name')
-        assert hasattr(tool, 'description')
-        assert hasattr(tool, 'args_schema')
-        assert hasattr(tool, '_run')
+        assert hasattr(tool, "name")
+        assert hasattr(tool, "description")
+        assert hasattr(tool, "args_schema")
+        assert hasattr(tool, "_run")
 
     # ========== Run Method Tests - Parameter Validation ==========
 
     def test_run_missing_semantic_model_id(self, tool):
         """Test _run fails with missing semantic_model_id"""
-        result = tool._run(
-            group_id="workspace456",
-            access_token="token789"
-        )
+        result = tool._run(group_id="workspace456", access_token="token789")
 
         assert "Error" in result
         assert "required" in result.lower()
 
     def test_run_missing_group_id(self, tool):
         """Test _run fails with missing group_id"""
-        result = tool._run(
-            semantic_model_id="model123",
-            access_token="token789"
-        )
+        result = tool._run(semantic_model_id="model123", access_token="token789")
 
         assert "Error" in result
         assert "required" in result.lower()
 
     def test_run_missing_access_token(self, tool):
         """Test _run fails with missing access_token"""
-        result = tool._run(
-            semantic_model_id="model123",
-            group_id="workspace456"
-        )
+        result = tool._run(semantic_model_id="model123", group_id="workspace456")
 
         assert "Error" in result
         assert "authentication" in result.lower()
@@ -132,7 +134,7 @@ class TestPowerBIConnectorTool:
             semantic_model_id="model123",
             group_id="workspace456",
             access_token="token789",
-            outbound_format="invalid_format"
+            outbound_format="invalid_format",
         )
 
         assert "Error" in result
@@ -140,7 +142,7 @@ class TestPowerBIConnectorTool:
 
     # ========== Run Method Tests - Success Paths ==========
 
-    @patch.object(PowerBIConnectorTool, '_pipeline')
+    @patch.object(PowerBIConnectorTool, "_pipeline")
     def test_run_dax_output_success(self, mock_pipeline, tool):
         """Test _run with DAX output format"""
         mock_pipeline.execute.return_value = {
@@ -149,18 +151,18 @@ class TestPowerBIConnectorTool:
                 {
                     "name": "Total Sales",
                     "expression": "SUM(Sales[Amount])",
-                    "description": "Total sales amount"
+                    "description": "Total sales amount",
                 }
             ],
             "measure_count": 1,
-            "errors": []
+            "errors": [],
         }
 
         result = tool._run(
             semantic_model_id="model123",
             group_id="workspace456",
             access_token="token789",
-            outbound_format="dax"
+            outbound_format="dax",
         )
 
         assert "Power BI Measures Converted to DAX" in result
@@ -168,14 +170,14 @@ class TestPowerBIConnectorTool:
         assert "SUM(Sales[Amount])" in result
         assert "```dax" in result
 
-    @patch.object(PowerBIConnectorTool, '_pipeline')
+    @patch.object(PowerBIConnectorTool, "_pipeline")
     def test_run_sql_output_success(self, mock_pipeline, tool):
         """Test _run with SQL output format"""
         mock_pipeline.execute.return_value = {
             "success": True,
             "output": "SELECT SUM(amount) as total_sales FROM sales",
             "measure_count": 1,
-            "errors": []
+            "errors": [],
         }
 
         result = tool._run(
@@ -183,21 +185,21 @@ class TestPowerBIConnectorTool:
             group_id="workspace456",
             access_token="token789",
             outbound_format="sql",
-            sql_dialect="databricks"
+            sql_dialect="databricks",
         )
 
         assert "Power BI Measures Converted to SQL" in result
         assert "SELECT SUM(amount)" in result
         assert "```sql" in result
 
-    @patch.object(PowerBIConnectorTool, '_pipeline')
+    @patch.object(PowerBIConnectorTool, "_pipeline")
     def test_run_uc_metrics_output_success(self, mock_pipeline, tool):
         """Test _run with UC Metrics output format"""
         mock_pipeline.execute.return_value = {
             "success": True,
             "output": "version: 0.1\nmeasures:\n  - name: total_sales",
             "measure_count": 1,
-            "errors": []
+            "errors": [],
         }
 
         result = tool._run(
@@ -206,28 +208,28 @@ class TestPowerBIConnectorTool:
             access_token="token789",
             outbound_format="uc_metrics",
             uc_catalog="main",
-            uc_schema="sales"
+            uc_schema="sales",
         )
 
         assert "Power BI Measures Converted to UC Metrics" in result
         assert "```yaml" in result
         assert "version: 0.1" in result
 
-    @patch.object(PowerBIConnectorTool, '_pipeline')
+    @patch.object(PowerBIConnectorTool, "_pipeline")
     def test_run_yaml_output_success(self, mock_pipeline, tool):
         """Test _run with YAML output format"""
         mock_pipeline.execute.return_value = {
             "success": True,
             "output": "kpis:\n  - technical_name: total_sales",
             "measure_count": 1,
-            "errors": []
+            "errors": [],
         }
 
         result = tool._run(
             semantic_model_id="model123",
             group_id="workspace456",
             access_token="token789",
-            outbound_format="yaml"
+            outbound_format="yaml",
         )
 
         assert "Power BI Measures Exported as YAML" in result
@@ -235,14 +237,14 @@ class TestPowerBIConnectorTool:
 
     # ========== Run Method Tests - Pipeline Parameters ==========
 
-    @patch.object(PowerBIConnectorTool, '_pipeline')
+    @patch.object(PowerBIConnectorTool, "_pipeline")
     def test_run_passes_correct_parameters_to_pipeline(self, mock_pipeline, tool):
         """Test _run passes all parameters correctly to pipeline"""
         mock_pipeline.execute.return_value = {
             "success": True,
             "output": [],
             "measure_count": 0,
-            "errors": []
+            "errors": [],
         }
 
         tool._run(
@@ -253,7 +255,7 @@ class TestPowerBIConnectorTool:
             include_hidden=True,
             filter_pattern="Sales.*",
             sql_dialect="postgresql",
-            info_table_name="Custom Measures"
+            info_table_name="Custom Measures",
         )
 
         # Verify pipeline.execute was called with correct parameters
@@ -261,44 +263,44 @@ class TestPowerBIConnectorTool:
         call_args = mock_pipeline.execute.call_args
 
         # Check inbound_params
-        inbound_params = call_args[1]['inbound_params']
-        assert inbound_params['semantic_model_id'] == "model123"
-        assert inbound_params['group_id'] == "workspace456"
-        assert inbound_params['access_token'] == "token789"
-        assert inbound_params['info_table_name'] == "Custom Measures"
+        inbound_params = call_args[1]["inbound_params"]
+        assert inbound_params["semantic_model_id"] == "model123"
+        assert inbound_params["group_id"] == "workspace456"
+        assert inbound_params["access_token"] == "token789"
+        assert inbound_params["info_table_name"] == "Custom Measures"
 
         # Check extract_params
-        extract_params = call_args[1]['extract_params']
-        assert extract_params['include_hidden'] is True
-        assert extract_params['filter_pattern'] == "Sales.*"
+        extract_params = call_args[1]["extract_params"]
+        assert extract_params["include_hidden"] is True
+        assert extract_params["filter_pattern"] == "Sales.*"
 
         # Check outbound_params
-        outbound_params = call_args[1]['outbound_params']
-        assert outbound_params['dialect'] == "postgresql"
+        outbound_params = call_args[1]["outbound_params"]
+        assert outbound_params["dialect"] == "postgresql"
 
     # ========== Run Method Tests - Error Handling ==========
 
-    @patch.object(PowerBIConnectorTool, '_pipeline')
+    @patch.object(PowerBIConnectorTool, "_pipeline")
     def test_run_pipeline_failure(self, mock_pipeline, tool):
         """Test _run handles pipeline execution failure"""
         mock_pipeline.execute.return_value = {
             "success": False,
             "output": None,
             "measure_count": 0,
-            "errors": ["Connection failed", "Authentication error"]
+            "errors": ["Connection failed", "Authentication error"],
         }
 
         result = tool._run(
             semantic_model_id="model123",
             group_id="workspace456",
-            access_token="token789"
+            access_token="token789",
         )
 
         assert "Error" in result
         assert "Conversion failed" in result
         assert "Connection failed" in result or "Authentication error" in result
 
-    @patch.object(PowerBIConnectorTool, '_pipeline')
+    @patch.object(PowerBIConnectorTool, "_pipeline")
     def test_run_exception_handling(self, mock_pipeline, tool):
         """Test _run handles exceptions gracefully"""
         mock_pipeline.execute.side_effect = Exception("Unexpected error")
@@ -306,7 +308,7 @@ class TestPowerBIConnectorTool:
         result = tool._run(
             semantic_model_id="model123",
             group_id="workspace456",
-            access_token="token789"
+            access_token="token789",
         )
 
         assert "Error" in result
@@ -314,7 +316,7 @@ class TestPowerBIConnectorTool:
 
     # ========== Run Method Tests - Multiple Measures ==========
 
-    @patch.object(PowerBIConnectorTool, '_pipeline')
+    @patch.object(PowerBIConnectorTool, "_pipeline")
     def test_run_multiple_measures_dax_output(self, mock_pipeline, tool):
         """Test _run with multiple measures in DAX format"""
         mock_pipeline.execute.return_value = {
@@ -323,23 +325,23 @@ class TestPowerBIConnectorTool:
                 {
                     "name": "Total Sales",
                     "expression": "SUM(Sales[Amount])",
-                    "description": "Total sales amount"
+                    "description": "Total sales amount",
                 },
                 {
                     "name": "Average Price",
                     "expression": "AVERAGE(Products[Price])",
-                    "description": None
-                }
+                    "description": None,
+                },
             ],
             "measure_count": 2,
-            "errors": []
+            "errors": [],
         }
 
         result = tool._run(
             semantic_model_id="model123",
             group_id="workspace456",
             access_token="token789",
-            outbound_format="dax"
+            outbound_format="dax",
         )
 
         assert "Extracted 2 measures" in result
@@ -350,33 +352,33 @@ class TestPowerBIConnectorTool:
 
     # ========== Edge Cases ==========
 
-    @patch.object(PowerBIConnectorTool, '_pipeline')
+    @patch.object(PowerBIConnectorTool, "_pipeline")
     def test_run_no_measures_extracted(self, mock_pipeline, tool):
         """Test _run when no measures are extracted"""
         mock_pipeline.execute.return_value = {
             "success": True,
             "output": [],
             "measure_count": 0,
-            "errors": []
+            "errors": [],
         }
 
         result = tool._run(
             semantic_model_id="model123",
             group_id="workspace456",
             access_token="token789",
-            outbound_format="dax"
+            outbound_format="dax",
         )
 
         assert "0 measures" in result
 
-    @patch.object(PowerBIConnectorTool, '_pipeline')
+    @patch.object(PowerBIConnectorTool, "_pipeline")
     def test_run_case_insensitive_outbound_format(self, mock_pipeline, tool):
         """Test _run handles case-insensitive outbound format"""
         mock_pipeline.execute.return_value = {
             "success": True,
             "output": [],
             "measure_count": 0,
-            "errors": []
+            "errors": [],
         }
 
         # Test uppercase
@@ -384,7 +386,7 @@ class TestPowerBIConnectorTool:
             semantic_model_id="model123",
             group_id="workspace456",
             access_token="token789",
-            outbound_format="DAX"
+            outbound_format="DAX",
         )
         assert "Error" not in result
 
@@ -393,18 +395,18 @@ class TestPowerBIConnectorTool:
             semantic_model_id="model123",
             group_id="workspace456",
             access_token="token789",
-            outbound_format="Sql"
+            outbound_format="Sql",
         )
         assert "Error" not in result
 
-    @patch.object(PowerBIConnectorTool, '_pipeline')
+    @patch.object(PowerBIConnectorTool, "_pipeline")
     def test_run_with_all_optional_parameters(self, mock_pipeline, tool):
         """Test _run with all optional parameters specified"""
         mock_pipeline.execute.return_value = {
             "success": True,
             "output": "SELECT * FROM table",
             "measure_count": 1,
-            "errors": []
+            "errors": [],
         }
 
         result = tool._run(
@@ -417,7 +419,7 @@ class TestPowerBIConnectorTool:
             sql_dialect="snowflake",
             uc_catalog="analytics",
             uc_schema="metrics",
-            info_table_name="Info Measures Custom"
+            info_table_name="Info Measures Custom",
         )
 
         assert "Error" not in result

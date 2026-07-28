@@ -6,13 +6,14 @@ Targets uncovered lines: 108-111, 150-179, 203-226, 284, 290, 300, 338,
 """
 
 import pytest
-from src.services.converters.formats.sql.yaml_to_sql import SQLGenerator
+
+from src.services.converters.base.models import KPI, KPIDefinition
 from src.services.converters.formats.sql.models import (
-    SQLDialect,
     SQLAggregationType,
+    SQLDialect,
     SQLTranslationOptions,
 )
-from src.services.converters.base.models import KPI, KPIDefinition
+from src.services.converters.formats.sql.yaml_to_sql import SQLGenerator
 
 
 def make_kpi(technical_name="sales", formula="amount", agg="SUM", **kwargs):
@@ -68,10 +69,14 @@ class TestGenerateSQLFromKBIDefinition2:
     def test_error_handling_returns_error_result(self, gen):
         """Lines 108-111: exception path returns invalid result."""
         from unittest.mock import patch
+
         kpi = make_kpi()
         definition = make_definition(kpis=[kpi])
-        with patch.object(gen.structure_processor, 'process_definition',
-                          side_effect=Exception("test error")):
+        with patch.object(
+            gen.structure_processor,
+            "process_definition",
+            side_effect=Exception("test error"),
+        ):
             result = gen.generate_sql_from_kbi_definition(definition)
             assert result.syntax_valid is False
             assert any("Generation failed" in m for m in result.validation_messages)
@@ -94,10 +99,12 @@ class TestEstimateComplexity2:
 
     def test_low_complexity_single_measure(self, gen):
         from src.services.converters.formats.sql.models import SQLDefinition, SQLMeasure
+
         sql_def = SQLDefinition(description="T", technical_name="t")
         sql_def.sql_measures = [
             SQLMeasure(
-                name="s", sql_expression="SUM(x)",
+                name="s",
+                sql_expression="SUM(x)",
                 aggregation_type=SQLAggregationType.SUM,
                 source_table="t",
             )
@@ -106,27 +113,33 @@ class TestEstimateComplexity2:
 
     def test_medium_complexity_6_measures_with_filter(self, gen):
         from src.services.converters.formats.sql.models import SQLDefinition, SQLMeasure
+
         sql_def = SQLDefinition(description="T", technical_name="t")
         sql_def.sql_measures = [
             SQLMeasure(
-                name=f"m{i}", sql_expression=f"SUM(x{i})",
+                name=f"m{i}",
+                sql_expression=f"SUM(x{i})",
                 aggregation_type=SQLAggregationType.SUM,
                 source_table="t",
                 filters=["x=1"],
-            ) for i in range(6)
+            )
+            for i in range(6)
         ]
         result = gen._estimate_complexity(sql_def)
         assert result in ("MEDIUM", "HIGH")
 
     def test_high_complexity_11_measures(self, gen):
         from src.services.converters.formats.sql.models import SQLDefinition, SQLMeasure
+
         sql_def = SQLDefinition(description="T", technical_name="t")
         sql_def.sql_measures = [
             SQLMeasure(
-                name=f"m{i}", sql_expression=f"SUM(x{i})",
+                name=f"m{i}",
+                sql_expression=f"SUM(x{i})",
                 aggregation_type=SQLAggregationType.SUM,
                 source_table="t",
-            ) for i in range(11)
+            )
+            for i in range(11)
         ]
         assert gen._estimate_complexity(sql_def) == "HIGH"
 
@@ -152,7 +165,10 @@ class TestMapAggregationType2:
         assert gen._map_aggregation_type("MAX", "x") == SQLAggregationType.MAX
 
     def test_distinctcount(self, gen):
-        assert gen._map_aggregation_type("DISTINCTCOUNT", "x") == SQLAggregationType.COUNT_DISTINCT
+        assert (
+            gen._map_aggregation_type("DISTINCTCOUNT", "x")
+            == SQLAggregationType.COUNT_DISTINCT
+        )
 
     def test_countrows(self, gen):
         assert gen._map_aggregation_type("COUNTROWS", "x") == SQLAggregationType.COUNT
@@ -216,7 +232,9 @@ class TestGenerateSQLExpression2:
     def test_count_distinct_simple_column(self, gen):
         kpi = make_kpi(formula="customer_id", agg="DISTINCTCOUNT")
         definition = make_definition(kpis=[kpi])
-        expr = gen._generate_sql_expression(kpi, SQLAggregationType.COUNT_DISTINCT, definition)
+        expr = gen._generate_sql_expression(
+            kpi, SQLAggregationType.COUNT_DISTINCT, definition
+        )
         assert "COUNT(DISTINCT" in expr
         assert "customer_id" in expr
 
@@ -224,7 +242,9 @@ class TestGenerateSQLExpression2:
         """Line 284: complex formula for COUNT DISTINCT -> fallback"""
         kpi = make_kpi(formula="a + b", agg="DISTINCTCOUNT")
         definition = make_definition(kpis=[kpi])
-        expr = gen._generate_sql_expression(kpi, SQLAggregationType.COUNT_DISTINCT, definition)
+        expr = gen._generate_sql_expression(
+            kpi, SQLAggregationType.COUNT_DISTINCT, definition
+        )
         assert "COUNT(DISTINCT" in expr
 
     def test_avg_simple(self, gen):
@@ -256,7 +276,9 @@ class TestGenerateSQLExpression2:
         """Line 299-300: fallback to SUM"""
         kpi = make_kpi(formula="amount")
         definition = make_definition(kpis=[kpi])
-        expr = gen._generate_sql_expression(kpi, SQLAggregationType.WEIGHTED_AVG, definition)
+        expr = gen._generate_sql_expression(
+            kpi, SQLAggregationType.WEIGHTED_AVG, definition
+        )
         assert "SUM" in expr
 
 
@@ -321,9 +343,7 @@ class TestProcessFilters2:
 
     def test_valid_filter_is_included(self, gen):
         result = gen._process_filters(
-            ["region = 'West'"],
-            make_definition(),
-            SQLTranslationOptions()
+            ["region = 'West'"], make_definition(), SQLTranslationOptions()
         )
         assert len(result) >= 1
 
@@ -336,7 +356,7 @@ class TestProcessFilters2:
         result = gen._process_filters(
             ["region = 'West'", "year = 2024"],
             make_definition(),
-            SQLTranslationOptions()
+            SQLTranslationOptions(),
         )
         assert len(result) == 2
 

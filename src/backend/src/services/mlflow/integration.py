@@ -4,12 +4,12 @@ This module provides MLflow autolog configuration and tracing setup specifically
 for CrewAI workflows. It handles CrewAI autolog, LiteLLM autolog, and crew-specific
 trace management.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from typing import Optional
-
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,7 @@ def _get_mlflow():
     """Get mlflow module if available."""
     try:
         import mlflow  # type: ignore
+
         return mlflow
     except Exception as e:
         logger.info(f"[crewai_mlflow] MLflow not available: {e}")
@@ -29,7 +30,7 @@ def enable_autologs(
     global_autolog: bool = True,
     global_log_traces: bool = True,
     crewai_autolog: bool = True,
-    litellm_spans_only: bool = True
+    litellm_spans_only: bool = True,
 ) -> None:
     """Enable MLflow autolog integrations with configurable root-trace behavior.
 
@@ -49,7 +50,9 @@ def enable_autologs(
     # Global autolog (may create root traces when global_log_traces=True)
     if global_autolog:
         try:
-            mlflow.autolog(log_traces=bool(global_log_traces), disable=False, silent=True)
+            mlflow.autolog(
+                log_traces=bool(global_log_traces), disable=False, silent=True
+            )
             logger.info(
                 f"[crewai_mlflow] Global autolog enabled (log_traces={bool(global_log_traces)})"
             )
@@ -79,6 +82,7 @@ def enable_autologs(
     # any trace is exported. Idempotent / process-wide.
     try:
         from src.services.otel_tracing.trace_redaction import enable_secret_redaction
+
         enable_secret_redaction()
     except Exception as e:
         logger.warning(f"[crewai_mlflow] Could not enable trace secret redaction: {e}")
@@ -88,7 +92,7 @@ async def update_execution_trace_id(
     execution_id: str,
     trace_id: Optional[str],
     experiment_name: str,
-    group_id: Optional[str]
+    group_id: Optional[str],
 ) -> None:
     """Update execution record with MLflow trace ID.
 
@@ -104,12 +108,15 @@ async def update_execution_trace_id(
         return
     try:
         from src.services.execution.status import ExecutionStatusService
+
         await ExecutionStatusService.update_mlflow_trace_id(
             job_id=execution_id,
             trace_id=trace_id,
             experiment_name=experiment_name,
         )
-        logger.info(f"[crewai_mlflow] Updated execution {execution_id} with trace {trace_id}")
+        logger.info(
+            f"[crewai_mlflow] Updated execution {execution_id} with trace {trace_id}"
+        )
     except Exception as e:
         logger.info(f"[crewai_mlflow] Could not update execution with trace id: {e}")
 
@@ -126,11 +133,13 @@ async def flush_and_stop_writers(async_logger: Optional[logging.Logger] = None) 
 
     # Flush MLflow async traces (use generic service)
     from src.services.mlflow.tracing import flush_async_logging
+
     await flush_async_logging(async_logger=alog)
 
     # Drain any custom trace queue and stop LogWriterTask if available (CrewAI-specific)
     try:
         from src.services.trace.queue import get_trace_queue
+
         trace_queue = get_trace_queue()
         max_wait = 10
         waited = 0.0
@@ -139,6 +148,7 @@ async def flush_and_stop_writers(async_logger: Optional[logging.Logger] = None) 
             waited += 0.1
         try:
             from src.services.execution.logs.writer_task import LogWriterTask
+
             await LogWriterTask.stop_writer()
         except Exception:
             pass

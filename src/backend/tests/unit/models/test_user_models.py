@@ -4,12 +4,15 @@ Unit tests for user models.
 Tests the functionality of the User database model
 including field validation, relationships, and data integrity.
 """
-import pytest
-from datetime import datetime, timezone, timedelta
+
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
+import pytest
+
+from src.models.enums import UserRole as UserRoleEnum
+from src.models.enums import UserStatus
 from src.models.user import User, generate_uuid
-from src.models.enums import UserRole as UserRoleEnum, UserStatus
 
 
 class TestUser:
@@ -29,8 +32,8 @@ class TestUser:
         assert user.username == username
         assert user.email == email
         # Note: SQLAlchemy defaults are applied when saved to database
-        assert User.__table__.columns['role'].default.arg == UserRoleEnum.REGULAR
-        assert User.__table__.columns['status'].default.arg == UserStatus.ACTIVE
+        assert User.__table__.columns["role"].default.arg == UserRoleEnum.REGULAR
+        assert User.__table__.columns["status"].default.arg == UserStatus.ACTIVE
         assert user.last_login is None
 
     def test_user_with_all_fields(self):
@@ -65,7 +68,7 @@ class TestUser:
             user = User(
                 username=f"user_{role.value}",
                 email=f"{role.value}@example.com",
-                role=role
+                role=role,
             )
             assert user.role == role
 
@@ -75,7 +78,7 @@ class TestUser:
             user = User(
                 username=f"user_{status.value}",
                 email=f"{status.value}@example.com",
-                status=status
+                status=status,
             )
             assert user.status == status
 
@@ -90,10 +93,10 @@ class TestUser:
         columns = User.__table__.columns
 
         # Assert
-        assert columns['username'].unique is True
-        assert columns['email'].unique is True
-        assert columns['username'].index is True
-        assert columns['email'].index is True
+        assert columns["username"].unique is True
+        assert columns["email"].unique is True
+        assert columns["username"].index is True
+        assert columns["email"].index is True
 
 
 class TestGenerateUuidFunction:
@@ -146,7 +149,7 @@ class TestUserModelsIntegration:
             username="admin_user",
             email="admin@example.com",
             is_system_admin=True,
-            is_personal_workspace_manager=True
+            is_personal_workspace_manager=True,
         )
 
         # Assert

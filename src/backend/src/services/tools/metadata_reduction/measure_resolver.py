@@ -17,8 +17,8 @@ Author: Kasal Team
 Date: 2026
 """
 
-import re
 import logging
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -36,6 +36,7 @@ class MeasureType(str, Enum):
 @dataclass
 class ExpressionFlags:
     """Analysis flags for a DAX measure expression."""
+
     safe_for_decompose: bool = True
     handles_date_internally: bool = False
     has_removefilters: bool = False
@@ -48,13 +49,14 @@ class ExpressionFlags:
 @dataclass
 class ResolvedMeasure:
     """A measure with resolution type and expression analysis."""
+
     name: str
     table: str = ""
     expression: str = ""
     resolution_type: MeasureType = MeasureType.UNRESOLVED
     base_measure: Optional[str] = None  # For FILTERED: the base measure name
     filter_column: Optional[str] = None  # For FILTERED: "Table[Column]"
-    filter_value: Optional[str] = None   # For FILTERED: the filter value
+    filter_value: Optional[str] = None  # For FILTERED: the filter value
     sibling_measures: List[str] = field(default_factory=list)  # For COMPOSITE
     expression_flags: ExpressionFlags = field(default_factory=ExpressionFlags)
 
@@ -284,7 +286,9 @@ class MeasureResolver:
                 matches = self._value_index[prefix]
                 if matches:
                     table_name, col_name, original_value = matches[0]
-                    base_expr = self._measure_map.get(base_from_suffix, {}).get("expression", "")
+                    base_expr = self._measure_map.get(base_from_suffix, {}).get(
+                        "expression", ""
+                    )
                     return ResolvedMeasure(
                         name=name,
                         table=self._measure_to_table.get(base_from_suffix, ""),
@@ -302,7 +306,9 @@ class MeasureResolver:
                 matches = self._value_index[suffix]
                 if matches:
                     table_name, col_name, original_value = matches[0]
-                    base_expr = self._measure_map.get(base_from_prefix, {}).get("expression", "")
+                    base_expr = self._measure_map.get(base_from_prefix, {}).get(
+                        "expression", ""
+                    )
                     return ResolvedMeasure(
                         name=name,
                         table=self._measure_to_table.get(base_from_prefix, ""),
@@ -338,7 +344,10 @@ class MeasureResolver:
         # Find all filtered measures by base
         filtered_by_base: Dict[str, List[str]] = {}
         for name, resolved in resolved_cache.items():
-            if resolved.resolution_type == MeasureType.FILTERED_MEASURE and resolved.base_measure:
+            if (
+                resolved.resolution_type == MeasureType.FILTERED_MEASURE
+                and resolved.base_measure
+            ):
                 filtered_by_base.setdefault(resolved.base_measure, []).append(name)
 
         if not filtered_by_base:

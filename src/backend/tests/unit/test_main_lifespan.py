@@ -8,18 +8,20 @@ touching a real database or scheduler, exercising the branches we care about.
 
 import json
 import os
-import pytest
 from contextlib import ExitStack
-from unittest.mock import AsyncMock, MagicMock, Mock, patch, call
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers — bring in handlers directly (no TestClient needed)
 # ---------------------------------------------------------------------------
 
+
 def _get_handlers():
     """Import the handlers from main after the module has been loaded."""
     import src.main as m
+
     return m
 
 
@@ -27,11 +29,13 @@ def _get_handlers():
 # Pydantic ValidationError handler
 # ---------------------------------------------------------------------------
 
+
 class TestPydanticValidationHandler:
     @pytest.mark.asyncio
     async def test_returns_422(self):
+        from pydantic import BaseModel, ValidationError
+
         from src.main import pydantic_validation_handler
-        from pydantic import ValidationError, BaseModel
 
         class M(BaseModel):
             x: int
@@ -47,7 +51,9 @@ class TestPydanticValidationHandler:
 
     def test_pydantic_handler_is_registered(self):
         from pydantic import ValidationError
+
         from src.main import app
+
         assert ValidationError in app.exception_handlers
 
 
@@ -55,22 +61,29 @@ class TestPydanticValidationHandler:
 # SQLAlchemy IntegrityError handler
 # ---------------------------------------------------------------------------
 
+
 class TestSAIntegrityErrorHandler:
     @pytest.mark.asyncio
     async def test_returns_409(self):
-        from src.main import integrity_error_handler
         from sqlalchemy.exc import IntegrityError
+
+        from src.main import integrity_error_handler
 
         exc = IntegrityError("INSERT", {}, Exception("UNIQUE constraint failed"))
         mock_request = MagicMock()
         response = await integrity_error_handler(mock_request, exc)
         assert response.status_code == 409
         body = json.loads(response.body)
-        assert "conflict" in body["detail"].lower() or "integrity" in body["detail"].lower()
+        assert (
+            "conflict" in body["detail"].lower()
+            or "integrity" in body["detail"].lower()
+        )
 
     def test_integrity_handler_is_registered(self):
         from sqlalchemy.exc import IntegrityError
+
         from src.main import app
+
         assert IntegrityError in app.exception_handlers
 
 
@@ -78,10 +91,12 @@ class TestSAIntegrityErrorHandler:
 # Health endpoint returns a 200 with {"status": "healthy"}
 # ---------------------------------------------------------------------------
 
+
 class TestHealthEndpointDirect:
     @pytest.mark.asyncio
     async def test_health_function_returns_healthy(self):
         from src.main import health
+
         result = await health()
         assert result == {"status": "healthy"}
 
@@ -89,6 +104,7 @@ class TestHealthEndpointDirect:
 # ---------------------------------------------------------------------------
 # LocalDevAuthMiddleware — extra edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestLocalDevAuthMiddlewareEdgeCases:
     @pytest.mark.asyncio
@@ -159,6 +175,7 @@ class TestLocalDevAuthMiddlewareEdgeCases:
 # SecurityHeadersMiddleware — additional coverage
 # ---------------------------------------------------------------------------
 
+
 class TestSecurityHeadersMiddlewareAdditional:
     @pytest.mark.asyncio
     async def test_both_response_start_and_body_messages_processed(self):
@@ -190,6 +207,7 @@ class TestSecurityHeadersMiddlewareAdditional:
 # Lifespan — startup branches
 # ---------------------------------------------------------------------------
 
+
 def _make_lifespan_patches(settings_overrides: dict, extra_patches: dict = None):
     """
     Build a common set of patches needed for lifespan tests.
@@ -201,8 +219,12 @@ def _make_lifespan_patches(settings_overrides: dict, extra_patches: dict = None)
         "src.main.DatabricksURLUtils.validate_and_fix_environment": AsyncMock(),
         "src.db.session.init_db": AsyncMock(),
         "src.db.session.set_main_event_loop": MagicMock(),
-        "src.main.ExecutionCleanupService.cleanup_stale_jobs_on_startup": AsyncMock(return_value=0),
-        "src.main.ExecutionCleanupService.cleanup_zombie_jobs": AsyncMock(return_value=0),
+        "src.main.ExecutionCleanupService.cleanup_stale_jobs_on_startup": AsyncMock(
+            return_value=0
+        ),
+        "src.main.ExecutionCleanupService.cleanup_zombie_jobs": AsyncMock(
+            return_value=0
+        ),
         "src.main.get_db": None,  # handled separately
         "src.main.async_session_factory": None,  # handled separately
         "src.main.start_hitl_timeout_service": AsyncMock(),
@@ -289,26 +311,35 @@ class TestLifespanStartup:
     async def test_lifespan_startup_with_sqlite_db_initialized(self):
         """Lifespan startup path: SQLite DB file exists and has tables."""
         from fastapi import FastAPI
+
         from src.main import lifespan
 
         fake_app = FastAPI()
 
         with ExitStack() as stack:
             p = self._base_patches()
-            p.update({
-                "src.main.settings": None,
-                "src.main.ExecutionCleanupService.cleanup_stale_jobs_on_startup": AsyncMock(return_value=0),
-                "src.main.ExecutionCleanupService.cleanup_zombie_jobs": AsyncMock(return_value=0),
-                "src.seeds.seed_runner.run_all_seeders": AsyncMock(),
-                "src.main.SchedulerService": None,
-                "src.main.get_db": None,
-                "src.main.async_session_factory": None,
-                "src.main.os.path.exists": MagicMock(return_value=True),
-                "src.main.os.path.getsize": MagicMock(return_value=1024),
-                "sqlite3.connect": None,
-                "src.repositories.engine_config_repository.EngineConfigRepository": None,
-                "src.db.database_router.is_lakebase_enabled": AsyncMock(return_value=False),
-            })
+            p.update(
+                {
+                    "src.main.settings": None,
+                    "src.main.ExecutionCleanupService.cleanup_stale_jobs_on_startup": AsyncMock(
+                        return_value=0
+                    ),
+                    "src.main.ExecutionCleanupService.cleanup_zombie_jobs": AsyncMock(
+                        return_value=0
+                    ),
+                    "src.seeds.seed_runner.run_all_seeders": AsyncMock(),
+                    "src.main.SchedulerService": None,
+                    "src.main.get_db": None,
+                    "src.main.async_session_factory": None,
+                    "src.main.os.path.exists": MagicMock(return_value=True),
+                    "src.main.os.path.getsize": MagicMock(return_value=1024),
+                    "sqlite3.connect": None,
+                    "src.repositories.engine_config_repository.EngineConfigRepository": None,
+                    "src.db.database_router.is_lakebase_enabled": AsyncMock(
+                        return_value=False
+                    ),
+                }
+            )
             mocks = self._apply_patches(stack, p)
 
             settings = mocks["src.main.settings"]
@@ -329,6 +360,7 @@ class TestLifespanStartup:
 
             async def fake_db_gen():
                 yield MagicMock()
+
             mocks["src.main.get_db"].return_value = fake_db_gen()
 
             mock_sess = self._make_session_mock()
@@ -336,7 +368,9 @@ class TestLifespanStartup:
 
             mock_repo = AsyncMock()
             mock_repo.get_otel_app_telemetry_enabled = AsyncMock(return_value=False)
-            mocks["src.repositories.engine_config_repository.EngineConfigRepository"].return_value = mock_repo
+            mocks[
+                "src.repositories.engine_config_repository.EngineConfigRepository"
+            ].return_value = mock_repo
 
             # Set start/stop on broadcast service mocks
             for svc_key in (
@@ -355,17 +389,20 @@ class TestLifespanStartup:
     async def test_lifespan_db_not_initialized(self):
         """When DB is not ready, seeding and scheduler are skipped."""
         from fastapi import FastAPI
+
         from src.main import lifespan
 
         fake_app = FastAPI()
 
         with ExitStack() as stack:
             p = self._base_patches()
-            p.update({
-                "src.main.settings": None,
-                "src.main.os.path.exists": MagicMock(return_value=False),
-                "src.main.os.path.getsize": MagicMock(return_value=0),
-            })
+            p.update(
+                {
+                    "src.main.settings": None,
+                    "src.main.os.path.exists": MagicMock(return_value=False),
+                    "src.main.os.path.getsize": MagicMock(return_value=0),
+                }
+            )
             mocks = self._apply_patches(stack, p)
 
             settings = mocks["src.main.settings"]
@@ -391,17 +428,22 @@ class TestLifespanStartup:
     async def test_lifespan_db_init_failure_continues(self):
         """Even if init_db raises, app should not crash."""
         from fastapi import FastAPI
+
         from src.main import lifespan
 
         fake_app = FastAPI()
 
         with ExitStack() as stack:
             p = self._base_patches()
-            p["src.db.session.init_db"] = AsyncMock(side_effect=Exception("db init failed"))
-            p.update({
-                "src.main.settings": None,
-                "src.main.os.path.exists": MagicMock(return_value=False),
-            })
+            p["src.db.session.init_db"] = AsyncMock(
+                side_effect=Exception("db init failed")
+            )
+            p.update(
+                {
+                    "src.main.settings": None,
+                    "src.main.os.path.exists": MagicMock(return_value=False),
+                }
+            )
             mocks = self._apply_patches(stack, p)
 
             settings = mocks["src.main.settings"]
@@ -428,26 +470,35 @@ class TestLifespanStartup:
     async def test_lifespan_seeding_enabled(self):
         """When AUTO_SEED_DATABASE=True, seeders are triggered in background."""
         from fastapi import FastAPI
+
         from src.main import lifespan
 
         fake_app = FastAPI()
 
         with ExitStack() as stack:
             p = self._base_patches()
-            p.update({
-                "src.main.settings": None,
-                "src.main.ExecutionCleanupService.cleanup_stale_jobs_on_startup": AsyncMock(return_value=2),
-                "src.main.ExecutionCleanupService.cleanup_zombie_jobs": AsyncMock(return_value=0),
-                "src.seeds.seed_runner.run_all_seeders": AsyncMock(),
-                "src.main.SchedulerService": None,
-                "src.main.get_db": None,
-                "src.main.async_session_factory": None,
-                "src.main.os.path.exists": MagicMock(return_value=True),
-                "src.main.os.path.getsize": MagicMock(return_value=1024),
-                "sqlite3.connect": None,
-                "src.repositories.engine_config_repository.EngineConfigRepository": None,
-                "src.db.database_router.is_lakebase_enabled": AsyncMock(return_value=False),
-            })
+            p.update(
+                {
+                    "src.main.settings": None,
+                    "src.main.ExecutionCleanupService.cleanup_stale_jobs_on_startup": AsyncMock(
+                        return_value=2
+                    ),
+                    "src.main.ExecutionCleanupService.cleanup_zombie_jobs": AsyncMock(
+                        return_value=0
+                    ),
+                    "src.seeds.seed_runner.run_all_seeders": AsyncMock(),
+                    "src.main.SchedulerService": None,
+                    "src.main.get_db": None,
+                    "src.main.async_session_factory": None,
+                    "src.main.os.path.exists": MagicMock(return_value=True),
+                    "src.main.os.path.getsize": MagicMock(return_value=1024),
+                    "sqlite3.connect": None,
+                    "src.repositories.engine_config_repository.EngineConfigRepository": None,
+                    "src.db.database_router.is_lakebase_enabled": AsyncMock(
+                        return_value=False
+                    ),
+                }
+            )
             mocks = self._apply_patches(stack, p)
 
             settings = mocks["src.main.settings"]
@@ -468,6 +519,7 @@ class TestLifespanStartup:
 
             async def fake_db_gen():
                 yield MagicMock()
+
             mocks["src.main.get_db"].return_value = fake_db_gen()
 
             mock_sess = self._make_session_mock()
@@ -475,7 +527,9 @@ class TestLifespanStartup:
 
             mock_repo = AsyncMock()
             mock_repo.get_otel_app_telemetry_enabled = AsyncMock(return_value=False)
-            mocks["src.repositories.engine_config_repository.EngineConfigRepository"].return_value = mock_repo
+            mocks[
+                "src.repositories.engine_config_repository.EngineConfigRepository"
+            ].return_value = mock_repo
 
             for svc_key in (
                 "src.services.trace.trace_broadcast_service",
@@ -493,19 +547,24 @@ class TestLifespanStartup:
     async def test_lifespan_sqlite_table_check_exception(self):
         """sqlite3 cursor raises -> db_initialized stays False."""
         from fastapi import FastAPI
+
         from src.main import lifespan
 
         fake_app = FastAPI()
 
         with ExitStack() as stack:
             p = self._base_patches()
-            p.update({
-                "src.main.settings": None,
-                "src.main.os.path.exists": MagicMock(return_value=True),
-                "src.main.os.path.getsize": MagicMock(return_value=1024),
-            })
+            p.update(
+                {
+                    "src.main.settings": None,
+                    "src.main.os.path.exists": MagicMock(return_value=True),
+                    "src.main.os.path.getsize": MagicMock(return_value=1024),
+                }
+            )
             mocks = self._apply_patches(stack, p)
-            stack.enter_context(patch("sqlite3.connect", side_effect=Exception("sqlite broken")))
+            stack.enter_context(
+                patch("sqlite3.connect", side_effect=Exception("sqlite broken"))
+            )
 
             settings = mocks["src.main.settings"]
             settings.DATABASE_URI = "sqlite:///test.db"
@@ -530,22 +589,31 @@ class TestLifespanStartup:
     async def test_lifespan_non_sqlite_db(self):
         """Non-SQLite DB path: uses async session execute to check connectivity."""
         from fastapi import FastAPI
+
         from src.main import lifespan
 
         fake_app = FastAPI()
 
         with ExitStack() as stack:
             p = self._base_patches()
-            p.update({
-                "src.main.settings": None,
-                "src.main.async_session_factory": None,
-                "src.main.ExecutionCleanupService.cleanup_stale_jobs_on_startup": AsyncMock(return_value=0),
-                "src.main.ExecutionCleanupService.cleanup_zombie_jobs": AsyncMock(return_value=0),
-                "src.main.SchedulerService": None,
-                "src.main.get_db": None,
-                "src.repositories.engine_config_repository.EngineConfigRepository": None,
-                "src.db.database_router.is_lakebase_enabled": AsyncMock(return_value=False),
-            })
+            p.update(
+                {
+                    "src.main.settings": None,
+                    "src.main.async_session_factory": None,
+                    "src.main.ExecutionCleanupService.cleanup_stale_jobs_on_startup": AsyncMock(
+                        return_value=0
+                    ),
+                    "src.main.ExecutionCleanupService.cleanup_zombie_jobs": AsyncMock(
+                        return_value=0
+                    ),
+                    "src.main.SchedulerService": None,
+                    "src.main.get_db": None,
+                    "src.repositories.engine_config_repository.EngineConfigRepository": None,
+                    "src.db.database_router.is_lakebase_enabled": AsyncMock(
+                        return_value=False
+                    ),
+                }
+            )
             mocks = self._apply_patches(stack, p)
 
             settings = mocks["src.main.settings"]
@@ -563,11 +631,14 @@ class TestLifespanStartup:
 
             async def fake_db_gen():
                 yield MagicMock()
+
             mocks["src.main.get_db"].return_value = fake_db_gen()
 
             mock_repo = AsyncMock()
             mock_repo.get_otel_app_telemetry_enabled = AsyncMock(return_value=False)
-            mocks["src.repositories.engine_config_repository.EngineConfigRepository"].return_value = mock_repo
+            mocks[
+                "src.repositories.engine_config_repository.EngineConfigRepository"
+            ].return_value = mock_repo
 
             for svc_key in (
                 "src.services.trace.trace_broadcast_service",
@@ -586,6 +657,7 @@ class TestLifespanStartup:
 # __main__ block coverage
 # ---------------------------------------------------------------------------
 
+
 class TestMainGuard:
     def test_uvicorn_called_when_main(self):
         """Running as __main__ calls uvicorn.run."""
@@ -594,7 +666,9 @@ class TestMainGuard:
 
         with patch("uvicorn.run") as mock_uvicorn:
             # Simulate the __main__ block execution
-            import src.main as m
             # Just test uvicorn.run is importable and callable
             import uvicorn
+
+            import src.main as m
+
             assert callable(uvicorn.run)

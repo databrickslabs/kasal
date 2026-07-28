@@ -1,55 +1,74 @@
 """Unit tests for GenieSpaceGeneratorTool (Tool 92)."""
+
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from src.services.tools.genie_space_generator_tool import (
-    GenieSpaceGeneratorTool,
     GenieSpaceGeneratorSchema,
+    GenieSpaceGeneratorTool,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared test data
 # ---------------------------------------------------------------------------
 
-SAMPLE_UCMV_OUTPUT = json.dumps({
-    "yaml": {
-        "fact_sales": "name: fact_sales_uc_metric_view\nsource: main.metrics.fact_sales\n",
-        "fact_orders": "name: fact_orders_uc_metric_view\nsource: main.metrics.fact_orders\n",
-    },
-    "sql": {
-        "fact_sales": "CREATE METRIC VIEW main.metrics.fact_sales_uc_metric_view ...",
-        "fact_orders": "CREATE METRIC VIEW main.metrics.fact_orders_uc_metric_view ...",
-    },
-    "stats": {
-        "fact_sales": {"total": 3, "translated": 3},
-        "fact_orders": {"total": 2, "translated": 2},
-    },
-})
-
-SAMPLE_JOIN_SPECS = json.dumps([
+SAMPLE_UCMV_OUTPUT = json.dumps(
     {
-        "left_table": "main.metrics.fact_sales_uc_metric_view",
-        "right_table": "main.raw.dim_customer",
-        "join_condition": "fact_sales_uc_metric_view.customer_id = dim_customer.customer_id",
+        "yaml": {
+            "fact_sales": "name: fact_sales_uc_metric_view\nsource: main.metrics.fact_sales\n",
+            "fact_orders": "name: fact_orders_uc_metric_view\nsource: main.metrics.fact_orders\n",
+        },
+        "sql": {
+            "fact_sales": "CREATE METRIC VIEW main.metrics.fact_sales_uc_metric_view ...",
+            "fact_orders": "CREATE METRIC VIEW main.metrics.fact_orders_uc_metric_view ...",
+        },
+        "stats": {
+            "fact_sales": {"total": 3, "translated": 3},
+            "fact_orders": {"total": 2, "translated": 2},
+        },
     }
-])
+)
 
-SAMPLE_SQL_EXPRESSIONS = json.dumps([
-    {"display_name": "Revenue", "sql": "SUM(net_revenue)"},
-])
+SAMPLE_JOIN_SPECS = json.dumps(
+    [
+        {
+            "left_table": "main.metrics.fact_sales_uc_metric_view",
+            "right_table": "main.raw.dim_customer",
+            "join_condition": "fact_sales_uc_metric_view.customer_id = dim_customer.customer_id",
+        }
+    ]
+)
 
-SAMPLE_SQL_MEASURES = json.dumps([
-    {"display_name": "Gross Margin", "sql": "SUM(gross_profit) / SUM(revenue)", "instruction": "Express as ratio 0-1"},
-])
+SAMPLE_SQL_EXPRESSIONS = json.dumps(
+    [
+        {"display_name": "Revenue", "sql": "SUM(net_revenue)"},
+    ]
+)
 
-SAMPLE_SQL_FILTERS = json.dumps([
-    {"display_name": "EMEA Only", "sql": "region = 'EMEA'"},
-])
+SAMPLE_SQL_MEASURES = json.dumps(
+    [
+        {
+            "display_name": "Gross Margin",
+            "sql": "SUM(gross_profit) / SUM(revenue)",
+            "instruction": "Express as ratio 0-1",
+        },
+    ]
+)
 
-SAMPLE_EXAMPLE_SQLS = json.dumps([
-    {"question": "What was total revenue last month?", "sql": "SELECT SUM(net_revenue) FROM ..."},
-])
+SAMPLE_SQL_FILTERS = json.dumps(
+    [
+        {"display_name": "EMEA Only", "sql": "region = 'EMEA'"},
+    ]
+)
+
+SAMPLE_EXAMPLE_SQLS = json.dumps(
+    [
+        {
+            "question": "What was total revenue last month?",
+            "sql": "SELECT SUM(net_revenue) FROM ...",
+        },
+    ]
+)
 
 
 def _mock_auth(workspace_url="https://my-workspace.cloud.databricks.com"):
@@ -74,12 +93,18 @@ def _make_requests_mock(list_spaces=None, post_status=201, patch_status=200):
 
     post_resp = MagicMock()
     post_resp.status_code = post_status
-    post_resp.json.return_value = {"space_id": "new-space-001", "display_name": "Test Space"}
+    post_resp.json.return_value = {
+        "space_id": "new-space-001",
+        "display_name": "Test Space",
+    }
     mock_requests.post.return_value = post_resp
 
     patch_resp = MagicMock()
     patch_resp.status_code = patch_status
-    patch_resp.json.return_value = {"space_id": "existing-space-001", "display_name": "Test Space"}
+    patch_resp.json.return_value = {
+        "space_id": "existing-space-001",
+        "display_name": "Test Space",
+    }
     mock_requests.patch.return_value = patch_resp
 
     return mock_requests
@@ -92,14 +117,17 @@ def _run_tool(tool, mock_requests=None, auth=None, **kwargs):
     if mock_requests is None:
         mock_requests = _make_requests_mock()
 
-    with patch.object(tool, "_authenticate", return_value=auth), \
-         patch.dict("sys.modules", {"requests": mock_requests}):
+    with (
+        patch.object(tool, "_authenticate", return_value=auth),
+        patch.dict("sys.modules", {"requests": mock_requests}),
+    ):
         return tool._run(**kwargs)
 
 
 # ---------------------------------------------------------------------------
 # Schema tests
 # ---------------------------------------------------------------------------
+
 
 class TestGenieSpaceGeneratorSchema:
     def test_all_fields_optional(self):
@@ -138,6 +166,7 @@ class TestGenieSpaceGeneratorSchema:
 # ---------------------------------------------------------------------------
 # Initialization tests
 # ---------------------------------------------------------------------------
+
 
 class TestGenieSpaceGeneratorToolInit:
     def test_tool_name(self):
@@ -178,6 +207,7 @@ class TestGenieSpaceGeneratorToolInit:
 # Validation: missing warehouse_id
 # ---------------------------------------------------------------------------
 
+
 class TestMissingWarehouseId:
     def test_missing_warehouse_id_returns_error(self):
         tool = GenieSpaceGeneratorTool()
@@ -188,7 +218,9 @@ class TestMissingWarehouseId:
 
     def test_empty_warehouse_id_returns_error(self):
         tool = GenieSpaceGeneratorTool()
-        result = tool._run(space_title="Test", catalog="main", schema_name="m", warehouse_id="")
+        result = tool._run(
+            space_title="Test", catalog="main", schema_name="m", warehouse_id=""
+        )
         data = json.loads(result)
         assert "error" in data
 
@@ -197,10 +229,13 @@ class TestMissingWarehouseId:
 # Auth failure handling
 # ---------------------------------------------------------------------------
 
+
 class TestAuthFailure:
     def test_auth_exception_returns_error(self):
         tool = GenieSpaceGeneratorTool()
-        with patch.object(tool, "_authenticate", side_effect=RuntimeError("No credentials configured")):
+        with patch.object(
+            tool, "_authenticate", side_effect=RuntimeError("No credentials configured")
+        ):
             result = tool._run(warehouse_id="wh-123")
         data = json.loads(result)
         assert "error" in data
@@ -218,6 +253,7 @@ class TestAuthFailure:
 # ---------------------------------------------------------------------------
 # SSRF protection
 # ---------------------------------------------------------------------------
+
 
 class TestSsrfProtection:
     def test_trusted_cloud_host_passes(self):
@@ -285,12 +321,14 @@ class TestSsrfProtection:
 # Happy path: POST (create new space)
 # ---------------------------------------------------------------------------
 
+
 class TestCreateNewSpace:
     def test_create_returns_space_id(self):
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-abc123",
             space_title="Test Space",
@@ -305,7 +343,8 @@ class TestCreateNewSpace:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-abc123",
             space_title="Test Space",
@@ -320,7 +359,8 @@ class TestCreateNewSpace:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-abc123",
             space_title="Test Space",
@@ -334,7 +374,8 @@ class TestCreateNewSpace:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-abc123",
             space_title="Test Space",
@@ -350,7 +391,8 @@ class TestCreateNewSpace:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-abc123",
             space_title="Test Space",
@@ -366,7 +408,8 @@ class TestCreateNewSpace:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-abc123",
             space_title="Test Space",
@@ -381,7 +424,8 @@ class TestCreateNewSpace:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-abc123",
             space_title="Test Space",
@@ -396,7 +440,8 @@ class TestCreateNewSpace:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-abc123",
             space_title="Test Space",
@@ -413,7 +458,8 @@ class TestCreateNewSpace:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-abc123",
             space_title="Test Space",
@@ -428,7 +474,8 @@ class TestCreateNewSpace:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=200)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             warehouse_id="wh-abc123",
             space_title="Test",
             catalog="main",
@@ -442,13 +489,17 @@ class TestCreateNewSpace:
 # Happy path: PATCH (update existing space)
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateExistingSpace:
     def test_update_operation_is_updated(self):
         tool = GenieSpaceGeneratorTool()
-        existing = [{"space_id": "existing-space-001", "display_name": "Existing Space"}]
+        existing = [
+            {"space_id": "existing-space-001", "display_name": "Existing Space"}
+        ]
         mock_requests = _make_requests_mock(list_spaces=existing, patch_status=200)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-abc123",
             space_title="Existing Space",
@@ -460,10 +511,13 @@ class TestUpdateExistingSpace:
 
     def test_update_returns_existing_space_id(self):
         tool = GenieSpaceGeneratorTool()
-        existing = [{"space_id": "existing-space-001", "display_name": "Existing Space"}]
+        existing = [
+            {"space_id": "existing-space-001", "display_name": "Existing Space"}
+        ]
         mock_requests = _make_requests_mock(list_spaces=existing, patch_status=200)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-abc123",
             space_title="Existing Space",
@@ -479,7 +533,8 @@ class TestUpdateExistingSpace:
         existing = [{"space_id": "other-space", "display_name": "Other Space"}]
         mock_requests = _make_requests_mock(list_spaces=existing, post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-abc123",
             space_title="My New Space",
@@ -493,7 +548,8 @@ class TestUpdateExistingSpace:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             warehouse_id="wh-abc123",
             space_title="Test",
             catalog="main",
@@ -506,6 +562,7 @@ class TestUpdateExistingSpace:
 # ---------------------------------------------------------------------------
 # API error handling
 # ---------------------------------------------------------------------------
+
 
 class TestApiErrors:
     def _run_with_http_error(self, post_status):
@@ -521,7 +578,8 @@ class TestApiErrors:
         post_resp.json.return_value = {}
         mock_requests.post.return_value = post_resp
         return _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-123",
             space_title="Test",
@@ -551,7 +609,8 @@ class TestApiErrors:
         mock_requests = MagicMock()
         mock_requests.get.side_effect = ConnectionError("Network unreachable")
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-123",
             space_title="Test",
@@ -566,13 +625,15 @@ class TestApiErrors:
 # UCMV output parsing
 # ---------------------------------------------------------------------------
 
+
 class TestUcmvOutputParsing:
     def test_two_metric_views_extracted(self):
         """SAMPLE_UCMV_OUTPUT has 2 fact tables → 2 metric view FQNs."""
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-123",
             space_title="Test",
@@ -586,7 +647,8 @@ class TestUcmvOutputParsing:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=json.dumps({"yaml": {}, "sql": {}}),
             warehouse_id="wh-123",
             space_title="Test",
@@ -600,7 +662,8 @@ class TestUcmvOutputParsing:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             warehouse_id="wh-123",
             space_title="Test",
             catalog="main",
@@ -614,7 +677,8 @@ class TestUcmvOutputParsing:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output="not-json{{{",
             warehouse_id="wh-123",
             space_title="Test",
@@ -626,14 +690,17 @@ class TestUcmvOutputParsing:
         assert isinstance(data, dict)
 
     def test_single_metric_view_extracted(self):
-        single_ucmv = json.dumps({
-            "yaml": {"fact_revenue": "name: fact_revenue_uc_metric_view\n"},
-            "sql": {},
-        })
+        single_ucmv = json.dumps(
+            {
+                "yaml": {"fact_revenue": "name: fact_revenue_uc_metric_view\n"},
+                "sql": {},
+            }
+        )
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=single_ucmv,
             warehouse_id="wh-123",
             space_title="Test",
@@ -648,12 +715,14 @@ class TestUcmvOutputParsing:
 # Additional tables parsing
 # ---------------------------------------------------------------------------
 
+
 class TestAdditionalTablesParsing:
     def test_valid_fqn_tables_counted(self):
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-123",
             space_title="Test",
@@ -669,7 +738,8 @@ class TestAdditionalTablesParsing:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-123",
             space_title="Test",
@@ -685,7 +755,8 @@ class TestAdditionalTablesParsing:
         tool = GenieSpaceGeneratorTool()
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             ucmv_output=SAMPLE_UCMV_OUTPUT,
             warehouse_id="wh-123",
             space_title="Test",
@@ -701,10 +772,13 @@ class TestAdditionalTablesParsing:
 # Static config (default_config) fallback
 # ---------------------------------------------------------------------------
 
+
 class TestStaticConfigFallback:
     def test_warehouse_from_default_config(self):
         """warehouse_id from init → not required in _run()."""
-        tool = GenieSpaceGeneratorTool(warehouse_id="from-config", space_title="T", catalog="c", schema_name="s")
+        tool = GenieSpaceGeneratorTool(
+            warehouse_id="from-config", space_title="T", catalog="c", schema_name="s"
+        )
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(tool, mock_requests)
         data = json.loads(result)
@@ -716,7 +790,8 @@ class TestStaticConfigFallback:
         tool = GenieSpaceGeneratorTool(warehouse_id="from-config")
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         result = _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             warehouse_id="from-kwargs",
             space_title="Test",
             catalog="main",
@@ -743,11 +818,13 @@ class TestStaticConfigFallback:
 # JSON parsing helpers (bad JSON handled gracefully)
 # ---------------------------------------------------------------------------
 
+
 class TestJsonParsing:
     def _run_minimal(self, tool, **kwargs):
         mock_requests = _make_requests_mock(list_spaces=[], post_status=201)
         return _run_tool(
-            tool, mock_requests,
+            tool,
+            mock_requests,
             warehouse_id="wh-123",
             space_title="Test",
             catalog="main",
@@ -786,6 +863,8 @@ class TestJsonParsing:
 
     def test_null_json_handled(self):
         tool = GenieSpaceGeneratorTool()
-        result = self._run_minimal(tool, join_specs_json="null", sql_expressions_json="null")
+        result = self._run_minimal(
+            tool, join_specs_json="null", sql_expressions_json="null"
+        )
         data = json.loads(result)
         assert isinstance(data, dict)

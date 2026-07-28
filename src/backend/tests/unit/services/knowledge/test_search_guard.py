@@ -55,7 +55,9 @@ class TestRelevanceFloor:
 
 class TestNoRelevantResultsNotice:
     def test_says_how_close_it_got_and_not_to_retry(self):
-        notice = no_relevant_results_notice("expense policy limit", 0.12, min_score=0.35)
+        notice = no_relevant_results_notice(
+            "expense policy limit", 0.12, min_score=0.35
+        )
 
         assert "expense policy limit" in notice
         assert "0.12" in notice
@@ -63,8 +65,9 @@ class TestNoRelevantResultsNotice:
         assert "Rephrasing the query is unlikely to help" in notice
 
     def test_handles_a_search_that_returned_nothing(self):
-        assert "Nothing in the knowledge base came close." in no_relevant_results_notice(
-            "anything", 0.0
+        assert (
+            "Nothing in the knowledge base came close."
+            in no_relevant_results_notice("anything", 0.0)
         )
 
 

@@ -4,8 +4,10 @@ Unit tests for LLMInjectionGuardrail (prompt_injection_check type).
 Tests patch ``_run_completion`` — the module-level helper that calls
 LLMManager.completion() — so no real LLM or DB calls are made.
 """
-import pytest
+
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 # Path to the module-level helper used by validate()
 _RUN_COMPLETION = "src.services.guardrails.core.llm_injection_guardrail._run_completion"
@@ -14,7 +16,10 @@ _RUN_COMPLETION = "src.services.guardrails.core.llm_injection_guardrail._run_com
 def _make_guardrail(config=None):
     """Create a guardrail with _run_completion mocked."""
     cfg = config or {"llm_model": "databricks-test-model"}
-    from src.services.guardrails.core.llm_injection_guardrail import LLMInjectionGuardrail
+    from src.services.guardrails.core.llm_injection_guardrail import (
+        LLMInjectionGuardrail,
+    )
+
     return LLMInjectionGuardrail(cfg)
 
 
@@ -116,8 +121,11 @@ class TestLLMInjectionGuardrailValidate:
 
 class TestLLMInjectionGuardrailFactoryRegistration:
     def test_factory_creates_correct_type(self):
+        from src.services.guardrails.core.llm_injection_guardrail import (
+            LLMInjectionGuardrail,
+        )
         from src.services.guardrails.guardrail_factory import GuardrailFactory
-        from src.services.guardrails.core.llm_injection_guardrail import LLMInjectionGuardrail
+
         guardrail = GuardrailFactory.create_guardrail(
             {"type": "prompt_injection_check", "llm_model": "databricks-test-model"}
         )
@@ -125,5 +133,6 @@ class TestLLMInjectionGuardrailFactoryRegistration:
 
     def test_factory_returns_none_for_unknown_type(self):
         from src.services.guardrails.guardrail_factory import GuardrailFactory
+
         guardrail = GuardrailFactory.create_guardrail({"type": "nonexistent_type"})
         assert guardrail is None

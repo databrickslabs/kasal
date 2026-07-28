@@ -2,12 +2,13 @@
 Unit tests for crew export service.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-from src.services.deployment.crew_export import CrewExportService
+import pytest
+
 from src.schemas.crew_export import ExportFormat, ExportOptions
+from src.services.deployment.crew_export import CrewExportService
 
 
 class TestCrewExportService:
@@ -28,7 +29,7 @@ class TestCrewExportService:
     def mock_group_context(self):
         """Create a mock group context."""
         context = MagicMock()
-        context.group_ids = ['test-group']
+        context.group_ids = ["test-group"]
         context.is_valid.return_value = True
         return context
 
@@ -36,123 +37,137 @@ class TestCrewExportService:
     def sample_crew_data(self):
         """Create sample crew data."""
         return {
-            'id': str(uuid4()),
-            'name': 'Test Crew',
-            'agents': [
+            "id": str(uuid4()),
+            "name": "Test Crew",
+            "agents": [
                 {
-                    'id': 'agent-1',
-                    'name': 'Research Agent',
-                    'role': 'Researcher',
-                    'goal': 'Research topics thoroughly',
-                    'backstory': 'Expert researcher',
-                    'llm': 'databricks-llama-4-maverick',
-                    'tools': [],
+                    "id": "agent-1",
+                    "name": "Research Agent",
+                    "role": "Researcher",
+                    "goal": "Research topics thoroughly",
+                    "backstory": "Expert researcher",
+                    "llm": "databricks-llama-4-maverick",
+                    "tools": [],
                 }
             ],
-            'tasks': [
+            "tasks": [
                 {
-                    'id': 'task-1',
-                    'name': 'Research Task',
-                    'description': 'Research the given topic',
-                    'expected_output': 'Comprehensive research report',
-                    'agent_id': 'agent-1',
+                    "id": "task-1",
+                    "name": "Research Task",
+                    "description": "Research the given topic",
+                    "expected_output": "Comprehensive research report",
+                    "agent_id": "agent-1",
                 }
             ],
         }
 
     @pytest.mark.asyncio
-    async def test_export_crew_databricks_notebook(self, service, sample_crew_data, mock_group_context):
+    async def test_export_crew_databricks_notebook(
+        self, service, sample_crew_data, mock_group_context
+    ):
         """Test exporting crew as Databricks notebook."""
-        with patch.object(service, '_get_crew_with_details', return_value=sample_crew_data):
+        with patch.object(
+            service, "_get_crew_with_details", return_value=sample_crew_data
+        ):
             result = await service.export_crew(
-                crew_id=sample_crew_data['id'],
+                crew_id=sample_crew_data["id"],
                 export_format=ExportFormat.DATABRICKS_NOTEBOOK,
                 options=ExportOptions(),
-                group_context=mock_group_context
+                group_context=mock_group_context,
             )
 
-        assert result['crew_id'] == sample_crew_data['id']
-        assert result['crew_name'] == 'Test Crew'
-        assert result['export_format'] == 'databricks_notebook'
-        assert 'notebook' in result
-        assert 'notebook_content' in result
-        assert 'metadata' in result
-        assert 'generated_at' in result
+        assert result["crew_id"] == sample_crew_data["id"]
+        assert result["crew_name"] == "Test Crew"
+        assert result["export_format"] == "databricks_notebook"
+        assert "notebook" in result
+        assert "notebook_content" in result
+        assert "metadata" in result
+        assert "generated_at" in result
 
     @pytest.mark.asyncio
-    async def test_export_crew_python_project(self, service, sample_crew_data, mock_group_context):
+    async def test_export_crew_python_project(
+        self, service, sample_crew_data, mock_group_context
+    ):
         """Test exporting crew as Python project."""
-        with patch.object(service, '_get_crew_with_details', return_value=sample_crew_data):
+        with patch.object(
+            service, "_get_crew_with_details", return_value=sample_crew_data
+        ):
             result = await service.export_crew(
-                crew_id=sample_crew_data['id'],
+                crew_id=sample_crew_data["id"],
                 export_format=ExportFormat.PYTHON_PROJECT,
                 options=ExportOptions(),
-                group_context=mock_group_context
+                group_context=mock_group_context,
             )
 
-        assert result['crew_id'] == sample_crew_data['id']
-        assert result['crew_name'] == 'Test Crew'
-        assert result['export_format'] == 'python_project'
-        assert 'files' in result
-        assert len(result['files']) > 0
+        assert result["crew_id"] == sample_crew_data["id"]
+        assert result["crew_name"] == "Test Crew"
+        assert result["export_format"] == "python_project"
+        assert "files" in result
+        assert len(result["files"]) > 0
 
         # Check that expected files are included
-        file_paths = [f['path'] for f in result['files']]
-        assert 'README.md' in file_paths
-        assert 'requirements.txt' in file_paths
-        assert any('agents.yaml' in p for p in file_paths)
-        assert any('tasks.yaml' in p for p in file_paths)
+        file_paths = [f["path"] for f in result["files"]]
+        assert "README.md" in file_paths
+        assert "requirements.txt" in file_paths
+        assert any("agents.yaml" in p for p in file_paths)
+        assert any("tasks.yaml" in p for p in file_paths)
 
     @pytest.mark.asyncio
-    async def test_export_crew_with_custom_tools(self, service, mock_session, mock_group_context):
+    async def test_export_crew_with_custom_tools(
+        self, service, mock_session, mock_group_context
+    ):
         """Test exporting crew with custom tools."""
         crew_data = {
-            'id': str(uuid4()),
-            'name': 'Crew With Tools',
-            'agents': [
+            "id": str(uuid4()),
+            "name": "Crew With Tools",
+            "agents": [
                 {
-                    'id': 'agent-1',
-                    'name': 'Agent With Tools',
-                    'role': 'Researcher',
-                    'goal': 'Research with tools',
-                    'backstory': 'Expert',
-                    'llm': 'databricks-llama-4-maverick',
-                    'tools': ['PerplexityTool', 'SerperDevTool'],
+                    "id": "agent-1",
+                    "name": "Agent With Tools",
+                    "role": "Researcher",
+                    "goal": "Research with tools",
+                    "backstory": "Expert",
+                    "llm": "databricks-llama-4-maverick",
+                    "tools": ["PerplexityTool", "SerperDevTool"],
                 }
             ],
-            'tasks': [
+            "tasks": [
                 {
-                    'id': 'task-1',
-                    'name': 'Search Task',
-                    'description': 'Search for information',
-                    'expected_output': 'Search results',
-                    'agent_id': 'agent-1',
-                    'tools': ['PerplexityTool'],
+                    "id": "task-1",
+                    "name": "Search Task",
+                    "description": "Search for information",
+                    "expected_output": "Search results",
+                    "agent_id": "agent-1",
+                    "tools": ["PerplexityTool"],
                 }
             ],
         }
 
-        with patch.object(service, '_get_crew_with_details', return_value=crew_data):
+        with patch.object(service, "_get_crew_with_details", return_value=crew_data):
             result = await service.export_crew(
-                crew_id=crew_data['id'],
+                crew_id=crew_data["id"],
                 export_format=ExportFormat.DATABRICKS_NOTEBOOK,
                 options=ExportOptions(include_custom_tools=True),
-                group_context=mock_group_context
+                group_context=mock_group_context,
             )
 
-        assert result['metadata']['tools_count'] > 0
+        assert result["metadata"]["tools_count"] > 0
 
     @pytest.mark.asyncio
-    async def test_export_crew_with_model_override(self, service, sample_crew_data, mock_group_context):
+    async def test_export_crew_with_model_override(
+        self, service, sample_crew_data, mock_group_context
+    ):
         """Test exporting crew with model override."""
-        model_override = 'databricks-meta-llama-3-1-70b-instruct'
+        model_override = "databricks-meta-llama-3-1-70b-instruct"
 
-        with patch.object(service, '_get_crew_with_details', return_value=sample_crew_data):
+        with patch.object(
+            service, "_get_crew_with_details", return_value=sample_crew_data
+        ):
             result = await service.export_crew(
-                crew_id=sample_crew_data['id'],
+                crew_id=sample_crew_data["id"],
                 export_format=ExportFormat.DATABRICKS_NOTEBOOK,
                 options=ExportOptions(model_override=model_override),
-                group_context=mock_group_context
+                group_context=mock_group_context,
             )
 
         assert result is not None
@@ -161,84 +176,102 @@ class TestCrewExportService:
     @pytest.mark.asyncio
     async def test_export_crew_not_found(self, service, mock_group_context):
         """Test exporting non-existent crew."""
-        with patch.object(service, '_get_crew_with_details', side_effect=ValueError("Crew not found")):
+        with patch.object(
+            service, "_get_crew_with_details", side_effect=ValueError("Crew not found")
+        ):
             with pytest.raises(ValueError) as exc_info:
                 await service.export_crew(
                     crew_id=str(uuid4()),
                     export_format=ExportFormat.DATABRICKS_NOTEBOOK,
                     options=ExportOptions(),
-                    group_context=mock_group_context
+                    group_context=mock_group_context,
                 )
 
         assert "not found" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_export_crew_with_tracing_disabled(self, service, sample_crew_data, mock_group_context):
+    async def test_export_crew_with_tracing_disabled(
+        self, service, sample_crew_data, mock_group_context
+    ):
         """Test exporting crew with MLflow tracing disabled."""
-        with patch.object(service, '_get_crew_with_details', return_value=sample_crew_data):
+        with patch.object(
+            service, "_get_crew_with_details", return_value=sample_crew_data
+        ):
             result = await service.export_crew(
-                crew_id=sample_crew_data['id'],
+                crew_id=sample_crew_data["id"],
                 export_format=ExportFormat.DATABRICKS_NOTEBOOK,
                 options=ExportOptions(include_tracing=False),
-                group_context=mock_group_context
+                group_context=mock_group_context,
             )
 
         assert result is not None
         # Verify tracing-related code is not included
-        notebook_content = result.get('notebook_content', '')
+        notebook_content = result.get("notebook_content", "")
         # The notebook should have fewer cells when tracing is disabled
 
     @pytest.mark.asyncio
-    async def test_export_crew_with_evaluation_disabled(self, service, sample_crew_data, mock_group_context):
+    async def test_export_crew_with_evaluation_disabled(
+        self, service, sample_crew_data, mock_group_context
+    ):
         """Test exporting crew with evaluation disabled."""
-        with patch.object(service, '_get_crew_with_details', return_value=sample_crew_data):
+        with patch.object(
+            service, "_get_crew_with_details", return_value=sample_crew_data
+        ):
             result = await service.export_crew(
-                crew_id=sample_crew_data['id'],
+                crew_id=sample_crew_data["id"],
                 export_format=ExportFormat.DATABRICKS_NOTEBOOK,
                 options=ExportOptions(include_evaluation=False),
-                group_context=mock_group_context
+                group_context=mock_group_context,
             )
 
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_export_crew_with_deployment_disabled(self, service, sample_crew_data, mock_group_context):
+    async def test_export_crew_with_deployment_disabled(
+        self, service, sample_crew_data, mock_group_context
+    ):
         """Test exporting crew with deployment disabled."""
-        with patch.object(service, '_get_crew_with_details', return_value=sample_crew_data):
+        with patch.object(
+            service, "_get_crew_with_details", return_value=sample_crew_data
+        ):
             result = await service.export_crew(
-                crew_id=sample_crew_data['id'],
+                crew_id=sample_crew_data["id"],
                 export_format=ExportFormat.DATABRICKS_NOTEBOOK,
                 options=ExportOptions(include_deployment=False),
-                group_context=mock_group_context
+                group_context=mock_group_context,
             )
 
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_export_crew_databricks_app(self, service, sample_crew_data, mock_group_context):
+    async def test_export_crew_databricks_app(
+        self, service, sample_crew_data, mock_group_context
+    ):
         """Test exporting crew as Databricks App."""
-        with patch.object(service, '_get_crew_with_details', return_value=sample_crew_data):
+        with patch.object(
+            service, "_get_crew_with_details", return_value=sample_crew_data
+        ):
             result = await service.export_crew(
-                crew_id=sample_crew_data['id'],
+                crew_id=sample_crew_data["id"],
                 export_format=ExportFormat.DATABRICKS_APP,
                 options=ExportOptions(),
-                group_context=mock_group_context
+                group_context=mock_group_context,
             )
 
-        assert result['crew_id'] == sample_crew_data['id']
-        assert result['crew_name'] == 'Test Crew'
-        assert result['export_format'] == 'databricks_app'
-        assert 'files' in result
-        assert len(result['files']) > 0
+        assert result["crew_id"] == sample_crew_data["id"]
+        assert result["crew_name"] == "Test Crew"
+        assert result["export_format"] == "databricks_app"
+        assert "files" in result
+        assert len(result["files"]) > 0
 
-        file_paths = [f['path'] for f in result['files']]
+        file_paths = [f["path"] for f in result["files"]]
         # Template-driven Databricks App (MLflow AgentServer + ResponsesAgent).
-        assert 'app.yaml' in file_paths
-        assert 'pyproject.toml' in file_paths
-        assert 'agent_server/agent.py' in file_paths
-        assert 'agent_server/start_server.py' in file_paths
-        assert 'config/agents.yaml' in file_paths
-        assert 'config/tasks.yaml' in file_paths
+        assert "app.yaml" in file_paths
+        assert "pyproject.toml" in file_paths
+        assert "agent_server/agent.py" in file_paths
+        assert "agent_server/start_server.py" in file_paths
+        assert "config/agents.yaml" in file_paths
+        assert "config/tasks.yaml" in file_paths
 
 
 class TestGetCrewData:
@@ -258,7 +291,7 @@ class TestGetCrewData:
     def mock_group_context(self):
         """Create a mock group context."""
         context = MagicMock()
-        context.group_ids = ['test-group']
+        context.group_ids = ["test-group"]
         context.is_valid.return_value = True
         return context
 
@@ -270,11 +303,13 @@ class TestGetCrewData:
         # Mock the crew repository
         mock_crew = MagicMock()
         mock_crew.id = crew_id
-        mock_crew.name = 'Test Crew'
+        mock_crew.name = "Test Crew"
         mock_crew.nodes = []
         mock_crew.edges = []
 
-        with patch('src.services.deployment.crew_export.CrewRepository') as mock_repo_class:
+        with patch(
+            "src.services.deployment.crew_export.CrewRepository"
+        ) as mock_repo_class:
             mock_repo = AsyncMock()
             mock_repo_class.return_value = mock_repo
             mock_repo.get.return_value = mock_crew
@@ -283,7 +318,9 @@ class TestGetCrewData:
             # Full integration testing would require more setup
 
     @pytest.mark.asyncio
-    async def test_get_crew_with_details_crew_not_found(self, service, mock_session, mock_group_context):
+    async def test_get_crew_with_details_crew_not_found(
+        self, service, mock_session, mock_group_context
+    ):
         """Test that ValueError is raised when crew is not found."""
         crew_id = str(uuid4())
 
@@ -313,7 +350,7 @@ class TestExportFormatSelection:
     def mock_group_context(self):
         """Create a mock group context."""
         context = MagicMock()
-        context.group_ids = ['test-group']
+        context.group_ids = ["test-group"]
         context.is_valid.return_value = True
         return context
 
@@ -321,48 +358,56 @@ class TestExportFormatSelection:
     async def test_python_project_exporter_selected(self, service, mock_group_context):
         """Test that Python project exporter is selected for PYTHON_PROJECT format."""
         sample_data = {
-            'id': 'test-id',
-            'name': 'Test',
-            'agents': [],
-            'tasks': [],
+            "id": "test-id",
+            "name": "Test",
+            "agents": [],
+            "tasks": [],
         }
 
-        with patch.object(service, '_get_crew_with_details', return_value=sample_data):
-            with patch('src.services.deployment.crew_export.PythonProjectExporter') as mock_exporter:
+        with patch.object(service, "_get_crew_with_details", return_value=sample_data):
+            with patch(
+                "src.services.deployment.crew_export.PythonProjectExporter"
+            ) as mock_exporter:
                 mock_instance = AsyncMock()
                 mock_exporter.return_value = mock_instance
-                mock_instance.export.return_value = {'export_format': 'python_project'}
+                mock_instance.export.return_value = {"export_format": "python_project"}
 
                 await service.export_crew(
-                    crew_id='test-id',
+                    crew_id="test-id",
                     export_format=ExportFormat.PYTHON_PROJECT,
                     options=ExportOptions(),
-                    group_context=mock_group_context
+                    group_context=mock_group_context,
                 )
 
                 mock_exporter.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_databricks_notebook_exporter_selected(self, service, mock_group_context):
+    async def test_databricks_notebook_exporter_selected(
+        self, service, mock_group_context
+    ):
         """Test that Databricks notebook exporter is selected for DATABRICKS_NOTEBOOK format."""
         sample_data = {
-            'id': 'test-id',
-            'name': 'Test',
-            'agents': [],
-            'tasks': [],
+            "id": "test-id",
+            "name": "Test",
+            "agents": [],
+            "tasks": [],
         }
 
-        with patch.object(service, '_get_crew_with_details', return_value=sample_data):
-            with patch('src.services.deployment.crew_export.DatabricksNotebookExporter') as mock_exporter:
+        with patch.object(service, "_get_crew_with_details", return_value=sample_data):
+            with patch(
+                "src.services.deployment.crew_export.DatabricksNotebookExporter"
+            ) as mock_exporter:
                 mock_instance = AsyncMock()
                 mock_exporter.return_value = mock_instance
-                mock_instance.export.return_value = {'export_format': 'databricks_notebook'}
+                mock_instance.export.return_value = {
+                    "export_format": "databricks_notebook"
+                }
 
                 await service.export_crew(
-                    crew_id='test-id',
+                    crew_id="test-id",
                     export_format=ExportFormat.DATABRICKS_NOTEBOOK,
                     options=ExportOptions(),
-                    group_context=mock_group_context
+                    group_context=mock_group_context,
                 )
 
                 mock_exporter.assert_called_once()
@@ -371,23 +416,25 @@ class TestExportFormatSelection:
     async def test_databricks_app_exporter_selected(self, service, mock_group_context):
         """Test that Databricks App exporter is selected for DATABRICKS_APP format."""
         sample_data = {
-            'id': 'test-id',
-            'name': 'Test',
-            'agents': [],
-            'tasks': [],
+            "id": "test-id",
+            "name": "Test",
+            "agents": [],
+            "tasks": [],
         }
 
-        with patch.object(service, '_get_crew_with_details', return_value=sample_data):
-            with patch('src.services.deployment.crew_export.DatabricksAppExporter') as mock_exporter:
+        with patch.object(service, "_get_crew_with_details", return_value=sample_data):
+            with patch(
+                "src.services.deployment.crew_export.DatabricksAppExporter"
+            ) as mock_exporter:
                 mock_instance = AsyncMock()
                 mock_exporter.return_value = mock_instance
-                mock_instance.export.return_value = {'export_format': 'databricks_app'}
+                mock_instance.export.return_value = {"export_format": "databricks_app"}
 
                 await service.export_crew(
-                    crew_id='test-id',
+                    crew_id="test-id",
                     export_format=ExportFormat.DATABRICKS_APP,
                     options=ExportOptions(),
-                    group_context=mock_group_context
+                    group_context=mock_group_context,
                 )
 
                 mock_exporter.assert_called_once()
@@ -396,19 +443,19 @@ class TestExportFormatSelection:
     async def test_unsupported_export_format(self, service, mock_group_context):
         """Test that unsupported format raises ValueError."""
         sample_data = {
-            'id': 'test-id',
-            'name': 'Test',
-            'agents': [],
-            'tasks': [],
+            "id": "test-id",
+            "name": "Test",
+            "agents": [],
+            "tasks": [],
         }
 
-        with patch.object(service, '_get_crew_with_details', return_value=sample_data):
+        with patch.object(service, "_get_crew_with_details", return_value=sample_data):
             with pytest.raises(ValueError, match="Unsupported export format"):
                 await service.export_crew(
-                    crew_id='test-id',
+                    crew_id="test-id",
                     export_format="invalid_format",
                     options=ExportOptions(),
-                    group_context=mock_group_context
+                    group_context=mock_group_context,
                 )
 
 
@@ -426,7 +473,7 @@ class TestGetCrewWithDetails:
     @pytest.fixture
     def mock_group_context(self):
         context = MagicMock()
-        context.group_ids = ['test-group']
+        context.group_ids = ["test-group"]
         context.is_valid.return_value = True
         return context
 
@@ -437,21 +484,21 @@ class TestGetCrewWithDetails:
 
         mock_crew = MagicMock()
         mock_crew.id = crew_id
-        mock_crew.name = 'Test Crew'
+        mock_crew.name = "Test Crew"
         mock_crew.nodes = [{"id": "1"}]
         mock_crew.edges = [{"source": "1"}]
-        mock_crew.group_id = 'test-group'
-        mock_crew.agent_ids = ['a1']
-        mock_crew.task_ids = ['t1']
+        mock_crew.group_id = "test-group"
+        mock_crew.agent_ids = ["a1"]
+        mock_crew.task_ids = ["t1"]
 
         mock_agent = MagicMock()
-        mock_agent.id = 'a1'
-        mock_agent.name = 'Agent'
-        mock_agent.role = 'Role'
-        mock_agent.goal = 'Goal'
-        mock_agent.backstory = 'Backstory'
-        mock_agent.llm = 'model'
-        mock_agent.tools = ['SerperDevTool']
+        mock_agent.id = "a1"
+        mock_agent.name = "Agent"
+        mock_agent.role = "Role"
+        mock_agent.goal = "Goal"
+        mock_agent.backstory = "Backstory"
+        mock_agent.llm = "model"
+        mock_agent.tools = ["SerperDevTool"]
         mock_agent.max_iter = 25
         mock_agent.max_rpm = None
         mock_agent.max_execution_time = None
@@ -463,11 +510,11 @@ class TestGetCrewWithDetails:
         mock_agent.response_template = None
 
         mock_task = MagicMock()
-        mock_task.id = 't1'
-        mock_task.name = 'Task'
-        mock_task.description = 'Desc'
-        mock_task.expected_output = 'Output'
-        mock_task.agent_id = 'a1'
+        mock_task.id = "t1"
+        mock_task.name = "Task"
+        mock_task.description = "Desc"
+        mock_task.expected_output = "Output"
+        mock_task.agent_id = "a1"
         mock_task.tools = [42]
         mock_task.async_execution = False
         mock_task.context = []
@@ -492,18 +539,18 @@ class TestGetCrewWithDetails:
 
         # Mock tool lookup for integer tool IDs
         mock_tool = MagicMock()
-        mock_tool.title = 'SerperDevTool'
+        mock_tool.title = "SerperDevTool"
         service.tool_repository.get = AsyncMock(return_value=mock_tool)
 
         result = await service._get_crew_with_details(crew_id, mock_group_context)
 
-        assert result['name'] == 'Test Crew'
-        assert len(result['agents']) == 1
-        assert result['agents'][0]['name'] == 'Agent'
-        assert result['agents'][0]['tools'] == ['SerperDevTool']
-        assert len(result['tasks']) == 1
-        assert result['tasks'][0]['name'] == 'Task'
-        assert result['tasks'][0]['tools'] == ['SerperDevTool']
+        assert result["name"] == "Test Crew"
+        assert len(result["agents"]) == 1
+        assert result["agents"][0]["name"] == "Agent"
+        assert result["agents"][0]["tools"] == ["SerperDevTool"]
+        assert len(result["tasks"]) == 1
+        assert result["tasks"][0]["name"] == "Task"
+        assert result["tasks"][0]["tools"] == ["SerperDevTool"]
 
     @pytest.mark.asyncio
     async def test_get_crew_group_authorization_denied(self, service):
@@ -512,8 +559,8 @@ class TestGetCrewWithDetails:
 
         mock_crew = MagicMock()
         mock_crew.id = crew_id
-        mock_crew.name = 'Test Crew'
-        mock_crew.group_id = 'other-group'
+        mock_crew.name = "Test Crew"
+        mock_crew.group_id = "other-group"
         mock_crew.agent_ids = []
         mock_crew.task_ids = []
         mock_crew.nodes = []
@@ -522,7 +569,7 @@ class TestGetCrewWithDetails:
         service.crew_repository.get = AsyncMock(return_value=mock_crew)
 
         context = MagicMock()
-        context.group_ids = ['my-group']
+        context.group_ids = ["my-group"]
         context.is_valid.return_value = True
 
         with pytest.raises(ValueError, match="not found"):
@@ -535,10 +582,10 @@ class TestGetCrewWithDetails:
 
         mock_crew = MagicMock()
         mock_crew.id = crew_id
-        mock_crew.name = 'Test Crew'
-        mock_crew.group_id = 'test-group'
-        mock_crew.agent_ids = ['a1', 'a2']
-        mock_crew.task_ids = ['t1', 't2']
+        mock_crew.name = "Test Crew"
+        mock_crew.group_id = "test-group"
+        mock_crew.agent_ids = ["a1", "a2"]
+        mock_crew.task_ids = ["t1", "t2"]
         mock_crew.nodes = []
         mock_crew.edges = []
 
@@ -557,8 +604,8 @@ class TestGetCrewWithDetails:
 
         result = await service._get_crew_with_details(crew_id, None)
 
-        assert result['agents'] == []
-        assert result['tasks'] == []
+        assert result["agents"] == []
+        assert result["tasks"] == []
 
     @pytest.mark.asyncio
     async def test_get_crew_no_group_context(self, service):
@@ -567,8 +614,8 @@ class TestGetCrewWithDetails:
 
         mock_crew = MagicMock()
         mock_crew.id = crew_id
-        mock_crew.name = 'Test Crew'
-        mock_crew.group_id = 'any-group'
+        mock_crew.name = "Test Crew"
+        mock_crew.group_id = "any-group"
         mock_crew.agent_ids = []
         mock_crew.task_ids = []
         mock_crew.nodes = None
@@ -586,9 +633,9 @@ class TestGetCrewWithDetails:
 
         result = await service._get_crew_with_details(crew_id, None)
 
-        assert result['name'] == 'Test Crew'
-        assert result['nodes'] == []
-        assert result['edges'] == []
+        assert result["name"] == "Test Crew"
+        assert result["nodes"] == []
+        assert result["edges"] == []
 
 
 class TestConvertToolIdsToNames:
@@ -605,28 +652,30 @@ class TestConvertToolIdsToNames:
     @pytest.mark.asyncio
     async def test_convert_string_tool_names(self, service):
         """String tool names are kept as-is."""
-        result = await service._convert_tool_ids_to_names(['SerperDevTool', 'DallETool'])
-        assert result == ['SerperDevTool', 'DallETool']
+        result = await service._convert_tool_ids_to_names(
+            ["SerperDevTool", "DallETool"]
+        )
+        assert result == ["SerperDevTool", "DallETool"]
 
     @pytest.mark.asyncio
     async def test_convert_integer_tool_ids(self, service):
         """Integer tool IDs are looked up from repository."""
         mock_tool = MagicMock()
-        mock_tool.title = 'MyCustomTool'
+        mock_tool.title = "MyCustomTool"
         service.tool_repository.get = AsyncMock(return_value=mock_tool)
 
         result = await service._convert_tool_ids_to_names([42])
-        assert result == ['MyCustomTool']
+        assert result == ["MyCustomTool"]
 
     @pytest.mark.asyncio
     async def test_convert_numeric_string_tool_ids(self, service):
         """Numeric string tool IDs are converted to int and looked up."""
         mock_tool = MagicMock()
-        mock_tool.title = 'FoundTool'
+        mock_tool.title = "FoundTool"
         service.tool_repository.get = AsyncMock(return_value=mock_tool)
 
-        result = await service._convert_tool_ids_to_names(['99'])
-        assert result == ['FoundTool']
+        result = await service._convert_tool_ids_to_names(["99"])
+        assert result == ["FoundTool"]
 
     @pytest.mark.asyncio
     async def test_convert_integer_tool_id_not_found(self, service):
@@ -634,13 +683,13 @@ class TestConvertToolIdsToNames:
         service.tool_repository.get = AsyncMock(return_value=None)
 
         result = await service._convert_tool_ids_to_names([999])
-        assert result == ['999']
+        assert result == ["999"]
 
     @pytest.mark.asyncio
     async def test_convert_unknown_type(self, service):
         """Unknown types are converted to string."""
         result = await service._convert_tool_ids_to_names([3.14])
-        assert result == ['3.14']
+        assert result == ["3.14"]
 
     @pytest.mark.asyncio
     async def test_convert_empty_list(self, service):
@@ -652,30 +701,34 @@ class TestConvertToolIdsToNames:
     async def test_captures_non_secret_tool_config(self, service):
         """Resolving an integer tool ID captures the tool's non-secret config."""
         mock_tool = MagicMock()
-        mock_tool.title = 'GenieTool'
-        mock_tool.config = {'space_id': 'abc123', 'api_key': 'SECRET', 'max_result_rows': 50}
+        mock_tool.title = "GenieTool"
+        mock_tool.config = {
+            "space_id": "abc123",
+            "api_key": "SECRET",
+            "max_result_rows": 50,
+        }
         service.tool_repository.get = AsyncMock(return_value=mock_tool)
 
         await service._convert_tool_ids_to_names([35])
-        captured = service._tool_configs['GenieTool']
-        assert captured['space_id'] == 'abc123'
-        assert captured['max_result_rows'] == 50
+        captured = service._tool_configs["GenieTool"]
+        assert captured["space_id"] == "abc123"
+        assert captured["max_result_rows"] == 50
         # Secret-looking keys are stripped before export.
-        assert 'api_key' not in captured
+        assert "api_key" not in captured
 
     def test_safe_tool_config_strips_secrets(self, service):
         """_safe_tool_config keeps functional keys and drops secret-looking ones."""
         safe = service._safe_tool_config(
             {
-                'space_id': 's1',
-                'n_results': 10,
-                'DATABRICKS_API_KEY': 'x',
-                'client_secret': 'y',
-                'password': 'z',
-                'access_token': 't',
+                "space_id": "s1",
+                "n_results": 10,
+                "DATABRICKS_API_KEY": "x",
+                "client_secret": "y",
+                "password": "z",
+                "access_token": "t",
             }
         )
-        assert safe == {'space_id': 's1', 'n_results': 10}
+        assert safe == {"space_id": "s1", "n_results": 10}
 
     def test_safe_tool_config_handles_non_dict(self, service):
         assert service._safe_tool_config(None) == {}
@@ -696,38 +749,62 @@ class TestGetDatabricksCatalogSchema:
     @pytest.fixture
     def mock_group_context(self):
         ctx = MagicMock()
-        ctx.primary_group_id = 'test-group'
+        ctx.primary_group_id = "test-group"
         return ctx
 
     @pytest.mark.asyncio
-    async def test_returns_catalog_and_schema_value_not_method(self, service, mock_group_context):
+    async def test_returns_catalog_and_schema_value_not_method(
+        self, service, mock_group_context
+    ):
         """Must read the schema VALUE (db_schema), not pydantic's BaseModel.schema method."""
         from src.schemas.databricks_config import DatabricksConfigResponse
+
         # Built by alias 'schema' exactly like DatabricksService.get_databricks_config
         config = DatabricksConfigResponse(
-            catalog='example_catalog', schema='kasal',
-            warehouse_id='w', workspace_url='', enabled=True,
+            catalog="example_catalog",
+            schema="kasal",
+            warehouse_id="w",
+            workspace_url="",
+            enabled=True,
         )
-        with patch('src.services.databricks.workspace.service.DatabricksService') as MockSvc:
+        with patch(
+            "src.services.databricks.workspace.service.DatabricksService"
+        ) as MockSvc:
             MockSvc.return_value.get_databricks_config = AsyncMock(return_value=config)
-            catalog, schema, warehouse = await service._get_databricks_catalog_schema(mock_group_context)
-        assert catalog == 'example_catalog'
-        assert schema == 'kasal'  # not "<bound method BaseModel.schema ...>"
-        assert warehouse == 'w'
+            catalog, schema, warehouse = await service._get_databricks_catalog_schema(
+                mock_group_context
+            )
+        assert catalog == "example_catalog"
+        assert schema == "kasal"  # not "<bound method BaseModel.schema ...>"
+        assert warehouse == "w"
 
     @pytest.mark.asyncio
     async def test_returns_none_when_no_config(self, service, mock_group_context):
         """No active Databricks config → (None, None, None) so exporter uses defaults."""
-        with patch('src.services.databricks.workspace.service.DatabricksService') as MockSvc:
+        with patch(
+            "src.services.databricks.workspace.service.DatabricksService"
+        ) as MockSvc:
             MockSvc.return_value.get_databricks_config = AsyncMock(return_value=None)
-            assert await service._get_databricks_catalog_schema(mock_group_context) == (None, None, None)
+            assert await service._get_databricks_catalog_schema(mock_group_context) == (
+                None,
+                None,
+                None,
+            )
 
     @pytest.mark.asyncio
     async def test_non_fatal_on_error(self, service, mock_group_context):
         """Errors are swallowed → (None, None, None), export still proceeds."""
-        with patch('src.services.databricks.workspace.service.DatabricksService') as MockSvc:
-            MockSvc.return_value.get_databricks_config = AsyncMock(side_effect=RuntimeError('boom'))
-            assert await service._get_databricks_catalog_schema(mock_group_context) == (None, None, None)
+        with patch(
+            "src.services.databricks.workspace.service.DatabricksService"
+        ) as MockSvc:
+            MockSvc.return_value.get_databricks_config = AsyncMock(
+                side_effect=RuntimeError("boom")
+            )
+            assert await service._get_databricks_catalog_schema(mock_group_context) == (
+                None,
+                None,
+                None,
+            )
 
 
 class TestExtractMcpNames:
@@ -737,7 +814,10 @@ class TestExtractMcpNames:
 
     def test_dict_form(self):
         cfg = {"MCP_SERVERS": {"servers": ["perplexity", "genie space"]}}
-        assert CrewExportService._extract_mcp_names(cfg) == ["perplexity", "genie space"]
+        assert CrewExportService._extract_mcp_names(cfg) == [
+            "perplexity",
+            "genie space",
+        ]
 
     def test_legacy_list_form(self):
         cfg = {"MCP_SERVERS": ["perplexity"]}

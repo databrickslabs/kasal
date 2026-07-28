@@ -290,7 +290,6 @@ def run_crew_in_process(
         # models like Qwen that silently fail when context is too large.
         try:
             from src.core.llm.transport import LLM_CONTEXT_WINDOW_SIZES
-
             from src.seeds.model_configs import MODEL_CONFIGS
 
             for model_name, config in MODEL_CONFIGS.items():
@@ -475,9 +474,9 @@ def run_crew_in_process(
             import warnings
 
             from src.services.agent_builder.crew_preparation import CrewPreparation
+            from src.services.settings.api_keys import ApiKeysService
             from src.services.tools.mcp_integration import MCPIntegration
             from src.services.tools.tool_factory import ToolFactory
-            from src.services.settings.api_keys import ApiKeysService
             from src.services.tools.tool_service import ToolService
 
             # Reset MCP warnings at the start of each execution
@@ -708,13 +707,14 @@ def run_crew_in_process(
                 # are captured even when MCP tool creation or other prep is slow.
                 otel_provider = None
                 try:
-                    from src.services.otel_tracing import (
-                        create_kasal_tracer_provider,
-                    )
                     from opentelemetry import trace as _otel_trace
                     from opentelemetry.sdk.trace.export import (
                         BatchSpanProcessor,
                         SimpleSpanProcessor,
+                    )
+
+                    from src.services.otel_tracing import (
+                        create_kasal_tracer_provider,
                     )
 
                     otel_provider = create_kasal_tracer_provider(job_id=execution_id)
@@ -1490,7 +1490,9 @@ def run_crew_in_process(
                 # Flush remaining token chunks + EOF sentinel so the parent's
                 # relay ends cleanly instead of being cancelled mid-stream.
                 try:
-                    from src.services.execution.event_pipe import close_active_pipe_writer
+                    from src.services.execution.event_pipe import (
+                        close_active_pipe_writer,
+                    )
 
                     close_active_pipe_writer()
                 except Exception:
@@ -1500,9 +1502,7 @@ def run_crew_in_process(
                 # This is essential for llm_request/llm_response traces that are written
                 # asynchronously by the event bus's thread pool
                 try:
-                    from src.core.events import (
-                        event_bus as _cleanup_event_bus,
-                    )
+                    from src.core.events import event_bus as _cleanup_event_bus
 
                     _cleanup_event_bus.flush(timeout=15.0)
                 except Exception:
@@ -1970,11 +1970,12 @@ class ProcessCrewExecutor:
         old_lakebase_active = os.environ.get("LAKEBASE_ACTIVE")
         old_lakebase_instance = os.environ.get("LAKEBASE_INSTANCE_NAME")
         try:
-            from src.db.database_router import (
-                is_lakebase_enabled,
-                get_lakebase_config_from_db,
-            )
             import asyncio
+
+            from src.db.database_router import (
+                get_lakebase_config_from_db,
+                is_lakebase_enabled,
+            )
 
             loop = asyncio.get_running_loop()
             lakebase_enabled = await is_lakebase_enabled()

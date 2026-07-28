@@ -1,17 +1,33 @@
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
+import pytest
 
 from src.services.settings.models import ModelConfigService
 
 
-def mk_model(key="k", name="N", provider="openai", enabled=True, group_id=None,
-             temperature=0.1, context_window=8192, max_output_tokens=2048, extended_thinking=False):
+def mk_model(
+    key="k",
+    name="N",
+    provider="openai",
+    enabled=True,
+    group_id=None,
+    temperature=0.1,
+    context_window=8192,
+    max_output_tokens=2048,
+    extended_thinking=False,
+):
     return SimpleNamespace(
-        key=key, name=name, provider=provider, enabled=enabled, group_id=group_id,
-        temperature=temperature, context_window=context_window,
-        max_output_tokens=max_output_tokens, extended_thinking=extended_thinking,
-        id=1
+        key=key,
+        name=name,
+        provider=provider,
+        enabled=enabled,
+        group_id=group_id,
+        temperature=temperature,
+        context_window=context_window,
+        max_output_tokens=max_output_tokens,
+        extended_thinking=extended_thinking,
+        id=1,
     )
 
 
@@ -21,7 +37,9 @@ async def test_basic_find_and_update_and_delete():
     repo = svc.repository = AsyncMock()
 
     # find_all / find_enabled_models / find_by_key
-    repo.find_all = AsyncMock(return_value=[mk_model("a"), mk_model("b", enabled=False)])
+    repo.find_all = AsyncMock(
+        return_value=[mk_model("a"), mk_model("b", enabled=False)]
+    )
     repo.find_enabled_models = AsyncMock(return_value=[mk_model("a")])
     repo.find_by_key = AsyncMock(side_effect=[mk_model("a"), None])
 
@@ -34,9 +52,14 @@ async def test_basic_find_and_update_and_delete():
 
     # create: reject duplicate, then create
     repo.find_by_key = AsyncMock(return_value=mk_model("a"))
+
     class Dummy:
-        def __init__(self): self.key = "a"
-        def model_dump(self): return {"key": self.key}
+        def __init__(self):
+            self.key = "a"
+
+        def model_dump(self):
+            return {"key": self.key}
+
     with pytest.raises(ValueError):
         await svc.create_model_config(Dummy())
 
@@ -113,19 +136,26 @@ async def test_get_model_config_paths_repo_and_fallback_and_auth(monkeypatch):
     # fallback path via utility with non-dbx provider -> adds API key
     monkeypatch.setattr(
         "src.services.settings.models.get_model_config",
-        lambda key: {"key": key, "name": "N", "provider": "openai",
-                     "temperature": 0.1, "context_window": 1, "max_output_tokens": 2,
-                     "extended_thinking": False, "enabled": True},
+        lambda key: {
+            "key": key,
+            "name": "N",
+            "provider": "openai",
+            "temperature": 0.1,
+            "context_window": 1,
+            "max_output_tokens": 2,
+            "extended_thinking": False,
+            "enabled": True,
+        },
     )
     repo.find_by_key = AsyncMock(return_value=None)
+
     # Patch ApiKeysService class to control API key returns
     class FakeKeysSvc:
         @staticmethod
         async def get_provider_api_key(provider: str, group_id=None):
             return "KEY"
-    monkeypatch.setattr(
-        "src.services.settings.models.ApiKeysService", FakeKeysSvc
-    )
+
+    monkeypatch.setattr("src.services.settings.models.ApiKeysService", FakeKeysSvc)
     cfg2 = await svc.get_model_config("openai/gpt-4o-mini")
     assert cfg2["api_key"] == "KEY" and cfg2["key"].endswith("gpt-4o-mini")
 
@@ -134,15 +164,14 @@ async def test_get_model_config_paths_repo_and_fallback_and_auth(monkeypatch):
         @staticmethod
         async def get_provider_api_key(provider: str, group_id=None):
             return None
-    monkeypatch.setattr(
-        "src.services.settings.models.ApiKeysService", FakeKeysSvc2
-    )
+
+    monkeypatch.setattr("src.services.settings.models.ApiKeysService", FakeKeysSvc2)
+
     # Patch actual function in src.utils.databricks_auth so in-function import sees it
     async def fake_auth():
         return SimpleNamespace(auth_method="obo")
-    monkeypatch.setattr(
-        "src.utils.databricks_auth.get_auth_context", fake_auth
-    )
+
+    monkeypatch.setattr("src.utils.databricks_auth.get_auth_context", fake_auth)
     cfg3 = await svc.get_model_config("openai/gpt-4o-mini")
     assert cfg3["provider"] == "openai"
 
@@ -159,7 +188,9 @@ async def test_group_aware_listing_and_toggle_with_group():
     override = mk_model("k1", group_id="g1", enabled=False)
     other = mk_model("k2", group_id=None, enabled=True)
     repo.find_all = AsyncMock(return_value=[default, override, other])
-    gc = GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin")
+    gc = GroupContext(
+        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+    )
     eff = await svc.find_all_for_group(gc)
     assert any(m.key == "k1" and m.group_id == "g1" for m in eff)
     eff_en = await svc.find_enabled_models_for_group(gc)
@@ -167,37 +198,56 @@ async def test_group_aware_listing_and_toggle_with_group():
     assert [m.key for m in eff_en] == ["k2"]
 
     # toggle with group: default -> create group copy
-    repo.find_all = AsyncMock(return_value=[mk_model("k3", group_id=None, enabled=True)])
+    repo.find_all = AsyncMock(
+        return_value=[mk_model("k3", group_id=None, enabled=True)]
+    )
     repo.find_by_key_and_group = AsyncMock(return_value=None)
     repo.create = AsyncMock(return_value=mk_model("k3", group_id="g1", enabled=False))
-    out = await svc.toggle_model_enabled_with_group("k3", enabled=False, group_context=gc)
+    out = await svc.toggle_model_enabled_with_group(
+        "k3", enabled=False, group_context=gc
+    )
     assert out.group_id == "g1" and out.enabled is False
 
     # toggle with group: default -> toggle existing group override
-    repo.find_all = AsyncMock(return_value=[mk_model("k3", group_id=None, enabled=True)])
-    repo.find_by_key_and_group = AsyncMock(return_value=mk_model("k3", group_id="g1", enabled=True))
+    repo.find_all = AsyncMock(
+        return_value=[mk_model("k3", group_id=None, enabled=True)]
+    )
+    repo.find_by_key_and_group = AsyncMock(
+        return_value=mk_model("k3", group_id="g1", enabled=True)
+    )
     repo.toggle_enabled_in_group = AsyncMock(return_value=True)
-    repo.find_by_key_and_group = AsyncMock(return_value=mk_model("k3", group_id="g1", enabled=False))
-    out2 = await svc.toggle_model_enabled_with_group("k3", enabled=False, group_context=gc)
+    repo.find_by_key_and_group = AsyncMock(
+        return_value=mk_model("k3", group_id="g1", enabled=False)
+    )
+    out2 = await svc.toggle_model_enabled_with_group(
+        "k3", enabled=False, group_context=gc
+    )
     assert out2.enabled is False
 
     # toggle with group: other group's model and no default -> returns None
-    repo.find_all = AsyncMock(return_value=[mk_model("k4", group_id="g2", enabled=True)])
+    repo.find_all = AsyncMock(
+        return_value=[mk_model("k4", group_id="g2", enabled=True)]
+    )
     assert await svc.toggle_model_enabled_with_group("k4", False, gc) is None
 
     # toggle with group: group tool toggled within its scope
-    repo.find_all = AsyncMock(return_value=[mk_model("k5", group_id="g1", enabled=True)])
+    repo.find_all = AsyncMock(
+        return_value=[mk_model("k5", group_id="g1", enabled=True)]
+    )
     repo.toggle_enabled_in_group = AsyncMock(return_value=True)
-    repo.find_by_key_and_group = AsyncMock(return_value=mk_model("k5", group_id="g1", enabled=False))
+    repo.find_by_key_and_group = AsyncMock(
+        return_value=mk_model("k5", group_id="g1", enabled=False)
+    )
     out3 = await svc.toggle_model_enabled_with_group("k5", False, gc)
     assert out3.enabled is False
 
     # toggle with group: requires group context
-    repo.find_all = AsyncMock(return_value=[mk_model("k5", group_id=None, enabled=True)])
+    repo.find_all = AsyncMock(
+        return_value=[mk_model("k5", group_id=None, enabled=True)]
+    )
     with pytest.raises(Exception) as ei2:
         await svc.toggle_model_enabled_with_group("k5", False, None)
     assert getattr(ei2.value, "status_code", None) == 403
-
 
 
 # ===================================================================
@@ -211,13 +261,13 @@ def _patch_keys(monkeypatch, key):
     The module imports the class by name, so the module attribute — not the
     class in api_keys_service — is what the code under test actually calls.
     """
+
     class _Keys:
         @staticmethod
         async def get_provider_api_key(provider, group_id=None):
             return key
-    monkeypatch.setattr(
-        "src.services.settings.models.ApiKeysService", _Keys
-    )
+
+    monkeypatch.setattr("src.services.settings.models.ApiKeysService", _Keys)
 
 
 class TestLocalFallbackConfig:
@@ -235,8 +285,12 @@ class TestLocalFallbackConfig:
 
     @pytest.mark.asyncio
     async def test_prefers_self_hosted_when_it_answers(self, monkeypatch):
-        svc = self._svc([mk_model("gpt-5-nano", provider="openai"),
-                         mk_model("Qwen3", provider="vllm")])
+        svc = self._svc(
+            [
+                mk_model("gpt-5-nano", provider="openai"),
+                mk_model("Qwen3", provider="vllm"),
+            ]
+        )
         monkeypatch.setattr(
             "src.services.settings.models._endpoint_reachable",
             AsyncMock(return_value=True),
@@ -247,8 +301,12 @@ class TestLocalFallbackConfig:
     @pytest.mark.asyncio
     async def test_skips_unreachable_self_hosted_for_hosted_with_key(self, monkeypatch):
         """The exact production failure: vLLM box offline, gpt-5-nano enabled."""
-        svc = self._svc([mk_model("Qwen3", provider="vllm"),
-                         mk_model("gpt-5-nano", provider="openai")])
+        svc = self._svc(
+            [
+                mk_model("Qwen3", provider="vllm"),
+                mk_model("gpt-5-nano", provider="openai"),
+            ]
+        )
         monkeypatch.setattr(
             "src.services.settings.models._endpoint_reachable",
             AsyncMock(return_value=False),
@@ -260,8 +318,12 @@ class TestLocalFallbackConfig:
 
     @pytest.mark.asyncio
     async def test_hosted_without_api_key_is_skipped(self, monkeypatch):
-        svc = self._svc([mk_model("Qwen3", provider="vllm"),
-                         mk_model("gpt-5-nano", provider="openai")])
+        svc = self._svc(
+            [
+                mk_model("Qwen3", provider="vllm"),
+                mk_model("gpt-5-nano", provider="openai"),
+            ]
+        )
         monkeypatch.setattr(
             "src.services.settings.models._endpoint_reachable",
             AsyncMock(return_value=False),
@@ -271,16 +333,24 @@ class TestLocalFallbackConfig:
 
     @pytest.mark.asyncio
     async def test_databricks_models_are_never_the_fallback(self, monkeypatch):
-        svc = self._svc([mk_model("databricks-x", provider="databricks"),
-                         mk_model("gpt-5-nano", provider="openai")])
+        svc = self._svc(
+            [
+                mk_model("databricks-x", provider="databricks"),
+                mk_model("gpt-5-nano", provider="openai"),
+            ]
+        )
         _patch_keys(monkeypatch, "sk-test")
         out = await svc._local_fallback_config()
         assert out["key"] == "gpt-5-nano"
 
     @pytest.mark.asyncio
     async def test_env_pin_wins_over_ranking(self, monkeypatch):
-        svc = self._svc([mk_model("Qwen3", provider="vllm"),
-                         mk_model("gpt-5-nano", provider="openai")])
+        svc = self._svc(
+            [
+                mk_model("Qwen3", provider="vllm"),
+                mk_model("gpt-5-nano", provider="openai"),
+            ]
+        )
         monkeypatch.setenv("KASAL_FALLBACK_MODEL", "gpt-5-nano")
         # Reachable self-hosted would normally win — the pin overrides it.
         monkeypatch.setattr(
@@ -313,11 +383,13 @@ class TestEndpointReachable:
     @pytest.mark.asyncio
     async def test_malformed_url_is_unreachable(self):
         from src.services.settings.models import _endpoint_reachable
+
         assert await _endpoint_reachable("not-a-url") is False
 
     @pytest.mark.asyncio
     async def test_dead_host_is_unreachable_and_fast(self, monkeypatch):
         from src.services.settings.models import _endpoint_reachable
+
         monkeypatch.setattr(
             "asyncio.open_connection", AsyncMock(side_effect=OSError("refused"))
         )

@@ -1,15 +1,15 @@
-from typing import Annotated, AsyncGenerator, Callable, Type, Optional
+import logging
+from typing import Annotated, AsyncGenerator, Callable, Optional, Type
 
-from fastapi import Depends, Request, Header
+from fastapi import Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
 from src.core.base_service import BaseService
 from src.db.base import Base
-from src.db.session import get_db, get_local_db
 from src.db.database_router import get_smart_db_session
+from src.db.session import get_db, get_local_db
 from src.utils.user_context import GroupContext
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -23,17 +23,19 @@ LegacySessionDep = Annotated[AsyncSession, Depends(get_db)]
 LocalSessionDep = Annotated[AsyncSession, Depends(get_local_db)]
 
 
-
-
 async def get_group_context(
     request: Request,
     x_forwarded_email: Optional[str] = Header(None, alias="X-Forwarded-Email"),
-    x_forwarded_access_token: Optional[str] = Header(None, alias="X-Forwarded-Access-Token"),
+    x_forwarded_access_token: Optional[str] = Header(
+        None, alias="X-Forwarded-Access-Token"
+    ),
     x_auth_request_email: Optional[str] = Header(None, alias="X-Auth-Request-Email"),
     x_auth_request_user: Optional[str] = Header(None, alias="X-Auth-Request-User"),
-    x_auth_request_access_token: Optional[str] = Header(None, alias="X-Auth-Request-Access-Token"),
+    x_auth_request_access_token: Optional[str] = Header(
+        None, alias="X-Auth-Request-Access-Token"
+    ),
     x_group_id: Optional[str] = Header(None, alias="group_id"),
-    x_group_domain: Optional[str] = Header(None, alias="X-Group-Domain")
+    x_group_domain: Optional[str] = Header(None, alias="X-Group-Domain"),
 ) -> GroupContext:
     """
     Extract group context from Databricks Apps or OAuth2-Proxy headers.
@@ -63,6 +65,7 @@ async def get_group_context(
         GroupContext: Extracted group context with group_id, email, etc.
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
     # Prefer OAuth2-Proxy headers over direct headers
@@ -75,7 +78,7 @@ async def get_group_context(
     # Create a cache key that includes email and group_id to handle group switching
     cache_key = f"group_context:{user_email}:{x_group_id}"
 
-    if hasattr(request.state, '_group_context_cache'):
+    if hasattr(request.state, "_group_context_cache"):
         cached = request.state._group_context_cache.get(cache_key)
         if cached is not None:
             logger.info(f"[CACHE HIT] Returning cached GroupContext for {user_email}")
@@ -94,14 +97,16 @@ async def get_group_context(
             group_context = await GroupContext.from_email(
                 email=user_email,
                 access_token=access_token,
-                group_id=x_group_id  # Pass the selected group ID from header
+                group_id=x_group_id,  # Pass the selected group ID from header
             )
-            logger.debug(f"Created group context: primary_group_id={group_context.primary_group_id}, group_ids={group_context.group_ids}, email={group_context.group_email}, role={group_context.user_role}")
+            logger.debug(
+                f"Created group context: primary_group_id={group_context.primary_group_id}, group_ids={group_context.group_ids}, email={group_context.group_email}, role={group_context.user_role}"
+            )
 
             # =========================================================================
             # CACHE: Store in request.state for subsequent accesses in this request
             # =========================================================================
-            if not hasattr(request.state, '_group_context_cache'):
+            if not hasattr(request.state, "_group_context_cache"):
                 request.state._group_context_cache = {}
             request.state._group_context_cache[cache_key] = group_context
             logger.debug(f"[CACHE SET] Cached GroupContext for {user_email}")
@@ -111,6 +116,7 @@ async def get_group_context(
             # SECURITY: Unauthorized group access attempt
             logger.error(f"Unauthorized group access attempt: {e}")
             from fastapi import HTTPException
+
             raise HTTPException(status_code=403, detail=str(e))
         except Exception as e:
             # Database or other unexpected errors during group resolution.
@@ -133,18 +139,18 @@ def get_repository(
 ) -> Callable[[SessionDep], BaseRepository]:
     """
     Factory function for repository dependencies.
-    
+
     Args:
         repository_class: Repository class to instantiate
         model_class: Model class to use with the repository
-        
+
     Returns:
         Callable: Dependency function that returns a repository instance
     """
-    
+
     def _get_repo(session: SessionDep) -> BaseRepository:
         return repository_class(model_class, session)
-    
+
     return _get_repo
 
 
@@ -155,16 +161,16 @@ def get_service(
 ) -> Callable[[SessionDep], BaseService]:
     """
     Factory function for service dependencies.
-    
+
     Args:
         service_class: Service class to instantiate
         repository_class: Repository class to use with the service
         model_class: Model class to use with the repository
-        
+
     Returns:
         Callable: Dependency function that returns a service instance
     """
-    
+
     def _get_service(session: SessionDep) -> BaseService:
         # The consistent pattern across services is to have session as the first parameter,
         # with repository_class and model_class as optional parameters with defaults
@@ -179,19 +185,20 @@ def get_service(
                 # Try creating with explicit repository and model classes
                 service = service_class(
                     session=session,
-                    repository_class=repository_class, 
-                    model_class=model_class
+                    repository_class=repository_class,
+                    model_class=model_class,
                 )
                 return service
             except Exception as inner_e:
                 # Log the error and re-raise
                 logger.error(f"Error creating service: {inner_e}")
                 raise
-    
-    return _get_service 
+
+    return _get_service
+
 
 # get_log_service moved to api/logs_router.py — its only caller. A provider that
 # names a concrete SERVICE cannot live here: this module is imported by core and
 # by services, so a service import at this level points core upward. The generic
 # plumbing below (session/context aliases, the BaseService factory) names no
-# service and stays. 
+# service and stays.

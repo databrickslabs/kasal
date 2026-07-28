@@ -3,18 +3,20 @@
 Knowledge/document embeddings go to the Lakebase memory instance when the
 active memory backend is Lakebase, otherwise to the app database.
 """
-import pytest
+
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.knowledge.embedding_session import (
-    resolve_lakebase_instance,
-    knowledge_embedding_session,
-    ensure_lakebase_doc_table,
-    emit_knowledge_span,
-)
+import pytest
+
 from src.schemas.memory_backend import MemoryBackendType
+from src.services.knowledge.embedding_session import (
+    emit_knowledge_span,
+    ensure_lakebase_doc_table,
+    knowledge_embedding_session,
+    resolve_lakebase_instance,
+)
 
 
 def _capture_spans():
@@ -49,7 +51,9 @@ def _cfg(backend_type, instance_name="my-lb", has_lakebase=True):
 def _patch_config(config):
     svc = MagicMock()
     svc.get_active_config = AsyncMock(return_value=config)
-    return patch("src.services.memory.config_service.MemoryConfigService", return_value=svc)
+    return patch(
+        "src.services.memory.config_service.MemoryConfigService", return_value=svc
+    )
 
 
 class TestResolveLakebaseInstance:
@@ -82,7 +86,9 @@ class TestResolveLakebaseInstance:
     async def test_none_on_error(self):
         svc = MagicMock()
         svc.get_active_config = AsyncMock(side_effect=RuntimeError("boom"))
-        with patch("src.services.memory.config_service.MemoryConfigService", return_value=svc):
+        with patch(
+            "src.services.memory.config_service.MemoryConfigService", return_value=svc
+        ):
             inst = await resolve_lakebase_instance(MagicMock(), "g1")
         assert inst is None
 
@@ -109,7 +115,9 @@ class TestEnsureLakebaseDocTable:
 
     @pytest.mark.asyncio
     async def test_noop_when_columns_already_present(self):
-        session = self._session(["id", "embedding", "group_id", "file_path", "created_by"])
+        session = self._session(
+            ["id", "embedding", "group_id", "file_path", "created_by"]
+        )
         await ensure_lakebase_doc_table(session)
         # Only the information_schema probe ran; no CREATE/ALTER.
         assert session.execute.await_count == 1
@@ -126,7 +134,10 @@ class TestEnsureLakebaseDocTable:
     async def test_raises_clear_error_when_not_owner(self):
         session = MagicMock()
         select_result = MagicMock()
-        select_result.fetchall.return_value = [("id",), ("source",)]  # missing pgvector cols
+        select_result.fetchall.return_value = [
+            ("id",),
+            ("source",),
+        ]  # missing pgvector cols
 
         async def _execute(stmt):
             s = str(stmt)
@@ -172,7 +183,10 @@ class TestKnowledgeEmbeddingSession:
                 "src.db.lakebase_session.get_lakebase_session",
                 new=fake_get_lakebase_session,
             ):
-                async with knowledge_embedding_session(app, "g1", "tok") as (sess, is_lakebase):
+                async with knowledge_embedding_session(app, "g1", "tok") as (
+                    sess,
+                    is_lakebase,
+                ):
                     assert sess is lb
                     assert is_lakebase is True
         # SET ROLE was attempted on the Lakebase session.
@@ -189,10 +203,13 @@ class TestKnowledgeRoutingObservability:
     async def test_app_db_fallback_emits_span(self):
         captured, span_patch = _capture_spans()
         app = MagicMock()
-        with patch(
-            "src.services.knowledge.embedding_session.resolve_lakebase_instance",
-            new=AsyncMock(return_value=None),
-        ), span_patch:
+        with (
+            patch(
+                "src.services.knowledge.embedding_session.resolve_lakebase_instance",
+                new=AsyncMock(return_value=None),
+            ),
+            span_patch,
+        ):
             async with knowledge_embedding_session(app, "g1") as (sess, is_lakebase):
                 assert sess is app and is_lakebase is False
         attrs = dict(captured)
@@ -211,13 +228,21 @@ class TestKnowledgeRoutingObservability:
         async def fake_get_lakebase_session(**kwargs):
             yield lb
 
-        with patch(
-            "src.services.knowledge.embedding_session.resolve_lakebase_instance",
-            new=AsyncMock(return_value="my-lb"),
-        ), patch(
-            "src.db.lakebase_session.get_lakebase_session", new=fake_get_lakebase_session
-        ), span_patch:
-            async with knowledge_embedding_session(app, "g1", "tok") as (sess, is_lakebase):
+        with (
+            patch(
+                "src.services.knowledge.embedding_session.resolve_lakebase_instance",
+                new=AsyncMock(return_value="my-lb"),
+            ),
+            patch(
+                "src.db.lakebase_session.get_lakebase_session",
+                new=fake_get_lakebase_session,
+            ),
+            span_patch,
+        ):
+            async with knowledge_embedding_session(app, "g1", "tok") as (
+                sess,
+                is_lakebase,
+            ):
                 assert is_lakebase is True
         attrs = dict(captured)
         assert attrs["kasal.knowledge.lakebase"] is True
@@ -233,16 +258,23 @@ class TestKnowledgeRoutingObservability:
         # Records WHY it's not Lakebase so a deployed run is unambiguous.
         assert attrs["kasal.event_type"] == "knowledge_store_resolve"
         assert attrs["kasal.knowledge.lakebase"] is False
-        assert "backend" in attrs["kasal.knowledge.backend"].lower() or attrs["kasal.knowledge.backend"]
+        assert (
+            "backend" in attrs["kasal.knowledge.backend"].lower()
+            or attrs["kasal.knowledge.backend"]
+        )
 
     @pytest.mark.asyncio
     async def test_resolve_error_spans_with_reason(self):
         captured, span_patch = _capture_spans()
         svc = MagicMock()
         svc.get_active_config = AsyncMock(side_effect=RuntimeError("boom"))
-        with patch(
-            "src.services.memory.config_service.MemoryConfigService", return_value=svc
-        ), span_patch:
+        with (
+            patch(
+                "src.services.memory.config_service.MemoryConfigService",
+                return_value=svc,
+            ),
+            span_patch,
+        ):
             inst = await resolve_lakebase_instance(MagicMock(), "g1")
         assert inst is None
         attrs = dict(captured)
@@ -250,5 +282,9 @@ class TestKnowledgeRoutingObservability:
 
     def test_emit_span_never_raises_without_otel(self):
         # Best-effort: a tracer failure must not break ingest/search.
-        with patch("opentelemetry.trace.get_tracer", side_effect=RuntimeError("no otel")):
-            emit_knowledge_span("knowledge_search", {"group_id": "g1", "lakebase": True})
+        with patch(
+            "opentelemetry.trace.get_tracer", side_effect=RuntimeError("no otel")
+        ):
+            emit_knowledge_span(
+                "knowledge_search", {"group_id": "g1", "lakebase": True}
+            )

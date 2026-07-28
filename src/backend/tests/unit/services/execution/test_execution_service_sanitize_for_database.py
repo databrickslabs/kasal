@@ -1,13 +1,14 @@
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
-from typing import Dict, Any, Optional, List
-import uuid
 import json
+import uuid
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+from unittest.mock import AsyncMock, Mock, patch
 
-# Test execution service - based on actual code inspection
+import pytest
 
 from src.services.execution.service import ExecutionService
+
+# Test execution service - based on actual code inspection
 
 
 class TestExecutionServiceInit:
@@ -17,8 +18,12 @@ class TestExecutionServiceInit:
         """Test ExecutionService __init__ with session parameter"""
         mock_session = Mock()
 
-        with patch('src.services.execution.service.ExecutionNameService') as mock_name_service:
-            with patch('src.services.execution.service.KasalExecutionService') as mock_crew_service:
+        with patch(
+            "src.services.execution.service.ExecutionNameService"
+        ) as mock_name_service:
+            with patch(
+                "src.services.execution.service.KasalExecutionService"
+            ) as mock_crew_service:
                 mock_name_instance = Mock()
                 mock_crew_instance = Mock()
                 mock_name_service.create.return_value = mock_name_instance
@@ -32,8 +37,12 @@ class TestExecutionServiceInit:
 
     def test_execution_service_init_without_session(self):
         """Test ExecutionService __init__ without session parameter"""
-        with patch('src.services.execution.service.ExecutionNameService') as mock_name_service:
-            with patch('src.services.execution.service.KasalExecutionService') as mock_crew_service:
+        with patch(
+            "src.services.execution.service.ExecutionNameService"
+        ) as mock_name_service:
+            with patch(
+                "src.services.execution.service.KasalExecutionService"
+            ) as mock_crew_service:
                 mock_name_instance = Mock()
                 mock_crew_instance = Mock()
                 mock_name_service.create.return_value = mock_name_instance
@@ -49,8 +58,12 @@ class TestExecutionServiceInit:
         """Test ExecutionService __init__ creates service instances"""
         mock_session = Mock()
 
-        with patch('src.services.execution.service.ExecutionNameService') as mock_name_service:
-            with patch('src.services.execution.service.KasalExecutionService') as mock_crew_service:
+        with patch(
+            "src.services.execution.service.ExecutionNameService"
+        ) as mock_name_service:
+            with patch(
+                "src.services.execution.service.KasalExecutionService"
+            ) as mock_crew_service:
                 service = ExecutionService(mock_session)
 
                 # Verify services were created properly
@@ -59,13 +72,13 @@ class TestExecutionServiceInit:
 
     def test_execution_service_init_class_attributes(self):
         """Test ExecutionService __init__ uses class attributes"""
-        with patch('src.services.execution.service.ExecutionNameService'):
-            with patch('src.services.execution.service.KasalExecutionService'):
+        with patch("src.services.execution.service.ExecutionNameService"):
+            with patch("src.services.execution.service.KasalExecutionService"):
                 service = ExecutionService()
 
                 # Should have access to class-level attributes
-                assert hasattr(ExecutionService, 'executions')
-                assert hasattr(ExecutionService, '_thread_pool')
+                assert hasattr(ExecutionService, "executions")
+                assert hasattr(ExecutionService, "_thread_pool")
                 assert isinstance(ExecutionService.executions, dict)
                 assert ExecutionService._thread_pool is not None
 
@@ -76,7 +89,7 @@ class TestExecutionServiceStaticMethods:
     def test_create_execution_id(self):
         """Test create_execution_id static method"""
         result = ExecutionService.create_execution_id()
-        
+
         assert isinstance(result, str)
         assert len(result) > 0
         # Should be a valid UUID format
@@ -90,7 +103,7 @@ class TestExecutionServiceStaticMethods:
         """Test create_execution_id generates unique IDs"""
         id1 = ExecutionService.create_execution_id()
         id2 = ExecutionService.create_execution_id()
-        
+
         assert id1 != id2
 
     def test_create_execution_id_multiple_calls(self):
@@ -104,22 +117,22 @@ class TestExecutionServiceStaticMethods:
     def test_get_execution_static(self):
         """Test get_execution static method"""
         execution_id = "test-execution-id"
-        
+
         # Should return None for non-existent execution
         result = ExecutionService.get_execution(execution_id)
-        
+
         assert result is None
 
     def test_get_execution_static_with_none(self):
         """Test get_execution static method with None"""
         result = ExecutionService.get_execution(None)
-        
+
         assert result is None
 
     def test_get_execution_static_with_empty_string(self):
         """Test get_execution static method with empty string"""
         result = ExecutionService.get_execution("")
-        
+
         assert result is None
 
 
@@ -170,7 +183,9 @@ class TestExecutionServiceAddExecutionToMemory:
         assert result1["run_name"] == "First Run"
 
         # Overwrite with second execution
-        ExecutionService.add_execution_to_memory(execution_id, "completed", "Second Run")
+        ExecutionService.add_execution_to_memory(
+            execution_id, "completed", "Second Run"
+        )
         result2 = ExecutionService.get_execution(execution_id)
         assert result2["run_name"] == "Second Run"
         assert result2["status"] == "completed"
@@ -186,11 +201,11 @@ class TestExecutionServiceSanitizeForDatabase:
             "int_field": 42,
             "bool_field": True,
             "list_field": [1, 2, 3],
-            "dict_field": {"nested": "value"}
+            "dict_field": {"nested": "value"},
         }
-        
+
         result = ExecutionService.sanitize_for_database(data)
-        
+
         assert isinstance(result, dict)
         assert result["string_field"] == "test_value"
         assert result["int_field"] == 42
@@ -200,14 +215,10 @@ class TestExecutionServiceSanitizeForDatabase:
 
     def test_sanitize_for_database_with_none_values(self):
         """Test sanitize_for_database with None values"""
-        data = {
-            "field1": "value1",
-            "field2": None,
-            "field3": "value3"
-        }
-        
+        data = {"field1": "value1", "field2": None, "field3": "value3"}
+
         result = ExecutionService.sanitize_for_database(data)
-        
+
         assert isinstance(result, dict)
         assert result["field1"] == "value1"
         assert result["field2"] is None
@@ -216,13 +227,10 @@ class TestExecutionServiceSanitizeForDatabase:
     def test_sanitize_for_database_with_datetime(self):
         """Test sanitize_for_database with datetime objects"""
         now = datetime.now()
-        data = {
-            "timestamp": now,
-            "other_field": "value"
-        }
-        
+        data = {"timestamp": now, "other_field": "value"}
+
         result = ExecutionService.sanitize_for_database(data)
-        
+
         assert isinstance(result, dict)
         assert result["other_field"] == "value"
         # datetime should be converted to string
@@ -231,13 +239,10 @@ class TestExecutionServiceSanitizeForDatabase:
     def test_sanitize_for_database_with_uuid(self):
         """Test sanitize_for_database with UUID objects"""
         test_uuid = uuid.uuid4()
-        data = {
-            "id": test_uuid,
-            "name": "test"
-        }
-        
+        data = {"id": test_uuid, "name": "test"}
+
         result = ExecutionService.sanitize_for_database(data)
-        
+
         assert isinstance(result, dict)
         assert result["name"] == "test"
         # UUID should be converted to string
@@ -252,30 +257,27 @@ class TestExecutionServiceSanitizeForDatabase:
             "nested": {
                 "uuid_field": test_uuid,
                 "datetime_field": now,
-                "string_field": "value"
+                "string_field": "value",
             },
-            "list_with_objects": [
-                {"uuid": test_uuid},
-                {"datetime": now}
-            ]
+            "list_with_objects": [{"uuid": test_uuid}, {"datetime": now}],
         }
-        
+
         result = ExecutionService.sanitize_for_database(data)
-        
+
         assert isinstance(result, dict)
         assert isinstance(result["nested"]["uuid_field"], str)
         assert isinstance(result["nested"]["datetime_field"], str)
         assert result["nested"]["string_field"] == "value"
-        
+
         assert isinstance(result["list_with_objects"][0]["uuid"], str)
         assert isinstance(result["list_with_objects"][1]["datetime"], str)
 
     def test_sanitize_for_database_empty_dict(self):
         """Test sanitize_for_database with empty dictionary"""
         data = {}
-        
+
         result = ExecutionService.sanitize_for_database(data)
-        
+
         assert isinstance(result, dict)
         assert len(result) == 0
 
@@ -287,15 +289,15 @@ class TestExecutionServiceSanitizeForDatabase:
             "boolean": True,
             "null": None,
             "array": [1, 2, 3],
-            "object": {"key": "value"}
+            "object": {"key": "value"},
         }
-        
+
         result = ExecutionService.sanitize_for_database(data)
-        
+
         # Should be JSON serializable
         json_str = json.dumps(result)
         assert isinstance(json_str, str)
-        
+
         # Should preserve all values
         assert result == data
 
@@ -306,18 +308,25 @@ class TestExecutionServiceConstants:
     def test_logger_initialization(self):
         """Test logger is properly initialized"""
         from src.services.execution.service import logger
-        
+
         assert logger is not None
-        assert hasattr(logger, 'info')
-        assert hasattr(logger, 'error')
-        assert hasattr(logger, 'warning')
+        assert hasattr(logger, "info")
+        assert hasattr(logger, "error")
+        assert hasattr(logger, "warning")
 
     def test_required_imports(self):
         """Test that required imports are available"""
         from src.services.execution.service import (
-            logging, sys, traceback, json, os, uuid, concurrent, asyncio
+            asyncio,
+            concurrent,
+            json,
+            logging,
+            os,
+            sys,
+            traceback,
+            uuid,
         )
-        
+
         assert logging is not None
         assert sys is not None
         assert traceback is not None
@@ -330,9 +339,12 @@ class TestExecutionServiceConstants:
     def test_schema_imports(self):
         """Test schema imports"""
         from src.services.execution.service import (
-            ExecutionStatus, CrewConfig, ExecutionNameGenerationRequest, ExecutionCreateResponse
+            CrewConfig,
+            ExecutionCreateResponse,
+            ExecutionNameGenerationRequest,
+            ExecutionStatus,
         )
-        
+
         assert ExecutionStatus is not None
         assert CrewConfig is not None
         assert ExecutionNameGenerationRequest is not None
@@ -341,9 +353,11 @@ class TestExecutionServiceConstants:
     def test_service_imports(self):
         """Test service imports"""
         from src.services.execution.service import (
-            KasalExecutionService, ExecutionStatusService, ExecutionNameService
+            ExecutionNameService,
+            ExecutionStatusService,
+            KasalExecutionService,
         )
-        
+
         assert KasalExecutionService is not None
         assert ExecutionStatusService is not None
         assert ExecutionNameService is not None
@@ -351,9 +365,11 @@ class TestExecutionServiceConstants:
     def test_utils_imports(self):
         """Test utils imports"""
         from src.services.execution.service import (
-            run_in_thread_with_loop, create_and_run_loop, GroupContext
+            GroupContext,
+            create_and_run_loop,
+            run_in_thread_with_loop,
         )
-        
+
         assert run_in_thread_with_loop is not None
         assert create_and_run_loop is not None
         assert GroupContext is not None
@@ -365,16 +381,16 @@ class TestExecutionServiceAttributes:
     def setup_method(self):
         """Set up test fixtures"""
         self.mock_session = Mock()
-        with patch('src.services.execution.service.ExecutionNameService'):
-            with patch('src.services.execution.service.KasalExecutionService'):
+        with patch("src.services.execution.service.ExecutionNameService"):
+            with patch("src.services.execution.service.KasalExecutionService"):
                 self.service = ExecutionService(self.mock_session)
 
     def test_service_has_required_attributes(self):
         """Test that service has all required attributes after initialization"""
         # Check all required attributes exist
-        assert hasattr(self.service, 'session')
-        assert hasattr(self.service, 'execution_name_service')
-        assert hasattr(self.service, 'kasal_execution_service')
+        assert hasattr(self.service, "session")
+        assert hasattr(self.service, "execution_name_service")
+        assert hasattr(self.service, "kasal_execution_service")
 
         # Check attribute values
         assert self.service.session == self.mock_session
@@ -387,14 +403,17 @@ class TestExecutionServiceAttributes:
 
         # Test with different session
         new_mock_session = Mock()
-        with patch('src.services.execution.service.ExecutionNameService'):
-            with patch('src.services.execution.service.KasalExecutionService'):
+        with patch("src.services.execution.service.ExecutionNameService"):
+            with patch("src.services.execution.service.KasalExecutionService"):
                 new_service = ExecutionService(new_mock_session)
                 assert new_service.session == new_mock_session
                 assert new_service.session != self.mock_session
 
     def test_service_services_are_separate(self):
         """Test that services are separate instances"""
-        assert self.service.execution_name_service is not self.service.kasal_execution_service
+        assert (
+            self.service.execution_name_service
+            is not self.service.kasal_execution_service
+        )
         assert self.service.execution_name_service is not None
         assert self.service.kasal_execution_service is not None

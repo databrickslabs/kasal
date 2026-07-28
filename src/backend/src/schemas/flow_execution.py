@@ -1,15 +1,18 @@
 """
 Schemas for Flow execution models and responses.
 """
-from enum import Enum
-from typing import Dict, List, Optional, Any, Union
+
 from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
-from pydantic import BaseModel, Field, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FlowExecutionStatus(str, Enum):
     """Flow execution status values"""
+
     PENDING = "pending"
     PREPARING = "preparing"
     RUNNING = "running"
@@ -20,6 +23,7 @@ class FlowExecutionStatus(str, Enum):
 
 class FlowExecutionBase(BaseModel):
     """Base model for flow execution data"""
+
     flow_id: Optional[Union[UUID, str]] = None  # Optional for ad-hoc executions
     job_id: str
     status: FlowExecutionStatus = FlowExecutionStatus.PENDING
@@ -30,11 +34,13 @@ class FlowExecutionBase(BaseModel):
 
 class FlowExecutionCreate(FlowExecutionBase):
     """Model for creating a new flow execution"""
+
     pass
 
 
 class FlowExecutionUpdate(BaseModel):
     """Model for updating an existing flow execution"""
+
     status: Optional[FlowExecutionStatus] = None
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
@@ -44,6 +50,7 @@ class FlowExecutionUpdate(BaseModel):
 
 class FlowExecutionResponse(FlowExecutionBase):
     """Response model for flow execution data"""
+
     id: int
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
@@ -56,6 +63,7 @@ class FlowExecutionResponse(FlowExecutionBase):
 
 class FlowNodeExecutionBase(BaseModel):
     """Base model for flow node execution data"""
+
     flow_execution_id: int
     node_id: str
     status: FlowExecutionStatus = FlowExecutionStatus.PENDING
@@ -66,11 +74,13 @@ class FlowNodeExecutionBase(BaseModel):
 
 class FlowNodeExecutionCreate(FlowNodeExecutionBase):
     """Model for creating a new flow node execution"""
+
     pass
 
 
 class FlowNodeExecutionUpdate(BaseModel):
     """Model for updating an existing flow node execution"""
+
     status: Optional[FlowExecutionStatus] = None
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
@@ -79,6 +89,7 @@ class FlowNodeExecutionUpdate(BaseModel):
 
 class FlowNodeExecutionResponse(FlowNodeExecutionBase):
     """Response model for flow node execution data"""
+
     id: int
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
@@ -91,6 +102,7 @@ class FlowNodeExecutionResponse(FlowNodeExecutionBase):
 
 class FlowExecutionDetailResponse(FlowExecutionResponse):
     """Detailed response model for flow execution including node executions"""
+
     nodes: List[FlowNodeExecutionResponse] = Field(default_factory=list)
 
-    model_config = ConfigDict(from_attributes=True) 
+    model_config = ConfigDict(from_attributes=True)

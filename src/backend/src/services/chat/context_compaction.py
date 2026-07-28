@@ -44,7 +44,9 @@ _SUMMARIZE_INSTRUCTIONS = (
 
 def compaction_enabled() -> bool:
     return os.getenv("CHAT_COMPACTION", "true").strip().lower() not in (
-        "0", "false", "no",
+        "0",
+        "false",
+        "no",
     )
 
 
@@ -70,7 +72,11 @@ def transcript_of(rows: Sequence[Any], per_turn_cap: int = 700) -> str:
         if mtype not in ("user", "assistant"):
             continue
         content = (getattr(row, "content", "") or "").strip()
-        if not content or content.lower() == "thinking..." or content.startswith("[ui-card]"):
+        if (
+            not content
+            or content.lower() == "thinking..."
+            or content.startswith("[ui-card]")
+        ):
             continue
         if len(content) > per_turn_cap:
             content = content[:per_turn_cap] + "…"
@@ -86,8 +92,10 @@ def split_for_compaction(
     """(to_fold, verbatim): rows newer than the fold marker, split so the
     newest ``keep_rows`` stay verbatim and the older remainder is foldable."""
     unsummarized = [
-        row for row in rows
-        if summary_upto is None or (getattr(row, "timestamp", None) and row.timestamp > summary_upto)
+        row
+        for row in rows
+        if summary_upto is None
+        or (getattr(row, "timestamp", None) and row.timestamp > summary_upto)
     ]
     if len(unsummarized) <= keep_rows:
         return [], unsummarized
@@ -97,9 +105,8 @@ def split_for_compaction(
 def build_summary_prompt(existing_summary: Optional[str], fold_transcript: str) -> list:
     system = _SUMMARIZE_INSTRUCTIONS.format(max_chars=summary_max_chars())
     user = (
-        (f"Existing summary:\n{existing_summary}\n\n" if existing_summary else "")
-        + f"New turns to fold in:\n{fold_transcript}"
-    )
+        f"Existing summary:\n{existing_summary}\n\n" if existing_summary else ""
+    ) + f"New turns to fold in:\n{fold_transcript}"
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
@@ -117,10 +124,10 @@ async def maintain_session_summary(
     if not compaction_enabled() or not session_id or not group_ids:
         return False
     try:
-        from src.services.llm.manager import LLMManager
         from src.db.session import request_scoped_session
         from src.repositories.chat_history_repository import ChatHistoryRepository
         from src.repositories.chat_session_repository import ChatSessionRepository
+        from src.services.llm.manager import LLMManager
 
         async with request_scoped_session() as db_session:
             session_record = await ChatSessionRepository(
@@ -131,13 +138,16 @@ async def maintain_session_summary(
             rows = await ChatHistoryRepository(
                 db_session
             ).get_recent_by_session_and_group(
-                session_id, group_ids,
+                session_id,
+                group_ids,
                 limit=int(os.getenv("CHAT_HISTORY_RECENT_LIMIT", "120")),
             )
             existing_summary = getattr(session_record, "context_summary", None)
             summary_upto = getattr(session_record, "context_summary_upto", None)
 
-        to_fold, _verbatim = split_for_compaction(rows, summary_upto, keep_recent_rows())
+        to_fold, _verbatim = split_for_compaction(
+            rows, summary_upto, keep_recent_rows()
+        )
         fold_transcript = transcript_of(to_fold)
         if len(fold_transcript) < trigger_chars():
             return False

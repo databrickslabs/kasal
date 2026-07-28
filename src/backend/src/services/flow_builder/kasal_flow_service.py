@@ -1,62 +1,69 @@
 """
 CrewAI Flow Service - Interface for flow execution operations.
 
-This is an adapter service that interfaces between the execution_service 
+This is an adapter service that interfaces between the execution_service
 and the flow_runner_service now located in the crewai engine folder.
 """
 
 import logging
 import uuid
-from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any, Dict, List, Optional, Union
+
 from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
+
 # SessionLocal removed - use async_session_factory instead
-from src.services.flow_builder.flow_runner_service import FlowRunnerService, BackendFlow
+from src.services.flow_builder.flow_runner_service import BackendFlow, FlowRunnerService
 
 # Initialize flow-specific logger
 logger = LoggerManager.get_instance().flow
 
+
 class KasalFlowService:
     """Service for interfacing with the CrewAI Flow Runner"""
-    
+
     def __init__(self, session: Optional[AsyncSession] = None):
         """
         Initialize the service with an optional database session.
-        
+
         Args:
             session: Optional database session
         """
         self.session = session
-        
+
     def _get_flow_runner(self) -> FlowRunnerService:
         """
         Get a FlowRunnerService instance with appropriate session handling.
-        
+
         Returns:
             FlowRunnerService instance
         """
         # If a session was provided to this service, use it
         if self.session:
             return FlowRunnerService(self.session)
-        
+
         # Cannot create sync session - need async refactoring
         # For now, return service without session
-        logger.warning("FlowRunnerService created without session - needs async refactoring")
+        logger.warning(
+            "FlowRunnerService created without session - needs async refactoring"
+        )
         return FlowRunnerService(None)
-    
-    async def run_flow(self,
-                      flow_id: Optional[Union[uuid.UUID, str]] = None,
-                      job_id: str = None,
-                      run_name: Optional[str] = None,
-                      config: Optional[Dict[str, Any]] = None,
-                      group_context = None,
-                      user_token: Optional[str] = None,
-                      resume_from_flow_uuid: Optional[str] = None,
-                      resume_from_execution_id: Optional[int] = None,
-                      resume_from_crew_sequence: Optional[int] = None) -> Dict[str, Any]:
+
+    async def run_flow(
+        self,
+        flow_id: Optional[Union[uuid.UUID, str]] = None,
+        job_id: str = None,
+        run_name: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+        group_context=None,
+        user_token: Optional[str] = None,
+        resume_from_flow_uuid: Optional[str] = None,
+        resume_from_execution_id: Optional[int] = None,
+        resume_from_crew_sequence: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
         Execute a flow based on the provided parameters using process isolation.
 
@@ -74,7 +81,7 @@ class KasalFlowService:
         Returns:
             Dictionary with execution result
         """
-        logger.info("="*100)
+        logger.info("=" * 100)
         logger.info("CREWAI FLOW SERVICE - RECEIVED REQUEST (PROCESS ISOLATION)")
         logger.info(f"  flow_id: {flow_id}")
         logger.info(f"  job_id: {job_id}")
@@ -88,45 +95,62 @@ class KasalFlowService:
             logger.info(f"  config keys: {list(config.keys())}")
             logger.info(f"  config.nodes: {len(config.get('nodes', []))} nodes")
             logger.info(f"  config.edges: {len(config.get('edges', []))} edges")
-            if 'flow_config' in config:
-                flow_config = config.get('flow_config', {})
-                logger.info(f"  flow_config.startingPoints: {len(flow_config.get('startingPoints', []))}")
-                logger.info(f"  flow_config.listeners: {len(flow_config.get('listeners', []))}")
-        logger.info("="*100)
+            if "flow_config" in config:
+                flow_config = config.get("flow_config", {})
+                logger.info(
+                    f"  flow_config.startingPoints: {len(flow_config.get('startingPoints', []))}"
+                )
+                logger.info(
+                    f"  flow_config.listeners: {len(flow_config.get('listeners', []))}"
+                )
+        logger.info("=" * 100)
 
         # Generate run_name if not provided
         if not run_name and config:
             try:
-                from src.services.execution.naming import ExecutionNameService
                 from src.schemas.execution import ExecutionNameGenerationRequest
+                from src.services.execution.naming import ExecutionNameService
 
                 # Extract agents/tasks from nodes for name generation
                 agents_yaml = {}
                 tasks_yaml = {}
-                nodes = config.get('nodes', [])
+                nodes = config.get("nodes", [])
 
                 for node in nodes:
-                    node_type = node.get('type', '').lower()
-                    node_data = node.get('data', {})
+                    node_type = node.get("type", "").lower()
+                    node_data = node.get("data", {})
 
-                    if node_type == 'crewnode':
-                        all_agents = node_data.get('allAgents', node_data.get('agents', []))
-                        all_tasks = node_data.get('allTasks', node_data.get('tasks', []))
+                    if node_type == "crewnode":
+                        all_agents = node_data.get(
+                            "allAgents", node_data.get("agents", [])
+                        )
+                        all_tasks = node_data.get(
+                            "allTasks", node_data.get("tasks", [])
+                        )
 
                         for agent in all_agents:
-                            agent_id = agent.get('id', f"agent_{len(agents_yaml)}")
+                            agent_id = agent.get("id", f"agent_{len(agents_yaml)}")
                             agents_yaml[agent_id] = {
-                                'role': agent.get('role', agent.get('name', 'Agent')),
-                                'goal': agent.get('goal', ''),
-                                'backstory': agent.get('backstory', '')
+                                "role": agent.get("role", agent.get("name", "Agent")),
+                                "goal": agent.get("goal", ""),
+                                "backstory": agent.get("backstory", ""),
                             }
 
                         for task in all_tasks:
-                            task_id = task.get('id', f"task_{len(tasks_yaml)}")
+                            task_id = task.get("id", f"task_{len(tasks_yaml)}")
                             tasks_yaml[task_id] = {
-                                'name': task.get('name', task.get('description', 'Task')[:50] if task.get('description') else 'Task'),
-                                'description': task.get('description', ''),
-                                'expected_output': task.get('expected_output', task.get('expectedOutput', ''))
+                                "name": task.get(
+                                    "name",
+                                    (
+                                        task.get("description", "Task")[:50]
+                                        if task.get("description")
+                                        else "Task"
+                                    ),
+                                ),
+                                "description": task.get("description", ""),
+                                "expected_output": task.get(
+                                    "expected_output", task.get("expectedOutput", "")
+                                ),
                             }
 
                 if agents_yaml or tasks_yaml:
@@ -134,7 +158,7 @@ class KasalFlowService:
                     request = ExecutionNameGenerationRequest(
                         agents_yaml=agents_yaml,
                         tasks_yaml=tasks_yaml,
-                        model=config.get('model')
+                        model=config.get("model"),
                     )
                     response = await name_service.generate_execution_name(request)
                     run_name = response.name
@@ -154,6 +178,7 @@ class KasalFlowService:
             # _running_jobs dict, and the cancel path in ExecutionService builds
             # its own fresh KasalEngineService anyway.
             from src.services.execution.engine_factory import EngineFactory
+
             engine = await EngineFactory.get_engine(engine_type="kasal")
 
             if not engine:
@@ -161,24 +186,24 @@ class KasalFlowService:
 
             # Prepare flow config for engine
             flow_config = {
-                'flow_id': str(flow_id) if flow_id else None,
-                'run_name': run_name,
-                'nodes': config.get('nodes', []) if config else [],
-                'edges': config.get('edges', []) if config else [],
-                'flow_config': config.get('flow_config', {}) if config else {},
-                'inputs': config.get('inputs', {}) if config else {},
-                'model': config.get('model') if config else None,
+                "flow_id": str(flow_id) if flow_id else None,
+                "run_name": run_name,
+                "nodes": config.get("nodes", []) if config else [],
+                "edges": config.get("edges", []) if config else [],
+                "flow_config": config.get("flow_config", {}) if config else {},
+                "inputs": config.get("inputs", {}) if config else {},
+                "model": config.get("model") if config else None,
                 # Checkpoint resume parameters
-                'resume_from_flow_uuid': resume_from_flow_uuid,
-                'resume_from_execution_id': resume_from_execution_id,
-                'resume_from_crew_sequence': resume_from_crew_sequence
+                "resume_from_flow_uuid": resume_from_flow_uuid,
+                "resume_from_execution_id": resume_from_execution_id,
+                "resume_from_crew_sequence": resume_from_crew_sequence,
             }
 
             # Add group_context to config if provided
             if group_context:
-                flow_config['group_context'] = group_context
-                if hasattr(group_context, 'primary_group_id'):
-                    flow_config['group_id'] = group_context.primary_group_id
+                flow_config["group_context"] = group_context
+                if hasattr(group_context, "primary_group_id"):
+                    flow_config["group_id"] = group_context.primary_group_id
 
             logger.info(f"[KasalFlowService] Calling engine.run_flow() for {job_id}")
 
@@ -187,10 +212,12 @@ class KasalFlowService:
                 execution_id=job_id,
                 flow_config=flow_config,
                 group_context=group_context,
-                user_token=user_token
+                user_token=user_token,
             )
 
-            logger.info(f"[KasalFlowService] Engine.run_flow() returned execution_id: {execution_id}")
+            logger.info(
+                f"[KasalFlowService] Engine.run_flow() returned execution_id: {execution_id}"
+            )
 
             # Build response message
             if resume_from_flow_uuid:
@@ -203,18 +230,21 @@ class KasalFlowService:
                 "execution_id": execution_id,
                 "job_id": job_id,
                 "message": message,
-                "resumed_from": resume_from_execution_id if resume_from_flow_uuid else None
+                "resumed_from": (
+                    resume_from_execution_id if resume_from_flow_uuid else None
+                ),
             }
 
         except Exception as e:
             error_msg = f"Error executing flow: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=error_msg
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg
             )
-    
-    async def get_flow_execution(self, execution_id: int, group_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+
+    async def get_flow_execution(
+        self, execution_id: int, group_ids: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """
         Get details for a specific flow execution.
 
@@ -229,16 +259,19 @@ class KasalFlowService:
         """
         try:
             flow_runner = self._get_flow_runner()
-            return await flow_runner.get_flow_execution(execution_id, group_ids=group_ids)
+            return await flow_runner.get_flow_execution(
+                execution_id, group_ids=group_ids
+            )
         except Exception as e:
             error_msg = f"Error getting flow execution: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=error_msg
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg
             )
-    
-    async def get_flow_executions_by_flow(self, flow_id: Union[uuid.UUID, str], group_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+
+    async def get_flow_executions_by_flow(
+        self, flow_id: Union[uuid.UUID, str], group_ids: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """
         Get all executions for a specific flow.
 
@@ -258,11 +291,13 @@ class KasalFlowService:
                 except ValueError:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Invalid flow_id format: {flow_id}"
+                        detail=f"Invalid flow_id format: {flow_id}",
                     )
 
             flow_runner = self._get_flow_runner()
-            return await flow_runner.get_flow_executions_by_flow(flow_id, group_ids=group_ids)
+            return await flow_runner.get_flow_executions_by_flow(
+                flow_id, group_ids=group_ids
+            )
         except HTTPException:
             # Re-raise HTTP exceptions
             raise
@@ -270,6 +305,5 @@ class KasalFlowService:
             error_msg = f"Error getting flow executions: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=error_msg
-            ) 
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg
+            )

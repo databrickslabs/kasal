@@ -15,8 +15,9 @@ Strategy:
 
 import base64
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.tools.powerbi_report_references_tool import (
     PowerBIReportReferencesSchema,
@@ -58,6 +59,7 @@ def _b64_text(text: str) -> str:
 # Schema tests
 # ===========================================================================
 
+
 class TestPowerBIReportReferencesSchema:
     def test_all_fields_optional(self):
         schema = PowerBIReportReferencesSchema()
@@ -71,10 +73,20 @@ class TestPowerBIReportReferencesSchema:
         # Connection/auth plumbing is injected via tool_configs in __init__,
         # never exposed as LLM-fillable schema parameters.
         forbidden = {
-            "workspace_id", "dataset_id", "tenant_id", "client_id",
-            "client_secret", "username", "password", "auth_method",
-            "access_token", "llm_token", "api_key", "token",
-            "llm_workspace_url", "llm_model",
+            "workspace_id",
+            "dataset_id",
+            "tenant_id",
+            "client_id",
+            "client_secret",
+            "username",
+            "password",
+            "auth_method",
+            "access_token",
+            "llm_token",
+            "api_key",
+            "token",
+            "llm_workspace_url",
+            "llm_model",
         }
         assert not forbidden & set(PowerBIReportReferencesSchema.model_fields)
 
@@ -94,6 +106,7 @@ class TestPowerBIReportReferencesSchema:
 # ===========================================================================
 # Init tests
 # ===========================================================================
+
 
 class TestPowerBIReportReferencesToolInit:
     def test_tool_name(self):
@@ -134,6 +147,7 @@ class TestPowerBIReportReferencesToolInit:
 # _resolve_placeholder tests
 # ===========================================================================
 
+
 class TestResolvePlaceholder:
     def setup_method(self):
         self.tool = PowerBIReportReferencesTool()
@@ -170,11 +184,10 @@ class TestResolvePlaceholder:
 # _run validation tests
 # ===========================================================================
 
+
 class TestRunValidation:
     def test_missing_workspace_id_returns_error(self):
-        tool = PowerBIReportReferencesTool(
-            dataset_id=DS_ID, access_token=ACCESS_TOKEN
-        )
+        tool = PowerBIReportReferencesTool(dataset_id=DS_ID, access_token=ACCESS_TOKEN)
         result = tool._run(dataset_id=DS_ID)
         assert "error" in result.lower() or "workspace_id" in result.lower()
 
@@ -204,19 +217,26 @@ class TestRunValidation:
     def test_placeholder_kwargs_filtered(self):
         tool = _make_tool()
         # Placeholder in runtime kwarg — should be filtered out and default used
-        with patch(
-            "src.services.tools.powerbi_auth_utils.validate_auth_config",
-            return_value=(True, ""),
-        ), patch.object(tool, "_run_sync", return_value="ok"):
+        with (
+            patch(
+                "src.services.tools.powerbi_auth_utils.validate_auth_config",
+                return_value=(True, ""),
+            ),
+            patch.object(tool, "_run_sync", return_value="ok"),
+        ):
             result = tool._run(workspace_id="your_workspace_here")
         # Should succeed (default config workspace used)
         assert isinstance(result, str)
 
-    @patch("src.services.tools.powerbi_auth_utils.validate_auth_config",
-           return_value=(True, ""))
+    @patch(
+        "src.services.tools.powerbi_auth_utils.validate_auth_config",
+        return_value=(True, ""),
+    )
     def test_run_with_valid_auth_calls_run_sync(self, _mock_validate):
         tool = _make_tool()
-        with patch.object(tool, "_run_sync", return_value="extracted result") as mock_sync:
+        with patch.object(
+            tool, "_run_sync", return_value="extracted result"
+        ) as mock_sync:
             result = tool._run()
         mock_sync.assert_called_once()
         assert result == "extracted result"
@@ -225,6 +245,7 @@ class TestRunValidation:
 # ===========================================================================
 # _build_report_url and _build_page_url tests
 # ===========================================================================
+
 
 class TestUrlBuilders:
     def setup_method(self):
@@ -252,6 +273,7 @@ class TestUrlBuilders:
 # _parse_report_info tests
 # ===========================================================================
 
+
 class TestParseReportInfo:
     def setup_method(self):
         self.tool = PowerBIReportReferencesTool()
@@ -261,7 +283,10 @@ class TestParseReportInfo:
         assert result == {}
 
     def test_no_report_json_part_returns_empty(self):
-        part = {"path": "definition/pages/page1/page.json", "payload": _b64({"name": "p1"})}
+        part = {
+            "path": "definition/pages/page1/page.json",
+            "payload": _b64({"name": "p1"}),
+        }
         result = self.tool._parse_report_info([part])
         assert result == {}
 
@@ -280,6 +305,7 @@ class TestParseReportInfo:
 # ===========================================================================
 # _parse_pages tests
 # ===========================================================================
+
 
 class TestParsePages:
     def setup_method(self):
@@ -323,9 +349,7 @@ class TestParsePages:
 
     def test_report_json_sections_key(self):
         report_data = {
-            "sections": [
-                {"name": "s1", "displayName": "Section 1", "ordinal": 0}
-            ]
+            "sections": [{"name": "s1", "displayName": "Section 1", "ordinal": 0}]
         }
         part = {"path": "report.json", "payload": _b64(report_data)}
         result = self.tool._parse_pages([part])
@@ -340,6 +364,7 @@ class TestParsePages:
 # ===========================================================================
 # _parse_pages_from_report_json tests
 # ===========================================================================
+
 
 class TestParsePagesFromReportJson:
     def setup_method(self):
@@ -363,6 +388,7 @@ class TestParsePagesFromReportJson:
 # ===========================================================================
 # _parse_visuals tests
 # ===========================================================================
+
 
 class TestParseVisuals:
     def setup_method(self):
@@ -409,6 +435,7 @@ class TestParseVisuals:
 # _extract_visual_references tests
 # ===========================================================================
 
+
 class TestExtractVisualReferences:
     def setup_method(self):
         self.tool = PowerBIReportReferencesTool()
@@ -418,7 +445,13 @@ class TestExtractVisualReferences:
         assert result == []
 
     def test_visual_with_no_config_returns_entry(self):
-        visual = {"id": "v1", "page_id": "p1", "type": "card", "name": "V1", "config": {}}
+        visual = {
+            "id": "v1",
+            "page_id": "p1",
+            "type": "card",
+            "name": "V1",
+            "config": {},
+        }
         result = self.tool._extract_visual_references([visual])
         assert len(result) == 1
         assert result[0]["visual_id"] == "v1"
@@ -430,13 +463,17 @@ class TestExtractVisualReferences:
             "visual": {
                 "queryDefinition": {
                     "from": [{"entity": "Sales"}],
-                    "select": [
-                        {"measure": {"property": "Total Revenue"}}
-                    ],
+                    "select": [{"measure": {"property": "Total Revenue"}}],
                 }
             }
         }
-        visual = {"id": "v1", "page_id": "p1", "type": "card", "name": "V1", "config": config}
+        visual = {
+            "id": "v1",
+            "page_id": "p1",
+            "type": "card",
+            "name": "V1",
+            "config": config,
+        }
         result = self.tool._extract_visual_references([visual])
         assert "Total Revenue" in result[0]["measures"]
         assert "Sales" in result[0]["tables"]
@@ -444,14 +481,26 @@ class TestExtractVisualReferences:
     def test_visual_with_string_config_parsed(self):
         config_dict = {"visual": {"queryDefinition": {"from": [], "select": []}}}
         config_str = json.dumps(config_dict)
-        visual = {"id": "v2", "page_id": "p1", "type": "card", "name": "V2", "config": config_str}
+        visual = {
+            "id": "v2",
+            "page_id": "p1",
+            "type": "card",
+            "name": "V2",
+            "config": config_str,
+        }
         result = self.tool._extract_visual_references([visual])
         assert len(result) == 1
         assert result[0]["visual_id"] == "v2"
 
     def test_multiple_visuals(self):
         visuals = [
-            {"id": f"v{i}", "page_id": "p1", "type": "card", "name": f"V{i}", "config": {}}
+            {
+                "id": f"v{i}",
+                "page_id": "p1",
+                "type": "card",
+                "name": f"V{i}",
+                "config": {},
+            }
             for i in range(3)
         ]
         result = self.tool._extract_visual_references(visuals)
@@ -461,6 +510,7 @@ class TestExtractVisualReferences:
 # ===========================================================================
 # _build_cross_reference tests
 # ===========================================================================
+
 
 class TestBuildCrossReference:
     def setup_method(self):
@@ -492,8 +542,24 @@ class TestBuildCrossReference:
             {"id": "p2", "displayName": "Page 2"},
         ]
         refs = [
-            {"visual_id": "v1", "page_id": "p1", "measures": ["M1"], "tables": [], "columns": [], "visual_type": "card", "visual_name": "V1"},
-            {"visual_id": "v2", "page_id": "p2", "measures": ["M1", "M2"], "tables": ["T1"], "columns": [], "visual_type": "bar", "visual_name": "V2"},
+            {
+                "visual_id": "v1",
+                "page_id": "p1",
+                "measures": ["M1"],
+                "tables": [],
+                "columns": [],
+                "visual_type": "card",
+                "visual_name": "V1",
+            },
+            {
+                "visual_id": "v2",
+                "page_id": "p2",
+                "measures": ["M1", "M2"],
+                "tables": ["T1"],
+                "columns": [],
+                "visual_type": "bar",
+                "visual_name": "V2",
+            },
         ]
         result = self.tool._build_cross_reference(pages, refs)
         assert isinstance(result, dict)
@@ -502,6 +568,7 @@ class TestBuildCrossReference:
 # ===========================================================================
 # _extract_from_query_definition tests
 # ===========================================================================
+
 
 class TestExtractFromQueryDefinition:
     def setup_method(self):
@@ -538,6 +605,7 @@ class TestExtractFromQueryDefinition:
 # _run_sync tests
 # ===========================================================================
 
+
 class TestRunSync:
     def test_run_sync_executes_coroutine(self):
         tool = PowerBIReportReferencesTool()
@@ -562,25 +630,32 @@ class TestRunSync:
 # Integration: _run with mocked _run_sync
 # ===========================================================================
 
+
 class TestRunIntegration:
-    @patch("src.services.tools.powerbi_auth_utils.validate_auth_config",
-           return_value=(True, ""))
+    @patch(
+        "src.services.tools.powerbi_auth_utils.validate_auth_config",
+        return_value=(True, ""),
+    )
     def test_run_returns_run_sync_result(self, _validate):
         tool = _make_tool()
         with patch.object(tool, "_run_sync", return_value="# markdown output"):
             result = tool._run()
         assert result == "# markdown output"
 
-    @patch("src.services.tools.powerbi_auth_utils.validate_auth_config",
-           return_value=(True, ""))
+    @patch(
+        "src.services.tools.powerbi_auth_utils.validate_auth_config",
+        return_value=(True, ""),
+    )
     def test_run_exception_returns_error_string(self, _validate):
         tool = _make_tool()
         with patch.object(tool, "_run_sync", side_effect=Exception("unexpected")):
             result = tool._run()
         assert "error" in result.lower() or "unexpected" in result.lower()
 
-    @patch("src.services.tools.powerbi_auth_utils.validate_auth_config",
-           return_value=(True, ""))
+    @patch(
+        "src.services.tools.powerbi_auth_utils.validate_auth_config",
+        return_value=(True, ""),
+    )
     def test_run_with_execution_inputs(self, _validate):
         tool = PowerBIReportReferencesTool(
             workspace_id="{ws}",
@@ -601,10 +676,10 @@ class TestRunIntegration:
 
 import asyncio
 
-
 # ===========================================================================
 # _format_markdown_output tests
 # ===========================================================================
+
 
 class TestFormatMarkdownOutput:
     """Tests for _format_markdown_output."""
@@ -613,7 +688,13 @@ class TestFormatMarkdownOutput:
         self.tool = PowerBIReportReferencesTool()
 
     def _make_page(self, page_id, name, ordinal=0):
-        return {"id": page_id, "name": name, "displayName": name, "ordinal": ordinal, "url": f"https://powerbi.com/rpt/{page_id}"}
+        return {
+            "id": page_id,
+            "name": name,
+            "displayName": name,
+            "ordinal": ordinal,
+            "url": f"https://powerbi.com/rpt/{page_id}",
+        }
 
     def _make_visual_ref(self, visual_id, page_id, measures=None, tables=None):
         return {
@@ -653,10 +734,7 @@ class TestFormatMarkdownOutput:
     def test_group_by_measure(self):
         pages = [self._make_page("p1", "Overview")]
         refs = [self._make_visual_ref("v1", "p1", measures=["Revenue"])]
-        cross_ref = {
-            "measure_pages": {"Revenue": ["Overview"]},
-            "table_pages": {}
-        }
+        cross_ref = {"measure_pages": {"Revenue": ["Overview"]}, "table_pages": {}}
         result = self.tool._format_markdown_output(
             WS_ID, REPORT_ID, {}, pages, refs, cross_ref, True, "measure"
         )
@@ -666,10 +744,7 @@ class TestFormatMarkdownOutput:
     def test_group_by_table(self):
         pages = [self._make_page("p1", "Overview")]
         refs = [self._make_visual_ref("v1", "p1", tables=["Sales"])]
-        cross_ref = {
-            "measure_pages": {},
-            "table_pages": {"Sales": ["Overview"]}
-        }
+        cross_ref = {"measure_pages": {}, "table_pages": {"Sales": ["Overview"]}}
         result = self.tool._format_markdown_output(
             WS_ID, REPORT_ID, {}, pages, refs, cross_ref, True, "table"
         )
@@ -685,7 +760,14 @@ class TestFormatMarkdownOutput:
         pages = [self._make_page("p1", "Overview")]
         refs = [self._make_visual_ref("v1", "p1", measures=["M1"], tables=["T1"])]
         result = self.tool._format_markdown_output(
-            WS_ID, REPORT_ID, {}, pages, refs, {}, True, "page"  # include_visual_details=True
+            WS_ID,
+            REPORT_ID,
+            {},
+            pages,
+            refs,
+            {},
+            True,
+            "page",  # include_visual_details=True
         )
         assert "Visual Details" in result
 
@@ -693,7 +775,14 @@ class TestFormatMarkdownOutput:
         pages = [self._make_page("p1", "Overview")]
         refs = [self._make_visual_ref("v1", "p1", measures=["M1"])]
         result = self.tool._format_markdown_output(
-            WS_ID, REPORT_ID, {}, pages, refs, {}, False, "page"  # include_visual_details=False
+            WS_ID,
+            REPORT_ID,
+            {},
+            pages,
+            refs,
+            {},
+            False,
+            "page",  # include_visual_details=False
         )
         assert isinstance(result, str)
 
@@ -702,6 +791,7 @@ class TestFormatMarkdownOutput:
 # _format_json_output tests
 # ===========================================================================
 
+
 class TestFormatJsonOutput:
     """Tests for _format_json_output."""
 
@@ -709,33 +799,37 @@ class TestFormatJsonOutput:
         self.tool = PowerBIReportReferencesTool()
 
     def test_returns_valid_json(self):
-        result = self.tool._format_json_output(
-            WS_ID, REPORT_ID, {}, [], [], {}
-        )
+        result = self.tool._format_json_output(WS_ID, REPORT_ID, {}, [], [], {})
         parsed = json.loads(result)
         assert "workspace_id" in parsed
         assert parsed["workspace_id"] == WS_ID
 
     def test_report_id_in_json(self):
-        result = self.tool._format_json_output(
-            WS_ID, REPORT_ID, {}, [], [], {}
-        )
+        result = self.tool._format_json_output(WS_ID, REPORT_ID, {}, [], [], {})
         parsed = json.loads(result)
         assert parsed.get("report_id") == REPORT_ID
 
     def test_pages_in_json(self):
-        pages = [{"id": "p1", "name": "Overview", "displayName": "Overview", "ordinal": 0}]
-        result = self.tool._format_json_output(
-            WS_ID, REPORT_ID, {}, pages, [], {}
-        )
+        pages = [
+            {"id": "p1", "name": "Overview", "displayName": "Overview", "ordinal": 0}
+        ]
+        result = self.tool._format_json_output(WS_ID, REPORT_ID, {}, pages, [], {})
         parsed = json.loads(result)
         assert len(parsed.get("pages", [])) == 1
 
     def test_visual_refs_in_json(self):
-        refs = [{"visual_id": "v1", "page_id": "p1", "measures": ["M1"], "tables": [], "columns": [], "visual_type": "card", "visual_name": "v1"}]
-        result = self.tool._format_json_output(
-            WS_ID, REPORT_ID, {}, [], refs, {}
-        )
+        refs = [
+            {
+                "visual_id": "v1",
+                "page_id": "p1",
+                "measures": ["M1"],
+                "tables": [],
+                "columns": [],
+                "visual_type": "card",
+                "visual_name": "v1",
+            }
+        ]
+        result = self.tool._format_json_output(WS_ID, REPORT_ID, {}, [], refs, {})
         parsed = json.loads(result)
         assert len(parsed.get("visual_references", [])) == 1
 
@@ -743,6 +837,7 @@ class TestFormatJsonOutput:
 # ===========================================================================
 # _format_matrix_output tests
 # ===========================================================================
+
 
 class TestFormatMatrixOutput:
     """Tests for _format_matrix_output."""
@@ -752,21 +847,30 @@ class TestFormatMatrixOutput:
 
     def test_returns_string(self):
         # _format_matrix_output(workspace_id, report_id, report_info, pages, visual_refs, cross_ref)
-        result = self.tool._format_matrix_output(
-            WS_ID, REPORT_ID, {}, [], [], {}
-        )
+        result = self.tool._format_matrix_output(WS_ID, REPORT_ID, {}, [], [], {})
         assert isinstance(result, str)
 
     def test_report_id_in_output(self):
-        result = self.tool._format_matrix_output(
-            WS_ID, REPORT_ID, {}, [], [], {}
-        )
+        result = self.tool._format_matrix_output(WS_ID, REPORT_ID, {}, [], [], {})
         assert REPORT_ID in result or isinstance(result, str)
 
     def test_with_pages_and_refs(self):
         pages = [{"id": "p1", "displayName": "Overview"}]
-        refs = [{"visual_id": "v1", "page_id": "p1", "measures": ["Revenue"], "tables": ["Sales"], "columns": [], "visual_type": "card", "visual_name": "v1"}]
-        cross_ref = {"measure_pages": {"Revenue": ["Overview"]}, "table_pages": {"Sales": ["Overview"]}}
+        refs = [
+            {
+                "visual_id": "v1",
+                "page_id": "p1",
+                "measures": ["Revenue"],
+                "tables": ["Sales"],
+                "columns": [],
+                "visual_type": "card",
+                "visual_name": "v1",
+            }
+        ]
+        cross_ref = {
+            "measure_pages": {"Revenue": ["Overview"]},
+            "table_pages": {"Sales": ["Overview"]},
+        }
         result = self.tool._format_matrix_output(
             WS_ID, REPORT_ID, {"name": "Report"}, pages, refs, cross_ref
         )
@@ -776,6 +880,7 @@ class TestFormatMatrixOutput:
 # ===========================================================================
 # Async methods: _list_workspace_reports, _fetch_report_definition
 # ===========================================================================
+
 
 class TestReportReferencesAsyncHelpers:
     """Tests for async helper methods in PowerBIReportReferencesTool."""
@@ -787,9 +892,7 @@ class TestReportReferencesAsyncHelpers:
         return asyncio.run(coro)
 
     def test_list_workspace_reports_success(self):
-        reports = [
-            {"id": "r1", "name": "Sales Report", "datasetId": DS_ID}
-        ]
+        reports = [{"id": "r1", "name": "Sales Report", "datasetId": DS_ID}]
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
         mock_response.json.return_value = {"value": reports}
@@ -799,7 +902,10 @@ class TestReportReferencesAsyncHelpers:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.get = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_report_references_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(self.tool._list_workspace_reports(WS_ID, ACCESS_TOKEN))
 
         assert len(result) == 1
@@ -811,7 +917,10 @@ class TestReportReferencesAsyncHelpers:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.get = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_report_references_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(self.tool._list_workspace_reports(WS_ID, ACCESS_TOKEN))
 
         assert result == []
@@ -827,8 +936,13 @@ class TestReportReferencesAsyncHelpers:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_report_references_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN))
+        with patch(
+            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
+            )
 
         assert len(result) == 1
         assert result[0]["path"] == "definition/report.json"
@@ -842,8 +956,13 @@ class TestReportReferencesAsyncHelpers:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_report_references_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN))
+        with patch(
+            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
+            )
 
         assert result == []
 
@@ -853,8 +972,13 @@ class TestReportReferencesAsyncHelpers:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_report_references_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN))
+        with patch(
+            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
+            )
 
         assert result == []
 
@@ -862,6 +986,7 @@ class TestReportReferencesAsyncHelpers:
 # ===========================================================================
 # _format_markdown_output_multi tests
 # ===========================================================================
+
 
 class TestFormatMarkdownOutputMulti:
     """Tests for _format_markdown_output_multi."""
@@ -919,6 +1044,7 @@ class TestFormatMarkdownOutputMulti:
 # _format_json_output_multi tests
 # ===========================================================================
 
+
 class TestFormatJsonOutputMulti:
     """Tests for _format_json_output_multi."""
 
@@ -926,28 +1052,32 @@ class TestFormatJsonOutputMulti:
         self.tool = PowerBIReportReferencesTool()
 
     def test_returns_valid_json(self):
-        results = [{
-            "report_id": "r1",
-            "report_name": "Sales Report",
-            "report_url": "https://powerbi.com/r/r1",
-            "pages": [],
-            "visual_references": [],
-            "cross_ref": {},
-        }]
+        results = [
+            {
+                "report_id": "r1",
+                "report_name": "Sales Report",
+                "report_url": "https://powerbi.com/r/r1",
+                "pages": [],
+                "visual_references": [],
+                "cross_ref": {},
+            }
+        ]
         output = self.tool._format_json_output_multi(WS_ID, DS_ID, results, [])
         parsed = json.loads(output)
         assert "workspace_id" in parsed
         assert "reports" in parsed
 
     def test_failed_reports_included(self):
-        results = [{
-            "report_id": "r1",
-            "report_name": "Report",
-            "report_url": "",
-            "pages": [],
-            "visual_references": [],
-            "cross_ref": {},
-        }]
+        results = [
+            {
+                "report_id": "r1",
+                "report_name": "Report",
+                "report_url": "",
+                "pages": [],
+                "visual_references": [],
+                "cross_ref": {},
+            }
+        ]
         failed = [{"id": "r2", "name": "Bad", "error": "Access denied"}]
         output = self.tool._format_json_output_multi(WS_ID, DS_ID, results, failed)
         parsed = json.loads(output)
@@ -957,6 +1087,7 @@ class TestFormatJsonOutputMulti:
 # ===========================================================================
 # _parse_pages_from_report_json tests (report references tool)
 # ===========================================================================
+
 
 class TestReportRefsParsePagesFromReportJson:
     """Tests for _parse_pages_from_report_json on the report references tool."""
@@ -995,6 +1126,7 @@ class TestReportRefsParsePagesFromReportJson:
 # _parse_visuals_from_report_json tests
 # ===========================================================================
 
+
 class TestParseVisualsFromReportJson:
     """Tests for _parse_visuals_from_report_json."""
 
@@ -1018,9 +1150,11 @@ class TestParseVisualsFromReportJson:
                         {
                             "name": "vis1",
                             "visualType": "card",
-                            "config": json.dumps({"singleVisual": {"visualType": "card"}}),
+                            "config": json.dumps(
+                                {"singleVisual": {"visualType": "card"}}
+                            ),
                         }
-                    ]
+                    ],
                 }
             ]
         }
@@ -1034,9 +1168,7 @@ class TestParseVisualsFromReportJson:
             "pages": [
                 {
                     "name": "p1",
-                    "visuals": [
-                        {"name": "v1", "visual": {"visualType": "barChart"}}
-                    ]
+                    "visuals": [{"name": "v1", "visual": {"visualType": "barChart"}}],
                 }
             ]
         }
@@ -1051,9 +1183,7 @@ class TestParseVisualsFromReportJson:
             "sections": [
                 {
                     "name": "sec1",
-                    "visualContainers": [
-                        {"name": "vis2", "visualType": "lineChart"}
-                    ]
+                    "visualContainers": [{"name": "vis2", "visualType": "lineChart"}],
                 }
             ]
         }
@@ -1071,7 +1201,7 @@ class TestParseVisualsFromReportJson:
                             "name": "vis3",
                             "config": {"singleVisual": {"visualType": "table"}},
                         }
-                    ]
+                    ],
                 }
             ]
         }
@@ -1085,9 +1215,7 @@ class TestParseVisualsFromReportJson:
             "reportPages": [
                 {
                     "name": "rp1",
-                    "visualContainers": [
-                        {"name": "v1", "visualType": "card"}
-                    ]
+                    "visualContainers": [{"name": "v1", "visualType": "card"}],
                 }
             ]
         }
@@ -1105,7 +1233,7 @@ class TestParseVisualsFromReportJson:
                             "name": "v1",
                             "visual": {"visualType": "pieChart"},
                         }
-                    ]
+                    ],
                 }
             ]
         }
@@ -1130,6 +1258,7 @@ class TestParseVisualsFromReportJson:
 # _extract_from_container_objects tests
 # ===========================================================================
 
+
 class TestExtractFromContainerObjects:
     def setup_method(self):
         self.tool = PowerBIReportReferencesTool()
@@ -1144,29 +1273,30 @@ class TestExtractFromContainerObjects:
             "filter": [
                 {
                     "properties": {
-                        "filter": {
-                            "expr": {
-                                "Measure": {"Property": "Revenue"}
-                            }
-                        }
+                        "filter": {"expr": {"Measure": {"Property": "Revenue"}}}
                     }
                 }
             ]
         }
         measures, tables, columns = set(), set(), set()
-        self.tool._extract_from_container_objects(container_objects, measures, tables, columns)
+        self.tool._extract_from_container_objects(
+            container_objects, measures, tables, columns
+        )
         assert "Revenue" in measures
 
     def test_non_list_value_skipped(self):
         container_objects = {"config": "not a list"}
         measures, tables, columns = set(), set(), set()
-        self.tool._extract_from_container_objects(container_objects, measures, tables, columns)
+        self.tool._extract_from_container_objects(
+            container_objects, measures, tables, columns
+        )
         assert measures == set()
 
 
 # ===========================================================================
 # _extract_from_projections tests
 # ===========================================================================
+
 
 class TestExtractFromProjections:
     def setup_method(self):
@@ -1178,22 +1308,14 @@ class TestExtractFromProjections:
         assert measures == set()
 
     def test_values_role_adds_measure(self):
-        projections = {
-            "Values": [
-                {"queryRef": "Sales.Revenue"}
-            ]
-        }
+        projections = {"Values": [{"queryRef": "Sales.Revenue"}]}
         measures, tables, columns = set(), set(), set()
         self.tool._extract_from_projections(projections, measures, tables, columns)
         assert "Sales" in tables
         assert "Revenue" in measures
 
     def test_category_role_adds_column(self):
-        projections = {
-            "Category": [
-                {"queryRef": "Date.Year"}
-            ]
-        }
+        projections = {"Category": [{"queryRef": "Date.Year"}]}
         measures, tables, columns = set(), set(), set()
         self.tool._extract_from_projections(projections, measures, tables, columns)
         assert "Date" in tables
@@ -1206,7 +1328,7 @@ class TestExtractFromProjections:
                     "field": {
                         "Measure": {
                             "Property": "Total Sales",
-                            "Expression": {"SourceRef": {"Entity": "FactSales"}}
+                            "Expression": {"SourceRef": {"Entity": "FactSales"}},
                         }
                     }
                 }
@@ -1224,7 +1346,7 @@ class TestExtractFromProjections:
                     "field": {
                         "Column": {
                             "Property": "Region",
-                            "Expression": {"SourceRef": {"Entity": "DimGeography"}}
+                            "Expression": {"SourceRef": {"Entity": "DimGeography"}},
                         }
                     }
                 }
@@ -1242,9 +1364,7 @@ class TestExtractFromProjections:
         assert measures == set()
 
     def test_query_ref_without_dot_skipped(self):
-        projections = {
-            "Values": [{"queryRef": "NoDotHere"}]
-        }
+        projections = {"Values": [{"queryRef": "NoDotHere"}]}
         measures, tables, columns = set(), set(), set()
         self.tool._extract_from_projections(projections, measures, tables, columns)
         assert measures == set()
@@ -1254,6 +1374,7 @@ class TestExtractFromProjections:
 # ===========================================================================
 # _extract_from_prototype_query tests
 # ===========================================================================
+
 
 class TestExtractFromPrototypeQuery:
     def setup_method(self):
@@ -1265,10 +1386,7 @@ class TestExtractFromPrototypeQuery:
         assert measures == set()
 
     def test_from_clause_populates_tables(self):
-        pq = {
-            "From": [{"Entity": "Sales", "Name": "s"}],
-            "Select": []
-        }
+        pq = {"From": [{"Entity": "Sales", "Name": "s"}], "Select": []}
         measures, tables, columns = set(), set(), set()
         self.tool._extract_from_prototype_query(pq, measures, tables, columns)
         assert "Sales" in tables
@@ -1280,11 +1398,11 @@ class TestExtractFromPrototypeQuery:
                 {
                     "Measure": {
                         "Property": "Total Revenue",
-                        "Expression": {"SourceRef": {"Source": "s"}}
+                        "Expression": {"SourceRef": {"Source": "s"}},
                     },
-                    "Name": "Sales.Total Revenue"
+                    "Name": "Sales.Total Revenue",
                 }
-            ]
+            ],
         }
         measures, tables, columns = set(), set(), set()
         self.tool._extract_from_prototype_query(pq, measures, tables, columns)
@@ -1298,11 +1416,11 @@ class TestExtractFromPrototypeQuery:
                 {
                     "Column": {
                         "Property": "Year",
-                        "Expression": {"SourceRef": {"Source": "d"}}
+                        "Expression": {"SourceRef": {"Source": "d"}},
                     },
-                    "Name": "Date.Year"
+                    "Name": "Date.Year",
                 }
-            ]
+            ],
         }
         measures, tables, columns = set(), set(), set()
         self.tool._extract_from_prototype_query(pq, measures, tables, columns)
@@ -1312,9 +1430,7 @@ class TestExtractFromPrototypeQuery:
     def test_lowercase_from_and_select_supported(self):
         pq = {
             "from": [{"entity": "Fact", "name": "f"}],
-            "select": [
-                {"Measure": {"Property": "Metric"}}
-            ]
+            "select": [{"Measure": {"Property": "Metric"}}],
         }
         measures, tables, columns = set(), set(), set()
         self.tool._extract_from_prototype_query(pq, measures, tables, columns)
@@ -1328,10 +1444,10 @@ class TestExtractFromPrototypeQuery:
                 {
                     "Measure": {
                         "Property": "Metric",
-                        "Expression": {"SourceRef": {"Entity": "DirectEntity"}}
+                        "Expression": {"SourceRef": {"Entity": "DirectEntity"}},
                     }
                 }
-            ]
+            ],
         }
         measures, tables, columns = set(), set(), set()
         self.tool._extract_from_prototype_query(pq, measures, tables, columns)
@@ -1341,6 +1457,7 @@ class TestExtractFromPrototypeQuery:
 # ===========================================================================
 # _extract_from_data_transforms tests
 # ===========================================================================
+
 
 class TestExtractFromDataTransforms:
     def setup_method(self):
@@ -1353,9 +1470,7 @@ class TestExtractFromDataTransforms:
 
     def test_selects_with_table_field(self):
         dt = {
-            "selects": [
-                {"displayName": "Sales.Revenue", "queryName": "Sales.Revenue"}
-            ]
+            "selects": [{"displayName": "Sales.Revenue", "queryName": "Sales.Revenue"}]
         }
         measures, tables, columns = set(), set(), set()
         self.tool._extract_from_data_transforms(dt, measures, tables, columns)
@@ -1364,16 +1479,10 @@ class TestExtractFromDataTransforms:
 
     def test_query_metadata_binding_projections(self):
         dt = {
-            "selects": [
-                {"displayName": "T1.Col1", "queryName": "T1.Col1"}
-            ],
+            "selects": [{"displayName": "T1.Col1", "queryName": "T1.Col1"}],
             "queryMetadata": {
-                "Binding": {
-                    "Primary": {
-                        "Groupings": [{"Projections": [0]}]
-                    }
-                }
-            }
+                "Binding": {"Primary": {"Groupings": [{"Projections": [0]}]}}
+            },
         }
         measures, tables, columns = set(), set(), set()
         self.tool._extract_from_data_transforms(dt, measures, tables, columns)
@@ -1388,18 +1497,14 @@ class TestExtractFromDataTransforms:
                         "Groupings": [{"Projections": [99]}]  # index > len(selects)
                     }
                 }
-            }
+            },
         }
         measures, tables, columns = set(), set(), set()
         # Should not raise
         self.tool._extract_from_data_transforms(dt, measures, tables, columns)
 
     def test_selects_without_dot_skipped(self):
-        dt = {
-            "selects": [
-                {"displayName": "NoDot", "queryName": "NoDot"}
-            ]
-        }
+        dt = {"selects": [{"displayName": "NoDot", "queryName": "NoDot"}]}
         measures, tables, columns = set(), set(), set()
         self.tool._extract_from_data_transforms(dt, measures, tables, columns)
         assert tables == set()
@@ -1408,6 +1513,7 @@ class TestExtractFromDataTransforms:
 # ===========================================================================
 # _extract_from_expression tests
 # ===========================================================================
+
 
 class TestExtractFromExpression:
     def setup_method(self):
@@ -1433,7 +1539,7 @@ class TestExtractFromExpression:
         expr = {
             "Column": {
                 "Property": "Region",
-                "Expression": {"SourceRef": {"Entity": "Sales"}}
+                "Expression": {"SourceRef": {"Entity": "Sales"}},
             }
         }
         measures, tables, columns = set(), set(), set()
@@ -1442,21 +1548,13 @@ class TestExtractFromExpression:
         assert "Sales" in tables
 
     def test_nested_dict_recursed(self):
-        expr = {
-            "outer": {
-                "Measure": {"Property": "NestedMeasure"}
-            }
-        }
+        expr = {"outer": {"Measure": {"Property": "NestedMeasure"}}}
         measures, tables, columns = set(), set(), set()
         self.tool._extract_from_expression(expr, measures, tables, columns)
         assert "NestedMeasure" in measures
 
     def test_list_values_recursed(self):
-        expr = {
-            "items": [
-                {"Measure": {"Property": "ListMeasure"}}
-            ]
-        }
+        expr = {"items": [{"Measure": {"Property": "ListMeasure"}}]}
         measures, tables, columns = set(), set(), set()
         self.tool._extract_from_expression(expr, measures, tables, columns)
         assert "ListMeasure" in measures
@@ -1465,6 +1563,7 @@ class TestExtractFromExpression:
 # ===========================================================================
 # _deep_search_references tests
 # ===========================================================================
+
 
 class TestDeepSearchReferences:
     def setup_method(self):
@@ -1536,14 +1635,24 @@ class TestDeepSearchReferences:
 # _format_matrix_output_multi tests
 # ===========================================================================
 
+
 class TestFormatMatrixOutputMulti:
     """Tests for _format_matrix_output_multi."""
 
     def setup_method(self):
         self.tool = PowerBIReportReferencesTool()
 
-    def _make_result(self, report_id, report_name, pages=None, measures=None, tables=None):
-        pages = pages or [{"id": "p1", "displayName": "Page 1", "name": "p1", "url": "https://powerbi.com/p1"}]
+    def _make_result(
+        self, report_id, report_name, pages=None, measures=None, tables=None
+    ):
+        pages = pages or [
+            {
+                "id": "p1",
+                "displayName": "Page 1",
+                "name": "p1",
+                "url": "https://powerbi.com/p1",
+            }
+        ]
         cross_ref = {
             "measure_pages": {m: ["Page 1"] for m in (measures or [])},
             "table_pages": {t: ["Page 1"] for t in (tables or [])},
@@ -1564,7 +1673,9 @@ class TestFormatMatrixOutputMulti:
         assert "Report 1" in output
 
     def test_with_measures_in_matrix(self):
-        results = [self._make_result("r1", "Sales Report", measures=["Revenue", "Cost"])]
+        results = [
+            self._make_result("r1", "Sales Report", measures=["Revenue", "Cost"])
+        ]
         output = self.tool._format_matrix_output_multi(WS_ID, DS_ID, results)
         assert "Revenue" in output
         assert "Cost" in output
@@ -1601,6 +1712,7 @@ class TestFormatMatrixOutputMulti:
 # _format_json_output_multi with debug_info
 # ===========================================================================
 
+
 class TestFormatJsonOutputMultiDebugInfo:
     """Tests for debug_info path in _format_json_output_multi."""
 
@@ -1608,15 +1720,17 @@ class TestFormatJsonOutputMultiDebugInfo:
         self.tool = PowerBIReportReferencesTool()
 
     def test_debug_info_included_when_present(self):
-        results = [{
-            "report_id": "r1",
-            "report_name": "Debug Report",
-            "report_url": "https://powerbi.com/r/r1",
-            "pages": [],
-            "visual_references": [],
-            "cross_ref": {"measure_pages": {}, "table_pages": {}},
-            "debug_info": {"note": "No pages found"},
-        }]
+        results = [
+            {
+                "report_id": "r1",
+                "report_name": "Debug Report",
+                "report_url": "https://powerbi.com/r/r1",
+                "pages": [],
+                "visual_references": [],
+                "cross_ref": {"measure_pages": {}, "table_pages": {}},
+                "debug_info": {"note": "No pages found"},
+            }
+        ]
         output = self.tool._format_json_output_multi(WS_ID, DS_ID, results, [])
         parsed = json.loads(output)
         report = parsed["reports"][0]
@@ -1624,14 +1738,16 @@ class TestFormatJsonOutputMultiDebugInfo:
         assert report["debug_info"]["note"] == "No pages found"
 
     def test_no_debug_info_absent_from_output(self):
-        results = [{
-            "report_id": "r1",
-            "report_name": "Clean Report",
-            "report_url": "https://powerbi.com/r/r1",
-            "pages": [],
-            "visual_references": [],
-            "cross_ref": {"measure_pages": {}, "table_pages": {}},
-        }]
+        results = [
+            {
+                "report_id": "r1",
+                "report_name": "Clean Report",
+                "report_url": "https://powerbi.com/r/r1",
+                "pages": [],
+                "visual_references": [],
+                "cross_ref": {"measure_pages": {}, "table_pages": {}},
+            }
+        ]
         output = self.tool._format_json_output_multi(WS_ID, DS_ID, results, [])
         parsed = json.loads(output)
         report = parsed["reports"][0]
@@ -1642,6 +1758,7 @@ class TestFormatJsonOutputMultiDebugInfo:
 # _format_markdown_output_multi with group_by="measure" and "table"
 # ===========================================================================
 
+
 class TestFormatMarkdownOutputMultiGroupBy:
     """Tests for _format_markdown_output_multi group_by variants."""
 
@@ -1649,22 +1766,31 @@ class TestFormatMarkdownOutputMultiGroupBy:
         self.tool = PowerBIReportReferencesTool()
 
     def _make_result(self, report_id, report_name, measures=None, tables=None):
-        pages = [{"id": "p1", "displayName": "Overview", "name": "p1", "url": "https://powerbi.com/p1"}]
+        pages = [
+            {
+                "id": "p1",
+                "displayName": "Overview",
+                "name": "p1",
+                "url": "https://powerbi.com/p1",
+            }
+        ]
         cross_ref = {
             "measure_pages": {m: ["Overview"] for m in (measures or [])},
             "table_pages": {t: ["Overview"] for t in (tables or [])},
         }
         refs = []
         if measures:
-            refs.append({
-                "visual_id": "v1",
-                "page_id": "p1",
-                "visual_type": "card",
-                "visual_name": "Card",
-                "measures": list(measures or []),
-                "tables": list(tables or []),
-                "columns": [],
-            })
+            refs.append(
+                {
+                    "visual_id": "v1",
+                    "page_id": "p1",
+                    "visual_type": "card",
+                    "visual_name": "Card",
+                    "measures": list(measures or []),
+                    "tables": list(tables or []),
+                    "columns": [],
+                }
+            )
         return {
             "report_id": report_id,
             "report_name": report_name,
@@ -1676,70 +1802,103 @@ class TestFormatMarkdownOutputMultiGroupBy:
 
     def test_group_by_measure(self):
         results = [self._make_result("r1", "Report 1", measures=["Revenue", "Cost"])]
-        output = self.tool._format_markdown_output_multi(WS_ID, DS_ID, results, [], True, "measure")
+        output = self.tool._format_markdown_output_multi(
+            WS_ID, DS_ID, results, [], True, "measure"
+        )
         assert "Revenue" in output
         assert "Cost" in output
 
     def test_group_by_table(self):
         results = [self._make_result("r1", "Report 1", tables=["Sales", "Date"])]
-        output = self.tool._format_markdown_output_multi(WS_ID, DS_ID, results, [], True, "table")
+        output = self.tool._format_markdown_output_multi(
+            WS_ID, DS_ID, results, [], True, "table"
+        )
         assert "Sales" in output
         assert "Date" in output
 
     def test_group_by_page_with_no_visuals(self):
-        results = [{
-            "report_id": "r1",
-            "report_name": "Empty Report",
-            "report_url": "https://powerbi.com/r/r1",
-            "pages": [{"id": "p1", "displayName": "Overview", "name": "p1", "url": "https://powerbi.com/p1"}],
-            "visual_references": [],
-            "cross_ref": {"measure_pages": {}, "table_pages": {}},
-        }]
-        output = self.tool._format_markdown_output_multi(WS_ID, DS_ID, results, [], True, "page")
+        results = [
+            {
+                "report_id": "r1",
+                "report_name": "Empty Report",
+                "report_url": "https://powerbi.com/r/r1",
+                "pages": [
+                    {
+                        "id": "p1",
+                        "displayName": "Overview",
+                        "name": "p1",
+                        "url": "https://powerbi.com/p1",
+                    }
+                ],
+                "visual_references": [],
+                "cross_ref": {"measure_pages": {}, "table_pages": {}},
+            }
+        ]
+        output = self.tool._format_markdown_output_multi(
+            WS_ID, DS_ID, results, [], True, "page"
+        )
         assert "No visuals" in output or "Empty Report" in output
 
     def test_failed_reports_in_output(self):
         results = [self._make_result("r1", "Good Report")]
         failed = [{"id": "r2", "name": "Bad Report", "error": "Access denied"}]
-        output = self.tool._format_markdown_output_multi(WS_ID, DS_ID, results, failed, True, "page")
+        output = self.tool._format_markdown_output_multi(
+            WS_ID, DS_ID, results, failed, True, "page"
+        )
         assert "Bad Report" in output or "Failed" in output
 
     def test_visual_details_excluded(self):
         results = [self._make_result("r1", "Report 1", measures=["Revenue"])]
-        output = self.tool._format_markdown_output_multi(WS_ID, DS_ID, results, [], False, "page")
+        output = self.tool._format_markdown_output_multi(
+            WS_ID, DS_ID, results, [], False, "page"
+        )
         assert isinstance(output, str)
 
     def test_measures_more_than_3_truncated(self):
         many_measures = ["M1", "M2", "M3", "M4", "M5"]
-        pages = [{"id": "p1", "displayName": "Overview", "name": "p1", "url": "https://powerbi.com/p1"}]
-        refs = [{
-            "visual_id": "v1",
-            "page_id": "p1",
-            "visual_type": "table",
-            "visual_name": "Table",
-            "measures": many_measures,
-            "tables": [],
-            "columns": [],
-        }]
+        pages = [
+            {
+                "id": "p1",
+                "displayName": "Overview",
+                "name": "p1",
+                "url": "https://powerbi.com/p1",
+            }
+        ]
+        refs = [
+            {
+                "visual_id": "v1",
+                "page_id": "p1",
+                "visual_type": "table",
+                "visual_name": "Table",
+                "measures": many_measures,
+                "tables": [],
+                "columns": [],
+            }
+        ]
         cross_ref = {
             "measure_pages": {m: ["Overview"] for m in many_measures},
             "table_pages": {},
         }
-        results = [{
-            "report_id": "r1",
-            "report_name": "Report",
-            "report_url": "https://powerbi.com/r/r1",
-            "pages": pages,
-            "visual_references": refs,
-            "cross_ref": cross_ref,
-        }]
-        output = self.tool._format_markdown_output_multi(WS_ID, DS_ID, results, [], True, "page")
+        results = [
+            {
+                "report_id": "r1",
+                "report_name": "Report",
+                "report_url": "https://powerbi.com/r/r1",
+                "pages": pages,
+                "visual_references": refs,
+                "cross_ref": cross_ref,
+            }
+        ]
+        output = self.tool._format_markdown_output_multi(
+            WS_ID, DS_ID, results, [], True, "page"
+        )
         assert "..." in output or isinstance(output, str)
 
 
 # ===========================================================================
 # _extract_report_references async tests
 # ===========================================================================
+
 
 class TestExtractReportReferencesAsync:
     """Tests for the async _extract_report_references orchestration."""
@@ -1755,21 +1914,26 @@ class TestExtractReportReferencesAsync:
 
         with patch(
             "src.services.tools.powerbi_auth_utils.get_fabric_access_token_from_config",
-            new_callable=AsyncMock, return_value=ACCESS_TOKEN
+            new_callable=AsyncMock,
+            return_value=ACCESS_TOKEN,
         ):
             with patch.object(
-                self.tool, "_list_workspace_reports",
-                new_callable=AsyncMock, return_value=[]
+                self.tool,
+                "_list_workspace_reports",
+                new_callable=AsyncMock,
+                return_value=[],
             ):
-                result = self._run(self.tool._extract_report_references(
-                    workspace_id=WS_ID,
-                    dataset_id=DS_ID,
-                    report_id=None,
-                    auth_config=auth_config,
-                    output_format="markdown",
-                    include_visual_details=True,
-                    group_by="page",
-                ))
+                result = self._run(
+                    self.tool._extract_report_references(
+                        workspace_id=WS_ID,
+                        dataset_id=DS_ID,
+                        report_id=None,
+                        auth_config=auth_config,
+                        output_format="markdown",
+                        include_visual_details=True,
+                        group_by="page",
+                    )
+                )
 
         assert "No reports found" in result
 
@@ -1778,27 +1942,34 @@ class TestExtractReportReferencesAsync:
         parts = [
             {
                 "path": "definition/report.json",
-                "payload": base64.b64encode(json.dumps({"name": "Test Report"}).encode()).decode()
+                "payload": base64.b64encode(
+                    json.dumps({"name": "Test Report"}).encode()
+                ).decode(),
             }
         ]
 
         with patch(
             "src.services.tools.powerbi_auth_utils.get_fabric_access_token_from_config",
-            new_callable=AsyncMock, return_value=ACCESS_TOKEN
+            new_callable=AsyncMock,
+            return_value=ACCESS_TOKEN,
         ):
             with patch.object(
-                self.tool, "_fetch_report_definition",
-                new_callable=AsyncMock, return_value=parts
+                self.tool,
+                "_fetch_report_definition",
+                new_callable=AsyncMock,
+                return_value=parts,
             ):
-                result = self._run(self.tool._extract_report_references(
-                    workspace_id=WS_ID,
-                    dataset_id=None,
-                    report_id=REPORT_ID,
-                    auth_config=auth_config,
-                    output_format="markdown",
-                    include_visual_details=True,
-                    group_by="page",
-                ))
+                result = self._run(
+                    self.tool._extract_report_references(
+                        workspace_id=WS_ID,
+                        dataset_id=None,
+                        report_id=REPORT_ID,
+                        auth_config=auth_config,
+                        output_format="markdown",
+                        include_visual_details=True,
+                        group_by="page",
+                    )
+                )
 
         assert isinstance(result, str)
         assert len(result) > 0
@@ -1808,27 +1979,34 @@ class TestExtractReportReferencesAsync:
         parts = [
             {
                 "path": "definition/report.json",
-                "payload": base64.b64encode(json.dumps({"name": "Report"}).encode()).decode()
+                "payload": base64.b64encode(
+                    json.dumps({"name": "Report"}).encode()
+                ).decode(),
             }
         ]
 
         with patch(
             "src.services.tools.powerbi_auth_utils.get_fabric_access_token_from_config",
-            new_callable=AsyncMock, return_value=ACCESS_TOKEN
+            new_callable=AsyncMock,
+            return_value=ACCESS_TOKEN,
         ):
             with patch.object(
-                self.tool, "_fetch_report_definition",
-                new_callable=AsyncMock, return_value=parts
+                self.tool,
+                "_fetch_report_definition",
+                new_callable=AsyncMock,
+                return_value=parts,
             ):
-                result = self._run(self.tool._extract_report_references(
-                    workspace_id=WS_ID,
-                    dataset_id=None,
-                    report_id=REPORT_ID,
-                    auth_config=auth_config,
-                    output_format="json",
-                    include_visual_details=True,
-                    group_by="page",
-                ))
+                result = self._run(
+                    self.tool._extract_report_references(
+                        workspace_id=WS_ID,
+                        dataset_id=None,
+                        report_id=REPORT_ID,
+                        auth_config=auth_config,
+                        output_format="json",
+                        include_visual_details=True,
+                        group_by="page",
+                    )
+                )
 
         parsed = json.loads(result)
         assert "workspace_id" in parsed or "reports" in parsed
@@ -1838,83 +2016,112 @@ class TestExtractReportReferencesAsync:
         parts = [
             {
                 "path": "definition/report.json",
-                "payload": base64.b64encode(json.dumps({"name": "Report"}).encode()).decode()
+                "payload": base64.b64encode(
+                    json.dumps({"name": "Report"}).encode()
+                ).decode(),
             }
         ]
 
         with patch(
             "src.services.tools.powerbi_auth_utils.get_fabric_access_token_from_config",
-            new_callable=AsyncMock, return_value=ACCESS_TOKEN
+            new_callable=AsyncMock,
+            return_value=ACCESS_TOKEN,
         ):
             with patch.object(
-                self.tool, "_fetch_report_definition",
-                new_callable=AsyncMock, return_value=parts
+                self.tool,
+                "_fetch_report_definition",
+                new_callable=AsyncMock,
+                return_value=parts,
             ):
-                result = self._run(self.tool._extract_report_references(
-                    workspace_id=WS_ID,
-                    dataset_id=None,
-                    report_id=REPORT_ID,
-                    auth_config=auth_config,
-                    output_format="matrix",
-                    include_visual_details=True,
-                    group_by="page",
-                ))
+                result = self._run(
+                    self.tool._extract_report_references(
+                        workspace_id=WS_ID,
+                        dataset_id=None,
+                        report_id=REPORT_ID,
+                        auth_config=auth_config,
+                        output_format="matrix",
+                        include_visual_details=True,
+                        group_by="page",
+                    )
+                )
 
         assert isinstance(result, str)
 
     def test_dataset_mode_report_fetch_fails(self):
         auth_config = {"access_token": ACCESS_TOKEN}
-        reports = [{"id": REPORT_ID, "name": "Report", "datasetId": DS_ID, "webUrl": ""}]
+        reports = [
+            {"id": REPORT_ID, "name": "Report", "datasetId": DS_ID, "webUrl": ""}
+        ]
 
         with patch(
             "src.services.tools.powerbi_auth_utils.get_fabric_access_token_from_config",
-            new_callable=AsyncMock, return_value=ACCESS_TOKEN
+            new_callable=AsyncMock,
+            return_value=ACCESS_TOKEN,
         ):
             with patch.object(
-                self.tool, "_list_workspace_reports",
-                new_callable=AsyncMock, return_value=reports
+                self.tool,
+                "_list_workspace_reports",
+                new_callable=AsyncMock,
+                return_value=reports,
             ):
                 with patch.object(
-                    self.tool, "_fetch_report_definition",
-                    new_callable=AsyncMock, return_value=[]  # empty = failed
+                    self.tool,
+                    "_fetch_report_definition",
+                    new_callable=AsyncMock,
+                    return_value=[],  # empty = failed
                 ):
-                    result = self._run(self.tool._extract_report_references(
-                        workspace_id=WS_ID,
-                        dataset_id=DS_ID,
-                        report_id=None,
-                        auth_config=auth_config,
-                        output_format="markdown",
-                        include_visual_details=True,
-                        group_by="page",
-                    ))
+                    result = self._run(
+                        self.tool._extract_report_references(
+                            workspace_id=WS_ID,
+                            dataset_id=DS_ID,
+                            report_id=None,
+                            auth_config=auth_config,
+                            output_format="markdown",
+                            include_visual_details=True,
+                            group_by="page",
+                        )
+                    )
 
-        assert "Error" in result or "Could not process" in result or isinstance(result, str)
+        assert (
+            "Error" in result
+            or "Could not process" in result
+            or isinstance(result, str)
+        )
 
     def test_all_reports_fail(self):
         auth_config = {"access_token": ACCESS_TOKEN}
-        reports = [{"id": REPORT_ID, "name": "Report", "datasetId": DS_ID, "webUrl": ""}]
+        reports = [
+            {"id": REPORT_ID, "name": "Report", "datasetId": DS_ID, "webUrl": ""}
+        ]
 
         with patch(
             "src.services.tools.powerbi_auth_utils.get_fabric_access_token_from_config",
-            new_callable=AsyncMock, return_value=ACCESS_TOKEN
+            new_callable=AsyncMock,
+            return_value=ACCESS_TOKEN,
         ):
             with patch.object(
-                self.tool, "_list_workspace_reports",
-                new_callable=AsyncMock, return_value=reports
+                self.tool,
+                "_list_workspace_reports",
+                new_callable=AsyncMock,
+                return_value=reports,
             ):
                 with patch.object(
-                    self.tool, "_fetch_report_definition",
-                    new_callable=AsyncMock, side_effect=Exception("Network error")
+                    self.tool,
+                    "_fetch_report_definition",
+                    new_callable=AsyncMock,
+                    side_effect=Exception("Network error"),
                 ):
-                    result = self._run(self.tool._extract_report_references(
-                        workspace_id=WS_ID,
-                        dataset_id=DS_ID,
-                        report_id=None,
-                        auth_config=auth_config,
-                        output_format="markdown",
-                        include_visual_details=True,
-                        group_by="page",
-                    ))
+                    result = self._run(
+                        self.tool._extract_report_references(
+                            workspace_id=WS_ID,
+                            dataset_id=DS_ID,
+                            report_id=None,
+                            auth_config=auth_config,
+                            output_format="markdown",
+                            include_visual_details=True,
+                            group_by="page",
+                        )
+                    )
 
         assert "Error" in result or isinstance(result, str)
 
@@ -1922,6 +2129,7 @@ class TestExtractReportReferencesAsync:
 # ===========================================================================
 # _fetch_report_definition async path: 202 polling
 # ===========================================================================
+
 
 class TestFetchReportDefinition202:
     """Tests for the 202 async polling path in _fetch_report_definition."""
@@ -1952,8 +2160,10 @@ class TestFetchReportDefinition202:
         mock_client.post = AsyncMock(return_value=initial_response)
         mock_client.get = AsyncMock(side_effect=[poll_response, result_response])
 
-        with patch("src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
-                   return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             with patch("asyncio.sleep", new_callable=AsyncMock):
                 result = self._run(
                     self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
@@ -1964,7 +2174,10 @@ class TestFetchReportDefinition202:
 
     def test_202_polling_failed_status(self):
         poll_response = MagicMock()
-        poll_response.json.return_value = {"status": "Failed", "error": {"message": "Fail"}}
+        poll_response.json.return_value = {
+            "status": "Failed",
+            "error": {"message": "Fail"},
+        }
 
         initial_response = MagicMock()
         initial_response.status_code = 202
@@ -1976,8 +2189,10 @@ class TestFetchReportDefinition202:
         mock_client.post = AsyncMock(return_value=initial_response)
         mock_client.get = AsyncMock(return_value=poll_response)
 
-        with patch("src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
-                   return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             with patch("asyncio.sleep", new_callable=AsyncMock):
                 result = self._run(
                     self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
@@ -1995,8 +2210,10 @@ class TestFetchReportDefinition202:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=initial_response)
 
-        with patch("src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
-                   return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
             )
@@ -2005,18 +2222,23 @@ class TestFetchReportDefinition202:
 
     def test_http_status_error_returns_empty(self):
         import httpx
+
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_resp = MagicMock()
         mock_resp.status_code = 403
         mock_resp.text = "Forbidden"
-        mock_client.post = AsyncMock(side_effect=httpx.HTTPStatusError(
-            "Forbidden", request=MagicMock(), response=mock_resp
-        ))
+        mock_client.post = AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "Forbidden", request=MagicMock(), response=mock_resp
+            )
+        )
 
-        with patch("src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
-                   return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_report_references_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._fetch_report_definition(WS_ID, REPORT_ID, ACCESS_TOKEN)
             )

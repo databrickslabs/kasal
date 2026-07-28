@@ -1,7 +1,8 @@
 """Unit tests for MCPIntegration class."""
 
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
 
 from src.services.tools.mcp_integration import MCPIntegration
 
@@ -98,9 +99,7 @@ class TestResolveEffectiveMcpServers:
             "name": "server1",
             "server_url": "https://example.com",
         }
-        mock_service.get_enabled_servers.return_value = MagicMock(
-            servers=[mock_server]
-        )
+        mock_service.get_enabled_servers.return_value = MagicMock(servers=[mock_server])
 
         result = await MCPIntegration.resolve_effective_mcp_servers(
             explicit_servers=[],
@@ -194,17 +193,21 @@ class TestCreateToolsForServerSPN:
         mock_wrapped = MagicMock()
         mock_wrapped.name = "tool1"
 
-        with patch(
-            "src.utils.databricks_auth.get_auth_context",
-            new_callable=AsyncMock,
-            return_value=mock_auth_context,
-        ) as mock_get_auth, patch(
-            "src.services.tools.mcp_integration.create_kasal_tool_from_mcp",
-            return_value=mock_wrapped,
-        ), patch(
-            "src.services.tools.mcp_handler.get_or_create_mcp_adapter",
-            new_callable=AsyncMock,
-            return_value=mock_adapter,
+        with (
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth_context,
+            ) as mock_get_auth,
+            patch(
+                "src.services.tools.mcp_integration.create_kasal_tool_from_mcp",
+                return_value=mock_wrapped,
+            ),
+            patch(
+                "src.services.tools.mcp_handler.get_or_create_mcp_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ),
         ):
             tools = await MCPIntegration._create_tools_for_server(
                 server,
@@ -214,9 +217,7 @@ class TestCreateToolsForServerSPN:
                 group_id="grp-1",
             )
 
-        mock_get_auth.assert_called_once_with(
-            user_token="user-tok", group_id="grp-1"
-        )
+        mock_get_auth.assert_called_once_with(user_token="user-tok", group_id="grp-1")
 
     @pytest.mark.asyncio
     async def test_spn_auth_no_context_returns_empty_with_warning(self):
@@ -296,7 +297,11 @@ class TestExtractMcpServersFromConfig:
 
     def test_exception_returns_empty(self):
         """Any unexpected error should return empty list."""
-        with patch.object(MCPIntegration, '_extract_mcp_servers_from_config', side_effect=Exception("bad")):
+        with patch.object(
+            MCPIntegration,
+            "_extract_mcp_servers_from_config",
+            side_effect=Exception("bad"),
+        ):
             # Direct call would raise; test the method handles it internally
             pass
         # The method itself has try/except, just verify it doesn't break
@@ -336,9 +341,22 @@ class TestCreateToolsForServerAuth:
         mock_wrapped = MagicMock()
         mock_wrapped.name = "tool1"
 
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth) as mock_get_auth, \
-             patch("src.services.tools.mcp_integration.create_kasal_tool_from_mcp", return_value=mock_wrapped), \
-             patch("src.services.tools.mcp_handler.get_or_create_mcp_adapter", new_callable=AsyncMock, return_value=mock_adapter):
+        with (
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ) as mock_get_auth,
+            patch(
+                "src.services.tools.mcp_integration.create_kasal_tool_from_mcp",
+                return_value=mock_wrapped,
+            ),
+            patch(
+                "src.services.tools.mcp_handler.get_or_create_mcp_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ),
+        ):
             tools = await MCPIntegration._create_tools_for_server(
                 server, "agent1", MagicMock(), user_token="u", group_id="g"
             )
@@ -365,8 +383,18 @@ class TestCreateToolsForServerAuth:
         mock_adapter.tools = []
         mock_adapter.initialization_error = None
 
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth), \
-             patch("src.services.tools.mcp_handler.get_or_create_mcp_adapter", new_callable=AsyncMock, return_value=mock_adapter):
+        with (
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch(
+                "src.services.tools.mcp_handler.get_or_create_mcp_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ),
+        ):
             tools = await MCPIntegration._create_tools_for_server(
                 server, "agent1", MagicMock(), user_token="u", group_id="g"
             )
@@ -392,15 +420,26 @@ class TestCreateToolsForServerAuth:
         mock_wrapped = MagicMock()
         mock_wrapped.name = "ext_tool"
 
-        with patch("src.services.tools.mcp_integration.create_kasal_tool_from_mcp", return_value=mock_wrapped), \
-             patch("src.services.tools.mcp_handler.get_or_create_mcp_adapter", new_callable=AsyncMock, return_value=mock_adapter) as mock_create:
+        with (
+            patch(
+                "src.services.tools.mcp_integration.create_kasal_tool_from_mcp",
+                return_value=mock_wrapped,
+            ),
+            patch(
+                "src.services.tools.mcp_handler.get_or_create_mcp_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ) as mock_create,
+        ):
             tools = await MCPIntegration._create_tools_for_server(
                 server, "agent1", MagicMock(), user_token=None, group_id=None
             )
 
         # Verify api_key was used in headers
         call_args = mock_create.call_args
-        server_params = call_args[0][0] if call_args[0] else call_args[1].get('server_params', {})
+        server_params = (
+            call_args[0][0] if call_args[0] else call_args[1].get("server_params", {})
+        )
         assert len(tools) >= 1
 
     @pytest.mark.asyncio
@@ -416,7 +455,11 @@ class TestCreateToolsForServerAuth:
             "rate_limit": 60,
         }
 
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=None):
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
             tools = await MCPIntegration._create_tools_for_server(
                 server, "agent1", MagicMock(), user_token=None, group_id=None
             )
@@ -438,6 +481,7 @@ class TestCreateToolsForServerAuth:
             "rate_limit": 60,
         }
         from src.core.exceptions import MCPConnectionError
+
         mock_adapter = MagicMock()
         mock_adapter.tools = []
         mock_adapter.initialization_error = MCPConnectionError(
@@ -446,7 +490,11 @@ class TestCreateToolsForServerAuth:
             detail="Connection refused",
         )
 
-        with patch("src.services.tools.mcp_handler.get_or_create_mcp_adapter", new_callable=AsyncMock, return_value=mock_adapter):
+        with patch(
+            "src.services.tools.mcp_handler.get_or_create_mcp_adapter",
+            new_callable=AsyncMock,
+            return_value=mock_adapter,
+        ):
             tools = await MCPIntegration._create_tools_for_server(
                 server, "agent1", MagicMock(), user_token=None, group_id=None
             )
@@ -476,12 +524,22 @@ class TestCreateToolsForServerAuth:
         mock_adapter.initialization_error = None
 
         captured_params = {}
+
         async def capture_adapter(params, *args, **kwargs):
             captured_params.update(params)
             return mock_adapter
 
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth), \
-             patch("src.services.tools.mcp_handler.get_or_create_mcp_adapter", side_effect=capture_adapter):
+        with (
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch(
+                "src.services.tools.mcp_handler.get_or_create_mcp_adapter",
+                side_effect=capture_adapter,
+            ),
+        ):
             await MCPIntegration._create_tools_for_server(
                 server, "agent1", MagicMock(), user_token="u", group_id="g"
             )
@@ -498,13 +556,23 @@ class TestResolveAgentReference:
         assert result == "a1"
 
     def test_match_by_agent_name(self):
-        config = {"agents": [{"id": "a1", "name": "DevAgent"}, {"id": "a2", "name": "PMAgent"}]}
+        config = {
+            "agents": [
+                {"id": "a1", "name": "DevAgent"},
+                {"id": "a2", "name": "PMAgent"},
+            ]
+        }
         result = MCPIntegration._resolve_agent_reference("DevAgent", config)
         # Returns agent_id (preferred) when agent is matched by name
         assert result == "a1"
 
     def test_match_by_role(self):
-        config = {"agents": [{"id": "a1", "role": "developer"}, {"id": "a2", "role": "manager"}]}
+        config = {
+            "agents": [
+                {"id": "a1", "role": "developer"},
+                {"id": "a2", "role": "manager"},
+            ]
+        }
         result = MCPIntegration._resolve_agent_reference("developer", config)
         # Returns agent_id (preferred) when agent is matched by role
         assert result == "a1"
@@ -533,7 +601,7 @@ class TestGetMcpSettings:
 
         result = await MCPIntegration.get_mcp_settings(mock_service)
         assert result is not None
-        assert result['global_enabled'] is True
+        assert result["global_enabled"] is True
 
     @pytest.mark.asyncio
     async def test_exception_returns_defaults(self):
@@ -542,8 +610,8 @@ class TestGetMcpSettings:
 
         result = await MCPIntegration.get_mcp_settings(mock_service)
         assert result is not None
-        assert result['global_enabled'] is False
-        assert result['individual_enabled'] is True
+        assert result["global_enabled"] is False
+        assert result["individual_enabled"] is True
 
 
 class TestValidateMcpConfiguration:
@@ -600,7 +668,12 @@ class TestCreateMcpToolsForAgent:
     async def test_returns_empty_when_no_servers(self):
         agent_config = {"id": "a1", "tool_configs": {}}
         mock_service = AsyncMock()
-        with patch.object(MCPIntegration, 'resolve_effective_mcp_servers', new_callable=AsyncMock, return_value=[]):
+        with patch.object(
+            MCPIntegration,
+            "resolve_effective_mcp_servers",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
             tools = await MCPIntegration.create_mcp_tools_for_agent(
                 agent_config, "a1", mock_service
             )
@@ -610,7 +683,12 @@ class TestCreateMcpToolsForAgent:
     async def test_exception_returns_empty(self):
         agent_config = {"id": "a1", "tool_configs": {}}
         mock_service = AsyncMock()
-        with patch.object(MCPIntegration, 'resolve_effective_mcp_servers', new_callable=AsyncMock, side_effect=Exception("err")):
+        with patch.object(
+            MCPIntegration,
+            "resolve_effective_mcp_servers",
+            new_callable=AsyncMock,
+            side_effect=Exception("err"),
+        ):
             tools = await MCPIntegration.create_mcp_tools_for_agent(
                 agent_config, "a1", mock_service
             )
@@ -624,7 +702,12 @@ class TestCreateMcpToolsForTask:
     async def test_returns_empty_when_no_servers(self):
         task_config = {"id": "t1", "tool_configs": {}}
         mock_service = AsyncMock()
-        with patch.object(MCPIntegration, 'resolve_effective_mcp_servers', new_callable=AsyncMock, return_value=[]):
+        with patch.object(
+            MCPIntegration,
+            "resolve_effective_mcp_servers",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
             tools = await MCPIntegration.create_mcp_tools_for_task(
                 task_config, "t1", mock_service
             )
@@ -634,7 +717,12 @@ class TestCreateMcpToolsForTask:
     async def test_exception_returns_empty(self):
         task_config = {"id": "t1", "tool_configs": {}}
         mock_service = AsyncMock()
-        with patch.object(MCPIntegration, 'resolve_effective_mcp_servers', new_callable=AsyncMock, side_effect=Exception("err")):
+        with patch.object(
+            MCPIntegration,
+            "resolve_effective_mcp_servers",
+            new_callable=AsyncMock,
+            side_effect=Exception("err"),
+        ):
             tools = await MCPIntegration.create_mcp_tools_for_task(
                 task_config, "t1", mock_service
             )

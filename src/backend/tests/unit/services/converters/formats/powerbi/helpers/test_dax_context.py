@@ -5,11 +5,12 @@ Tests DAX context tracking for filters, constant selection, and exception aggreg
 """
 
 import pytest
+
+from src.services.converters.base.models import KPI
 from src.services.converters.formats.powerbi.helpers.dax_context import (
     DAXBaseKBIContext,
-    DAXKBIContextCache
+    DAXKBIContextCache,
 )
-from src.services.converters.base.models import KPI
 
 
 class TestDAXBaseKBIContext:
@@ -23,7 +24,7 @@ class TestDAXBaseKBIContext:
             technical_name="revenue",
             formula="amount",
             aggregation_type="SUM",
-            source_table="Sales"
+            source_table="Sales",
         )
 
     @pytest.fixture
@@ -35,7 +36,7 @@ class TestDAXBaseKBIContext:
             formula="amount",
             aggregation_type="SUM",
             source_table="Sales",
-            filters=["status = 'active'", "region = 'US'"]
+            filters=["status = 'active'", "region = 'US'"],
         )
 
     @pytest.fixture
@@ -47,7 +48,7 @@ class TestDAXBaseKBIContext:
             formula="amount",
             aggregation_type="SUM",
             source_table="Sales",
-            fields_for_constant_selection=["month", "year"]
+            fields_for_constant_selection=["month", "year"],
         )
 
     @pytest.fixture
@@ -59,7 +60,7 @@ class TestDAXBaseKBIContext:
             formula="amount",
             aggregation_type="SUM",
             source_table="Sales",
-            fields_for_exception_aggregation=["customer_id", "product_id"]
+            fields_for_exception_aggregation=["customer_id", "product_id"],
         )
 
     # ========== Initialization Tests ==========
@@ -198,7 +199,9 @@ class TestDAXBaseKBIContext:
 
         assert context.fields_for_constant_selection == {"month", "year"}
 
-    def test_fields_for_constant_selection_union(self, simple_kbi, kbi_with_constant_selection):
+    def test_fields_for_constant_selection_union(
+        self, simple_kbi, kbi_with_constant_selection
+    ):
         """Test fields_for_constant_selection union from chain"""
         kbi_with_additional = KPI(
             description="Test",
@@ -206,12 +209,12 @@ class TestDAXBaseKBIContext:
             formula="val",
             aggregation_type="SUM",
             source_table="Data",
-            fields_for_constant_selection=["quarter"]
+            fields_for_constant_selection=["quarter"],
         )
 
         context = DAXBaseKBIContext(
             kbi=simple_kbi,
-            parent_kbis=[kbi_with_constant_selection, kbi_with_additional]
+            parent_kbis=[kbi_with_constant_selection, kbi_with_additional],
         )
 
         assert context.fields_for_constant_selection == {"month", "year", "quarter"}
@@ -222,7 +225,9 @@ class TestDAXBaseKBIContext:
 
         assert context.fields_for_exception_aggregation == set()
 
-    def test_fields_for_exception_aggregation_kbi_only(self, kbi_with_exception_aggregation):
+    def test_fields_for_exception_aggregation_kbi_only(
+        self, kbi_with_exception_aggregation
+    ):
         """Test fields_for_exception_aggregation from KBI"""
         context = DAXBaseKBIContext(kbi=kbi_with_exception_aggregation)
 
@@ -240,8 +245,7 @@ class TestDAXBaseKBIContext:
     def test_get_kbi_context_with_parents(self, simple_kbi, kbi_with_filters):
         """Test get_kbi_context with parent KBIs"""
         context = DAXBaseKBIContext.get_kbi_context(
-            kbi=simple_kbi,
-            parent_kbis=[kbi_with_filters]
+            kbi=simple_kbi, parent_kbis=[kbi_with_filters]
         )
 
         assert len(context.parent_kbis) == 1
@@ -249,7 +253,9 @@ class TestDAXBaseKBIContext:
     def test_append_dependency_valid_kbi(self, kbi_with_filters):
         """Test append_dependency with valid KBI for context"""
         parents = []
-        result = DAXBaseKBIContext.append_dependency(kbi=kbi_with_filters, parent_kbis=parents)
+        result = DAXBaseKBIContext.append_dependency(
+            kbi=kbi_with_filters, parent_kbis=parents
+        )
 
         assert len(result) == 1
         assert result[0] == kbi_with_filters
@@ -257,16 +263,19 @@ class TestDAXBaseKBIContext:
     def test_append_dependency_invalid_kbi(self, simple_kbi):
         """Test append_dependency with invalid KBI (no filters/fields)"""
         parents = []
-        result = DAXBaseKBIContext.append_dependency(kbi=simple_kbi, parent_kbis=parents)
+        result = DAXBaseKBIContext.append_dependency(
+            kbi=simple_kbi, parent_kbis=parents
+        )
 
         assert result == []
 
-    def test_append_dependency_preserves_existing(self, kbi_with_filters, kbi_with_constant_selection):
+    def test_append_dependency_preserves_existing(
+        self, kbi_with_filters, kbi_with_constant_selection
+    ):
         """Test append_dependency doesn't modify original list"""
         parents = [kbi_with_filters]
         result = DAXBaseKBIContext.append_dependency(
-            kbi=kbi_with_constant_selection,
-            parent_kbis=parents
+            kbi=kbi_with_constant_selection, parent_kbis=parents
         )
 
         assert len(parents) == 1  # Original unchanged
@@ -276,13 +285,23 @@ class TestDAXBaseKBIContext:
         """Test is_valid_for_context returns True for KBI with filters"""
         assert DAXBaseKBIContext.is_valid_for_context(kbi=kbi_with_filters) is True
 
-    def test_is_valid_for_context_with_constant_selection(self, kbi_with_constant_selection):
+    def test_is_valid_for_context_with_constant_selection(
+        self, kbi_with_constant_selection
+    ):
         """Test is_valid_for_context returns True for constant selection"""
-        assert DAXBaseKBIContext.is_valid_for_context(kbi=kbi_with_constant_selection) is True
+        assert (
+            DAXBaseKBIContext.is_valid_for_context(kbi=kbi_with_constant_selection)
+            is True
+        )
 
-    def test_is_valid_for_context_with_exception_aggregation(self, kbi_with_exception_aggregation):
+    def test_is_valid_for_context_with_exception_aggregation(
+        self, kbi_with_exception_aggregation
+    ):
         """Test is_valid_for_context returns True for exception aggregation"""
-        assert DAXBaseKBIContext.is_valid_for_context(kbi=kbi_with_exception_aggregation) is True
+        assert (
+            DAXBaseKBIContext.is_valid_for_context(kbi=kbi_with_exception_aggregation)
+            is True
+        )
 
     def test_is_valid_for_context_simple(self, simple_kbi):
         """Test is_valid_for_context returns False for simple KBI"""
@@ -313,7 +332,9 @@ class TestDAXBaseKBIContext:
 
         assert result == []
 
-    def test_get_dax_constant_selection_expressions_with_fields(self, kbi_with_constant_selection):
+    def test_get_dax_constant_selection_expressions_with_fields(
+        self, kbi_with_constant_selection
+    ):
         """Test get_dax_constant_selection_expressions generates REMOVEFILTERS"""
         context = DAXBaseKBIContext(kbi=kbi_with_constant_selection)
         result = context.get_dax_constant_selection_expressions("Sales")
@@ -330,7 +351,9 @@ class TestDAXBaseKBIContext:
 
         assert result == base_columns
 
-    def test_get_target_columns_for_calculation_with_constant_selection(self, kbi_with_constant_selection):
+    def test_get_target_columns_for_calculation_with_constant_selection(
+        self, kbi_with_constant_selection
+    ):
         """Test get_target_columns_for_calculation excludes constant selection fields"""
         context = DAXBaseKBIContext(kbi=kbi_with_constant_selection)
         base_columns = {"customer", "month", "year"}
@@ -339,14 +362,18 @@ class TestDAXBaseKBIContext:
         # month and year should be excluded (constant selection)
         assert result == {"customer"}
 
-    def test_needs_exception_aggregation_expansion_no_exception_fields(self, simple_kbi):
+    def test_needs_exception_aggregation_expansion_no_exception_fields(
+        self, simple_kbi
+    ):
         """Test needs_exception_aggregation_expansion with no exception fields"""
         context = DAXBaseKBIContext(kbi=simple_kbi)
         result = context.needs_exception_aggregation_expansion({"customer", "product"})
 
         assert result is False
 
-    def test_needs_exception_aggregation_expansion_subset(self, kbi_with_exception_aggregation):
+    def test_needs_exception_aggregation_expansion_subset(
+        self, kbi_with_exception_aggregation
+    ):
         """Test needs_exception_aggregation_expansion when fields are subset"""
         context = DAXBaseKBIContext(kbi=kbi_with_exception_aggregation)
         # Target columns include all exception aggregation fields
@@ -355,7 +382,9 @@ class TestDAXBaseKBIContext:
 
         assert result is False  # No expansion needed
 
-    def test_needs_exception_aggregation_expansion_not_subset(self, kbi_with_exception_aggregation):
+    def test_needs_exception_aggregation_expansion_not_subset(
+        self, kbi_with_exception_aggregation
+    ):
         """Test needs_exception_aggregation_expansion when fields not in target"""
         context = DAXBaseKBIContext(kbi=kbi_with_exception_aggregation)
         # Target columns don't include all exception aggregation fields
@@ -382,7 +411,7 @@ class TestDAXKBIContextCache:
             formula="amount",
             aggregation_type="SUM",
             source_table="Sales",
-            filters=["status = 'active'"]
+            filters=["status = 'active'"],
         )
 
     @pytest.fixture

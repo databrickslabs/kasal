@@ -31,9 +31,9 @@ from src.services.security.prompt_injection_detector import (
 )
 from src.services.security.secret_leak_detector import (
     SecretLeakResult,
-    detect as _detect_secrets,
-    redact as _redact_secrets,
 )
+from src.services.security.secret_leak_detector import detect as _detect_secrets
+from src.services.security.secret_leak_detector import redact as _redact_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ScanResult:
     """Combined result from all security scanners."""
+
     injection: DetectionResult
     secrets: SecretLeakResult
     has_findings: bool = False
@@ -107,9 +108,8 @@ class SecurityScannerPipeline:
 
     def meets_severity_threshold(self, result: DetectionResult) -> bool:
         """Return True if *result* meets or exceeds the configured minimum severity."""
-        return (
-            self._severity_rank.get(result.severity, 0)
-            >= self._severity_rank.get(self._min_severity, 0)
+        return self._severity_rank.get(result.severity, 0) >= self._severity_rank.get(
+            self._min_severity, 0
         )
 
     # ------------------------------------------------------------------
@@ -120,7 +120,9 @@ class SecurityScannerPipeline:
         """Emit structured audit log entries for any findings."""
         ctx = f" [{result.context}]" if result.context else ""
 
-        if result.injection.detected and self.meets_severity_threshold(result.injection):
+        if result.injection.detected and self.meets_severity_threshold(
+            result.injection
+        ):
             logger.warning(
                 "[SECURITY]%s Injection detected: severity=%s patterns=%s excerpt=%.200r",
                 ctx,

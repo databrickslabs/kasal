@@ -5,11 +5,14 @@ Missing lines targeted: 42, 173, 195-196, 222-228, 244-257, 284-286, 306-307,
 320-322, 347-349, 368-369, 381-383, 412-414, 441-442, 446-447, 488-491, 497-499,
 523-525, 549-551, 563-564
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
+from src.schemas.tool import ToggleResponse, ToolCreate, ToolResponse, ToolUpdate
 from src.services.tools.tool_service import ToolService
-from src.core.exceptions import NotFoundError, ForbiddenError, KasalError
-from src.schemas.tool import ToolCreate, ToolUpdate, ToolResponse, ToggleResponse
 
 
 def make_service():
@@ -34,7 +37,9 @@ def make_tool(id=1, title="TestTool", group_id=None, enabled=True, config=None):
     return tool
 
 
-def make_group_context(group_ids=None, primary_group_id="g1", group_email="group@example.com", valid=True):
+def make_group_context(
+    group_ids=None, primary_group_id="g1", group_email="group@example.com", valid=True
+):
     ctx = MagicMock()
     ctx.group_ids = group_ids or [primary_group_id]
     ctx.primary_group_id = primary_group_id
@@ -44,6 +49,7 @@ def make_group_context(group_ids=None, primary_group_id="g1", group_email="group
 
 
 # ─── get_all_tools (line 42 - empty list) ────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_get_all_tools_empty():
@@ -56,8 +62,9 @@ async def test_get_all_tools_empty():
 
 # ─── get_tool_by_id ─────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
-async def test_get_tool_by_id_not_found(  ):
+async def test_get_tool_by_id_not_found():
     svc = make_service()
     svc.repository.get = AsyncMock(return_value=None)
     with pytest.raises(NotFoundError):
@@ -65,6 +72,7 @@ async def test_get_tool_by_id_not_found(  ):
 
 
 # ─── get_tool_with_group_check ───────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_get_tool_with_group_check_tool_not_found():
@@ -108,6 +116,7 @@ async def test_get_tool_with_group_check_default_tool_always_accessible():
 
 # ─── create_tool ─────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_create_tool_success():
     svc = make_service()
@@ -132,6 +141,7 @@ async def test_create_tool_raises_on_error():
 
 
 # ─── create_tool_with_group ───────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_create_tool_with_group_adds_group_info():
@@ -161,6 +171,7 @@ async def test_create_tool_with_group_raises_on_error():
 
 # ─── update_tool ─────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_update_tool_not_found():
     svc = make_service()
@@ -183,6 +194,7 @@ async def test_update_tool_update_error():
 
 
 # ─── update_tool_with_group_check ─────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_update_tool_with_group_check_not_found():
@@ -218,6 +230,7 @@ async def test_update_tool_with_group_check_update_error():
 
 # ─── delete_tool ─────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_delete_tool_not_found():
     svc = make_service()
@@ -237,6 +250,7 @@ async def test_delete_tool_delete_error():
 
 
 # ─── delete_tool_with_group_check ─────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_delete_tool_with_group_check_not_found():
@@ -270,6 +284,7 @@ async def test_delete_tool_with_group_check_delete_error():
 
 # ─── toggle_tool_enabled ──────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_toggle_tool_enabled_not_found():
     svc = make_service()
@@ -287,6 +302,7 @@ async def test_toggle_tool_enabled_error():
 
 
 # ─── toggle_tool_enabled_with_group_check ─────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_toggle_group_tool_no_group_context():
@@ -345,6 +361,7 @@ async def test_toggle_group_tool_error():
 
 # ─── get_tool_config_by_name ──────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_get_tool_config_by_name_not_found():
     svc = make_service()
@@ -363,6 +380,7 @@ async def test_get_tool_config_by_name_exception():
 
 # ─── update_tool_configuration_by_title ──────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_update_tool_config_by_title_not_found():
     svc = make_service()
@@ -374,12 +392,15 @@ async def test_update_tool_config_by_title_not_found():
 @pytest.mark.asyncio
 async def test_update_tool_config_by_title_error():
     svc = make_service()
-    svc.repository.update_configuration_by_title = AsyncMock(side_effect=Exception("DB error"))
+    svc.repository.update_configuration_by_title = AsyncMock(
+        side_effect=Exception("DB error")
+    )
     with pytest.raises(KasalError):
         await svc.update_tool_configuration_by_title("SomeTool", {})
 
 
 # ─── get_all_tool_configurations_for_group ────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_get_all_tool_configurations_for_group():
@@ -389,13 +410,16 @@ async def test_get_all_tool_configurations_for_group():
     tool_resp.config = {"key": "val"}
     tools_response = MagicMock()
     tools_response.tools = [tool_resp]
-    with patch.object(svc, "get_all_tools_for_group", new=AsyncMock(return_value=tools_response)):
+    with patch.object(
+        svc, "get_all_tools_for_group", new=AsyncMock(return_value=tools_response)
+    ):
         ctx = make_group_context()
         result = await svc.get_all_tool_configurations_for_group(ctx)
     assert result == {"Tool1": {"key": "val"}}
 
 
 # ─── get_tool_configuration_with_group_check ─────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_get_tool_configuration_with_group_check_returns_group_config():
@@ -420,6 +444,7 @@ async def test_get_tool_configuration_with_group_check_falls_back_to_base():
 
 # ─── update_tool_configuration_group_scoped ───────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_update_tool_config_group_scoped_no_context():
     svc = make_service()
@@ -433,7 +458,9 @@ async def test_update_tool_config_group_scoped_updates_existing():
     existing = make_tool(group_id="g1", config={"old": "val"})
     svc.repository.find_by_title_and_group = AsyncMock(return_value=existing)
     updated = make_tool(config={"new": "val"})
-    svc.repository.update_configuration_for_title_and_group = AsyncMock(return_value=updated)
+    svc.repository.update_configuration_for_title_and_group = AsyncMock(
+        return_value=updated
+    )
     ctx = make_group_context()
     with patch("src.services.tools.tool_service.ToolResponse") as mock_resp:
         mock_resp.model_validate.return_value = MagicMock()
@@ -472,17 +499,21 @@ async def test_update_tool_config_group_scoped_creates_new_no_base():
 
 # ─── personal-workspace-only tools (Gmail) ───────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_gmail_hidden_in_shared_workspace():
     """Gmail must not appear in get_all_tools_for_group for a shared workspace."""
     svc = make_service()
-    svc.repository.list = AsyncMock(return_value=[
-        make_tool(id=1, title="Gmail", group_id=None),
-        make_tool(id=2, title="PerplexityTool", group_id=None),
-    ])
+    svc.repository.list = AsyncMock(
+        return_value=[
+            make_tool(id=1, title="Gmail", group_id=None),
+            make_tool(id=2, title="PerplexityTool", group_id=None),
+        ]
+    )
     # Shared workspace: primary_group_id is NOT user_<email>.
     ctx = make_group_context(
-        group_ids=["bi-specialist"], primary_group_id="bi-specialist",
+        group_ids=["bi-specialist"],
+        primary_group_id="bi-specialist",
         group_email="alice@x.com",
     )
     result = await svc.get_all_tools_for_group(ctx)
@@ -495,13 +526,16 @@ async def test_gmail_hidden_in_shared_workspace():
 async def test_gmail_visible_in_personal_workspace():
     """Gmail appears when the active group IS the caller's personal workspace."""
     svc = make_service()
-    svc.repository.list = AsyncMock(return_value=[
-        make_tool(id=1, title="Gmail", group_id=None),
-        make_tool(id=2, title="PerplexityTool", group_id=None),
-    ])
+    svc.repository.list = AsyncMock(
+        return_value=[
+            make_tool(id=1, title="Gmail", group_id=None),
+            make_tool(id=2, title="PerplexityTool", group_id=None),
+        ]
+    )
     # generate_individual_group_id("alice@x.com") == "user_alice_x_com"
     ctx = make_group_context(
-        group_ids=["user_alice_x_com"], primary_group_id="user_alice_x_com",
+        group_ids=["user_alice_x_com"],
+        primary_group_id="user_alice_x_com",
         group_email="alice@x.com",
     )
     result = await svc.get_all_tools_for_group(ctx)
@@ -514,13 +548,16 @@ async def test_gmail_visible_in_personal_workspace():
 async def test_gmail_hidden_in_enabled_tools_for_shared_workspace():
     """The same filter applies to the /enabled path used by ChatMode/generation."""
     from src.core.cache import tool_list_cache
+
     await tool_list_cache.clear()
 
     svc = make_service()
-    svc.repository.find_enabled = AsyncMock(return_value=[
-        make_tool(id=1, title="Gmail", group_id=None),
-        make_tool(id=2, title="PerplexityTool", group_id=None),
-    ])
+    svc.repository.find_enabled = AsyncMock(
+        return_value=[
+            make_tool(id=1, title="Gmail", group_id=None),
+            make_tool(id=2, title="PerplexityTool", group_id=None),
+        ]
+    )
     mapping1 = MagicMock(tool_id=1, config={})
     mapping2 = MagicMock(tool_id=2, config={})
     with patch("src.services.tools.tool_service.GroupToolRepository") as MockGroupRepo:
@@ -528,7 +565,8 @@ async def test_gmail_hidden_in_enabled_tools_for_shared_workspace():
         group_repo.list_enabled_for_group = AsyncMock(return_value=[mapping1, mapping2])
         MockGroupRepo.return_value = group_repo
         ctx = make_group_context(
-            group_ids=["bi-specialist"], primary_group_id="bi-specialist",
+            group_ids=["bi-specialist"],
+            primary_group_id="bi-specialist",
             group_email="alice@x.com",
         )
         result = await svc._build_enabled_tools_for_group(ctx)

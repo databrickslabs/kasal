@@ -1,4 +1,5 @@
 """Tests for sql_emitter.py — deployment reference SQL generation."""
+
 from __future__ import annotations
 
 import pytest
@@ -35,7 +36,10 @@ def _make_spec(
     switch_count: int = 0,
 ) -> MetricViewSpec:
     measures = [_make_translation(f"m{i}") for i in range(num_measures)]
-    untranslatable = [_make_translation(f"u{i}", translatable=False) for i in range(num_untranslatable)]
+    untranslatable = [
+        _make_translation(f"u{i}", translatable=False)
+        for i in range(num_untranslatable)
+    ]
     return MetricViewSpec(
         fact_table_key=fact_table_key,
         source_table=source_table,

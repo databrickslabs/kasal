@@ -4,16 +4,17 @@ Unit tests for template generation API router.
 Tests the /template-generation/generate-templates POST endpoint with
 mocked TemplateGenerationService and dependency overrides.
 """
+
 import json
-import pytest
 from unittest.mock import AsyncMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.template_generation_router import (
-    router,
     get_template_generation_service,
+    router,
 )
 from src.core.dependencies import get_group_context
 from src.db.database_router import get_smart_db_session
@@ -60,7 +61,9 @@ def client(mock_template_service):
 
     app.dependency_overrides[get_group_context] = override_group_context
     app.dependency_overrides[get_smart_db_session] = override_session
-    app.dependency_overrides[get_template_generation_service] = override_template_service
+    app.dependency_overrides[get_template_generation_service] = (
+        override_template_service
+    )
 
     return TestClient(app)
 

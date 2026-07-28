@@ -4,16 +4,22 @@ Unit tests for agent schemas.
 Tests the functionality of Pydantic schemas for agent operations
 including validation, serialization, and field constraints.
 """
-from src.utils.model_config import DEFAULT_ENGINE_MODEL
-import pytest
+
 from datetime import datetime
+from typing import Any, Dict, List
+
+import pytest
 from pydantic import ValidationError
-from typing import List, Dict, Any
 
 from src.schemas.agent import (
-    AgentBase, AgentCreate, AgentUpdate, AgentLimitedUpdate,
-    AgentInDBBase, Agent
+    Agent,
+    AgentBase,
+    AgentCreate,
+    AgentInDBBase,
+    AgentLimitedUpdate,
+    AgentUpdate,
 )
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 
 class TestAgentBase:
@@ -24,7 +30,7 @@ class TestAgentBase:
         agent_data = {
             "role": "analyst",
             "goal": "Analyze data effectively",
-            "backstory": "Expert in data analysis"
+            "backstory": "Expert in data analysis",
         }
         agent = AgentBase(**agent_data)
         assert agent.name == "Unnamed Agent"  # Default value
@@ -83,7 +89,7 @@ class TestAgentBase:
             "respect_context_window": False,
             "knowledge_sources": [{"type": "document", "path": "/docs"}],
             "inject_date": False,
-            "date_format": "%B %d, %Y"
+            "date_format": "%B %d, %Y",
         }
         agent = AgentBase(**agent_data)
         assert agent.name == "Senior Data Analyst"
@@ -100,7 +106,10 @@ class TestAgentBase:
         assert agent.allow_delegation is True
         assert agent.cache is False
         assert agent.memory is False
-        assert agent.embedder_config == {"model": "databricks-gte-large-en", "dimension": 1024}
+        assert agent.embedder_config == {
+            "model": "databricks-gte-large-en",
+            "dimension": 1024,
+        }
         assert agent.system_template == "You are a data analyst"
         assert agent.prompt_template == "Analyze: {data}"
         assert agent.response_template == "Result: {result}"
@@ -120,19 +129,16 @@ class TestAgentBase:
             AgentBase(name="Test Agent")
 
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "role" in missing_fields
         assert "goal" in missing_fields
         assert "backstory" in missing_fields
 
     def test_agent_base_empty_strings(self):
         """Test AgentBase with empty strings for required fields."""
-        agent_data = {
-            "name": "",
-            "role": "",
-            "goal": "",
-            "backstory": ""
-        }
+        agent_data = {"name": "", "role": "", "goal": "", "backstory": ""}
         agent = AgentBase(**agent_data)
         assert agent.name == ""
         assert agent.role == ""
@@ -148,7 +154,7 @@ class TestAgentBase:
             "verbose": "true",
             "allow_delegation": 1,
             "cache": 0,
-            "memory": "false"
+            "memory": "false",
         }
         agent = AgentBase(**agent_data)
         assert agent.verbose is True
@@ -163,7 +169,7 @@ class TestAgentBase:
             "goal": "Analyze data",
             "backstory": "Expert analyst",
             "max_iter": "30",  # String that can be converted
-            "max_retry_limit": 3.0  # Float that can be converted
+            "max_retry_limit": 3.0,  # Float that can be converted
         }
         agent = AgentBase(**agent_data)
         assert agent.max_iter == 30
@@ -180,7 +186,7 @@ class TestAgentBaseDateAwareness:
         agent_data = {
             "role": "analyst",
             "goal": "Analyze data",
-            "backstory": "Expert analyst"
+            "backstory": "Expert analyst",
         }
         agent = AgentBase(**agent_data)
         assert agent.inject_date is True
@@ -191,7 +197,7 @@ class TestAgentBaseDateAwareness:
             "role": "analyst",
             "goal": "Analyze data",
             "backstory": "Expert analyst",
-            "inject_date": True
+            "inject_date": True,
         }
         agent = AgentBase(**agent_data)
         assert agent.inject_date is True
@@ -202,7 +208,7 @@ class TestAgentBaseDateAwareness:
             "role": "analyst",
             "goal": "Analyze data",
             "backstory": "Expert analyst",
-            "inject_date": False
+            "inject_date": False,
         }
         agent = AgentBase(**agent_data)
         assert agent.inject_date is False
@@ -213,7 +219,7 @@ class TestAgentBaseDateAwareness:
             "role": "analyst",
             "goal": "Analyze data",
             "backstory": "Expert analyst",
-            "inject_date": "true"
+            "inject_date": "true",
         }
         agent = AgentBase(**agent_data)
         assert agent.inject_date is True
@@ -228,7 +234,7 @@ class TestAgentBaseDateAwareness:
             "role": "analyst",
             "goal": "Analyze data",
             "backstory": "Expert analyst",
-            "inject_date": 1
+            "inject_date": 1,
         }
         agent = AgentBase(**agent_data)
         assert agent.inject_date is True
@@ -242,7 +248,7 @@ class TestAgentBaseDateAwareness:
         agent_data = {
             "role": "analyst",
             "goal": "Analyze data",
-            "backstory": "Expert analyst"
+            "backstory": "Expert analyst",
         }
         agent = AgentBase(**agent_data)
         assert agent.date_format is None
@@ -253,7 +259,7 @@ class TestAgentBaseDateAwareness:
             "role": "analyst",
             "goal": "Analyze data",
             "backstory": "Expert analyst",
-            "date_format": "%Y-%m-%d"
+            "date_format": "%Y-%m-%d",
         }
         agent = AgentBase(**agent_data)
         assert agent.date_format == "%Y-%m-%d"
@@ -264,7 +270,7 @@ class TestAgentBaseDateAwareness:
             "role": "analyst",
             "goal": "Analyze data",
             "backstory": "Expert analyst",
-            "date_format": "%B %d, %Y"
+            "date_format": "%B %d, %Y",
         }
         agent = AgentBase(**agent_data)
         assert agent.date_format == "%B %d, %Y"
@@ -275,7 +281,7 @@ class TestAgentBaseDateAwareness:
             "role": "analyst",
             "goal": "Analyze data",
             "backstory": "Expert analyst",
-            "date_format": "%Y-%m-%d %H:%M:%S"
+            "date_format": "%Y-%m-%d %H:%M:%S",
         }
         agent = AgentBase(**agent_data)
         assert agent.date_format == "%Y-%m-%d %H:%M:%S"
@@ -286,7 +292,7 @@ class TestAgentBaseDateAwareness:
             "role": "analyst",
             "goal": "Analyze data",
             "backstory": "Expert analyst",
-            "date_format": ""
+            "date_format": "",
         }
         agent = AgentBase(**agent_data)
         assert agent.date_format == ""
@@ -307,7 +313,7 @@ class TestAgentBaseDateAwareness:
                 "role": "analyst",
                 "goal": "Analyze data",
                 "backstory": "Expert analyst",
-                "date_format": fmt
+                "date_format": fmt,
             }
             agent = AgentBase(**agent_data)
             assert agent.date_format == fmt
@@ -319,7 +325,7 @@ class TestAgentBaseDateAwareness:
             "goal": "Analyze time-sensitive data",
             "backstory": "Expert analyst with temporal awareness",
             "inject_date": True,
-            "date_format": "%B %d, %Y"
+            "date_format": "%B %d, %Y",
         }
         agent = AgentBase(**agent_data)
         assert agent.inject_date is True
@@ -332,7 +338,7 @@ class TestAgentBaseDateAwareness:
             "goal": "Analyze data",
             "backstory": "Expert analyst",
             "inject_date": False,
-            "date_format": "%Y-%m-%d"
+            "date_format": "%Y-%m-%d",
         }
         agent = AgentBase(**agent_data)
         assert agent.inject_date is False
@@ -348,23 +354,23 @@ class TestAgentCreate:
             "name": "New Agent",
             "role": "developer",
             "goal": "Develop software",
-            "backstory": "Software developer"
+            "backstory": "Software developer",
         }
         agent = AgentCreate(**agent_data)
 
         # Should have all base class attributes
-        assert hasattr(agent, 'name')
-        assert hasattr(agent, 'role')
-        assert hasattr(agent, 'goal')
-        assert hasattr(agent, 'backstory')
-        assert hasattr(agent, 'llm')
-        assert hasattr(agent, 'tools')
-        assert hasattr(agent, 'max_iter')
-        assert hasattr(agent, 'verbose')
-        assert hasattr(agent, 'cache')
-        assert hasattr(agent, 'memory')
-        assert hasattr(agent, 'inject_date')
-        assert hasattr(agent, 'date_format')
+        assert hasattr(agent, "name")
+        assert hasattr(agent, "role")
+        assert hasattr(agent, "goal")
+        assert hasattr(agent, "backstory")
+        assert hasattr(agent, "llm")
+        assert hasattr(agent, "tools")
+        assert hasattr(agent, "max_iter")
+        assert hasattr(agent, "verbose")
+        assert hasattr(agent, "cache")
+        assert hasattr(agent, "memory")
+        assert hasattr(agent, "inject_date")
+        assert hasattr(agent, "date_format")
 
         # Should behave like base class
         assert agent.name == "New Agent"
@@ -386,7 +392,7 @@ class TestAgentCreate:
             "llm": "claude-3",
             "tools": ["search", "summarize"],
             "max_iter": 40,
-            "verbose": True
+            "verbose": True,
         }
         agent = AgentCreate(**agent_data)
         assert agent.name == "Custom Agent"
@@ -404,7 +410,7 @@ class TestAgentCreate:
             "goal": "Schedule meetings based on current date",
             "backstory": "Expert scheduler",
             "inject_date": True,
-            "date_format": "%A, %B %d, %Y"
+            "date_format": "%A, %B %d, %Y",
         }
         agent = AgentCreate(**agent_data)
         assert agent.inject_date is True
@@ -446,11 +452,7 @@ class TestAgentUpdate:
 
     def test_agent_update_partial(self):
         """Test AgentUpdate with partial fields."""
-        update_data = {
-            "name": "Updated Agent",
-            "llm": "gpt-4",
-            "verbose": True
-        }
+        update_data = {"name": "Updated Agent", "llm": "gpt-4", "verbose": True}
         update = AgentUpdate(**update_data)
         assert update.name == "Updated Agent"
         assert update.llm == "gpt-4"
@@ -487,7 +489,7 @@ class TestAgentUpdate:
             "respect_context_window": False,
             "knowledge_sources": [{"updated": "source"}],
             "inject_date": False,
-            "date_format": "%d-%m-%Y"
+            "date_format": "%d-%m-%Y",
         }
         update = AgentUpdate(**update_data)
         assert update.name == "Fully Updated Agent"
@@ -525,7 +527,7 @@ class TestAgentUpdate:
             "goal": None,
             "backstory": None,
             "llm": None,
-            "tools": None
+            "tools": None,
         }
         update = AgentUpdate(**update_data)
         assert update.name is None
@@ -537,12 +539,7 @@ class TestAgentUpdate:
 
     def test_agent_update_empty_strings(self):
         """Test AgentUpdate with empty strings."""
-        update_data = {
-            "name": "",
-            "role": "",
-            "goal": "",
-            "backstory": ""
-        }
+        update_data = {"name": "", "role": "", "goal": "", "backstory": ""}
         update = AgentUpdate(**update_data)
         assert update.name == ""
         assert update.role == ""
@@ -585,19 +582,13 @@ class TestAgentUpdateDateAwareness:
 
     def test_agent_update_both_date_fields(self):
         """Test AgentUpdate with both inject_date and date_format."""
-        update = AgentUpdate(
-            inject_date=True,
-            date_format="%A, %B %d, %Y"
-        )
+        update = AgentUpdate(inject_date=True, date_format="%A, %B %d, %Y")
         assert update.inject_date is True
         assert update.date_format == "%A, %B %d, %Y"
 
     def test_agent_update_date_fields_only(self):
         """Test AgentUpdate with only date awareness fields."""
-        update_data = {
-            "inject_date": False,
-            "date_format": "%d/%m/%Y"
-        }
+        update_data = {"inject_date": False, "date_format": "%d/%m/%Y"}
         update = AgentUpdate(**update_data)
         assert update.inject_date is False
         assert update.date_format == "%d/%m/%Y"
@@ -625,10 +616,7 @@ class TestAgentLimitedUpdate:
 
     def test_agent_limited_update_partial(self):
         """Test AgentLimitedUpdate with partial fields."""
-        update_data = {
-            "name": "Limited Update Agent",
-            "role": "limited_role"
-        }
+        update_data = {"name": "Limited Update Agent", "role": "limited_role"}
         update = AgentLimitedUpdate(**update_data)
         assert update.name == "Limited Update Agent"
         assert update.role == "limited_role"
@@ -641,7 +629,7 @@ class TestAgentLimitedUpdate:
             "name": "Complete Limited Update",
             "role": "complete_role",
             "goal": "Complete goal",
-            "backstory": "Complete backstory"
+            "backstory": "Complete backstory",
         }
         update = AgentLimitedUpdate(**update_data)
         assert update.name == "Complete Limited Update"
@@ -657,15 +645,21 @@ class TestAgentLimitedUpdate:
         assert actual_fields == expected_fields
 
         # Test that it doesn't have configuration fields in its model definition
-        config_fields = {"llm", "tools", "max_iter", "verbose", "cache", "memory", "inject_date", "date_format"}
+        config_fields = {
+            "llm",
+            "tools",
+            "max_iter",
+            "verbose",
+            "cache",
+            "memory",
+            "inject_date",
+            "date_format",
+        }
         assert config_fields.isdisjoint(actual_fields)
 
         # Test that a limited update can be created successfully
         limited_update = AgentLimitedUpdate(
-            name="Test",
-            role="test",
-            goal="test goal",
-            backstory="test backstory"
+            name="Test", role="test", goal="test goal", backstory="test backstory"
         )
         assert limited_update.name == "Test"
         assert limited_update.role == "test"
@@ -686,7 +680,7 @@ class TestAgentInDBBase:
             "goal": "Analyze database",
             "backstory": "Database expert",
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         agent = AgentInDBBase(**agent_data)
         assert agent.id == "agent-123"
@@ -709,21 +703,18 @@ class TestAgentInDBBase:
 
     def test_agent_in_db_base_config(self):
         """Test AgentInDBBase Config class."""
-        assert hasattr(AgentInDBBase, 'model_config')
-        assert AgentInDBBase.model_config.get('from_attributes') is True
+        assert hasattr(AgentInDBBase, "model_config")
+        assert AgentInDBBase.model_config.get("from_attributes") is True
 
     def test_agent_in_db_base_missing_fields(self):
         """Test AgentInDBBase validation with missing fields."""
         with pytest.raises(ValidationError) as exc_info:
-            AgentInDBBase(
-                name="Test Agent",
-                role="test",
-                goal="test",
-                backstory="test"
-            )
+            AgentInDBBase(name="Test Agent", role="test", goal="test", backstory="test")
 
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "id" in missing_fields
         assert "created_at" in missing_fields
         assert "updated_at" in missing_fields
@@ -737,7 +728,7 @@ class TestAgentInDBBase:
             "goal": "Handle datetime",
             "backstory": "Time expert",
             "created_at": "2023-01-01T12:00:00",
-            "updated_at": "2023-01-01T12:00:00"
+            "updated_at": "2023-01-01T12:00:00",
         }
         agent = AgentInDBBase(**agent_data)
         assert agent.id == "agent-456"
@@ -756,7 +747,7 @@ class TestAgentInDBBase:
             "created_at": now,
             "updated_at": now,
             "inject_date": True,
-            "date_format": "%B %d, %Y"
+            "date_format": "%B %d, %Y",
         }
         agent = AgentInDBBase(**agent_data)
         assert agent.inject_date is True
@@ -776,28 +767,28 @@ class TestAgent:
             "goal": "Test inheritance",
             "backstory": "Inheritance expert",
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         agent = Agent(**agent_data)
 
         # Should have all AgentInDBBase attributes
-        assert hasattr(agent, 'id')
-        assert hasattr(agent, 'created_at')
-        assert hasattr(agent, 'updated_at')
+        assert hasattr(agent, "id")
+        assert hasattr(agent, "created_at")
+        assert hasattr(agent, "updated_at")
 
         # Should have all AgentBase attributes
-        assert hasattr(agent, 'name')
-        assert hasattr(agent, 'role')
-        assert hasattr(agent, 'goal')
-        assert hasattr(agent, 'backstory')
-        assert hasattr(agent, 'llm')
-        assert hasattr(agent, 'tools')
-        assert hasattr(agent, 'max_iter')
-        assert hasattr(agent, 'verbose')
-        assert hasattr(agent, 'cache')
-        assert hasattr(agent, 'memory')
-        assert hasattr(agent, 'inject_date')
-        assert hasattr(agent, 'date_format')
+        assert hasattr(agent, "name")
+        assert hasattr(agent, "role")
+        assert hasattr(agent, "goal")
+        assert hasattr(agent, "backstory")
+        assert hasattr(agent, "llm")
+        assert hasattr(agent, "tools")
+        assert hasattr(agent, "max_iter")
+        assert hasattr(agent, "verbose")
+        assert hasattr(agent, "cache")
+        assert hasattr(agent, "memory")
+        assert hasattr(agent, "inject_date")
+        assert hasattr(agent, "date_format")
 
         # Verify values
         assert agent.id == "agent-789"
@@ -844,7 +835,7 @@ class TestAgent:
             "inject_date": False,
             "date_format": "%Y-%m-%d %H:%M:%S",
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         agent = Agent(**agent_data)
 
@@ -893,22 +884,18 @@ class TestSchemaIntegration:
             "backstory": "Workflow expert",
             "llm": "claude-3",
             "tools": ["workflow_tool"],
-            "verbose": True
+            "verbose": True,
         }
         create_schema = AgentCreate(**create_data)
 
         # Update agent
-        update_data = {
-            "name": "Updated Workflow Agent",
-            "max_iter": 50,
-            "cache": False
-        }
+        update_data = {"name": "Updated Workflow Agent", "max_iter": 50, "cache": False}
         update_schema = AgentUpdate(**update_data)
 
         # Limited update
         limited_update_data = {
             "role": "senior_workflow_analyst",
-            "goal": "Advanced workflow testing"
+            "goal": "Advanced workflow testing",
         }
         limited_update_schema = AgentLimitedUpdate(**limited_update_data)
 
@@ -926,7 +913,7 @@ class TestSchemaIntegration:
             "max_iter": update_data["max_iter"],  # Updated max_iter
             "cache": update_data["cache"],  # Updated cache
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         agent_response = Agent(**db_data)
 
@@ -949,9 +936,7 @@ class TestSchemaIntegration:
         """Test different agent configuration scenarios."""
         # Basic agent
         basic_agent = AgentCreate(
-            role="basic",
-            goal="Basic tasks",
-            backstory="Basic background"
+            role="basic", goal="Basic tasks", backstory="Basic background"
         )
         assert basic_agent.name == "Unnamed Agent"
         assert basic_agent.llm == DEFAULT_ENGINE_MODEL
@@ -971,14 +956,16 @@ class TestSchemaIntegration:
             max_iter=200,
             verbose=True,
             allow_code_execution=True,
-            memory=True
+            memory=True,
         )
         assert advanced_agent.name == "Advanced AI"
         assert advanced_agent.llm == "gpt-4"
         assert advanced_agent.tools == ["research", "analysis", "visualization"]
         assert advanced_agent.max_iter == 200
         assert advanced_agent.verbose is True
-        assert advanced_agent.allow_code_execution is False  # Security: Always forced to False
+        assert (
+            advanced_agent.allow_code_execution is False
+        )  # Security: Always forced to False
         assert advanced_agent.memory is True
 
         # Specialized agent with templates
@@ -990,12 +977,17 @@ class TestSchemaIntegration:
             system_template="You are a specialist in {domain}",
             prompt_template="Analyze this {domain} problem: {problem}",
             response_template="Solution: {solution}",
-            knowledge_sources=[{"type": "domain_docs", "path": "/domain"}]
+            knowledge_sources=[{"type": "domain_docs", "path": "/domain"}],
         )
         assert specialized_agent.system_template == "You are a specialist in {domain}"
-        assert specialized_agent.prompt_template == "Analyze this {domain} problem: {problem}"
+        assert (
+            specialized_agent.prompt_template
+            == "Analyze this {domain} problem: {problem}"
+        )
         assert specialized_agent.response_template == "Solution: {solution}"
-        assert specialized_agent.knowledge_sources == [{"type": "domain_docs", "path": "/domain"}]
+        assert specialized_agent.knowledge_sources == [
+            {"type": "domain_docs", "path": "/domain"}
+        ]
 
     def test_agent_update_scenarios(self):
         """Test different agent update scenarios."""
@@ -1005,7 +997,7 @@ class TestSchemaIntegration:
             max_rpm=1000,
             max_execution_time=7200,
             cache=True,
-            respect_context_window=True
+            respect_context_window=True,
         )
         assert performance_update.max_iter == 300
         assert performance_update.max_rpm == 1000
@@ -1018,7 +1010,7 @@ class TestSchemaIntegration:
             allow_code_execution=False,
             code_execution_mode="safe",
             allow_delegation=False,
-            use_system_prompt=True
+            use_system_prompt=True,
         )
         assert security_update.allow_code_execution is False
         assert security_update.code_execution_mode == "safe"
@@ -1030,12 +1022,14 @@ class TestSchemaIntegration:
             system_template="Updated system template",
             prompt_template="Updated prompt template",
             response_template="Updated response template",
-            knowledge_sources=[{"type": "updated_docs", "path": "/updated"}]
+            knowledge_sources=[{"type": "updated_docs", "path": "/updated"}],
         )
         assert content_update.system_template == "Updated system template"
         assert content_update.prompt_template == "Updated prompt template"
         assert content_update.response_template == "Updated response template"
-        assert content_update.knowledge_sources == [{"type": "updated_docs", "path": "/updated"}]
+        assert content_update.knowledge_sources == [
+            {"type": "updated_docs", "path": "/updated"}
+        ]
 
     def test_date_awareness_workflow(self):
         """Test complete workflow with date awareness fields."""
@@ -1046,17 +1040,14 @@ class TestSchemaIntegration:
             "goal": "Analyze time-sensitive data with current date context",
             "backstory": "Expert in temporal data analysis",
             "inject_date": True,
-            "date_format": "%B %d, %Y"
+            "date_format": "%B %d, %Y",
         }
         create_schema = AgentCreate(**create_data)
         assert create_schema.inject_date is True
         assert create_schema.date_format == "%B %d, %Y"
 
         # Update date awareness settings
-        update_data = {
-            "inject_date": False,
-            "date_format": "%Y-%m-%d"
-        }
+        update_data = {"inject_date": False, "date_format": "%Y-%m-%d"}
         update_schema = AgentUpdate(**update_data)
         assert update_schema.inject_date is False
         assert update_schema.date_format == "%Y-%m-%d"
@@ -1072,7 +1063,7 @@ class TestSchemaIntegration:
             "inject_date": update_schema.inject_date,  # Updated
             "date_format": update_schema.date_format,  # Updated
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         agent_response = Agent(**db_data)
 
@@ -1091,7 +1082,7 @@ class TestDateAwarenessSerialization:
             "goal": "Analyze data",
             "backstory": "Expert analyst",
             "inject_date": True,
-            "date_format": "%B %d, %Y"
+            "date_format": "%B %d, %Y",
         }
         agent = AgentBase(**agent_data)
         dumped = agent.model_dump()
@@ -1106,7 +1097,7 @@ class TestDateAwarenessSerialization:
         agent_data = {
             "role": "analyst",
             "goal": "Analyze data",
-            "backstory": "Expert analyst"
+            "backstory": "Expert analyst",
         }
         agent = AgentBase(**agent_data)
         dumped = agent.model_dump()
@@ -1145,7 +1136,7 @@ class TestDateAwarenessSerialization:
             "inject_date": True,
             "date_format": "%A, %B %d, %Y",
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         agent = Agent(**agent_data)
         json_str = agent.model_dump_json()
@@ -1160,7 +1151,7 @@ class TestDateAwarenessSerialization:
             "goal": "Analyze data",
             "backstory": "Expert analyst",
             "inject_date": False,
-            "date_format": "%d/%m/%Y"
+            "date_format": "%d/%m/%Y",
         }
         agent = AgentBase(**agent_dict)
 

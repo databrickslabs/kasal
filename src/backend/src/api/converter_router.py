@@ -6,33 +6,30 @@ FastAPI routes for converter management (history, jobs, saved configurations)
 import logging
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.session import get_db
-from src.services.powerbi.conversions import ConverterService
-from src.schemas.conversion import (
-    # History
-    ConversionHistoryCreate,
-    ConversionHistoryUpdate,
-    ConversionHistoryResponse,
-    ConversionHistoryListResponse,
-    ConversionHistoryFilter,
-    ConversionStatistics,
-    # Jobs
-    ConversionJobCreate,
-    ConversionJobUpdate,
-    ConversionJobResponse,
-    ConversionJobListResponse,
-    ConversionJobStatusUpdate,
-    # Saved Configs
-    SavedConfigurationCreate,
-    SavedConfigurationUpdate,
-    SavedConfigurationResponse,
-    SavedConfigurationListResponse,
-    SavedConfigurationFilter,
-)
 from src.core.dependencies import GroupContextDep
+from src.db.session import get_db
+from src.schemas.conversion import (  # History; Jobs; Saved Configs
+    ConversionHistoryCreate,
+    ConversionHistoryFilter,
+    ConversionHistoryListResponse,
+    ConversionHistoryResponse,
+    ConversionHistoryUpdate,
+    ConversionJobCreate,
+    ConversionJobListResponse,
+    ConversionJobResponse,
+    ConversionJobStatusUpdate,
+    ConversionJobUpdate,
+    ConversionStatistics,
+    SavedConfigurationCreate,
+    SavedConfigurationFilter,
+    SavedConfigurationListResponse,
+    SavedConfigurationResponse,
+    SavedConfigurationUpdate,
+)
+from src.services.powerbi.conversions import ConverterService
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +50,7 @@ def get_converter_service(
 
 
 # ===== CONVERSION HISTORY ENDPOINTS =====
+
 
 @router.post(
     "/history",
@@ -135,7 +133,9 @@ async def list_history(
     service: Annotated[ConverterService, Depends(get_converter_service)],
     source_format: Optional[str] = Query(None, description="Filter by source format"),
     target_format: Optional[str] = Query(None, description="Filter by target format"),
-    status: Optional[str] = Query(None, description="Filter by status (pending, success, failed)"),
+    status: Optional[str] = Query(
+        None, description="Filter by status (pending, success, failed)"
+    ),
     execution_id: Optional[str] = Query(None, description="Filter by execution ID"),
     limit: int = Query(100, ge=1, le=1000, description="Number of results"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
@@ -160,6 +160,7 @@ async def list_history(
 
 
 # ===== CONVERSION JOB ENDPOINTS =====
+
 
 @router.post(
     "/jobs",
@@ -237,7 +238,10 @@ async def update_job_status(
 )
 async def list_jobs(
     service: Annotated[ConverterService, Depends(get_converter_service)],
-    status: Optional[str] = Query(None, description="Filter by status (pending, running, completed, failed, cancelled)"),
+    status: Optional[str] = Query(
+        None,
+        description="Filter by status (pending, running, completed, failed, cancelled)",
+    ),
     limit: int = Query(50, ge=1, le=500, description="Number of results"),
 ) -> ConversionJobListResponse:
     """
@@ -268,6 +272,7 @@ async def cancel_job(
 
 
 # ===== SAVED CONFIGURATION ENDPOINTS =====
+
 
 @router.post(
     "/configs",
@@ -349,7 +354,9 @@ async def list_configs(
     service: Annotated[ConverterService, Depends(get_converter_service)],
     source_format: Optional[str] = Query(None, description="Filter by source format"),
     target_format: Optional[str] = Query(None, description="Filter by target format"),
-    is_public: Optional[bool] = Query(None, description="Filter by public/shared status"),
+    is_public: Optional[bool] = Query(
+        None, description="Filter by public/shared status"
+    ),
     is_template: Optional[bool] = Query(None, description="Filter by template status"),
     search: Optional[str] = Query(None, description="Search in configuration name"),
     limit: int = Query(50, ge=1, le=200, description="Number of results"),
@@ -393,6 +400,7 @@ async def use_config(
 
 
 # ===== HEALTH CHECK =====
+
 
 @router.get(
     "/health",

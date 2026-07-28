@@ -1,18 +1,19 @@
-import pytest
-from unittest.mock import AsyncMock
-from types import SimpleNamespace
 from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from src.api.templates_router import (
-    health_check,
-    list_templates,
+    create_template,
+    delete_all_templates,
+    delete_template,
     get_template,
     get_template_by_name,
-    create_template,
-    update_template,
-    delete_template,
-    delete_all_templates,
+    health_check,
+    list_templates,
     reset_templates,
+    update_template,
 )
 from src.schemas.template import PromptTemplateCreate, PromptTemplateUpdate
 
@@ -26,7 +27,15 @@ class Ctx:
 
 def make_tpl(i=1, name="t1"):
     now = datetime.utcnow()
-    return SimpleNamespace(id=i, name=name, description=None, template="hi", is_active=True, created_at=now, updated_at=now)
+    return SimpleNamespace(
+        id=i,
+        name=name,
+        description=None,
+        template="hi",
+        is_active=True,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 @pytest.mark.asyncio
@@ -59,23 +68,33 @@ async def test_create_update_delete_and_reset_paths():
 
     # create success
     svc.create_template_with_group = AsyncMock(return_value=make_tpl(2, "t2"))
-    out = await create_template(PromptTemplateCreate(name="t2", template="x"), service=svc, group_context=ctx)
+    out = await create_template(
+        PromptTemplateCreate(name="t2", template="x"), service=svc, group_context=ctx
+    )
     assert out.name == "t2"
 
     # create conflict -> 400
     svc.create_template_with_group = AsyncMock(side_effect=ValueError("exists"))
     with pytest.raises(Exception):
-        await create_template(PromptTemplateCreate(name="t2", template="x"), service=svc, group_context=ctx)
+        await create_template(
+            PromptTemplateCreate(name="t2", template="x"),
+            service=svc,
+            group_context=ctx,
+        )
 
     # update not found -> 404
     svc.update_with_group_check = AsyncMock(return_value=None)
     with pytest.raises(Exception):
-        await update_template(5, PromptTemplateUpdate(name="t3"), service=svc, group_context=ctx)
+        await update_template(
+            5, PromptTemplateUpdate(name="t3"), service=svc, group_context=ctx
+        )
 
     # update conflict -> 400
     svc.update_with_group_check = AsyncMock(side_effect=ValueError("conflict"))
     with pytest.raises(Exception):
-        await update_template(5, PromptTemplateUpdate(name="t3"), service=svc, group_context=ctx)
+        await update_template(
+            5, PromptTemplateUpdate(name="t3"), service=svc, group_context=ctx
+        )
 
     # delete not found -> 404
     svc.delete_with_group_check = AsyncMock(return_value=False)
@@ -90,4 +109,3 @@ async def test_create_update_delete_and_reset_paths():
     svc.reset_templates_with_group = AsyncMock(return_value=2)
     ra = await reset_templates(service=svc, group_context=ctx)
     assert ra["reset_count"] == 2
-

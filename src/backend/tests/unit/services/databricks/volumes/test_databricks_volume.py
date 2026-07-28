@@ -7,18 +7,19 @@ and volume upload logic with mocked Databricks SDK and repository.
 
 import io
 import json
-import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 from src.services.databricks.volumes.volume_callback import (
     DatabricksVolumeCallback,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def base_kwargs():
@@ -40,6 +41,7 @@ def callback(base_kwargs):
 # Initialization
 # ===========================================================================
 
+
 class TestInit:
 
     def test_stores_volume_path(self, base_kwargs):
@@ -53,9 +55,7 @@ class TestInit:
         assert cb.volume_path == "/Volumes/catalog/myschema/myvol"
 
     def test_converts_non_standard_dot_notation(self):
-        cb = DatabricksVolumeCallback(
-            volume_path="a.b.c.d", task_key="t"
-        )
+        cb = DatabricksVolumeCallback(volume_path="a.b.c.d", task_key="t")
         assert cb.volume_path.startswith("/Volumes/")
 
     def test_default_flags(self, base_kwargs):
@@ -85,6 +85,7 @@ class TestInit:
 # _ensure_auth
 # ===========================================================================
 
+
 class TestEnsureAuth:
 
     @pytest.mark.asyncio
@@ -95,9 +96,7 @@ class TestEnsureAuth:
 
     @pytest.mark.asyncio
     async def test_fetches_auth_context_when_missing(self):
-        cb = DatabricksVolumeCallback(
-            volume_path="/Volumes/c/s/v", task_key="t"
-        )
+        cb = DatabricksVolumeCallback(volume_path="/Volumes/c/s/v", task_key="t")
         assert cb.workspace_url is None
 
         mock_auth = MagicMock()
@@ -117,9 +116,7 @@ class TestEnsureAuth:
 
     @pytest.mark.asyncio
     async def test_handles_auth_exception(self):
-        cb = DatabricksVolumeCallback(
-            volume_path="/Volumes/c/s/v", task_key="t"
-        )
+        cb = DatabricksVolumeCallback(volume_path="/Volumes/c/s/v", task_key="t")
         with patch(
             "src.utils.databricks_auth.get_auth_context",
             new_callable=AsyncMock,
@@ -132,6 +129,7 @@ class TestEnsureAuth:
 # ===========================================================================
 # _ensure_client
 # ===========================================================================
+
 
 class TestEnsureClient:
 
@@ -161,13 +159,16 @@ class TestEnsureClient:
             new_callable=AsyncMock,
             return_value=None,
         ):
-            with pytest.raises(ValueError, match="Failed to get Databricks workspace client"):
+            with pytest.raises(
+                ValueError, match="Failed to get Databricks workspace client"
+            ):
                 await callback._ensure_client()
 
 
 # ===========================================================================
 # _generate_file_path
 # ===========================================================================
+
 
 class TestGenerateFilePath:
 
@@ -202,6 +203,7 @@ class TestGenerateFilePath:
 # ===========================================================================
 # _format_output
 # ===========================================================================
+
 
 class TestFormatOutput:
 
@@ -259,17 +261,22 @@ class TestFormatOutput:
 # execute
 # ===========================================================================
 
+
 class TestExecute:
 
     @pytest.mark.asyncio
     async def test_successful_upload(self, callback):
-        with patch.object(
-            callback, "_generate_file_path", return_value="2024/01/01/task_1.json"
-        ), patch.object(
-            callback, "_format_output", return_value='{"k":"v"}'
-        ), patch.object(
-            callback, "_upload_to_volume", new_callable=AsyncMock,
-            return_value="/Volumes/cat/schema/vol/2024/01/01/task_1.json",
+        with (
+            patch.object(
+                callback, "_generate_file_path", return_value="2024/01/01/task_1.json"
+            ),
+            patch.object(callback, "_format_output", return_value='{"k":"v"}'),
+            patch.object(
+                callback,
+                "_upload_to_volume",
+                new_callable=AsyncMock,
+                return_value="/Volumes/cat/schema/vol/2024/01/01/task_1.json",
+            ),
         ):
             meta = await callback.execute({"k": "v"})
             assert meta["volume_path"].endswith("task_1.json")
@@ -286,13 +293,15 @@ class TestExecute:
 
     @pytest.mark.asyncio
     async def test_propagates_upload_error(self, callback):
-        with patch.object(
-            callback, "_generate_file_path", return_value="f.json"
-        ), patch.object(
-            callback, "_format_output", return_value="{}"
-        ), patch.object(
-            callback, "_upload_to_volume", new_callable=AsyncMock,
-            side_effect=Exception("upload failed"),
+        with (
+            patch.object(callback, "_generate_file_path", return_value="f.json"),
+            patch.object(callback, "_format_output", return_value="{}"),
+            patch.object(
+                callback,
+                "_upload_to_volume",
+                new_callable=AsyncMock,
+                side_effect=Exception("upload failed"),
+            ),
         ):
             with pytest.raises(Exception, match="upload failed"):
                 await callback.execute({})
@@ -301,6 +310,7 @@ class TestExecute:
 # ===========================================================================
 # _upload_to_volume
 # ===========================================================================
+
 
 class TestUploadToVolume:
 
@@ -330,19 +340,27 @@ class TestUploadToVolume:
         mock_ws_client.files = MagicMock()
         mock_ws_client.files.upload = MagicMock()
 
-        with patch(
-            "src.repositories.databricks_volume_repository.DatabricksVolumeRepository",
-            return_value=mock_vol_repo,
-        ), patch.object(
-            callback, "_ensure_client", new_callable=AsyncMock,
-            return_value=mock_ws_client,
+        with (
+            patch(
+                "src.repositories.databricks_volume_repository.DatabricksVolumeRepository",
+                return_value=mock_vol_repo,
+            ),
+            patch.object(
+                callback,
+                "_ensure_client",
+                new_callable=AsyncMock,
+                return_value=mock_ws_client,
+            ),
         ):
             path = await callback._upload_to_volume("2024/01/f.json", "data")
             assert path == "/Volumes/cat/schema/vol/2024/01/f.json"
             mock_ws_client.files.upload.assert_called_once()
             # Verify overwrite=True
             call_kwargs = mock_ws_client.files.upload.call_args
-            assert call_kwargs.kwargs.get("overwrite") is True or call_kwargs[1].get("overwrite") is True
+            assert (
+                call_kwargs.kwargs.get("overwrite") is True
+                or call_kwargs[1].get("overwrite") is True
+            )
 
     @pytest.mark.asyncio
     async def test_raises_when_volume_creation_fails(self, callback):
@@ -372,12 +390,17 @@ class TestUploadToVolume:
         mock_ws_client.files = MagicMock()
         mock_ws_client.files.upload = MagicMock()
 
-        with patch(
-            "src.repositories.databricks_volume_repository.DatabricksVolumeRepository",
-            return_value=mock_vol_repo,
-        ), patch.object(
-            callback, "_ensure_client", new_callable=AsyncMock,
-            return_value=mock_ws_client,
+        with (
+            patch(
+                "src.repositories.databricks_volume_repository.DatabricksVolumeRepository",
+                return_value=mock_vol_repo,
+            ),
+            patch.object(
+                callback,
+                "_ensure_client",
+                new_callable=AsyncMock,
+                return_value=mock_ws_client,
+            ),
         ):
             # Should not raise, just warn
             path = await callback._upload_to_volume("subdir/f.json", "data")
@@ -394,12 +417,17 @@ class TestUploadToVolume:
         mock_ws_client.files = MagicMock()
         mock_ws_client.files.upload = MagicMock()
 
-        with patch(
-            "src.repositories.databricks_volume_repository.DatabricksVolumeRepository",
-            return_value=mock_vol_repo,
-        ), patch.object(
-            callback, "_ensure_client", new_callable=AsyncMock,
-            return_value=mock_ws_client,
+        with (
+            patch(
+                "src.repositories.databricks_volume_repository.DatabricksVolumeRepository",
+                return_value=mock_vol_repo,
+            ),
+            patch.object(
+                callback,
+                "_ensure_client",
+                new_callable=AsyncMock,
+                return_value=mock_ws_client,
+            ),
         ):
             path = await callback._upload_to_volume("root_file.json", "data")
             assert path.endswith("root_file.json")

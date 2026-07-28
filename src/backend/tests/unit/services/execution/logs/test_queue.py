@@ -4,12 +4,17 @@ Unit tests for ExecutionLogsQueue.
 Tests the functionality of the job output queue including
 singleton behavior, log enqueueing, and group context handling.
 """
-import pytest
 import queue
 from datetime import datetime
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from src.services.execution.logs.queue import JobOutputQueue, get_job_output_queue, enqueue_log
+import pytest
+
+from src.services.execution.logs.queue import (
+    JobOutputQueue,
+    enqueue_log,
+    get_job_output_queue,
+)
 from src.utils.user_context import GroupContext
 
 

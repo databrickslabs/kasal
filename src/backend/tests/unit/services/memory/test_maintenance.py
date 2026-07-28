@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 from src.services.memory.engine import Memory
 from src.services.memory.engine_storage_adapter import EngineStorageAdapter
-from src.services.memory.local_storage_backend import LocalMemoryStorage
 from src.services.memory.hooks import flush_memory_writes, remember_async
+from src.services.memory.local_storage_backend import LocalMemoryStorage
 from src.services.memory.maintenance import consolidate_memory
 
 
@@ -78,10 +78,10 @@ class TestConsolidateGuards:
 
 class TestCognitiveWeightPlumbing:
     def test_factory_maps_cognitive_config_to_scoring_kwargs(self):
+        from src.schemas.memory_backend import MemoryBackendConfig
         from src.services.memory.backend_factory import (
             MemoryBackendFactory,
         )
-        from src.schemas.memory_backend import MemoryBackendConfig
 
         config = MemoryBackendConfig(
             backend_type="default",
@@ -103,10 +103,10 @@ class TestCognitiveWeightPlumbing:
         }
 
     def test_factory_omits_unset_fields(self):
+        from src.schemas.memory_backend import MemoryBackendConfig
         from src.services.memory.backend_factory import (
             MemoryBackendFactory,
         )
-        from src.schemas.memory_backend import MemoryBackendConfig
 
         config = MemoryBackendConfig(backend_type="default")
         assert MemoryBackendFactory._cognitive_scoring_kwargs(config) == {}

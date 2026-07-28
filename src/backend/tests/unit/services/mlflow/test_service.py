@@ -1,5 +1,6 @@
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.services.mlflow.service import MLflowService
@@ -19,10 +20,10 @@ class TestMLflowServiceInit:
     def test_init_without_group_id_raises_error(self):
         """Test initialization without group_id raises ValueError."""
         session = AsyncMock(spec=AsyncSession)
-        
+
         with pytest.raises(ValueError, match="SECURITY: group_id is REQUIRED"):
             MLflowService(session=session, group_id="")
-        
+
         with pytest.raises(ValueError, match="SECURITY: group_id is REQUIRED"):
             MLflowService(session=session, group_id=None)
 
@@ -35,9 +36,9 @@ class TestMLflowServiceEnableDisable:
         """Test checking if MLflow is enabled returns True."""
         session = AsyncMock(spec=AsyncSession)
         service = MLflowService(session=session, group_id="test-group")
-        
+
         service.repo.is_enabled = AsyncMock(return_value=True)
-        
+
         result = await service.is_enabled()
         assert result is True
         service.repo.is_enabled.assert_called_once_with(group_id="test-group")
@@ -47,9 +48,9 @@ class TestMLflowServiceEnableDisable:
         """Test checking if MLflow is enabled returns False."""
         session = AsyncMock(spec=AsyncSession)
         service = MLflowService(session=session, group_id="test-group")
-        
+
         service.repo.is_enabled = AsyncMock(return_value=False)
-        
+
         result = await service.is_enabled()
         assert result is False
 
@@ -58,24 +59,28 @@ class TestMLflowServiceEnableDisable:
         """Test enabling MLflow."""
         session = AsyncMock(spec=AsyncSession)
         service = MLflowService(session=session, group_id="test-group")
-        
+
         service.repo.set_enabled = AsyncMock(return_value=True)
-        
+
         result = await service.set_enabled(True)
         assert result is True
-        service.repo.set_enabled.assert_called_once_with(enabled=True, group_id="test-group")
+        service.repo.set_enabled.assert_called_once_with(
+            enabled=True, group_id="test-group"
+        )
 
     @pytest.mark.asyncio
     async def test_set_enabled_false(self):
         """Test disabling MLflow."""
         session = AsyncMock(spec=AsyncSession)
         service = MLflowService(session=session, group_id="test-group")
-        
+
         service.repo.set_enabled = AsyncMock(return_value=True)
-        
+
         result = await service.set_enabled(False)
         assert result is True
-        service.repo.set_enabled.assert_called_once_with(enabled=False, group_id="test-group")
+        service.repo.set_enabled.assert_called_once_with(
+            enabled=False, group_id="test-group"
+        )
 
 
 class TestMLflowServiceEvaluation:
@@ -86,21 +91,23 @@ class TestMLflowServiceEvaluation:
         """Test checking if evaluation is enabled returns True."""
         session = AsyncMock(spec=AsyncSession)
         service = MLflowService(session=session, group_id="test-group")
-        
+
         service.repo.is_evaluation_enabled = AsyncMock(return_value=True)
-        
+
         result = await service.is_evaluation_enabled()
         assert result is True
-        service.repo.is_evaluation_enabled.assert_called_once_with(group_id="test-group")
+        service.repo.is_evaluation_enabled.assert_called_once_with(
+            group_id="test-group"
+        )
 
     @pytest.mark.asyncio
     async def test_is_evaluation_enabled_false(self):
         """Test checking if evaluation is enabled returns False."""
         session = AsyncMock(spec=AsyncSession)
         service = MLflowService(session=session, group_id="test-group")
-        
+
         service.repo.is_evaluation_enabled = AsyncMock(return_value=False)
-        
+
         result = await service.is_evaluation_enabled()
         assert result is False
 
@@ -109,24 +116,28 @@ class TestMLflowServiceEvaluation:
         """Test enabling evaluation."""
         session = AsyncMock(spec=AsyncSession)
         service = MLflowService(session=session, group_id="test-group")
-        
+
         service.repo.set_evaluation_enabled = AsyncMock(return_value=True)
-        
+
         result = await service.set_evaluation_enabled(True)
         assert result is True
-        service.repo.set_evaluation_enabled.assert_called_once_with(enabled=True, group_id="test-group")
+        service.repo.set_evaluation_enabled.assert_called_once_with(
+            enabled=True, group_id="test-group"
+        )
 
     @pytest.mark.asyncio
     async def test_set_evaluation_enabled_false(self):
         """Test disabling evaluation."""
         session = AsyncMock(spec=AsyncSession)
         service = MLflowService(session=session, group_id="test-group")
-        
+
         service.repo.set_evaluation_enabled = AsyncMock(return_value=True)
-        
+
         result = await service.set_evaluation_enabled(False)
         assert result is True
-        service.repo.set_evaluation_enabled.assert_called_once_with(enabled=False, group_id="test-group")
+        service.repo.set_evaluation_enabled.assert_called_once_with(
+            enabled=False, group_id="test-group"
+        )
 
 
 class TestMLflowServiceAuth:
@@ -143,10 +154,15 @@ class TestMLflowServiceAuth:
         mock_auth.auth_method = "PAT"
         mock_auth.token = "test-token"
 
-        with patch.dict('os.environ', {}, clear=False), \
-             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with (
+            patch.dict("os.environ", {}, clear=False),
+            patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_get_auth,
+        ):
             # Ensure SPN env vars are not set
             import os
+
             os.environ.pop("DATABRICKS_CLIENT_ID", None)
             os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
 
@@ -172,14 +188,19 @@ class TestMLflowServiceAuth:
         mock_authenticate = Mock(side_effect=lambda req: None)
         mock_workspace_client.config.authenticate.return_value = mock_authenticate
 
-        with patch.dict('os.environ', {
-            "DATABRICKS_CLIENT_ID": "test-client-id",
-            "DATABRICKS_CLIENT_SECRET": "test-client-secret",
-            "DATABRICKS_HOST": "https://test.databricks.com",
-        }), \
-             patch('src.utils.databricks_auth.AuthContext') as mock_ac, \
-             patch('databricks.sdk.WorkspaceClient', return_value=mock_workspace_client), \
-             patch('requests.Request') as mock_req_cls:
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "DATABRICKS_CLIENT_ID": "test-client-id",
+                    "DATABRICKS_CLIENT_SECRET": "test-client-secret",
+                    "DATABRICKS_HOST": "https://test.databricks.com",
+                },
+            ),
+            patch("src.utils.databricks_auth.AuthContext") as mock_ac,
+            patch("databricks.sdk.WorkspaceClient", return_value=mock_workspace_client),
+            patch("requests.Request") as mock_req_cls,
+        ):
             mock_req_instance = Mock()
             mock_req_instance.headers = {"Authorization": "Bearer spn-token-123"}
             mock_req_cls.return_value = mock_req_instance
@@ -206,13 +227,22 @@ class TestMLflowServiceAuth:
         mock_auth.auth_method = "PAT"
         mock_auth.token = "pat-token"
 
-        with patch.dict('os.environ', {
-            "DATABRICKS_CLIENT_ID": "test-client-id",
-            "DATABRICKS_CLIENT_SECRET": "test-client-secret",
-            "DATABRICKS_HOST": "https://test.databricks.com",
-        }), \
-             patch('databricks.sdk.WorkspaceClient', side_effect=Exception("SPN failed")), \
-             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "DATABRICKS_CLIENT_ID": "test-client-id",
+                    "DATABRICKS_CLIENT_SECRET": "test-client-secret",
+                    "DATABRICKS_HOST": "https://test.databricks.com",
+                },
+            ),
+            patch(
+                "databricks.sdk.WorkspaceClient", side_effect=Exception("SPN failed")
+            ),
+            patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_get_auth,
+        ):
             mock_get_auth.return_value = mock_auth
 
             result = await service._setup_mlflow_auth()
@@ -227,9 +257,14 @@ class TestMLflowServiceAuth:
         session = AsyncMock(spec=AsyncSession)
         service = MLflowService(session=session, group_id="test-group")
 
-        with patch.dict('os.environ', {}, clear=False), \
-             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with (
+            patch.dict("os.environ", {}, clear=False),
+            patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_get_auth,
+        ):
             import os
+
             os.environ.pop("DATABRICKS_CLIENT_ID", None)
             os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
             mock_get_auth.return_value = None
@@ -247,9 +282,14 @@ class TestMLflowServiceAuth:
         mock_auth = Mock()
         mock_auth.workspace_url = None
 
-        with patch.dict('os.environ', {}, clear=False), \
-             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with (
+            patch.dict("os.environ", {}, clear=False),
+            patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_get_auth,
+        ):
             import os
+
             os.environ.pop("DATABRICKS_CLIENT_ID", None)
             os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
             mock_get_auth.return_value = mock_auth
@@ -264,9 +304,14 @@ class TestMLflowServiceAuth:
         session = AsyncMock(spec=AsyncSession)
         service = MLflowService(session=session, group_id="test-group")
 
-        with patch.dict('os.environ', {}, clear=False), \
-             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with (
+            patch.dict("os.environ", {}, clear=False),
+            patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_get_auth,
+        ):
             import os
+
             os.environ.pop("DATABRICKS_CLIENT_ID", None)
             os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
             mock_get_auth.side_effect = Exception("Auth error")
@@ -285,14 +330,19 @@ class TestMLflowServiceAuth:
         mock_authenticate = Mock(side_effect=lambda req: None)
         mock_workspace_client.config.authenticate.return_value = mock_authenticate
 
-        with patch.dict('os.environ', {
-            "DATABRICKS_CLIENT_ID": "test-client-id",
-            "DATABRICKS_CLIENT_SECRET": "test-client-secret",
-            "DATABRICKS_HOST": "test.databricks.com",  # no scheme
-        }), \
-             patch('src.utils.databricks_auth.AuthContext') as mock_ac, \
-             patch('databricks.sdk.WorkspaceClient', return_value=mock_workspace_client), \
-             patch('requests.Request') as mock_req_cls:
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "DATABRICKS_CLIENT_ID": "test-client-id",
+                    "DATABRICKS_CLIENT_SECRET": "test-client-secret",
+                    "DATABRICKS_HOST": "test.databricks.com",  # no scheme
+                },
+            ),
+            patch("src.utils.databricks_auth.AuthContext") as mock_ac,
+            patch("databricks.sdk.WorkspaceClient", return_value=mock_workspace_client),
+            patch("requests.Request") as mock_req_cls,
+        ):
             mock_req_instance = Mock()
             mock_req_instance.headers = {"Authorization": "Bearer spn-tok"}
             mock_req_cls.return_value = mock_req_instance
@@ -325,16 +375,25 @@ class TestMLflowServiceAuth:
         mock_pat_auth.auth_method = "PAT"
         mock_pat_auth.token = "pat-token"
 
-        with patch.dict('os.environ', {
-            "DATABRICKS_CLIENT_ID": "test-client-id",
-            "DATABRICKS_CLIENT_SECRET": "test-client-secret",
-            "DATABRICKS_HOST": "https://test.databricks.com",
-        }), \
-             patch('databricks.sdk.WorkspaceClient', return_value=mock_workspace_client), \
-             patch('requests.Request') as mock_req_cls, \
-             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "DATABRICKS_CLIENT_ID": "test-client-id",
+                    "DATABRICKS_CLIENT_SECRET": "test-client-secret",
+                    "DATABRICKS_HOST": "https://test.databricks.com",
+                },
+            ),
+            patch("databricks.sdk.WorkspaceClient", return_value=mock_workspace_client),
+            patch("requests.Request") as mock_req_cls,
+            patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_get_auth,
+        ):
             mock_req_instance = Mock()
-            mock_req_instance.headers = {"Authorization": "Basic some-cred"}  # no Bearer
+            mock_req_instance.headers = {
+                "Authorization": "Basic some-cred"
+            }  # no Bearer
             mock_req_cls.return_value = mock_req_instance
 
             mock_get_auth.return_value = mock_pat_auth
@@ -354,9 +413,10 @@ class TestMLflowServiceExperimentInfo:
         """Test getting experiment info when authentication fails."""
         session = AsyncMock(spec=AsyncSession)
         service = MLflowService(session=session, group_id="test-group")
-        
-        service._setup_mlflow_auth = AsyncMock(return_value=None)
-        
-        with pytest.raises(RuntimeError, match="Failed to configure MLflow authentication"):
-            await service.get_experiment_info()
 
+        service._setup_mlflow_auth = AsyncMock(return_value=None)
+
+        with pytest.raises(
+            RuntimeError, match="Failed to configure MLflow authentication"
+        ):
+            await service.get_experiment_info()

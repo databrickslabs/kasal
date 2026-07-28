@@ -4,45 +4,40 @@ Unit tests for HITL (Human in the Loop) schemas.
 Tests the functionality of Pydantic schemas for HITL operations
 including validation, serialization, enum values, and field constraints.
 """
-import pytest
-from datetime import datetime, timezone
-from pydantic import ValidationError
-from typing import Dict, Any
 
-from src.schemas.hitl import (
-    # Enums
-    HITLApprovalStatusEnum,
-    HITLTimeoutActionEnum,
-    HITLRejectionActionEnum,
-    HITLWebhookEventEnum,
-    # Gate Configuration
-    HITLGateConfig,
-    # Approval Schemas
+from datetime import datetime, timezone
+from typing import Any, Dict
+
+import pytest
+from pydantic import ValidationError
+
+from src.schemas.hitl import (  # Enums; Gate Configuration; Approval Schemas; Action Schemas; Status Schema; Webhook Schemas; Node Configuration
+    ExecutionHITLStatus,
+    HITLActionResponse,
     HITLApprovalBase,
     HITLApprovalCreate,
-    HITLApprovalResponse,
     HITLApprovalListResponse,
-    # Action Schemas
+    HITLApprovalResponse,
+    HITLApprovalStatusEnum,
     HITLApproveRequest,
+    HITLGateConfig,
+    HITLGateNodeData,
+    HITLRejectionActionEnum,
     HITLRejectRequest,
-    HITLActionResponse,
-    # Status Schema
-    ExecutionHITLStatus,
-    # Webhook Schemas
+    HITLTimeoutActionEnum,
     HITLWebhookBase,
     HITLWebhookCreate,
-    HITLWebhookUpdate,
-    HITLWebhookResponse,
+    HITLWebhookEventEnum,
     HITLWebhookListResponse,
     HITLWebhookPayload,
-    # Node Configuration
-    HITLGateNodeData,
+    HITLWebhookResponse,
+    HITLWebhookUpdate,
 )
-
 
 # =============================================================================
 # Enum Tests
 # =============================================================================
+
 
 class TestHITLApprovalStatusEnum:
     """Test cases for HITLApprovalStatusEnum."""
@@ -135,6 +130,7 @@ class TestHITLWebhookEventEnum:
 # Gate Configuration Tests
 # =============================================================================
 
+
 class TestHITLGateConfig:
     """Test cases for HITLGateConfig schema."""
 
@@ -154,7 +150,7 @@ class TestHITLGateConfig:
             timeout_seconds=7200,
             timeout_action=HITLTimeoutActionEnum.FAIL,
             require_comment=True,
-            allowed_approvers=["admin@example.com", "manager@example.com"]
+            allowed_approvers=["admin@example.com", "manager@example.com"],
         )
         assert config.message == "Please review the research output"
         assert config.timeout_seconds == 7200
@@ -188,7 +184,10 @@ class TestHITLGateConfig:
         """Test that extra fields are forbidden."""
         with pytest.raises(ValidationError) as exc_info:
             HITLGateConfig(unknown_field="value")
-        assert "extra_forbidden" in str(exc_info.value).lower() or "extra" in str(exc_info.value).lower()
+        assert (
+            "extra_forbidden" in str(exc_info.value).lower()
+            or "extra" in str(exc_info.value).lower()
+        )
 
     def test_serialization(self):
         """Test HITLGateConfig serialization to dict."""
@@ -197,7 +196,7 @@ class TestHITLGateConfig:
             timeout_seconds=1800,
             timeout_action=HITLTimeoutActionEnum.FAIL,
             require_comment=True,
-            allowed_approvers=["user@example.com"]
+            allowed_approvers=["user@example.com"],
         )
         data = config.model_dump()
         assert data["message"] == "Test message"
@@ -211,6 +210,7 @@ class TestHITLGateConfig:
 # Approval Base Tests
 # =============================================================================
 
+
 class TestHITLApprovalBase:
     """Test cases for HITLApprovalBase schema."""
 
@@ -220,7 +220,7 @@ class TestHITLApprovalBase:
             "execution_id": "exec_12345",
             "flow_id": "flow_67890",
             "gate_node_id": "gate_001",
-            "crew_sequence": 1
+            "crew_sequence": 1,
         }
         approval = HITLApprovalBase(**data)
         assert approval.execution_id == "exec_12345"
@@ -232,9 +232,7 @@ class TestHITLApprovalBase:
         """Test that execution_id is required."""
         with pytest.raises(ValidationError) as exc_info:
             HITLApprovalBase(
-                flow_id="flow_67890",
-                gate_node_id="gate_001",
-                crew_sequence=1
+                flow_id="flow_67890", gate_node_id="gate_001", crew_sequence=1
             )
         assert "execution_id" in str(exc_info.value)
 
@@ -242,9 +240,7 @@ class TestHITLApprovalBase:
         """Test that flow_id is required."""
         with pytest.raises(ValidationError) as exc_info:
             HITLApprovalBase(
-                execution_id="exec_12345",
-                gate_node_id="gate_001",
-                crew_sequence=1
+                execution_id="exec_12345", gate_node_id="gate_001", crew_sequence=1
             )
         assert "flow_id" in str(exc_info.value)
 
@@ -252,9 +248,7 @@ class TestHITLApprovalBase:
         """Test that gate_node_id is required."""
         with pytest.raises(ValidationError) as exc_info:
             HITLApprovalBase(
-                execution_id="exec_12345",
-                flow_id="flow_67890",
-                crew_sequence=1
+                execution_id="exec_12345", flow_id="flow_67890", crew_sequence=1
             )
         assert "gate_node_id" in str(exc_info.value)
 
@@ -262,9 +256,7 @@ class TestHITLApprovalBase:
         """Test that crew_sequence is required."""
         with pytest.raises(ValidationError) as exc_info:
             HITLApprovalBase(
-                execution_id="exec_12345",
-                flow_id="flow_67890",
-                gate_node_id="gate_001"
+                execution_id="exec_12345", flow_id="flow_67890", gate_node_id="gate_001"
             )
         assert "crew_sequence" in str(exc_info.value)
 
@@ -274,7 +266,7 @@ class TestHITLApprovalBase:
             execution_id="exec_12345",
             flow_id="flow_67890",
             gate_node_id="gate_001",
-            crew_sequence=2
+            crew_sequence=2,
         )
         data = approval.model_dump()
         assert data["execution_id"] == "exec_12345"
@@ -287,6 +279,7 @@ class TestHITLApprovalBase:
 # Approval Create Tests
 # =============================================================================
 
+
 class TestHITLApprovalCreate:
     """Test cases for HITLApprovalCreate schema."""
 
@@ -297,7 +290,7 @@ class TestHITLApprovalCreate:
             "flow_id": "flow_67890",
             "gate_node_id": "gate_001",
             "crew_sequence": 1,
-            "group_id": "group_abc"
+            "group_id": "group_abc",
         }
         approval = HITLApprovalCreate(**data)
         assert approval.execution_id == "exec_12345"
@@ -316,7 +309,7 @@ class TestHITLApprovalCreate:
         gate_config = HITLGateConfig(
             message="Review the analysis results",
             timeout_seconds=7200,
-            require_comment=True
+            require_comment=True,
         )
         data = {
             "execution_id": "exec_12345",
@@ -327,7 +320,7 @@ class TestHITLApprovalCreate:
             "gate_config": gate_config,
             "previous_crew_name": "Research Crew",
             "previous_crew_output": "Research findings...",
-            "flow_state_snapshot": {"key": "value"}
+            "flow_state_snapshot": {"key": "value"},
         }
         approval = HITLApprovalCreate(**data)
         assert approval.gate_config.message == "Review the analysis results"
@@ -343,7 +336,7 @@ class TestHITLApprovalCreate:
                 execution_id="exec_12345",
                 flow_id="flow_67890",
                 gate_node_id="gate_001",
-                crew_sequence=1
+                crew_sequence=1,
             )
         assert "group_id" in str(exc_info.value)
 
@@ -355,6 +348,7 @@ class TestHITLApprovalCreate:
 # =============================================================================
 # Approval Response Tests
 # =============================================================================
+
 
 class TestHITLApprovalResponse:
     """Test cases for HITLApprovalResponse schema."""
@@ -381,7 +375,7 @@ class TestHITLApprovalResponse:
             "expires_at": now,
             "is_expired": False,
             "created_at": now,
-            "group_id": "group_abc"
+            "group_id": "group_abc",
         }
         response = HITLApprovalResponse(**data)
         assert response.id == 1
@@ -403,7 +397,7 @@ class TestHITLApprovalResponse:
             "responded_at": now,
             "approval_comment": "Looks good!",
             "created_at": now,
-            "group_id": "group_abc"
+            "group_id": "group_abc",
         }
         response = HITLApprovalResponse(**data)
         assert response.status == HITLApprovalStatusEnum.APPROVED
@@ -426,7 +420,7 @@ class TestHITLApprovalResponse:
             "rejection_reason": "Quality not acceptable",
             "rejection_action": HITLRejectionActionEnum.RETRY,
             "created_at": now,
-            "group_id": "group_abc"
+            "group_id": "group_abc",
         }
         response = HITLApprovalResponse(**data)
         assert response.status == HITLApprovalStatusEnum.REJECTED
@@ -446,6 +440,7 @@ class TestHITLApprovalResponse:
 # Approval List Response Tests
 # =============================================================================
 
+
 class TestHITLApprovalListResponse:
     """Test cases for HITLApprovalListResponse schema."""
 
@@ -461,14 +456,9 @@ class TestHITLApprovalListResponse:
             "status": HITLApprovalStatusEnum.PENDING,
             "gate_config": {"message": "Approval needed"},
             "created_at": now,
-            "group_id": "group_abc"
+            "group_id": "group_abc",
         }
-        data = {
-            "items": [item],
-            "total": 1,
-            "limit": 10,
-            "offset": 0
-        }
+        data = {"items": [item], "total": 1, "limit": 10, "offset": 0}
         response = HITLApprovalListResponse(**data)
         assert len(response.items) == 1
         assert response.total == 1
@@ -477,12 +467,7 @@ class TestHITLApprovalListResponse:
 
     def test_empty_list_response(self):
         """Test HITLApprovalListResponse with empty items."""
-        data = {
-            "items": [],
-            "total": 0,
-            "limit": 10,
-            "offset": 0
-        }
+        data = {"items": [], "total": 0, "limit": 10, "offset": 0}
         response = HITLApprovalListResponse(**data)
         assert len(response.items) == 0
         assert response.total == 0
@@ -491,6 +476,7 @@ class TestHITLApprovalListResponse:
 # =============================================================================
 # Approve Request Tests
 # =============================================================================
+
 
 class TestHITLApproveRequest:
     """Test cases for HITLApproveRequest schema."""
@@ -529,6 +515,7 @@ class TestHITLApproveRequest:
 # Reject Request Tests
 # =============================================================================
 
+
 class TestHITLRejectRequest:
     """Test cases for HITLRejectRequest schema."""
 
@@ -542,7 +529,7 @@ class TestHITLRejectRequest:
         """Test rejection request with retry action."""
         request = HITLRejectRequest(
             reason="Minor issues, please try again",
-            action=HITLRejectionActionEnum.RETRY
+            action=HITLRejectionActionEnum.RETRY,
         )
         assert request.reason == "Minor issues, please try again"
         assert request.action == HITLRejectionActionEnum.RETRY
@@ -583,6 +570,7 @@ class TestHITLRejectRequest:
 # Action Response Tests
 # =============================================================================
 
+
 class TestHITLActionResponse:
     """Test cases for HITLActionResponse schema."""
 
@@ -593,7 +581,7 @@ class TestHITLActionResponse:
             approval_id=1,
             status=HITLApprovalStatusEnum.APPROVED,
             message="Approval submitted successfully",
-            execution_resumed=True
+            execution_resumed=True,
         )
         assert response.success is True
         assert response.approval_id == 1
@@ -607,7 +595,7 @@ class TestHITLActionResponse:
             success=True,
             approval_id=1,
             status=HITLApprovalStatusEnum.APPROVED,
-            message="Done"
+            message="Done",
         )
         assert response.execution_resumed is False
 
@@ -623,6 +611,7 @@ class TestHITLActionResponse:
 # Execution HITL Status Tests
 # =============================================================================
 
+
 class TestExecutionHITLStatus:
     """Test cases for ExecutionHITLStatus schema."""
 
@@ -633,7 +622,7 @@ class TestExecutionHITLStatus:
             has_pending_approval=False,
             pending_approval=None,
             approval_history=[],
-            total_gates_passed=0
+            total_gates_passed=0,
         )
         assert status.execution_id == "exec_12345"
         assert status.has_pending_approval is False
@@ -653,14 +642,14 @@ class TestExecutionHITLStatus:
             status=HITLApprovalStatusEnum.PENDING,
             gate_config={"message": "Approval needed"},
             created_at=now,
-            group_id="group_abc"
+            group_id="group_abc",
         )
         status = ExecutionHITLStatus(
             execution_id="exec_12345",
             has_pending_approval=True,
             pending_approval=pending,
             approval_history=[],
-            total_gates_passed=0
+            total_gates_passed=0,
         )
         assert status.has_pending_approval is True
         assert status.pending_approval is not None
@@ -669,8 +658,7 @@ class TestExecutionHITLStatus:
     def test_default_values(self):
         """Test default values for optional fields."""
         status = ExecutionHITLStatus(
-            execution_id="exec_12345",
-            has_pending_approval=False
+            execution_id="exec_12345", has_pending_approval=False
         )
         assert status.pending_approval is None
         assert status.approval_history == []
@@ -681,15 +669,13 @@ class TestExecutionHITLStatus:
 # Webhook Base Tests
 # =============================================================================
 
+
 class TestHITLWebhookBase:
     """Test cases for HITLWebhookBase schema."""
 
     def test_valid_webhook_base(self):
         """Test valid webhook base with required fields."""
-        webhook = HITLWebhookBase(
-            name="My Webhook",
-            url="https://example.com/webhook"
-        )
+        webhook = HITLWebhookBase(name="My Webhook", url="https://example.com/webhook")
         assert webhook.name == "My Webhook"
         assert webhook.url == "https://example.com/webhook"
         assert webhook.enabled is True  # Default
@@ -707,9 +693,9 @@ class TestHITLWebhookBase:
             events=[
                 HITLWebhookEventEnum.GATE_REACHED,
                 HITLWebhookEventEnum.GATE_APPROVED,
-                HITLWebhookEventEnum.GATE_REJECTED
+                HITLWebhookEventEnum.GATE_REJECTED,
             ],
-            headers={"Authorization": "Bearer token123"}
+            headers={"Authorization": "Bearer token123"},
         )
         assert webhook.name == "Production Webhook"
         assert webhook.flow_id == "flow_policies_123"
@@ -722,9 +708,7 @@ class TestHITLWebhookBase:
         long_flow_id = "x" * 101
         with pytest.raises(ValidationError) as exc_info:
             HITLWebhookBase(
-                name="Test",
-                url="https://example.com/webhook",
-                flow_id=long_flow_id
+                name="Test", url="https://example.com/webhook", flow_id=long_flow_id
             )
         assert "flow_id" in str(exc_info.value).lower()
 
@@ -759,14 +743,14 @@ class TestHITLWebhookBase:
 # Webhook Create Tests
 # =============================================================================
 
+
 class TestHITLWebhookCreate:
     """Test cases for HITLWebhookCreate schema."""
 
     def test_create_without_secret(self):
         """Test webhook creation without secret."""
         webhook = HITLWebhookCreate(
-            name="My Webhook",
-            url="https://example.com/webhook"
+            name="My Webhook", url="https://example.com/webhook"
         )
         assert webhook.secret is None
 
@@ -775,7 +759,7 @@ class TestHITLWebhookCreate:
         webhook = HITLWebhookCreate(
             name="Secure Webhook",
             url="https://example.com/webhook",
-            secret="my-secret-key"
+            secret="my-secret-key",
         )
         assert webhook.secret == "my-secret-key"
 
@@ -784,7 +768,7 @@ class TestHITLWebhookCreate:
         webhook = HITLWebhookCreate(
             name="Flow-Specific Webhook",
             url="https://example.com/webhook",
-            flow_id="flow_policies_123"
+            flow_id="flow_policies_123",
         )
         assert webhook.flow_id == "flow_policies_123"
         assert webhook.name == "Flow-Specific Webhook"
@@ -794,9 +778,7 @@ class TestHITLWebhookCreate:
         long_secret = "x" * 256
         with pytest.raises(ValidationError) as exc_info:
             HITLWebhookCreate(
-                name="Test",
-                url="https://example.com/webhook",
-                secret=long_secret
+                name="Test", url="https://example.com/webhook", secret=long_secret
             )
         assert "secret" in str(exc_info.value).lower()
 
@@ -804,9 +786,7 @@ class TestHITLWebhookCreate:
         """Test that extra fields are forbidden."""
         with pytest.raises(ValidationError) as exc_info:
             HITLWebhookCreate(
-                name="Test",
-                url="https://example.com/webhook",
-                extra_field="value"
+                name="Test", url="https://example.com/webhook", extra_field="value"
             )
         assert "extra" in str(exc_info.value).lower()
 
@@ -818,6 +798,7 @@ class TestHITLWebhookCreate:
 # =============================================================================
 # Webhook Update Tests
 # =============================================================================
+
 
 class TestHITLWebhookUpdate:
     """Test cases for HITLWebhookUpdate schema."""
@@ -849,7 +830,7 @@ class TestHITLWebhookUpdate:
             enabled=True,
             events=[HITLWebhookEventEnum.GATE_APPROVED],
             headers={"X-Custom": "Header"},
-            secret="new-secret"
+            secret="new-secret",
         )
         assert update.name == "New Name"
         assert update.url == "https://example.com/new-webhook"
@@ -877,6 +858,7 @@ class TestHITLWebhookUpdate:
 # Webhook Response Tests
 # =============================================================================
 
+
 class TestHITLWebhookResponse:
     """Test cases for HITLWebhookResponse schema."""
 
@@ -892,7 +874,7 @@ class TestHITLWebhookResponse:
             events=[HITLWebhookEventEnum.GATE_REACHED],
             headers=None,
             created_at=now,
-            updated_at=None
+            updated_at=None,
         )
         assert response.id == 1
         assert response.group_id == "group_abc"
@@ -914,7 +896,7 @@ class TestHITLWebhookResponse:
             events=[HITLWebhookEventEnum.GATE_REACHED],
             headers=None,
             created_at=now,
-            updated_at=None
+            updated_at=None,
         )
         assert response.id == 2
         assert response.flow_id == "flow_policies_123"
@@ -933,6 +915,7 @@ class TestHITLWebhookResponse:
 # Webhook List Response Tests
 # =============================================================================
 
+
 class TestHITLWebhookListResponse:
     """Test cases for HITLWebhookListResponse schema."""
 
@@ -949,7 +932,7 @@ class TestHITLWebhookListResponse:
             "events": [HITLWebhookEventEnum.GATE_REACHED],
             "headers": None,
             "created_at": now,
-            "updated_at": None
+            "updated_at": None,
         }
         response = HITLWebhookListResponse(items=[item], total=1)
         assert len(response.items) == 1
@@ -969,7 +952,7 @@ class TestHITLWebhookListResponse:
                 "events": [HITLWebhookEventEnum.GATE_REACHED],
                 "headers": None,
                 "created_at": now,
-                "updated_at": None
+                "updated_at": None,
             },
             {
                 "id": 2,
@@ -981,8 +964,8 @@ class TestHITLWebhookListResponse:
                 "events": [HITLWebhookEventEnum.GATE_REACHED],
                 "headers": None,
                 "created_at": now,
-                "updated_at": None
-            }
+                "updated_at": None,
+            },
         ]
         response = HITLWebhookListResponse(items=items, total=2)
         assert len(response.items) == 2
@@ -1001,6 +984,7 @@ class TestHITLWebhookListResponse:
 # Webhook Payload Tests
 # =============================================================================
 
+
 class TestHITLWebhookPayload:
     """Test cases for HITLWebhookPayload schema."""
 
@@ -1014,7 +998,7 @@ class TestHITLWebhookPayload:
             execution_id="exec_12345",
             flow_id="flow_67890",
             gate_node_id="gate_001",
-            message="Approval required"
+            message="Approval required",
         )
         assert payload.event == HITLWebhookEventEnum.GATE_REACHED
         assert payload.approval_id == 1
@@ -1036,7 +1020,7 @@ class TestHITLWebhookPayload:
             status=HITLApprovalStatusEnum.APPROVED,
             responded_by="user@example.com",
             approval_url="https://app.example.com/approvals/1",
-            expires_at=now
+            expires_at=now,
         )
         assert payload.event == HITLWebhookEventEnum.GATE_APPROVED
         assert payload.status == HITLApprovalStatusEnum.APPROVED
@@ -1052,7 +1036,7 @@ class TestHITLWebhookPayload:
             execution_id="exec_12345",
             flow_id="flow_67890",
             gate_node_id="gate_001",
-            message="Test"
+            message="Test",
         )
         assert payload.previous_crew_name is None
         assert payload.previous_crew_output_preview is None
@@ -1065,6 +1049,7 @@ class TestHITLWebhookPayload:
 # =============================================================================
 # Gate Node Data Tests
 # =============================================================================
+
 
 class TestHITLGateNodeData:
     """Test cases for HITLGateNodeData schema."""
@@ -1080,13 +1065,10 @@ class TestHITLGateNodeData:
     def test_custom_values(self):
         """Test HITLGateNodeData with custom values."""
         gate_config = HITLGateConfig(
-            message="Custom approval message",
-            timeout_seconds=1800
+            message="Custom approval message", timeout_seconds=1800
         )
         node_data = HITLGateNodeData(
-            label="Custom HITL Gate",
-            nodetype="hitlGateNode",
-            gate_config=gate_config
+            label="Custom HITL Gate", nodetype="hitlGateNode", gate_config=gate_config
         )
         assert node_data.label == "Custom HITL Gate"
         assert node_data.gate_config.message == "Custom approval message"
@@ -1111,6 +1093,7 @@ class TestHITLGateNodeData:
 # Cross-Schema Validation Tests
 # =============================================================================
 
+
 class TestCrossSchemaValidation:
     """Test cross-schema validation and consistency."""
 
@@ -1125,7 +1108,7 @@ class TestCrossSchemaValidation:
             "crew_sequence": 1,
             "gate_config": {"message": "Test"},
             "created_at": now,
-            "group_id": "group_abc"
+            "group_id": "group_abc",
         }
 
         for status in HITLApprovalStatusEnum:
@@ -1136,10 +1119,7 @@ class TestCrossSchemaValidation:
     def test_reject_request_accepts_all_rejection_actions(self):
         """Test that reject request accepts all rejection action values."""
         for action in HITLRejectionActionEnum:
-            request = HITLRejectRequest(
-                reason="Test reason",
-                action=action
-            )
+            request = HITLRejectRequest(reason="Test reason", action=action)
             assert request.action == action
 
     def test_webhook_base_accepts_all_event_types(self):
@@ -1148,7 +1128,7 @@ class TestCrossSchemaValidation:
         webhook = HITLWebhookBase(
             name="All Events Webhook",
             url="https://example.com/webhook",
-            events=all_events
+            events=all_events,
         )
         assert len(webhook.events) == len(HITLWebhookEventEnum)
 
@@ -1156,9 +1136,6 @@ class TestCrossSchemaValidation:
         """Test that action response accepts all status enum values."""
         for status in HITLApprovalStatusEnum:
             response = HITLActionResponse(
-                success=True,
-                approval_id=1,
-                status=status,
-                message="Test"
+                success=True, approval_id=1, status=status, message="Test"
             )
             assert response.status == status

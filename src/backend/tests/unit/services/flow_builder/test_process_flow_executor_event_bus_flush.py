@@ -7,13 +7,14 @@ process_flow_executor.py:
 3. Cleanup/finally flush (before subprocess teardown)
 """
 
-import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _mock_event_bus(flush_return=True, flush_side_effect=None):
     """Create a mock event_bus with configurable flush behaviour."""
@@ -28,6 +29,7 @@ def _mock_event_bus(flush_return=True, flush_side_effect=None):
 # Tests: Post-success flush
 # ===========================================================================
 
+
 class TestPostSuccessFlush:
     """Tests for the event bus flush after successful flow execution."""
 
@@ -35,9 +37,12 @@ class TestPostSuccessFlush:
         """Event bus flush is called with 30s timeout after successful execution."""
         mock_bus = _mock_event_bus(flush_return=True)
 
-        with patch.dict("sys.modules", {"src.core.events": MagicMock(event_bus=mock_bus)}):
+        with patch.dict(
+            "sys.modules", {"src.core.events": MagicMock(event_bus=mock_bus)}
+        ):
             # Simulate the post-success flush logic directly
             from src.core.events import event_bus as _event_bus
+
             flushed = _event_bus.flush(timeout=30.0)
 
             assert flushed is True
@@ -47,8 +52,11 @@ class TestPostSuccessFlush:
         """When flush returns False (timeout), a warning is logged."""
         mock_bus = _mock_event_bus(flush_return=False)
 
-        with patch.dict("sys.modules", {"src.core.events": MagicMock(event_bus=mock_bus)}):
+        with patch.dict(
+            "sys.modules", {"src.core.events": MagicMock(event_bus=mock_bus)}
+        ):
             from src.core.events import event_bus as _event_bus
+
             flushed = _event_bus.flush(timeout=30.0)
 
             assert flushed is False
@@ -70,6 +78,7 @@ class TestPostSuccessFlush:
 # Tests: Error-path flush
 # ===========================================================================
 
+
 class TestErrorPathFlush:
     """Tests for the event bus flush in the except block."""
 
@@ -77,12 +86,15 @@ class TestErrorPathFlush:
         """Event bus flush is called with 10s timeout on error path."""
         mock_bus = _mock_event_bus(flush_return=True)
 
-        with patch.dict("sys.modules", {"src.core.events": MagicMock(event_bus=mock_bus)}):
+        with patch.dict(
+            "sys.modules", {"src.core.events": MagicMock(event_bus=mock_bus)}
+        ):
             # Simulate error-path flush
             try:
                 raise RuntimeError("Flow execution error")
             except Exception:
                 from src.core.events import event_bus as _event_bus
+
                 _event_bus.flush(timeout=10.0)
 
                 _event_bus.flush.assert_called_once_with(timeout=10.0)
@@ -91,13 +103,16 @@ class TestErrorPathFlush:
         """Flush exception on error path is silenced (pass)."""
         mock_bus = _mock_event_bus(flush_side_effect=RuntimeError("double fault"))
 
-        with patch.dict("sys.modules", {"src.core.events": MagicMock(event_bus=mock_bus)}):
+        with patch.dict(
+            "sys.modules", {"src.core.events": MagicMock(event_bus=mock_bus)}
+        ):
             # Simulate: except block tries flush, flush fails, should be silenced
             try:
                 raise RuntimeError("Flow execution error")
             except Exception:
                 try:
                     from src.core.events import event_bus as _event_bus
+
                     _event_bus.flush(timeout=10.0)
                 except Exception:
                     pass  # This matches the actual code pattern
@@ -107,6 +122,7 @@ class TestErrorPathFlush:
 # Tests: Cleanup/finally flush
 # ===========================================================================
 
+
 class TestCleanupFlush:
     """Tests for the event bus flush in the finally/cleanup block."""
 
@@ -114,10 +130,13 @@ class TestCleanupFlush:
         """Final cleanup flush uses 15s timeout."""
         mock_bus = _mock_event_bus(flush_return=True)
 
-        with patch.dict("sys.modules", {"src.core.events": MagicMock(event_bus=mock_bus)}):
+        with patch.dict(
+            "sys.modules", {"src.core.events": MagicMock(event_bus=mock_bus)}
+        ):
             # Simulate the finally cleanup flush
             try:
                 from src.core.events import event_bus as _cleanup_event_bus
+
                 _cleanup_event_bus.flush(timeout=15.0)
 
                 _cleanup_event_bus.flush.assert_called_once_with(timeout=15.0)
@@ -126,12 +145,17 @@ class TestCleanupFlush:
 
     def test_cleanup_flush_exception_is_caught(self):
         """Exception during cleanup flush is caught and does not halt cleanup."""
-        mock_bus = _mock_event_bus(flush_side_effect=RuntimeError("cleanup flush error"))
+        mock_bus = _mock_event_bus(
+            flush_side_effect=RuntimeError("cleanup flush error")
+        )
 
-        with patch.dict("sys.modules", {"src.core.events": MagicMock(event_bus=mock_bus)}):
+        with patch.dict(
+            "sys.modules", {"src.core.events": MagicMock(event_bus=mock_bus)}
+        ):
             # Simulate the try/except pattern in the finally block
             try:
                 from src.core.events import event_bus as _cleanup_event_bus
+
                 _cleanup_event_bus.flush(timeout=15.0)
             except Exception as eb_flush_err:
                 # Code logs warning but continues cleanup
@@ -142,18 +166,22 @@ class TestCleanupFlush:
 # Integration: run_flow_in_process flush points
 # ===========================================================================
 
+
 class TestRunFlowInProcessFlushIntegration:
     """Integration tests verifying flush is wired into run_flow_in_process."""
 
     def test_module_imports_successfully(self):
         """The process_flow_executor module can be imported."""
         from src.services.flow_builder.process_executor import run_flow_in_process
+
         assert callable(run_flow_in_process)
 
     def test_run_flow_in_process_has_flush_code(self):
         """Verify the source code contains event bus flush calls."""
         import inspect
+
         from src.services.flow_builder.process_executor import run_flow_in_process
+
         source = inspect.getsource(run_flow_in_process)
 
         # Verify all three flush points exist
@@ -164,7 +192,9 @@ class TestRunFlowInProcessFlushIntegration:
     def test_run_flow_in_process_has_flush_error_handling(self):
         """Verify flush errors are handled gracefully."""
         import inspect
+
         from src.services.flow_builder.process_executor import run_flow_in_process
+
         source = inspect.getsource(run_flow_in_process)
 
         assert "Event bus flush error (non-fatal)" in source
@@ -173,7 +203,9 @@ class TestRunFlowInProcessFlushIntegration:
     def test_run_flow_in_process_has_flush_logging(self):
         """Verify flush operations are properly logged."""
         import inspect
+
         from src.services.flow_builder.process_executor import run_flow_in_process
+
         source = inspect.getsource(run_flow_in_process)
 
         assert "Flushing CrewAI event bus" in source
@@ -188,12 +220,16 @@ class TestProcessFlowExecutorFlushEnvironment:
     def test_crewai_tracing_disabled_at_module_level(self):
         """Module sets CREWAI_TRACING_ENABLED to false."""
         import os
+
         # Import the module (which sets env vars at import time)
         import src.services.flow_builder.process_executor  # noqa: F401
+
         assert os.environ.get("CREWAI_TRACING_ENABLED") == "false"
 
     def test_crewai_telemetry_opt_out_at_module_level(self):
         """Module sets CREWAI_TELEMETRY_OPT_OUT."""
         import os
+
         import src.services.flow_builder.process_executor  # noqa: F401
+
         assert os.environ.get("CREWAI_TELEMETRY_OPT_OUT") == "1"

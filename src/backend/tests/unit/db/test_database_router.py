@@ -5,22 +5,25 @@ Tests the routing logic that selects between regular database (PostgreSQL/SQLite
 and Lakebase sessions, including configuration reading, enable/disable checks,
 and the get_smart_db_session async generator with all its edge cases.
 """
+
 import json
 import os
 import sqlite3
 import tempfile
-import pytest
 from contextvars import Token
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_async_ctx(session):
     """Create an async context manager that yields *session*."""
+
     class _Ctx:
         async def __aenter__(self):
             return session
@@ -34,6 +37,7 @@ def _make_async_ctx(session):
 # ---------------------------------------------------------------------------
 # get_lakebase_config_from_db
 # ---------------------------------------------------------------------------
+
 
 class TestGetLakebaseConfigFromDb:
     """Tests for get_lakebase_config_from_db (reads directly from SQLite)."""
@@ -68,9 +72,12 @@ class TestGetLakebaseConfigFromDb:
         mock_settings = MagicMock()
         mock_settings.SQLITE_DB_PATH = tmp_db
 
-        with patch("src.db.database_router.os.path.exists", return_value=True), \
-             patch("src.db.session.settings", mock_settings):
+        with (
+            patch("src.db.database_router.os.path.exists", return_value=True),
+            patch("src.db.session.settings", mock_settings),
+        ):
             from src.db.database_router import get_lakebase_config_from_db
+
             result = await get_lakebase_config_from_db()
 
         assert result == expected_config
@@ -81,9 +88,12 @@ class TestGetLakebaseConfigFromDb:
         mock_settings = MagicMock()
         mock_settings.SQLITE_DB_PATH = tmp_db
 
-        with patch("src.db.database_router.os.path.exists", return_value=True), \
-             patch("src.db.session.settings", mock_settings):
+        with (
+            patch("src.db.database_router.os.path.exists", return_value=True),
+            patch("src.db.session.settings", mock_settings),
+        ):
             from src.db.database_router import get_lakebase_config_from_db
+
             result = await get_lakebase_config_from_db()
 
         assert result is None
@@ -96,6 +106,7 @@ class TestGetLakebaseConfigFromDb:
 
         with patch("src.db.session.settings", mock_settings):
             from src.db.database_router import get_lakebase_config_from_db
+
             result = await get_lakebase_config_from_db()
 
         assert result is None
@@ -114,9 +125,12 @@ class TestGetLakebaseConfigFromDb:
         mock_settings = MagicMock()
         mock_settings.SQLITE_DB_PATH = tmp_db
 
-        with patch("src.db.database_router.os.path.exists", return_value=True), \
-             patch("src.db.session.settings", mock_settings):
+        with (
+            patch("src.db.database_router.os.path.exists", return_value=True),
+            patch("src.db.session.settings", mock_settings),
+        ):
             from src.db.database_router import get_lakebase_config_from_db
+
             result = await get_lakebase_config_from_db()
 
         assert result is None
@@ -134,9 +148,12 @@ class TestGetLakebaseConfigFromDb:
             mock_settings = MagicMock()
             mock_settings.SQLITE_DB_PATH = tmp_path
 
-            with patch("src.db.database_router.os.path.exists", return_value=True), \
-                 patch("src.db.session.settings", mock_settings):
+            with (
+                patch("src.db.database_router.os.path.exists", return_value=True),
+                patch("src.db.session.settings", mock_settings),
+            ):
                 from src.db.database_router import get_lakebase_config_from_db
+
                 result = await get_lakebase_config_from_db()
 
             assert result is None
@@ -159,11 +176,14 @@ class TestGetLakebaseConfigFromDb:
         mock_settings = MagicMock()
         mock_settings.SQLITE_DB_PATH = None  # triggers fallback
 
-        with patch("src.db.database_router.os.path.exists", return_value=True), \
-             patch("src.db.database_router.os.path.isabs", return_value=False), \
-             patch("src.db.database_router.os.path.abspath", return_value=str(db_file)), \
-             patch("src.db.session.settings", mock_settings):
+        with (
+            patch("src.db.database_router.os.path.exists", return_value=True),
+            patch("src.db.database_router.os.path.isabs", return_value=False),
+            patch("src.db.database_router.os.path.abspath", return_value=str(db_file)),
+            patch("src.db.session.settings", mock_settings),
+        ):
             from src.db.database_router import get_lakebase_config_from_db
+
             result = await get_lakebase_config_from_db()
 
         assert result == {"enabled": True}
@@ -186,10 +206,13 @@ class TestGetLakebaseConfigFromDb:
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
 
-        with patch("src.db.database_router.os.path.exists", return_value=True), \
-             patch("src.db.session.settings", mock_settings), \
-             patch("sqlite3.connect", return_value=mock_conn):
+        with (
+            patch("src.db.database_router.os.path.exists", return_value=True),
+            patch("src.db.session.settings", mock_settings),
+            patch("sqlite3.connect", return_value=mock_conn),
+        ):
             from src.db.database_router import get_lakebase_config_from_db
+
             result = await get_lakebase_config_from_db()
 
         assert result == expected
@@ -199,6 +222,7 @@ class TestGetLakebaseConfigFromDb:
 # ---------------------------------------------------------------------------
 # is_lakebase_enabled
 # ---------------------------------------------------------------------------
+
 
 class TestIsLakebaseEnabled:
     """Tests for is_lakebase_enabled."""
@@ -387,6 +411,7 @@ class TestIsLakebaseEnabled:
 # get_smart_db_session - regular (non-Lakebase) path
 # ---------------------------------------------------------------------------
 
+
 class TestGetSmartDbSessionRegularPath:
     """Tests for get_smart_db_session when Lakebase is disabled."""
 
@@ -532,6 +557,7 @@ class TestGetSmartDbSessionRegularPath:
 # ---------------------------------------------------------------------------
 # get_smart_db_session - Lakebase path (success)
 # ---------------------------------------------------------------------------
+
 
 class TestGetSmartDbSessionLakebasePath:
     """Tests for get_smart_db_session when Lakebase is enabled and succeeds."""
@@ -772,6 +798,7 @@ class TestGetSmartDbSessionLakebasePath:
 # get_smart_db_session - Lakebase fallback path (connection failure)
 # ---------------------------------------------------------------------------
 
+
 class TestGetSmartDbSessionLakebaseFallback:
     """Tests for get_smart_db_session when Lakebase connection fails BEFORE yield."""
 
@@ -805,9 +832,7 @@ class TestGetSmartDbSessionLakebaseFallback:
             async def __aexit__(self, *args):
                 return False
 
-        mock_regular_factory = MagicMock(
-            return_value=_make_async_ctx(regular_session)
-        )
+        mock_regular_factory = MagicMock(return_value=_make_async_ctx(regular_session))
 
         with (
             patch(
@@ -1011,7 +1036,9 @@ class TestGetSmartDbSessionLakebaseFallback:
                 return_value=mock_auth,
             ),
             patch("src.db.database_router.is_fallback_allowed", return_value=False),
-            patch("src.db.database_router.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch(
+                "src.db.database_router.asyncio.sleep", new_callable=AsyncMock
+            ) as mock_sleep,
         ):
             from src.db.database_router import get_smart_db_session
 
@@ -1047,9 +1074,7 @@ class TestGetSmartDbSessionLakebaseFallback:
             async def __aexit__(self, *args):
                 return False
 
-        mock_regular_factory = MagicMock(
-            return_value=_make_async_ctx(regular_session)
-        )
+        mock_regular_factory = MagicMock(return_value=_make_async_ctx(regular_session))
 
         with (
             patch(
@@ -1094,6 +1119,7 @@ class TestGetSmartDbSessionLakebaseFallback:
 # ---------------------------------------------------------------------------
 # get_smart_db_session - Lakebase post-yield error (no fallback)
 # ---------------------------------------------------------------------------
+
 
 class TestGetSmartDbSessionLakebasePostYieldError:
     """Tests for get_smart_db_session when Lakebase errors AFTER yield (during request)."""
@@ -1158,6 +1184,7 @@ class TestGetSmartDbSessionLakebasePostYieldError:
 # ---------------------------------------------------------------------------
 # get_smart_db_session - GeneratorExit handling
 # ---------------------------------------------------------------------------
+
 
 class TestGetSmartDbSessionGeneratorExit:
     """Tests for get_smart_db_session GeneratorExit behavior."""
@@ -1255,6 +1282,7 @@ class TestGetSmartDbSessionGeneratorExit:
 # get_smart_db_session - Lakebase path, context var reset ValueError
 # ---------------------------------------------------------------------------
 
+
 class TestGetSmartDbSessionLakebaseResetError:
     """Tests for _request_session.reset ValueError handling in the Lakebase path."""
 
@@ -1316,6 +1344,7 @@ class TestGetSmartDbSessionLakebaseResetError:
 # ---------------------------------------------------------------------------
 # get_smart_db_session - config is None after is_lakebase_enabled returns True
 # ---------------------------------------------------------------------------
+
 
 class TestGetSmartDbSessionConfigNoneAfterEnabled:
     """Edge case: is_lakebase_enabled returns True but get_lakebase_config_from_db returns None."""
@@ -1413,6 +1442,7 @@ class TestGetSmartDbSessionConfigNoneAfterEnabled:
         ):
             # Remove LAKEBASE_INSTANCE_NAME if set
             import os
+
             env_backup = os.environ.pop("LAKEBASE_INSTANCE_NAME", None)
             try:
                 from src.db.database_router import get_smart_db_session
@@ -1436,6 +1466,7 @@ class TestGetSmartDbSessionConfigNoneAfterEnabled:
 # ---------------------------------------------------------------------------
 # is_lakebase_enabled - edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestIsLakebaseEnabledEdgeCases:
     """Additional edge cases for is_lakebase_enabled."""
@@ -1519,6 +1550,7 @@ class TestIsLakebaseEnabledEdgeCases:
 # get_lakebase_config_from_db - config entry has empty value
 # ---------------------------------------------------------------------------
 
+
 class TestGetLakebaseConfigFromDbEmptyValue:
     """Edge cases for get_lakebase_config_from_db with empty/falsy config values."""
 
@@ -1529,7 +1561,9 @@ class TestGetLakebaseConfigFromDbEmptyValue:
             tmp_path = f.name
         try:
             conn = sqlite3.connect(tmp_path)
-            conn.execute("CREATE TABLE database_configs (key TEXT PRIMARY KEY, value TEXT)")
+            conn.execute(
+                "CREATE TABLE database_configs (key TEXT PRIMARY KEY, value TEXT)"
+            )
             conn.execute(
                 "INSERT INTO database_configs (key, value) VALUES (?, ?)",
                 ("lakebase", None),
@@ -1540,9 +1574,12 @@ class TestGetLakebaseConfigFromDbEmptyValue:
             mock_settings = MagicMock()
             mock_settings.SQLITE_DB_PATH = tmp_path
 
-            with patch("src.db.database_router.os.path.exists", return_value=True), \
-                 patch("src.db.session.settings", mock_settings):
+            with (
+                patch("src.db.database_router.os.path.exists", return_value=True),
+                patch("src.db.session.settings", mock_settings),
+            ):
                 from src.db.database_router import get_lakebase_config_from_db
+
                 result = await get_lakebase_config_from_db()
 
             assert result is None
@@ -1558,7 +1595,9 @@ class TestGetLakebaseConfigFromDbEmptyValue:
             tmp_path = f.name
         try:
             conn = sqlite3.connect(tmp_path)
-            conn.execute("CREATE TABLE database_configs (key TEXT PRIMARY KEY, value TEXT)")
+            conn.execute(
+                "CREATE TABLE database_configs (key TEXT PRIMARY KEY, value TEXT)"
+            )
             conn.execute(
                 "INSERT INTO database_configs (key, value) VALUES (?, ?)",
                 ("lakebase", json.dumps(config_value)),
@@ -1569,9 +1608,12 @@ class TestGetLakebaseConfigFromDbEmptyValue:
             mock_settings = MagicMock()
             mock_settings.SQLITE_DB_PATH = tmp_path
 
-            with patch("src.db.database_router.os.path.exists", return_value=True), \
-                 patch("src.db.session.settings", mock_settings):
+            with (
+                patch("src.db.database_router.os.path.exists", return_value=True),
+                patch("src.db.session.settings", mock_settings),
+            ):
                 from src.db.database_router import get_lakebase_config_from_db
+
                 result = await get_lakebase_config_from_db()
 
             assert result == config_value
@@ -1583,14 +1625,18 @@ class TestGetLakebaseConfigFromDbEmptyValue:
 # activate_lakebase_in_subprocess
 # ---------------------------------------------------------------------------
 
+
 class TestActivateLakebaseInSubprocess:
     """Tests for activate_lakebase_in_subprocess."""
 
     @pytest.mark.asyncio
     async def test_activate_lakebase_in_subprocess_disabled(self):
         """Returns False when Lakebase is not enabled."""
-        with patch("src.db.database_router.is_lakebase_enabled", AsyncMock(return_value=False)):
+        with patch(
+            "src.db.database_router.is_lakebase_enabled", AsyncMock(return_value=False)
+        ):
             from src.db.database_router import activate_lakebase_in_subprocess
+
             result = await activate_lakebase_in_subprocess()
         assert result is False
 
@@ -1601,25 +1647,48 @@ class TestActivateLakebaseInSubprocess:
         mock_lb_factory.create_engine = AsyncMock()
         mock_lb_factory._session_factory = MagicMock()
 
-        with patch("src.db.database_router.is_lakebase_enabled", AsyncMock(return_value=True)), \
-             patch("src.db.database_router.get_lakebase_config_from_db", AsyncMock(return_value={"instance_name": "test-instance"})), \
-             patch("src.db.lakebase_session.LakebaseSessionFactory", return_value=mock_lb_factory) as mock_cls, \
-             patch("src.db.database_router.async_session_factory") as mock_asf, \
-             patch("src.db.lakebase_state.mark_lakebase_activated"):
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                AsyncMock(return_value=True),
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                AsyncMock(return_value={"instance_name": "test-instance"}),
+            ),
+            patch(
+                "src.db.lakebase_session.LakebaseSessionFactory",
+                return_value=mock_lb_factory,
+            ) as mock_cls,
+            patch("src.db.database_router.async_session_factory") as mock_asf,
+            patch("src.db.lakebase_state.mark_lakebase_activated"),
+        ):
             from src.db.database_router import activate_lakebase_in_subprocess
+
             result = await activate_lakebase_in_subprocess()
 
         assert result is True
         mock_cls.assert_called_once_with("test-instance")
         mock_lb_factory.create_engine.assert_awaited_once()
-        mock_asf.activate_lakebase.assert_called_once_with(mock_lb_factory._session_factory)
+        mock_asf.activate_lakebase.assert_called_once_with(
+            mock_lb_factory._session_factory
+        )
 
     @pytest.mark.asyncio
     async def test_activate_lakebase_in_subprocess_error(self):
         """Returns False when an exception occurs during activation."""
-        with patch("src.db.database_router.is_lakebase_enabled", AsyncMock(return_value=True)), \
-             patch("src.db.database_router.get_lakebase_config_from_db", AsyncMock(side_effect=Exception("boom"))):
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                AsyncMock(return_value=True),
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                AsyncMock(side_effect=Exception("boom")),
+            ),
+        ):
             from src.db.database_router import activate_lakebase_in_subprocess
+
             result = await activate_lakebase_in_subprocess()
 
         assert result is False
@@ -1629,17 +1698,21 @@ class TestActivateLakebaseInSubprocess:
 # Module-level imports and exports
 # ---------------------------------------------------------------------------
 
+
 class TestModuleLevelExports:
     """Verify the module exposes the expected public functions."""
 
     def test_get_lakebase_config_from_db_is_callable(self):
         from src.db.database_router import get_lakebase_config_from_db
+
         assert callable(get_lakebase_config_from_db)
 
     def test_is_lakebase_enabled_is_callable(self):
         from src.db.database_router import is_lakebase_enabled
+
         assert callable(is_lakebase_enabled)
 
     def test_get_smart_db_session_is_callable(self):
         from src.db.database_router import get_smart_db_session
+
         assert callable(get_smart_db_session)

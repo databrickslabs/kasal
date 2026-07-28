@@ -142,14 +142,16 @@ async def get_fabric_access_token(
     url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
 
     # Determine authentication method
-    if auth_method == "service_account" or (username and password and not client_secret):
+    if auth_method == "service_account" or (
+        username and password and not client_secret
+    ):
         # Service Account (ROPC flow)
         data = {
             "grant_type": "password",
             "client_id": client_id,
             "username": username,
             "password": password,
-            "scope": "https://api.fabric.microsoft.com/.default"
+            "scope": "https://api.fabric.microsoft.com/.default",
         }
     else:
         # Service Principal (client credentials)
@@ -157,7 +159,7 @@ async def get_fabric_access_token(
             "grant_type": "client_credentials",
             "client_id": client_id,
             "client_secret": client_secret,
-            "scope": "https://api.fabric.microsoft.com/.default"
+            "scope": "https://api.fabric.microsoft.com/.default",
         }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -197,17 +199,17 @@ def validate_auth_config(config: Dict[str, Any]) -> tuple[bool, str]:
         Tuple of (is_valid, error_message)
     """
     has_access_token = bool(config.get("access_token"))
-    has_service_principal = all([
-        config.get("tenant_id"),
-        config.get("client_id"),
-        config.get("client_secret")
-    ])
-    has_service_account = all([
-        config.get("tenant_id"),
-        config.get("client_id"),
-        config.get("username"),
-        config.get("password")
-    ])
+    has_service_principal = all(
+        [config.get("tenant_id"), config.get("client_id"), config.get("client_secret")]
+    )
+    has_service_account = all(
+        [
+            config.get("tenant_id"),
+            config.get("client_id"),
+            config.get("username"),
+            config.get("password"),
+        ]
+    )
 
     if has_access_token or has_service_principal or has_service_account:
         return True, ""

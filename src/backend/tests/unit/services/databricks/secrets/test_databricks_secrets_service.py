@@ -28,9 +28,10 @@ IMPORTANT patching notes:
 import base64
 import os
 import sys
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.databricks.secrets.service import DatabricksSecretsService
 
@@ -47,6 +48,7 @@ _PATCH_AIOHTTP_SESSION = "src.services.databricks.secrets.service.aiohttp.Client
 # Helper: build a DatabricksSecretsService with mocked internals
 # ---------------------------------------------------------------------------
 
+
 def _make_service(group_id=None):
     """Return a DatabricksSecretsService with mocked repository."""
     with patch(
@@ -57,7 +59,9 @@ def _make_service(group_id=None):
     return service
 
 
-def _make_config(is_enabled=True, workspace_url="https://example.com", secret_scope="my-scope"):
+def _make_config(
+    is_enabled=True, workspace_url="https://example.com", secret_scope="my-scope"
+):
     """Return a mock Databricks config object."""
     return SimpleNamespace(
         is_enabled=is_enabled,
@@ -257,9 +261,12 @@ class TestGetDatabricksSecrets:
         )
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             # If this were called the value would leak — assert it is NOT.
             service.get_databricks_secret_value = AsyncMock(return_value="secret-val")
             result = await service.get_databricks_secrets("my-scope")
@@ -328,9 +335,12 @@ class TestGetDatabricksSecrets:
         api_response = _mock_aiohttp_response(403, text_data="Forbidden")
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             result = await service.get_databricks_secrets("scope")
         assert result == []
 
@@ -368,9 +378,12 @@ class TestGetDatabricksSecrets:
         async def mock_get_value(scope, key):
             return values.get(key, "")
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             service.get_databricks_secret_value = AsyncMock(side_effect=mock_get_value)
             result = await service.get_databricks_secrets("scope")
 
@@ -400,9 +413,12 @@ class TestGetDatabricksSecretValue:
         api_response = _mock_aiohttp_response(200, json_data={"value": encoded})
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             result = await service.get_databricks_secret_value("scope", "key")
 
         assert result == "my-secret"
@@ -415,14 +431,15 @@ class TestGetDatabricksSecretValue:
         service._databricks_service = mock_ds
 
         # Not valid base64
-        api_response = _mock_aiohttp_response(
-            200, json_data={"value": "not-base64!!!"}
-        )
+        api_response = _mock_aiohttp_response(200, json_data={"value": "not-base64!!!"})
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             result = await service.get_databricks_secret_value("scope", "key")
 
         assert result == "not-base64!!!"
@@ -482,9 +499,12 @@ class TestGetDatabricksSecretValue:
         api_response = _mock_aiohttp_response(500, text_data="Server Error")
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             result = await service.get_databricks_secret_value("scope", "key")
         assert result == ""
 
@@ -508,9 +528,12 @@ class TestGetDatabricksSecretValue:
         api_response = _mock_aiohttp_response(200, json_data={"value": ""})
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             result = await service.get_databricks_secret_value("scope", "key")
         # base64.b64decode("") returns b"", decoded to ""
         assert result == ""
@@ -535,9 +558,12 @@ class TestSetDatabricksSecretValue:
         api_response = _mock_aiohttp_response(200)
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             result = await service.set_databricks_secret_value("scope", "key", "value")
 
         assert result is True
@@ -585,9 +611,7 @@ class TestSetDatabricksSecretValue:
         service._databricks_service = mock_ds
 
         with patch(_PATCH_AUTH, new_callable=AsyncMock, return_value=None):
-            result = await service.set_databricks_secret_value(
-                "scope", "key", "value"
-            )
+            result = await service.set_databricks_secret_value("scope", "key", "value")
         assert result is False
 
     @pytest.mark.asyncio
@@ -601,12 +625,13 @@ class TestSetDatabricksSecretValue:
         api_response = _mock_aiohttp_response(500, text_data="Error")
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
-            result = await service.set_databricks_secret_value(
-                "scope", "key", "value"
-            )
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
+            result = await service.set_databricks_secret_value("scope", "key", "value")
         assert result is False
 
     @pytest.mark.asyncio
@@ -638,9 +663,12 @@ class TestDeleteDatabricksSecret:
         api_response = _mock_aiohttp_response(200)
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             result = await service.delete_databricks_secret("scope", "key")
 
         assert result is True
@@ -700,9 +728,12 @@ class TestDeleteDatabricksSecret:
         api_response = _mock_aiohttp_response(404, text_data="Not Found")
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             result = await service.delete_databricks_secret("scope", "key")
         assert result is False
 
@@ -740,9 +771,7 @@ class TestCreateDatabricksSecretScope:
     @pytest.mark.asyncio
     async def test_returns_true_when_scope_already_exists(self):
         service = _make_service()
-        api_response = _mock_aiohttp_response(
-            400, text_data="Scope 'x' already exists"
-        )
+        api_response = _mock_aiohttp_response(400, text_data="Scope 'x' already exists")
         mock_session = _mock_aiohttp_session(api_response)
 
         with patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
@@ -754,9 +783,7 @@ class TestCreateDatabricksSecretScope:
     @pytest.mark.asyncio
     async def test_returns_true_when_resource_already_exists(self):
         service = _make_service()
-        api_response = _mock_aiohttp_response(
-            400, text_data="RESOURCE_ALREADY_EXISTS"
-        )
+        api_response = _mock_aiohttp_response(400, text_data="RESOURCE_ALREADY_EXISTS")
         mock_session = _mock_aiohttp_session(api_response)
 
         with patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
@@ -876,9 +903,7 @@ class TestSetupProviderApiKey:
         this always fails silently. Verify the key is not found."""
         mock_db = MagicMock()
 
-        with patch(_PATCH_AKS) as MockAKS, patch(_PATCH_UC) as MockUC, patch(
-            _PATCH_DS
-        ):
+        with patch(_PATCH_AKS) as MockAKS, patch(_PATCH_UC) as MockUC, patch(_PATCH_DS):
             MockAKS.get_api_key_value = AsyncMock(return_value=None)
             MockUC.get_group_context.return_value = SimpleNamespace(
                 primary_group_id="grp-1"
@@ -895,9 +920,11 @@ class TestSetupProviderApiKey:
     async def test_returns_false_when_key_not_found_anywhere(self):
         mock_db = MagicMock()
 
-        with patch(_PATCH_AKS) as MockAKS, patch(_PATCH_UC) as MockUC, patch(
-            _PATCH_DS
-        ) as MockDS:
+        with (
+            patch(_PATCH_AKS) as MockAKS,
+            patch(_PATCH_UC) as MockUC,
+            patch(_PATCH_DS) as MockDS,
+        ):
             MockAKS.get_api_key_value = AsyncMock(return_value=None)
             MockUC.get_group_context.return_value = SimpleNamespace(
                 primary_group_id="grp-1"
@@ -908,16 +935,19 @@ class TestSetupProviderApiKey:
             )
             MockDS.return_value = mock_ds_instance
 
-            with patch.object(
-                DatabricksSecretsService,
-                "validate_databricks_config",
-                new_callable=AsyncMock,
-                return_value=("https://example.com", "my-scope"),
-            ), patch.object(
-                DatabricksSecretsService,
-                "get_databricks_secret_value",
-                new_callable=AsyncMock,
-                return_value="",
+            with (
+                patch.object(
+                    DatabricksSecretsService,
+                    "validate_databricks_config",
+                    new_callable=AsyncMock,
+                    return_value=("https://example.com", "my-scope"),
+                ),
+                patch.object(
+                    DatabricksSecretsService,
+                    "get_databricks_secret_value",
+                    new_callable=AsyncMock,
+                    return_value="",
+                ),
             ):
                 result = await DatabricksSecretsService.setup_provider_api_key(
                     mock_db, "MISSING_KEY"
@@ -958,9 +988,11 @@ class TestSetupProviderApiKey:
         and the method continues (key not found anywhere -> False)."""
         mock_db = MagicMock()
 
-        with patch(_PATCH_AKS) as MockAKS, patch(_PATCH_UC) as MockUC, patch(
-            _PATCH_DS
-        ) as MockDS:
+        with (
+            patch(_PATCH_AKS) as MockAKS,
+            patch(_PATCH_UC) as MockUC,
+            patch(_PATCH_DS) as MockDS,
+        ):
             MockAKS.get_api_key_value = AsyncMock(return_value=None)
             MockUC.get_group_context.return_value = SimpleNamespace(
                 primary_group_id="grp-1"
@@ -1157,9 +1189,7 @@ class TestGetProviderApiKey:
         service.api_keys_service = MagicMock()
 
         with patch(_PATCH_AKS) as MockAKS:
-            MockAKS.get_provider_api_key = AsyncMock(
-                side_effect=RuntimeError("boom")
-            )
+            MockAKS.get_provider_api_key = AsyncMock(side_effect=RuntimeError("boom"))
             result = await service.get_provider_api_key("deepseek")
 
         assert result == ""
@@ -1254,9 +1284,12 @@ class TestEdgeCases:
         api_response = _mock_aiohttp_response(200, json_data={"secrets": []})
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             result = await service.get_databricks_secrets("scope")
 
         assert result == []
@@ -1272,9 +1305,12 @@ class TestEdgeCases:
         api_response = _mock_aiohttp_response(200, json_data={})
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             result = await service.get_databricks_secret_value("scope", "key")
 
         # result.get("value", "") returns "", base64.b64decode("") = b"" -> ""
@@ -1294,11 +1330,14 @@ class TestEdgeCases:
         api_response = _mock_aiohttp_response(200)
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH,
-            new_callable=AsyncMock,
-            return_value=_make_auth_context(token="my-tok"),
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH,
+                new_callable=AsyncMock,
+                return_value=_make_auth_context(token="my-tok"),
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             await service.set_databricks_secret_value("my-scope", "my-key", "my-val")
 
         service.create_databricks_secret_scope.assert_awaited_once_with(
@@ -1333,9 +1372,12 @@ class TestEdgeCases:
         api_response = _mock_aiohttp_response(200, json_data={})
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             result = await service.get_databricks_secrets("scope")
 
         assert result == []
@@ -1354,9 +1396,12 @@ class TestEdgeCases:
         )
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             service.get_databricks_secret_value = AsyncMock(return_value="v")
             result = await service.get_databricks_secrets("my-scope")
 
@@ -1376,9 +1421,12 @@ class TestEdgeCases:
         )
         mock_session = _mock_aiohttp_session(api_response)
 
-        with patch(
-            _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
-        ), patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session):
+        with (
+            patch(
+                _PATCH_AUTH, new_callable=AsyncMock, return_value=_make_auth_context()
+            ),
+            patch(_PATCH_AIOHTTP_SESSION, return_value=mock_session),
+        ):
             service.get_databricks_secret_value = AsyncMock(return_value="x")
             result = await service.get_databricks_secrets("scope")
 

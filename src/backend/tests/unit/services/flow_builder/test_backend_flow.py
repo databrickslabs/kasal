@@ -1,15 +1,15 @@
+import asyncio
+import json
+import os
+import uuid
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, call, patch
+
 import pytest
 
-from src.utils.model_config import DEFAULT_ENGINE_MODEL
-import uuid
-import asyncio
-import os
-import json
-from unittest.mock import Mock, patch, AsyncMock, MagicMock, call, PropertyMock
-from datetime import datetime, UTC
-
-from src.services.flow_builder.backend_flow import BackendFlow
 from src.repositories.flow_repository import FlowRepository
+from src.services.flow_builder.backend_flow import BackendFlow
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 
 @pytest.fixture(autouse=True)
@@ -19,6 +19,7 @@ def _clear_user_context():
     modules (this previously broke 24 reducer tests in full-suite runs)."""
     yield
     from src.utils.user_context import UserContext
+
     UserContext.clear_context()
 
 
@@ -29,10 +30,12 @@ class MockCrewAIFlowClass:
     dynamically-added attributes via dir().
     """
 
-    def __init__(self, kickoff_async_result, start_method_names=None, has_kickoff_async=True):
+    def __init__(
+        self, kickoff_async_result, start_method_names=None, has_kickoff_async=True
+    ):
         # Store the result exactly as provided (including None)
         self._kickoff_async_result = kickoff_async_result
-        self._start_methods = start_method_names or ['starting_point_test']
+        self._start_methods = start_method_names or ["starting_point_test"]
         self._has_kickoff_async = has_kickoff_async
         self._method_outputs = []
 
@@ -56,7 +59,12 @@ _NOT_PROVIDED = object()
 class TestBackendFlow:
     """Test cases for BackendFlow - targeting 100% coverage."""
 
-    def create_mock_crewai_flow(self, kickoff_async_result=_NOT_PROVIDED, has_kickoff_async=True, start_method_names=None):
+    def create_mock_crewai_flow(
+        self,
+        kickoff_async_result=_NOT_PROVIDED,
+        has_kickoff_async=True,
+        start_method_names=None,
+    ):
         """Helper to create a properly mocked CrewAI flow that supports dir() inspection."""
         # Use default only when not explicitly provided
         if kickoff_async_result is _NOT_PROVIDED:
@@ -64,7 +72,7 @@ class TestBackendFlow:
         return MockCrewAIFlowClass(
             kickoff_async_result=kickoff_async_result,
             start_method_names=start_method_names,
-            has_kickoff_async=has_kickoff_async
+            has_kickoff_async=has_kickoff_async,
         )
 
     # Test __init__ method - lines 39-67
@@ -125,7 +133,9 @@ class TestBackendFlow:
     def test_init_with_flow_id_attribute_error(self):
         """Test BackendFlow initialization with flow_id causing AttributeError."""
         with pytest.raises(ValueError, match="Invalid flow_id format"):
-            BackendFlow(flow_id=123)  # This will cause AttributeError in str() conversion
+            BackendFlow(
+                flow_id=123
+            )  # This will cause AttributeError in str() conversion
 
     def test_init_with_flow_id_type_error(self):
         """Test BackendFlow initialization with flow_id causing TypeError."""
@@ -235,14 +245,16 @@ class TestBackendFlow:
 
         mock_llm = Mock()
 
-        with patch('src.services.flow_builder.backend_flow.LLMManager') as mock_llm_manager:
+        with patch(
+            "src.services.flow_builder.backend_flow.LLMManager"
+        ) as mock_llm_manager:
             mock_llm_manager.get_llm = AsyncMock(return_value=mock_llm)
 
-            with patch.dict(os.environ, {'DEFAULT_LLM_MODEL': 'test-model'}):
+            with patch.dict(os.environ, {"DEFAULT_LLM_MODEL": "test-model"}):
                 result = await flow._get_llm()
 
                 assert result == mock_llm
-                mock_llm_manager.get_llm.assert_called_once_with('test-model')
+                mock_llm_manager.get_llm.assert_called_once_with("test-model")
 
     @pytest.mark.asyncio
     async def test_get_llm_default_model(self):
@@ -251,7 +263,9 @@ class TestBackendFlow:
 
         mock_llm = Mock()
 
-        with patch('src.services.flow_builder.backend_flow.LLMManager') as mock_llm_manager:
+        with patch(
+            "src.services.flow_builder.backend_flow.LLMManager"
+        ) as mock_llm_manager:
             mock_llm_manager.get_llm = AsyncMock(return_value=mock_llm)
 
             # Remove DEFAULT_LLM_MODEL from environment
@@ -266,7 +280,9 @@ class TestBackendFlow:
         """Test _get_llm method with exception."""
         flow = BackendFlow()
 
-        with patch('src.services.flow_builder.backend_flow.LLMManager') as mock_llm_manager:
+        with patch(
+            "src.services.flow_builder.backend_flow.LLMManager"
+        ) as mock_llm_manager:
             mock_llm_manager.get_llm = AsyncMock(side_effect=Exception("LLM error"))
 
             with pytest.raises(Exception, match="LLM error"):
@@ -281,10 +297,12 @@ class TestBackendFlow:
 
         mock_dynamic_flow = Mock()
 
-        with patch('src.services.flow_builder.backend_flow.FlowBuilder') as mock_flow_builder:
+        with patch(
+            "src.services.flow_builder.backend_flow.FlowBuilder"
+        ) as mock_flow_builder:
             mock_flow_builder.build_flow = AsyncMock(return_value=mock_dynamic_flow)
 
-            with patch.object(flow, '_init_callbacks') as mock_init_callbacks:
+            with patch.object(flow, "_init_callbacks") as mock_init_callbacks:
                 result = await flow.flow()
 
                 assert result == mock_dynamic_flow
@@ -298,7 +316,7 @@ class TestBackendFlow:
         flow = BackendFlow(flow_id=flow_id)
 
         mock_flow_repo = Mock()
-        flow._repositories = {'flow': mock_flow_repo}
+        flow._repositories = {"flow": mock_flow_repo}
 
         mock_flow_db = Mock()
         mock_flow_db.id = flow_id
@@ -311,10 +329,12 @@ class TestBackendFlow:
         mock_flow_repo.get = AsyncMock(return_value=mock_flow_db)
         mock_dynamic_flow = Mock()
 
-        with patch('src.services.flow_builder.backend_flow.FlowBuilder') as mock_flow_builder:
+        with patch(
+            "src.services.flow_builder.backend_flow.FlowBuilder"
+        ) as mock_flow_builder:
             mock_flow_builder.build_flow = AsyncMock(return_value=mock_dynamic_flow)
 
-            with patch.object(flow, '_init_callbacks') as mock_init_callbacks:
+            with patch.object(flow, "_init_callbacks") as mock_init_callbacks:
                 result = await flow.flow()
 
                 assert result == mock_dynamic_flow
@@ -334,11 +354,17 @@ class TestBackendFlow:
         flow = BackendFlow()
         flow._flow_data = {"nodes": [{"id": "node1"}]}
 
-        with patch('src.services.flow_builder.backend_flow.FlowBuilder') as mock_flow_builder:
-            mock_flow_builder.build_flow = AsyncMock(side_effect=Exception("Build error"))
+        with patch(
+            "src.services.flow_builder.backend_flow.FlowBuilder"
+        ) as mock_flow_builder:
+            mock_flow_builder.build_flow = AsyncMock(
+                side_effect=Exception("Build error")
+            )
 
-            with patch.object(flow, '_init_callbacks'):
-                with pytest.raises(ValueError, match="Failed to create flow: Build error"):
+            with patch.object(flow, "_init_callbacks"):
+                with pytest.raises(
+                    ValueError, match="Failed to create flow: Build error"
+                ):
                     await flow.flow()
 
     # Test _init_callbacks method - the actual implementation sets callbacks directly
@@ -348,27 +374,27 @@ class TestBackendFlow:
         flow._config = {"group_context": {"key": "value"}}
 
         # Mock UserContext to prevent import errors
-        with patch('src.services.flow_builder.backend_flow.logger'):
+        with patch("src.services.flow_builder.backend_flow.logger"):
             flow._init_callbacks()
 
         # Check that callbacks are set correctly
-        assert 'callbacks' in flow._config
-        assert flow._config['callbacks']['handlers'] == []
-        assert flow._config['callbacks']['job_id'] == "test-job"
-        assert flow._config['callbacks']['start_trace_writer'] is True
+        assert "callbacks" in flow._config
+        assert flow._config["callbacks"]["handlers"] == []
+        assert flow._config["callbacks"]["job_id"] == "test-job"
+        assert flow._config["callbacks"]["start_trace_writer"] is True
 
     def test_init_callbacks_no_group_context(self):
         """Test _init_callbacks method without group_context."""
         flow = BackendFlow(job_id="test-job")
         flow._config = {}
 
-        with patch('src.services.flow_builder.backend_flow.logger'):
+        with patch("src.services.flow_builder.backend_flow.logger"):
             flow._init_callbacks()
 
         # Check that callbacks are set correctly
-        assert 'callbacks' in flow._config
-        assert flow._config['callbacks']['handlers'] == []
-        assert flow._config['callbacks']['job_id'] == "test-job"
+        assert "callbacks" in flow._config
+        assert flow._config["callbacks"]["handlers"] == []
+        assert flow._config["callbacks"]["job_id"] == "test-job"
 
     # Test kickoff method - using crewai_flow.kickoff_async()
     @pytest.mark.asyncio
@@ -379,12 +405,16 @@ class TestBackendFlow:
         flow._config = {"callbacks": {"start_trace_writer": True}}
         flow._flow_data = {"nodes": [{"id": "node1"}]}
 
-        mock_crewai_flow = self.create_mock_crewai_flow(kickoff_async_result="test result")
+        mock_crewai_flow = self.create_mock_crewai_flow(
+            kickoff_async_result="test result"
+        )
 
-        with patch('src.services.execution.logs.writer_task.LogWriterTask') as mock_trace_manager:
+        with patch(
+            "src.services.execution.logs.writer_task.LogWriterTask"
+        ) as mock_trace_manager:
             mock_trace_manager.ensure_writer_started = AsyncMock()
 
-            with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+            with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
                 mock_flow_method.return_value = mock_crewai_flow
 
                 result = await flow.kickoff()
@@ -402,10 +432,14 @@ class TestBackendFlow:
 
         mock_crewai_flow = self.create_mock_crewai_flow()
 
-        with patch('src.services.execution.logs.writer_task.LogWriterTask') as mock_trace_manager:
-            mock_trace_manager.ensure_writer_started = AsyncMock(side_effect=Exception("Trace error"))
+        with patch(
+            "src.services.execution.logs.writer_task.LogWriterTask"
+        ) as mock_trace_manager:
+            mock_trace_manager.ensure_writer_started = AsyncMock(
+                side_effect=Exception("Trace error")
+            )
 
-            with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+            with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
                 mock_flow_method.return_value = mock_crewai_flow
 
                 result = await flow.kickoff()
@@ -433,7 +467,7 @@ class TestBackendFlow:
 
         mock_crewai_flow = self.create_mock_crewai_flow()
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow
 
             result = await flow.kickoff()
@@ -461,13 +495,15 @@ class TestBackendFlow:
         flow = BackendFlow(job_id="test-job")
         flow._flow_data = {"nodes": [{"id": "node1"}]}
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.side_effect = Exception("Flow creation error")
 
             result = await flow.kickoff()
 
             assert result["success"] is False
-            assert result["error"] == "Failed to create CrewAI flow: Flow creation error"
+            assert (
+                result["error"] == "Failed to create CrewAI flow: Flow creation error"
+            )
 
     @pytest.mark.asyncio
     async def test_kickoff_no_start_methods(self):
@@ -479,7 +515,7 @@ class TestBackendFlow:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value=None)
         # No starting_point_ methods
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow
 
             result = await flow.kickoff()
@@ -496,10 +532,10 @@ class TestBackendFlow:
 
         mock_crewai_flow = self.create_mock_crewai_flow(
             kickoff_async_result={"output": "test result"},
-            start_method_names=['starting_point_node1']
+            start_method_names=["starting_point_node1"],
         )
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow
 
             result = await flow.kickoff()
@@ -513,11 +549,10 @@ class TestBackendFlow:
         flow._flow_data = {"nodes": [{"id": "node1"}]}
 
         mock_crewai_flow = self.create_mock_crewai_flow(
-            kickoff_async_result=None,
-            start_method_names=['starting_point_node1']
+            kickoff_async_result=None, start_method_names=["starting_point_node1"]
         )
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow
 
             result = await flow.kickoff()
@@ -535,10 +570,10 @@ class TestBackendFlow:
         mock_result = {"key": "value"}
         mock_crewai_flow = self.create_mock_crewai_flow(
             kickoff_async_result=mock_result,
-            start_method_names=['starting_point_node1']
+            start_method_names=["starting_point_node1"],
         )
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow
 
             result = await flow.kickoff()
@@ -560,10 +595,10 @@ class TestBackendFlow:
 
         mock_crewai_flow = self.create_mock_crewai_flow(
             kickoff_async_result=mock_result_obj,
-            start_method_names=['starting_point_node1']
+            start_method_names=["starting_point_node1"],
         )
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow
 
             result = await flow.kickoff()
@@ -583,10 +618,10 @@ class TestBackendFlow:
         mock_result_obj = MockResult()
         mock_crewai_flow = self.create_mock_crewai_flow(
             kickoff_async_result=mock_result_obj,
-            start_method_names=['starting_point_node1']
+            start_method_names=["starting_point_node1"],
         )
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow
 
             result = await flow.kickoff()
@@ -601,7 +636,8 @@ class TestBackendFlow:
 
         # Create an object with slots to avoid __dict__
         class ResultWithSlots:
-            __slots__ = ['raw', 'token_usage']
+            __slots__ = ["raw", "token_usage"]
+
             def __init__(self):
                 self.raw = "raw content"
                 self.token_usage = "100 tokens"
@@ -609,10 +645,10 @@ class TestBackendFlow:
         mock_result_obj = ResultWithSlots()
         mock_crewai_flow = self.create_mock_crewai_flow(
             kickoff_async_result=mock_result_obj,
-            start_method_names=['starting_point_node1']
+            start_method_names=["starting_point_node1"],
         )
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow
 
             result = await flow.kickoff()
@@ -627,17 +663,18 @@ class TestBackendFlow:
 
         # Create an object with slots to avoid __dict__, with only raw
         class ResultWithSlots:
-            __slots__ = ['raw']
+            __slots__ = ["raw"]
+
             def __init__(self):
                 self.raw = "raw content"
 
         mock_result_obj = ResultWithSlots()
         mock_crewai_flow = self.create_mock_crewai_flow(
             kickoff_async_result=mock_result_obj,
-            start_method_names=['starting_point_node1']
+            start_method_names=["starting_point_node1"],
         )
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow
 
             result = await flow.kickoff()
@@ -652,10 +689,10 @@ class TestBackendFlow:
 
         mock_crewai_flow = self.create_mock_crewai_flow(
             kickoff_async_result="simple string",
-            start_method_names=['starting_point_node1']
+            start_method_names=["starting_point_node1"],
         )
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow
 
             result = await flow.kickoff()
@@ -673,10 +710,10 @@ class TestBackendFlow:
 
         mock_crewai_flow = self.create_mock_crewai_flow(
             kickoff_async_result=mock_result_obj,
-            start_method_names=['starting_point_node1']
+            start_method_names=["starting_point_node1"],
         )
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow
 
             result = await flow.kickoff()
@@ -691,10 +728,10 @@ class TestBackendFlow:
 
         mock_crewai_flow = self.create_mock_crewai_flow(
             kickoff_async_result={"output": "combined"},
-            start_method_names=['starting_point_node1', 'starting_point_node2']
+            start_method_names=["starting_point_node1", "starting_point_node2"],
         )
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow
 
             result = await flow.kickoff()
@@ -707,7 +744,7 @@ class TestBackendFlow:
         flow = BackendFlow(job_id="test-job")
         flow._flow_data = {"nodes": [{"id": "node1"}]}
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.side_effect = Exception("General error")
 
             result = await flow.kickoff()
@@ -724,10 +761,10 @@ class TestBackendFlow:
         mock_result = {"existing": "data"}
         mock_crewai_flow = self.create_mock_crewai_flow(
             kickoff_async_result=mock_result,
-            start_method_names=['starting_point_node1']
+            start_method_names=["starting_point_node1"],
         )
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow
 
             result = await flow.kickoff()
@@ -742,10 +779,10 @@ class TestBackendFlow:
 
         mock_crewai_flow = self.create_mock_crewai_flow(
             kickoff_async_result="string result",
-            start_method_names=['starting_point_node1']
+            start_method_names=["starting_point_node1"],
         )
 
-        with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
+        with patch.object(flow, "flow", new_callable=AsyncMock) as mock_flow_method:
             mock_flow_method.return_value = mock_crewai_flow
 
             result = await flow.kickoff()

@@ -13,8 +13,9 @@ from src.services.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
 
 def _llm(**kwargs):
     with patch("src.services.llm.handlers.databricks_retry_llm.litellm"):
-        return DatabricksRetryLLM(model="databricks/databricks-claude-sonnet-4-6",
-                                  api_key="k", **kwargs)
+        return DatabricksRetryLLM(
+            model="databricks/databricks-claude-sonnet-4-6", api_key="k", **kwargs
+        )
 
 
 class TestRetryPolicyOwnership:
@@ -39,6 +40,11 @@ class TestRetryPolicyOwnership:
 
     def test_the_errors_the_sdk_would_have_retried_are_covered_here(self):
         llm = _llm()
-        for error in ("timeout", "connection reset", "429 too many requests",
-                      "503 service unavailable", "502 bad gateway"):
+        for error in (
+            "timeout",
+            "connection reset",
+            "429 too many requests",
+            "503 service unavailable",
+            "502 bad gateway",
+        ):
             assert llm._is_retryable_error(error), error

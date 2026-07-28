@@ -4,15 +4,16 @@ Unit tests for ExecutionLogCapture.
 Tests the functionality of the CrewAI engine logger including
 event handling, output capture, and log redirection.
 """
-import pytest
+import io
 import logging
 import sys
-import io
 import threading
 import warnings
-from unittest.mock import patch, MagicMock, AsyncMock, call, PropertyMock
 from contextlib import contextmanager
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, call, patch
+
+import pytest
 
 from src.services.execution.logs.capture import ExecutionLogCapture, ExecutionLogHandler
 
@@ -102,7 +103,7 @@ class TestExecutionLogCapture:
         """Verify module constants and coverage."""
         # Simple test to verify module is loaded and accessible
         from src.services.execution.logs.capture import logger
-        
+
         # Test the logger exists
         assert logger is not None
 

@@ -6,27 +6,28 @@ scan status polling, result parsing, and relationship enrichment.
 All httpx calls are mocked to avoid real network dependencies.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.services.converters.formats.mquery.models import (
+    ColumnDataType,
+    ExpressionType,
     MQueryConversionConfig,
-    SemanticModel,
+    MQueryExpression,
     PowerBITable,
+    ScanStatus,
+    SemanticModel,
+    StorageMode,
     TableColumn,
     TableRelationship,
-    StorageMode,
-    ColumnDataType,
-    MQueryExpression,
-    ExpressionType,
-    ScanStatus,
 )
 from src.services.converters.formats.mquery.scanner import PowerBIAdminScanner
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_config(**kwargs):
     defaults = dict(
@@ -82,6 +83,7 @@ def _make_semantic_model_data(
 # Initialization tests
 # ---------------------------------------------------------------------------
 
+
 def test_scanner_init_with_config():
     """Scanner stores access_token and config correctly."""
     cfg = _make_config(workspace_id="ws-abc")
@@ -102,6 +104,7 @@ def test_scanner_init_without_config_uses_defaults():
 # _get_headers tests
 # ---------------------------------------------------------------------------
 
+
 def test_get_headers_includes_bearer_token():
     """_get_headers returns Authorization header with Bearer token."""
     scanner = _make_scanner(access_token="my-token-123")
@@ -113,6 +116,7 @@ def test_get_headers_includes_bearer_token():
 # ---------------------------------------------------------------------------
 # _build_scan_url tests
 # ---------------------------------------------------------------------------
+
 
 def test_build_scan_url_all_options_enabled():
     """_build_scan_url includes all query params when all options are True."""
@@ -152,6 +156,7 @@ def test_build_scan_url_no_options():
 # Async context manager tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_async_context_manager_creates_and_closes_client():
     """Async context manager creates and closes httpx.AsyncClient."""
@@ -159,7 +164,9 @@ async def test_async_context_manager_creates_and_closes_client():
     mock_client = AsyncMock()
     mock_client.aclose = AsyncMock()
 
-    with patch("src.services.converters.formats.mquery.scanner.httpx.AsyncClient") as mock_cls:
+    with patch(
+        "src.services.converters.formats.mquery.scanner.httpx.AsyncClient"
+    ) as mock_cls:
         mock_instance = AsyncMock()
         mock_instance.aclose = AsyncMock()
         mock_cls.return_value = mock_instance
@@ -171,6 +178,7 @@ async def test_async_context_manager_creates_and_closes_client():
 # ---------------------------------------------------------------------------
 # initiate_scan tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_initiate_scan_returns_scan_status():
@@ -210,6 +218,7 @@ async def test_initiate_scan_uses_existing_client():
 # ---------------------------------------------------------------------------
 # check_scan_status tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_check_scan_status_succeeded():
@@ -264,6 +273,7 @@ async def test_check_scan_status_with_error():
 # get_scan_result tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_scan_result_returns_raw_data():
     """get_scan_result returns raw JSON data from API."""
@@ -301,6 +311,7 @@ async def test_get_scan_result_uses_httpx_when_no_client():
 # wait_for_scan tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_wait_for_scan_succeeds_immediately():
     """wait_for_scan returns immediately when scan is Succeeded."""
@@ -328,7 +339,9 @@ async def test_wait_for_scan_fails():
 
     scanner.check_scan_status = mock_check
 
-    status = await scanner.wait_for_scan("scan-fail", timeout_seconds=10, poll_interval=1)
+    status = await scanner.wait_for_scan(
+        "scan-fail", timeout_seconds=10, poll_interval=1
+    )
     assert status.status == "Failed"
     assert call_count == 1  # Should stop after first Failed status
 
@@ -362,7 +375,9 @@ async def test_wait_for_scan_polls_until_done():
 
     with patch("asyncio.sleep", new_callable=AsyncMock):
         scanner.check_scan_status = mock_check
-        status = await scanner.wait_for_scan("scan-poll", timeout_seconds=300, poll_interval=1)
+        status = await scanner.wait_for_scan(
+            "scan-poll", timeout_seconds=300, poll_interval=1
+        )
 
     assert status.status == "Succeeded"
     assert call_count == 3
@@ -371,6 +386,7 @@ async def test_wait_for_scan_polls_until_done():
 # ---------------------------------------------------------------------------
 # scan_workspace tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_scan_workspace_returns_semantic_models():
@@ -465,6 +481,7 @@ async def test_scan_workspace_raises_on_failed_scan():
 # scan_multiple_workspaces tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_scan_multiple_workspaces_returns_all_models():
     """scan_multiple_workspaces returns models from all workspaces."""
@@ -475,12 +492,16 @@ async def test_scan_multiple_workspaces_returns_all_models():
             {
                 "id": "ws-1",
                 "name": "WS1",
-                "datasets": [{"id": "ds-1", "name": "Model1", "tables": [], "relationships": []}],
+                "datasets": [
+                    {"id": "ds-1", "name": "Model1", "tables": [], "relationships": []}
+                ],
             },
             {
                 "id": "ws-2",
                 "name": "WS2",
-                "datasets": [{"id": "ds-2", "name": "Model2", "tables": [], "relationships": []}],
+                "datasets": [
+                    {"id": "ds-2", "name": "Model2", "tables": [], "relationships": []}
+                ],
             },
         ]
     }
@@ -524,8 +545,20 @@ async def test_scan_multiple_workspaces_raises_on_failure():
 # extract_tables_with_mquery tests
 # ---------------------------------------------------------------------------
 
-def _make_table_obj(name: str, is_hidden: bool = False, with_expr: bool = True) -> PowerBITable:
-    exprs = [MQueryExpression(raw_expression='Sql.Database("s", "d")', expression_type=ExpressionType.SQL_DATABASE)] if with_expr else []
+
+def _make_table_obj(
+    name: str, is_hidden: bool = False, with_expr: bool = True
+) -> PowerBITable:
+    exprs = (
+        [
+            MQueryExpression(
+                raw_expression='Sql.Database("s", "d")',
+                expression_type=ExpressionType.SQL_DATABASE,
+            )
+        ]
+        if with_expr
+        else []
+    )
     return PowerBITable(
         name=name,
         is_hidden=is_hidden,
@@ -549,10 +582,12 @@ def _make_model(tables: list) -> SemanticModel:
 def test_extract_tables_with_mquery_excludes_hidden_by_default():
     """extract_tables_with_mquery skips hidden tables unless include_hidden=True."""
     scanner = _make_scanner()
-    model = _make_model([
-        _make_table_obj("Visible", is_hidden=False),
-        _make_table_obj("Hidden", is_hidden=True),
-    ])
+    model = _make_model(
+        [
+            _make_table_obj("Visible", is_hidden=False),
+            _make_table_obj("Hidden", is_hidden=True),
+        ]
+    )
     tables = scanner.extract_tables_with_mquery(model, include_hidden=False)
     names = [t.name for t in tables]
     assert "Visible" in names
@@ -562,10 +597,12 @@ def test_extract_tables_with_mquery_excludes_hidden_by_default():
 def test_extract_tables_with_mquery_includes_hidden_when_requested():
     """extract_tables_with_mquery includes hidden tables when include_hidden=True."""
     scanner = _make_scanner()
-    model = _make_model([
-        _make_table_obj("Visible", is_hidden=False),
-        _make_table_obj("Hidden", is_hidden=True),
-    ])
+    model = _make_model(
+        [
+            _make_table_obj("Visible", is_hidden=False),
+            _make_table_obj("Hidden", is_hidden=True),
+        ]
+    )
     tables = scanner.extract_tables_with_mquery(model, include_hidden=True)
     names = [t.name for t in tables]
     assert "Visible" in names
@@ -575,10 +612,12 @@ def test_extract_tables_with_mquery_includes_hidden_when_requested():
 def test_extract_tables_with_mquery_excludes_tables_without_expressions():
     """extract_tables_with_mquery excludes tables with no source expressions."""
     scanner = _make_scanner()
-    model = _make_model([
-        _make_table_obj("HasExpr", with_expr=True),
-        _make_table_obj("NoExpr", with_expr=False),
-    ])
+    model = _make_model(
+        [
+            _make_table_obj("HasExpr", with_expr=True),
+            _make_table_obj("NoExpr", with_expr=False),
+        ]
+    )
     tables = scanner.extract_tables_with_mquery(model)
     names = [t.name for t in tables]
     assert "HasExpr" in names
@@ -588,6 +627,7 @@ def test_extract_tables_with_mquery_excludes_tables_without_expressions():
 # ---------------------------------------------------------------------------
 # fetch_relationships_via_execute_queries tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_fetch_relationships_returns_list_on_success():
@@ -608,9 +648,7 @@ async def test_fetch_relationships_returns_list_on_success():
             "[IsActive]": True,
         }
     ]
-    response_data = {
-        "results": [{"tables": [{"rows": rows}]}]
-    }
+    response_data = {"results": [{"tables": [{"rows": rows}]}]}
     mock_resp = _make_httpx_response(json_data=response_data)
     mock_client = AsyncMock()
     mock_client.post = AsyncMock(return_value=mock_resp)
@@ -710,6 +748,7 @@ async def test_fetch_relationships_skips_local_date_tables():
 async def test_fetch_relationships_returns_empty_on_http_error():
     """fetch_relationships returns empty list on HTTP 403."""
     import httpx
+
     scanner = _make_scanner()
 
     mock_client = AsyncMock()
@@ -717,7 +756,9 @@ async def test_fetch_relationships_returns_empty_on_http_error():
     response = MagicMock()
     response.status_code = 403
     mock_client.post = AsyncMock(
-        side_effect=httpx.HTTPStatusError("Forbidden", request=request, response=response)
+        side_effect=httpx.HTTPStatusError(
+            "Forbidden", request=request, response=response
+        )
     )
 
     with patch("httpx.AsyncClient") as mock_cls:
@@ -801,6 +842,7 @@ async def test_fetch_relationships_handles_cardinality_variants():
 # ---------------------------------------------------------------------------
 # enrich_model_with_relationships tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_enrich_model_skips_when_relationships_exist():

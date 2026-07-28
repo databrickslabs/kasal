@@ -5,9 +5,10 @@ These guard the C1 fix: user-authored flow router/state expressions are
 evaluated with a restricted AST walker instead of eval(), which must block the
 introspection escapes that an empty __builtins__ does NOT prevent.
 """
+
 import pytest
 
-from src.utils.safe_eval import safe_eval, UnsafeExpressionError
+from src.utils.safe_eval import UnsafeExpressionError, safe_eval
 
 # Bare names the flow engine permits (mirrors flow_builder._FLOW_CONDITION_CALLS).
 CALLS = frozenset({"int", "float", "str", "bool", "len", "abs", "min", "max"})
@@ -51,7 +52,10 @@ class TestBlocksRce:
             ("(1).__class__.__mro__", {}),
             ("''.__class__.__mro__[1].__subclasses__()", {}),
             ("state.__class__", {"state": {}}),
-            ("'{0.__class__}'.format(state)", {"state": {}}),  # format-string attr access
+            (
+                "'{0.__class__}'.format(state)",
+                {"state": {}},
+            ),  # format-string attr access
             ("'{0.__class__.__init__.__globals__}'.format(s)", {"s": ""}),
             (
                 "().__class__.__bases__[0].__subclasses__()[40]('x', shell=True)",
@@ -70,7 +74,14 @@ class TestBlocksRce:
     )
     def test_blocked(self, expr, names):
         with pytest.raises(
-            (UnsafeExpressionError, SyntaxError, NameError, AttributeError, TypeError, KeyError)
+            (
+                UnsafeExpressionError,
+                SyntaxError,
+                NameError,
+                AttributeError,
+                TypeError,
+                KeyError,
+            )
         ):
             safe_eval(expr, names, allowed_call_names=CALLS)
 

@@ -2,8 +2,10 @@
 Unit tests for services/lakebase_connection_service.py
 """
 
-import pytest
 from unittest.mock import patch
+
+import pytest
+
 from src.services.databricks.lakebase.connection import LakebaseConnectionService
 
 
@@ -13,7 +15,9 @@ class TestLakebaseConnectionService:
     @pytest.fixture
     def service(self):
         """Create LakebaseConnectionService instance for testing"""
-        return LakebaseConnectionService(user_token="fake-token", user_email="test@example.com")
+        return LakebaseConnectionService(
+            user_token="fake-token", user_email="test@example.com"
+        )
 
     def test_lakebaseconnectionservice_initialization(self, service):
         """Test LakebaseConnectionService initializes correctly"""

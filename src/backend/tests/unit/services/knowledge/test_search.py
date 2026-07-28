@@ -30,7 +30,8 @@ class TestFormat:
 
     def test_numbers_each_match(self):
         answer = KnowledgeSearch.format(
-            "q", [_result(0.9, "Content A", "a.pdf"), _result(0.8, "Content B", "b.pdf")]
+            "q",
+            [_result(0.9, "Content A", "a.pdf"), _result(0.8, "Content B", "b.pdf")],
         )
 
         assert "Result 1" in answer and "Result 2" in answer
@@ -46,7 +47,9 @@ class TestFormat:
         """An index always returns its top-k. Twenty unrelated chunks read to an
         agent exactly like twenty relevant ones — that is what made it rephrase
         25 times and die on the round limit."""
-        answer = KnowledgeSearch.format("expense policy", [_result(0.08) for _ in range(20)])
+        answer = KnowledgeSearch.format(
+            "expense policy", [_result(0.08) for _ in range(20)]
+        )
 
         assert "does not appear to contain this" in answer
 
@@ -64,7 +67,9 @@ class TestSearch:
         search = KnowledgeSearch(group_id="g1", user_email="dev@localhost")
 
         with patch.object(
-            KnowledgeSearch, "raw_results", AsyncMock(return_value=[_result(0.9, "Answer text")])
+            KnowledgeSearch,
+            "raw_results",
+            AsyncMock(return_value=[_result(0.9, "Answer text")]),
         ):
             answer = await search.search("q")
 
@@ -77,7 +82,9 @@ class TestSearch:
         search = KnowledgeSearch(group_id="g1")
 
         with patch.object(
-            KnowledgeSearch, "raw_results", AsyncMock(side_effect=RuntimeError("index down"))
+            KnowledgeSearch,
+            "raw_results",
+            AsyncMock(side_effect=RuntimeError("index down")),
         ):
             answer = await search.search("q")
 
@@ -91,8 +98,10 @@ class TestSearch:
         async def _never(*args, **kwargs):
             await asyncio.sleep(60)
 
-        with patch.object(KnowledgeSearch, "raw_results", _never), \
-             patch("src.services.knowledge.search.SEARCH_TIMEOUT_SECONDS", 0.01):
+        with (
+            patch.object(KnowledgeSearch, "raw_results", _never),
+            patch("src.services.knowledge.search.SEARCH_TIMEOUT_SECONDS", 0.01),
+        ):
             answer = await search.search("q")
 
         assert "timed out" in answer
@@ -101,9 +110,20 @@ class TestSearch:
         """Per-user isolation is not a filter applied afterwards: knowledge is
         scoped to the user who uploaded it."""
         search = KnowledgeSearch(
-            group_id="g1", execution_id="exec-1", user_email="dev@localhost", agent_id="a1"
+            group_id="g1",
+            execution_id="exec-1",
+            user_email="dev@localhost",
+            agent_id="a1",
         )
 
-        assert (search.group_id, search.execution_id, search.user_email, search.agent_id) == (
-            "g1", "exec-1", "dev@localhost", "a1",
+        assert (
+            search.group_id,
+            search.execution_id,
+            search.user_email,
+            search.agent_id,
+        ) == (
+            "g1",
+            "exec-1",
+            "dev@localhost",
+            "a1",
         )

@@ -39,8 +39,8 @@ import json
 import logging
 from typing import Any
 
-from crewai.llms.providers.openai.completion import OpenAICompletion
 from crewai.events.types.llm_events import LLMCallType
+from crewai.llms.providers.openai.completion import OpenAICompletion
 
 # Use the "crew" logger so messages appear in crew.log alongside other
 # subprocess output (the root logger is set to WARNING in subprocesses).

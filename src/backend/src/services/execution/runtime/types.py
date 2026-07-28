@@ -6,17 +6,18 @@ Edit the component/component_member rows and re-run generator/generate.py.
 
 import json
 import uuid
-from uuid import uuid4
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal, Self
-from collections.abc import Sequence
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class OutputFormat(str, Enum):
     """Task output format."""
+
     JSON = "json"
     PYDANTIC = "pydantic"
     RAW = "raw"
@@ -202,5 +203,6 @@ class PlanningConfig(BaseModel):
 
 class Process(str, Enum):
     """Engine replacement for crewai.Process"""
+
     sequential = "sequential"
     hierarchical = "hierarchical"

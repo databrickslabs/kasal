@@ -12,15 +12,16 @@ Tests the TTLCache implementation including:
 
 import asyncio
 import time
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from src.core.cache import (
-    TTLCache,
     CacheEntry,
-    model_config_cache,
+    TTLCache,
     db_config_cache,
     get_all_cache_stats,
+    model_config_cache,
 )
 
 

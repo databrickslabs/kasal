@@ -4,13 +4,13 @@ This module provides generic MLflow tracing utilities that can be used by any pa
 of the application (dispatcher, crew executor, etc.). It handles trace lifecycle,
 cleanup, and utility functions independent of any specific engine.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from contextlib import contextmanager, nullcontext
 from typing import Any, Dict, Optional
-
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ def _get_mlflow():
     """Get mlflow module if available."""
     try:
         import mlflow  # type: ignore
+
         return mlflow
     except Exception as e:
         logger.info(f"[mlflow_tracing] MLflow not available: {e}")
@@ -71,15 +72,19 @@ def start_root_trace(trace_name: str, inputs: Optional[Dict[str, Any]] = None):
             with start_span_fn(name=trace_name, span_type="CHAIN", attributes=inputs) as span:  # type: ignore[misc]
                 # Explicitly set inputs on the span if method exists
                 # This ensures inputs appear in the MLflow UI
-                if inputs and hasattr(span, 'set_inputs'):
+                if inputs and hasattr(span, "set_inputs"):
                     try:
                         span.set_inputs(inputs)
                     except Exception as input_e:
-                        logger.debug(f"[mlflow_tracing] Could not set span inputs: {input_e}")
+                        logger.debug(
+                            f"[mlflow_tracing] Could not set span inputs: {input_e}"
+                        )
                 yield span
                 return
         except Exception as e:
-            logger.info(f"[mlflow_tracing] start_span failed, continuing without root: {e}")
+            logger.info(
+                f"[mlflow_tracing] start_span failed, continuing without root: {e}"
+            )
 
     # Fallback to nullcontext if no trace API is available
     with nullcontext() as _nc:
@@ -96,7 +101,9 @@ def get_last_active_trace_id() -> Optional[str]:
     if not mlflow:
         return None
     try:
-        get_last = getattr(getattr(mlflow, "tracing", None), "get_last_active_trace_id", None)
+        get_last = getattr(
+            getattr(mlflow, "tracing", None), "get_last_active_trace_id", None
+        )
         if callable(get_last):
             return get_last()
         alt = getattr(mlflow, "get_last_active_trace_id", None)
@@ -121,13 +128,21 @@ async def flush_async_logging(async_logger: Optional[logging.Logger] = None) -> 
     try:
         alog.info(f"[mlflow_tracing] [DEBUG] Starting MLflow flush operation")
         if mlflow and hasattr(mlflow, "flush_trace_async_logging"):
-            alog.info(f"[mlflow_tracing] [DEBUG] About to call mlflow.flush_trace_async_logging()")
+            alog.info(
+                f"[mlflow_tracing] [DEBUG] About to call mlflow.flush_trace_async_logging()"
+            )
             mlflow.flush_trace_async_logging()
-            alog.info(f"[mlflow_tracing] [DEBUG] MLflow flush_trace_async_logging() completed successfully")
+            alog.info(
+                f"[mlflow_tracing] [DEBUG] MLflow flush_trace_async_logging() completed successfully"
+            )
         else:
-            alog.info(f"[mlflow_tracing] [DEBUG] MLflow not available or flush_trace_async_logging not found")
+            alog.info(
+                f"[mlflow_tracing] [DEBUG] MLflow not available or flush_trace_async_logging not found"
+            )
     except Exception as e:
-        alog.warning(f"[mlflow_tracing] [DEBUG] Error flushing MLflow async logging: {e}")
+        alog.warning(
+            f"[mlflow_tracing] [DEBUG] Error flushing MLflow async logging: {e}"
+        )
         alog.warning(f"[mlflow_tracing] Error flushing MLflow async logging: {e}")
 
 
@@ -142,8 +157,9 @@ def cleanup_async_db_connections(async_logger: Optional[logging.Logger] = None) 
     """
     alog = async_logger or logger
     try:
-        from sqlalchemy.ext.asyncio import AsyncEngine
         import gc
+
+        from sqlalchemy.ext.asyncio import AsyncEngine
 
         for obj in gc.get_objects():
             if isinstance(obj, AsyncEngine):

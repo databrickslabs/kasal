@@ -17,7 +17,6 @@ from typing import Any, Dict, Optional
 
 from src.core.events import event_bus
 from src.core.events.types import CrewKickoffCompletedEvent, TaskCompletedEvent
-
 from src.services.tools.async_bridge import run_async_with_context
 
 logger = logging.getLogger(__name__)
@@ -133,7 +132,9 @@ class CrewTaskCheckpointRecorder:
         await execute_db_operation_smart(_op)
 
 
-def build_resume_checkpoint(stored: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def build_resume_checkpoint(
+    stored: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
     """Convert the stored checkpoint into the engine's from_checkpoint shape.
 
     Stored shape keys ``completed`` by stringified index (idempotent DB merge);

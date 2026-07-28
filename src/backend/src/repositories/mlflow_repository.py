@@ -38,33 +38,40 @@ class MLflowRepository:
         cfg = await self.dbx_repo.get_active_config(group_id=group_id)
         return bool(getattr(cfg, "evaluation_enabled", False)) if cfg else False
 
-    async def set_evaluation_enabled(self, enabled: bool, group_id: Optional[str] = None) -> bool:
+    async def set_evaluation_enabled(
+        self, enabled: bool, group_id: Optional[str] = None
+    ) -> bool:
         cfg = await self.dbx_repo.get_active_config(group_id=group_id)
         if not cfg:
             cfg = await self._ensure_default_config(group_id)
         updated = await self._base_repo.update(cfg.id, {"evaluation_enabled": enabled})
         return bool(updated)
 
-
-    async def _ensure_default_config(self, group_id: Optional[str] = None) -> DatabricksConfig:
+    async def _ensure_default_config(
+        self, group_id: Optional[str] = None
+    ) -> DatabricksConfig:
         """Auto-create a minimal DatabricksConfig so MLflow toggles work
         even before the user has manually configured the Databricks integration
         (common on fresh Databricks Apps deployments)."""
         workspace_url = os.environ.get("DATABRICKS_HOST", "")
-        cfg = await self.dbx_repo.create_config({
-            "workspace_url": workspace_url,
-            "warehouse_id": "",
-            "catalog": "",
-            "schema": "",
-            "is_active": True,
-            "is_enabled": True,
-            "group_id": group_id,
-        })
+        cfg = await self.dbx_repo.create_config(
+            {
+                "workspace_url": workspace_url,
+                "warehouse_id": "",
+                "catalog": "",
+                "schema": "",
+                "is_active": True,
+                "is_enabled": True,
+                "group_id": group_id,
+            }
+        )
         await self.session.commit()
         logger.info("Auto-created default DatabricksConfig for group_id=%s", group_id)
         return cfg
 
-    async def get_evaluation_judge_model(self, group_id: Optional[str] = None) -> Optional[str]:
+    async def get_evaluation_judge_model(
+        self, group_id: Optional[str] = None
+    ) -> Optional[str]:
         """Return the configured Databricks judge model route if set."""
         cfg = await self.dbx_repo.get_active_config(group_id=group_id)
         if not cfg:

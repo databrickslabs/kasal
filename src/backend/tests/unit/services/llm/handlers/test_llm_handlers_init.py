@@ -7,15 +7,17 @@ Uses AST parsing to avoid triggering the heavy import chain (litellm/openai).
 
 import ast
 import pathlib
-import pytest
 
+import pytest
 
 # Walk up to src/backend rather than counting parents. A parent count breaks
 # silently the moment this file changes depth, and it has now done so twice —
 # once when the two sibling LLM folders merged, once when the handlers moved to
 # services/ because they read the model catalogue.
 _BACKEND = next(
-    a for a in pathlib.Path(__file__).resolve().parents if (a / "src" / "services").is_dir()
+    a
+    for a in pathlib.Path(__file__).resolve().parents
+    if (a / "src" / "services").is_dir()
 )
 _INIT_PATH = _BACKEND / "src" / "services" / "llm" / "handlers" / "__init__.py"
 
@@ -38,7 +40,11 @@ def _get_all_list(tree):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == "__all__":
                     if isinstance(node.value, ast.List):
-                        return [elt.value for elt in node.value.elts if isinstance(elt, ast.Constant)]
+                        return [
+                            elt.value
+                            for elt in node.value.elts
+                            if isinstance(elt, ast.Constant)
+                        ]
     return []
 
 

@@ -12,18 +12,18 @@ Tests cover:
 """
 
 import os
-import pytest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pandas as pd
+import pytest
 
 from src.services.mlflow.evaluation_runner import MLflowEvaluationRunner
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _make_exec_obj(**overrides):
     """Build a mock execution object with sensible defaults."""
@@ -75,6 +75,7 @@ MOD = "src.services.mlflow.evaluation_runner"
 # TestInit
 # ===========================================================================
 
+
 class TestInit:
     """Tests for MLflowEvaluationRunner.__init__."""
 
@@ -106,6 +107,7 @@ class TestInit:
 # TestSaveEnvironmentVars
 # ===========================================================================
 
+
 class TestSaveEnvironmentVars:
     """Tests for _save_environment_vars."""
 
@@ -132,9 +134,12 @@ class TestSaveEnvironmentVars:
         """Returns None for env vars that are not set."""
         runner = _make_runner()
         clean = {
-            k: None for k in [
-                "DATABRICKS_HOST", "DATABRICKS_TOKEN",
-                "DATABRICKS_BASE_URL", "DATABRICKS_API_BASE",
+            k: None
+            for k in [
+                "DATABRICKS_HOST",
+                "DATABRICKS_TOKEN",
+                "DATABRICKS_BASE_URL",
+                "DATABRICKS_API_BASE",
                 "DATABRICKS_ENDPOINT",
             ]
         }
@@ -153,6 +158,7 @@ class TestSaveEnvironmentVars:
 # TestSetEnvironmentVars
 # ===========================================================================
 
+
 class TestSetEnvironmentVars:
     """Tests for _set_environment_vars."""
 
@@ -168,9 +174,18 @@ class TestSetEnvironmentVars:
 
             assert os.environ["DATABRICKS_HOST"] == auth_ctx.workspace_url
             assert os.environ["DATABRICKS_TOKEN"] == auth_ctx.token
-            assert os.environ["DATABRICKS_BASE_URL"] == "https://example.databricks.com/serving-endpoints"
-            assert os.environ["DATABRICKS_API_BASE"] == "https://example.databricks.com/serving-endpoints"
-            assert os.environ["DATABRICKS_ENDPOINT"] == "https://example.databricks.com/serving-endpoints"
+            assert (
+                os.environ["DATABRICKS_BASE_URL"]
+                == "https://example.databricks.com/serving-endpoints"
+            )
+            assert (
+                os.environ["DATABRICKS_API_BASE"]
+                == "https://example.databricks.com/serving-endpoints"
+            )
+            assert (
+                os.environ["DATABRICKS_ENDPOINT"]
+                == "https://example.databricks.com/serving-endpoints"
+            )
 
     @patch("src.utils.databricks_url_utils.DatabricksURLUtils.construct_llm_base_url")
     def test_skips_api_base_when_empty(self, mock_construct):
@@ -205,6 +220,7 @@ class TestSetEnvironmentVars:
 # TestRestoreEnvironmentVars
 # ===========================================================================
 
+
 class TestRestoreEnvironmentVars:
     """Tests for _restore_environment_vars."""
 
@@ -220,7 +236,11 @@ class TestRestoreEnvironmentVars:
         }
         auth_ctx = _make_auth_ctx()
 
-        with patch.dict(os.environ, {"DATABRICKS_HOST": "changed", "DATABRICKS_TOKEN": "changed"}, clear=True):
+        with patch.dict(
+            os.environ,
+            {"DATABRICKS_HOST": "changed", "DATABRICKS_TOKEN": "changed"},
+            clear=True,
+        ):
             runner._restore_environment_vars(old_env, auth_ctx)
 
             assert os.environ["DATABRICKS_HOST"] == "https://original.example.com"
@@ -263,6 +283,7 @@ class TestRestoreEnvironmentVars:
 # TestLogRunParameters
 # ===========================================================================
 
+
 class TestLogRunParameters:
     """Tests for _log_run_parameters."""
 
@@ -272,6 +293,7 @@ class TestLogRunParameters:
         # The method does `import mlflow` inside, so we patch the module-level
         # reference that Python will resolve.
         import sys
+
         mock_mlflow = MagicMock()
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             runner = _make_runner()
@@ -284,13 +306,16 @@ class TestLogRunParameters:
             assert params["status"] == "completed"
             assert params["related_trace_ids"] == "trace-1,trace-2"
             assert params["judge_model_configured"] is True
-            assert params["judge_model_route"] == "databricks/databricks-claude-sonnet-4"
+            assert (
+                params["judge_model_route"] == "databricks/databricks-claude-sonnet-4"
+            )
             assert params["judge_model_defaulted"] is False
 
     @patch(f"{MOD}.mlflow", create=True)
     def test_logs_empty_trace_ids(self, mock_mlflow_mod):
         """Logs empty string when no trace IDs provided."""
         import sys
+
         mock_mlflow = MagicMock()
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             runner = _make_runner()
@@ -303,6 +328,7 @@ class TestLogRunParameters:
     def test_handles_log_params_exception(self, mock_mlflow_mod):
         """Swallows exceptions from mlflow.log_params."""
         import sys
+
         mock_mlflow = MagicMock()
         mock_mlflow.log_params.side_effect = RuntimeError("MLflow error")
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
@@ -315,19 +341,23 @@ class TestLogRunParameters:
 # TestLogBaselineMetrics
 # ===========================================================================
 
+
 class TestLogBaselineMetrics:
     """Tests for _log_baseline_metrics."""
 
     def test_calculates_metrics_from_dataframe(self):
         """Computes prediction length, word counts, and Jaccard overlap."""
         import sys
+
         mock_mlflow = MagicMock()
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             runner = _make_runner()
-            eval_df = pd.DataFrame({
-                "messages": ["hello world", "foo bar baz"],
-                "predictions": ["hello there world", "answer is foo"],
-            })
+            eval_df = pd.DataFrame(
+                {
+                    "messages": ["hello world", "foo bar baz"],
+                    "predictions": ["hello there world", "answer is foo"],
+                }
+            )
 
             runner._log_baseline_metrics(eval_df)
 
@@ -351,6 +381,7 @@ class TestLogBaselineMetrics:
     def test_handles_empty_dataframe(self):
         """Does not crash on empty dataframe."""
         import sys
+
         mock_mlflow = MagicMock()
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             runner = _make_runner()
@@ -360,6 +391,7 @@ class TestLogBaselineMetrics:
     def test_handles_missing_columns(self):
         """Does not crash when expected columns are absent."""
         import sys
+
         mock_mlflow = MagicMock()
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             runner = _make_runner()
@@ -371,12 +403,14 @@ class TestLogBaselineMetrics:
 # TestLogArtifacts
 # ===========================================================================
 
+
 class TestLogArtifacts:
     """Tests for _log_artifacts."""
 
     def test_logs_inputs_and_prediction_text(self):
         """Logs both inputs and prediction text as artifacts."""
         import sys
+
         mock_mlflow = MagicMock()
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             runner = _make_runner(
@@ -393,6 +427,7 @@ class TestLogArtifacts:
     def test_logs_empty_string_for_none(self):
         """Logs empty string when inputs_text or prediction_text is None."""
         import sys
+
         mock_mlflow = MagicMock()
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             runner = _make_runner(inputs_text=None, prediction_text=None)
@@ -405,6 +440,7 @@ class TestLogArtifacts:
     def test_handles_log_text_exception(self):
         """Swallows exceptions from mlflow.log_text."""
         import sys
+
         mock_mlflow = MagicMock()
         mock_mlflow.log_text.side_effect = RuntimeError("write error")
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
@@ -417,19 +453,30 @@ class TestLogArtifacts:
 # TestExtractRecordsFromTraces
 # ===========================================================================
 
+
 class TestExtractRecordsFromTraces:
     """Tests for _extract_records_from_traces."""
 
     def test_extracts_records_from_dataframe(self):
         """Extracts messages/predictions from trace rows with attributes."""
         runner = _make_runner()
-        df = pd.DataFrame({
-            "trace_id": ["t1", "t2"],
-            "attributes": [
-                {"execution_id": "exec-123", "prompt": "question 1", "output": "answer 1"},
-                {"execution_id": "exec-123", "prompt": "question 2", "output": "answer 2"},
-            ],
-        })
+        df = pd.DataFrame(
+            {
+                "trace_id": ["t1", "t2"],
+                "attributes": [
+                    {
+                        "execution_id": "exec-123",
+                        "prompt": "question 1",
+                        "output": "answer 1",
+                    },
+                    {
+                        "execution_id": "exec-123",
+                        "prompt": "question 2",
+                        "output": "answer 2",
+                    },
+                ],
+            }
+        )
 
         trace_ids, records = runner._extract_records_from_traces(df)
 
@@ -443,13 +490,15 @@ class TestExtractRecordsFromTraces:
     def test_skips_rows_with_no_message_and_no_prediction(self):
         """Skips rows where both message and prediction are empty/missing."""
         runner = _make_runner()
-        df = pd.DataFrame({
-            "trace_id": ["t1", "t2"],
-            "attributes": [
-                {"execution_id": "exec-123", "prompt": "q1", "output": "a1"},
-                {"execution_id": "exec-123"},  # No useful fields
-            ],
-        })
+        df = pd.DataFrame(
+            {
+                "trace_id": ["t1", "t2"],
+                "attributes": [
+                    {"execution_id": "exec-123", "prompt": "q1", "output": "a1"},
+                    {"execution_id": "exec-123"},  # No useful fields
+                ],
+            }
+        )
 
         trace_ids, records = runner._extract_records_from_traces(df)
 
@@ -459,18 +508,20 @@ class TestExtractRecordsFromTraces:
     def test_includes_context_and_reference_fields(self):
         """Includes contexts and references when present in attributes."""
         runner = _make_runner()
-        df = pd.DataFrame({
-            "trace_id": ["t1"],
-            "attributes": [
-                {
-                    "execution_id": "exec-123",
-                    "prompt": "q1",
-                    "output": "a1",
-                    "contexts": "some context",
-                    "reference": "expected answer",
-                },
-            ],
-        })
+        df = pd.DataFrame(
+            {
+                "trace_id": ["t1"],
+                "attributes": [
+                    {
+                        "execution_id": "exec-123",
+                        "prompt": "q1",
+                        "output": "a1",
+                        "contexts": "some context",
+                        "reference": "expected answer",
+                    },
+                ],
+            }
+        )
 
         _, records = runner._extract_records_from_traces(df)
 
@@ -481,11 +532,13 @@ class TestExtractRecordsFromTraces:
     def test_no_attributes_column(self):
         """Handles dataframes without an 'attributes' column."""
         runner = _make_runner()
-        df = pd.DataFrame({
-            "trace_id": ["t1"],
-            "prompt": ["question"],
-            "output": ["answer"],
-        })
+        df = pd.DataFrame(
+            {
+                "trace_id": ["t1"],
+                "prompt": ["question"],
+                "output": ["answer"],
+            }
+        )
 
         trace_ids, records = runner._extract_records_from_traces(df)
 
@@ -500,10 +553,12 @@ class TestExtractRecordsFromTraces:
             {"execution_id": "exec-123", "prompt": f"q{i}", "output": f"a{i}"}
             for i in range(10)
         ]
-        df = pd.DataFrame({
-            "trace_id": [f"t{i}" for i in range(10)],
-            "attributes": rows,
-        })
+        df = pd.DataFrame(
+            {
+                "trace_id": [f"t{i}" for i in range(10)],
+                "attributes": rows,
+            }
+        )
 
         with patch.dict(os.environ, {"MLFLOW_EVAL_MAX_ROWS": "3"}):
             _, records = runner._extract_records_from_traces(df)
@@ -513,16 +568,18 @@ class TestExtractRecordsFromTraces:
     def test_handles_dict_and_list_values_in_attributes(self):
         """Serializes dict/list attribute values to JSON strings."""
         runner = _make_runner()
-        df = pd.DataFrame({
-            "trace_id": ["t1"],
-            "attributes": [
-                {
-                    "execution_id": "exec-123",
-                    "prompt": {"nested": "value"},
-                    "output": ["item1", "item2"],
-                },
-            ],
-        })
+        df = pd.DataFrame(
+            {
+                "trace_id": ["t1"],
+                "attributes": [
+                    {
+                        "execution_id": "exec-123",
+                        "prompt": {"nested": "value"},
+                        "output": ["item1", "item2"],
+                    },
+                ],
+            }
+        )
 
         _, records = runner._extract_records_from_traces(df)
 
@@ -536,12 +593,14 @@ class TestExtractRecordsFromTraces:
 # TestDiscoverTracesAndBuildDataset
 # ===========================================================================
 
+
 class TestDiscoverTracesAndBuildDataset:
     """Tests for _discover_traces_and_build_dataset."""
 
     def test_finds_traces_by_stored_trace_id(self):
         """Uses stored mlflow_trace_id when available, skips search."""
         import sys
+
         mock_mlflow = MagicMock()
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             exec_obj = _make_exec_obj(mlflow_trace_id="stored-trace-abc")
@@ -559,15 +618,18 @@ class TestDiscoverTracesAndBuildDataset:
     def test_searches_traces_when_no_stored_id(self):
         """Falls back to search_traces when no stored trace ID."""
         import sys
+
         mock_mlflow = MagicMock()
 
         # Create a trace dataframe that search_traces returns
-        search_df = pd.DataFrame({
-            "trace_id": ["found-trace-1"],
-            "attributes": [
-                {"execution_id": "exec-123", "prompt": "q", "output": "a"},
-            ],
-        })
+        search_df = pd.DataFrame(
+            {
+                "trace_id": ["found-trace-1"],
+                "attributes": [
+                    {"execution_id": "exec-123", "prompt": "q", "output": "a"},
+                ],
+            }
+        )
         mock_mlflow.search_traces = MagicMock(return_value=search_df)
 
         mock_experiment = SimpleNamespace(experiment_id="exp-999")
@@ -587,9 +649,12 @@ class TestDiscoverTracesAndBuildDataset:
     def test_returns_empty_on_search_error(self):
         """Returns empty lists when search_traces raises an exception."""
         import sys
+
         mock_mlflow = MagicMock()
         mock_mlflow.search_traces = MagicMock(side_effect=RuntimeError("search failed"))
-        mock_mlflow.get_experiment_by_name.return_value = SimpleNamespace(experiment_id="exp-1")
+        mock_mlflow.get_experiment_by_name.return_value = SimpleNamespace(
+            experiment_id="exp-1"
+        )
 
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             exec_obj = _make_exec_obj(mlflow_trace_id=None)
@@ -605,9 +670,12 @@ class TestDiscoverTracesAndBuildDataset:
     def test_returns_empty_when_search_returns_none(self):
         """Returns empty lists when search_traces returns None."""
         import sys
+
         mock_mlflow = MagicMock()
         mock_mlflow.search_traces = MagicMock(return_value=None)
-        mock_mlflow.get_experiment_by_name.return_value = SimpleNamespace(experiment_id="exp-1")
+        mock_mlflow.get_experiment_by_name.return_value = SimpleNamespace(
+            experiment_id="exp-1"
+        )
 
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             exec_obj = _make_exec_obj(mlflow_trace_id=None)
@@ -624,6 +692,7 @@ class TestDiscoverTracesAndBuildDataset:
 # ===========================================================================
 # TestCreateRun
 # ===========================================================================
+
 
 class TestCreateRun:
     """Tests for create_run."""
@@ -648,6 +717,7 @@ class TestCreateRun:
     def test_create_run_success(self):
         """create_run returns experiment_id, experiment_name, run_id on success."""
         import sys
+
         mock_mlflow = MagicMock()
         self._setup_mlflow_mocks(mock_mlflow)
 
@@ -679,6 +749,7 @@ class TestCreateRun:
     def test_create_run_sets_and_restores_env_vars(self):
         """create_run calls _save, _set, and _restore environment vars."""
         import sys
+
         mock_mlflow = MagicMock()
         self._setup_mlflow_mocks(mock_mlflow)
 
@@ -705,11 +776,14 @@ class TestCreateRun:
 
             runner._save_environment_vars.assert_called_once()
             runner._set_environment_vars.assert_called_once_with(auth_ctx)
-            runner._restore_environment_vars.assert_called_once_with(saved_env, auth_ctx)
+            runner._restore_environment_vars.assert_called_once_with(
+                saved_env, auth_ctx
+            )
 
     def test_create_run_restores_env_on_error(self):
         """Env vars are restored even if create_run raises internally."""
         import sys
+
         mock_mlflow = MagicMock()
         mock_mlflow.set_experiment.side_effect = RuntimeError("fail")
 
@@ -725,11 +799,14 @@ class TestCreateRun:
             with pytest.raises(RuntimeError):
                 runner.create_run(auth_ctx)
 
-            runner._restore_environment_vars.assert_called_once_with(saved_env, auth_ctx)
+            runner._restore_environment_vars.assert_called_once_with(
+                saved_env, auth_ctx
+            )
 
     def test_create_run_fallback_to_single_record(self):
         """Uses single-record fallback when trace discovery returns empty records."""
         import sys
+
         mock_mlflow = MagicMock()
         self._setup_mlflow_mocks(mock_mlflow)
 
@@ -759,6 +836,7 @@ class TestCreateRun:
     def test_create_run_no_auth_ctx(self):
         """create_run works with auth_ctx=None, skipping env var setup."""
         import sys
+
         mock_mlflow = MagicMock()
         self._setup_mlflow_mocks(mock_mlflow)
 
@@ -787,6 +865,7 @@ class TestCreateRun:
     def test_create_run_calls_helpers(self):
         """create_run calls log_run_parameters, log_baseline_metrics, and log_artifacts."""
         import sys
+
         mock_mlflow = MagicMock()
         self._setup_mlflow_mocks(mock_mlflow)
 
@@ -820,6 +899,7 @@ class TestCreateRun:
 # ===========================================================================
 # TestCompleteEvaluation
 # ===========================================================================
+
 
 class TestCompleteEvaluation:
     """Tests for complete_evaluation."""
@@ -868,6 +948,7 @@ class TestCompleteEvaluation:
     def test_complete_evaluation_basic_scorers(self):
         """Adds RelevanceToQuery and Safety scorers by default."""
         import sys
+
         mock_mlflow = MagicMock()
         self._setup_mlflow_for_eval(mock_mlflow)
 
@@ -882,9 +963,11 @@ class TestCompleteEvaluation:
         mock_df = MagicMock()
         mock_df.__len__ = MagicMock(return_value=1)
         mock_df.columns = ["messages", "predictions"]
-        mock_df.iterrows.return_value = iter([
-            (0, {"messages": "q1", "predictions": "a1"}),
-        ])
+        mock_df.iterrows.return_value = iter(
+            [
+                (0, {"messages": "q1", "predictions": "a1"}),
+            ]
+        )
         mock_pd.DataFrame.from_records.return_value = mock_df
 
         mock_client_cls = MagicMock()
@@ -897,12 +980,15 @@ class TestCompleteEvaluation:
         )
         mock_client_cls.return_value = mock_client_inst
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "pandas": mock_pd,
-            "mlflow.genai": mock_mlflow.genai,
-            "mlflow.tracking": MagicMock(MlflowClient=mock_client_cls),
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "pandas": mock_pd,
+                "mlflow.genai": mock_mlflow.genai,
+                "mlflow.tracking": MagicMock(MlflowClient=mock_client_cls),
+            },
+        ):
             runner = _make_runner()
             runner._save_environment_vars = MagicMock(return_value={})
             runner._set_environment_vars = MagicMock()
@@ -917,6 +1003,7 @@ class TestCompleteEvaluation:
     def test_complete_evaluation_adds_extra_scorers_with_contexts(self):
         """Adds Groundedness and Relevance scorers when contexts are present."""
         import sys
+
         mock_mlflow = MagicMock()
         self._setup_mlflow_for_eval(mock_mlflow)
 
@@ -930,11 +1017,15 @@ class TestCompleteEvaluation:
 
         # Make "contexts" column check work
         context_series = MagicMock()
-        context_series.astype.return_value.str.strip.return_value.astype.return_value.any.return_value = True
+        context_series.astype.return_value.str.strip.return_value.astype.return_value.any.return_value = (
+            True
+        )
         mock_df.__getitem__ = MagicMock(return_value=context_series)
-        mock_df.iterrows.return_value = iter([
-            (0, {"messages": "q1", "predictions": "a1", "contexts": "ctx1"}),
-        ])
+        mock_df.iterrows.return_value = iter(
+            [
+                (0, {"messages": "q1", "predictions": "a1", "contexts": "ctx1"}),
+            ]
+        )
         mock_pd.DataFrame.from_records.return_value = mock_df
 
         mock_client_cls = MagicMock()
@@ -942,15 +1033,20 @@ class TestCompleteEvaluation:
         mock_client_inst.get_run.return_value = SimpleNamespace(
             info=SimpleNamespace(experiment_id="exp-100")
         )
-        mock_client_inst.get_experiment.return_value = SimpleNamespace(name="/Shared/test")
+        mock_client_inst.get_experiment.return_value = SimpleNamespace(
+            name="/Shared/test"
+        )
         mock_client_cls.return_value = mock_client_inst
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "pandas": mock_pd,
-            "mlflow.genai": mock_mlflow.genai,
-            "mlflow.tracking": MagicMock(MlflowClient=mock_client_cls),
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "pandas": mock_pd,
+                "mlflow.genai": mock_mlflow.genai,
+                "mlflow.tracking": MagicMock(MlflowClient=mock_client_cls),
+            },
+        ):
             runner = _make_runner()
             runner._save_environment_vars = MagicMock(return_value={})
             runner._set_environment_vars = MagicMock()
@@ -965,6 +1061,7 @@ class TestCompleteEvaluation:
     def test_complete_evaluation_adds_correctness_scorer_with_references(self):
         """Adds Correctness scorer when references are present."""
         import sys
+
         mock_mlflow = MagicMock()
         self._setup_mlflow_for_eval(mock_mlflow)
 
@@ -972,11 +1069,13 @@ class TestCompleteEvaluation:
         mock_mlflow.genai.scorers = mock_scorers
 
         # Use a real pandas DataFrame so column detection logic works correctly
-        real_df = pd.DataFrame({
-            "messages": ["q1"],
-            "predictions": ["a1"],
-            "references": ["expected answer"],
-        })
+        real_df = pd.DataFrame(
+            {
+                "messages": ["q1"],
+                "predictions": ["a1"],
+                "references": ["expected answer"],
+            }
+        )
 
         mock_pd = MagicMock()
         mock_pd.DataFrame.from_records.return_value = real_df
@@ -986,15 +1085,20 @@ class TestCompleteEvaluation:
         mock_client_inst.get_run.return_value = SimpleNamespace(
             info=SimpleNamespace(experiment_id="exp-100")
         )
-        mock_client_inst.get_experiment.return_value = SimpleNamespace(name="/Shared/test")
+        mock_client_inst.get_experiment.return_value = SimpleNamespace(
+            name="/Shared/test"
+        )
         mock_client_cls.return_value = mock_client_inst
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "pandas": mock_pd,
-            "mlflow.genai": mock_mlflow.genai,
-            "mlflow.tracking": MagicMock(MlflowClient=mock_client_cls),
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "pandas": mock_pd,
+                "mlflow.genai": mock_mlflow.genai,
+                "mlflow.tracking": MagicMock(MlflowClient=mock_client_cls),
+            },
+        ):
             runner = _make_runner()
             runner._save_environment_vars = MagicMock(return_value={})
             runner._set_environment_vars = MagicMock()
@@ -1008,6 +1112,7 @@ class TestCompleteEvaluation:
     def test_complete_evaluation_restores_env_on_failure(self):
         """Env vars are restored even if complete_evaluation fails internally."""
         import sys
+
         mock_mlflow = MagicMock()
         mock_mlflow.set_tracking_uri.side_effect = RuntimeError("boom")
 
@@ -1030,11 +1135,14 @@ class TestCompleteEvaluation:
             except Exception:
                 pass
 
-            runner._restore_environment_vars.assert_called_once_with(saved_env, auth_ctx)
+            runner._restore_environment_vars.assert_called_once_with(
+                saved_env, auth_ctx
+            )
 
     def test_complete_evaluation_no_auth_ctx(self):
         """complete_evaluation works with auth_ctx=None."""
         import sys
+
         mock_mlflow = MagicMock()
         self._setup_mlflow_for_eval(mock_mlflow)
 
@@ -1042,9 +1150,11 @@ class TestCompleteEvaluation:
         mock_df = MagicMock()
         mock_df.__len__ = MagicMock(return_value=1)
         mock_df.columns = ["messages", "predictions"]
-        mock_df.iterrows.return_value = iter([
-            (0, {"messages": "q1", "predictions": "a1"}),
-        ])
+        mock_df.iterrows.return_value = iter(
+            [
+                (0, {"messages": "q1", "predictions": "a1"}),
+            ]
+        )
         mock_pd.DataFrame.from_records.return_value = mock_df
 
         mock_client_cls = MagicMock()
@@ -1052,15 +1162,20 @@ class TestCompleteEvaluation:
         mock_client_inst.get_run.return_value = SimpleNamespace(
             info=SimpleNamespace(experiment_id="exp-100")
         )
-        mock_client_inst.get_experiment.return_value = SimpleNamespace(name="/Shared/test")
+        mock_client_inst.get_experiment.return_value = SimpleNamespace(
+            name="/Shared/test"
+        )
         mock_client_cls.return_value = mock_client_inst
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "pandas": mock_pd,
-            "mlflow.genai": mock_mlflow.genai,
-            "mlflow.tracking": MagicMock(MlflowClient=mock_client_cls),
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "pandas": mock_pd,
+                "mlflow.genai": mock_mlflow.genai,
+                "mlflow.tracking": MagicMock(MlflowClient=mock_client_cls),
+            },
+        ):
             runner = _make_runner()
             runner._save_environment_vars = MagicMock(return_value={})
             runner._set_environment_vars = MagicMock()
@@ -1074,13 +1189,14 @@ class TestCompleteEvaluation:
     def test_complete_evaluation_uses_trace_objects_when_available(self):
         """Fetches and uses trace objects for enriched evaluation data."""
         import sys
+
         mock_mlflow = MagicMock()
         self._setup_mlflow_for_eval(mock_mlflow)
 
         # Mock a trace object with request/response data
         mock_trace_data = SimpleNamespace(
             request='{"inputs": {"query": "test question"}}',
-            response='{"response": "test answer"}'
+            response='{"response": "test answer"}',
         )
         mock_trace = SimpleNamespace(data=mock_trace_data)
         mock_mlflow.get_trace.return_value = mock_trace
@@ -1097,15 +1213,20 @@ class TestCompleteEvaluation:
         mock_client_inst.get_run.return_value = SimpleNamespace(
             info=SimpleNamespace(experiment_id="exp-100")
         )
-        mock_client_inst.get_experiment.return_value = SimpleNamespace(name="/Shared/test")
+        mock_client_inst.get_experiment.return_value = SimpleNamespace(
+            name="/Shared/test"
+        )
         mock_client_cls.return_value = mock_client_inst
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "pandas": mock_pd,
-            "mlflow.genai": mock_mlflow.genai,
-            "mlflow.tracking": MagicMock(MlflowClient=mock_client_cls),
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "pandas": mock_pd,
+                "mlflow.genai": mock_mlflow.genai,
+                "mlflow.tracking": MagicMock(MlflowClient=mock_client_cls),
+            },
+        ):
             runner = _make_runner()
             runner._save_environment_vars = MagicMock(return_value={})
             runner._set_environment_vars = MagicMock()
@@ -1121,6 +1242,7 @@ class TestCompleteEvaluation:
     def test_complete_evaluation_fallback_when_get_trace_fails(self):
         """Falls back to single-record data when get_trace raises."""
         import sys
+
         mock_mlflow = MagicMock()
         self._setup_mlflow_for_eval(mock_mlflow)
         mock_mlflow.get_trace.side_effect = RuntimeError("trace not found")
@@ -1129,9 +1251,11 @@ class TestCompleteEvaluation:
         mock_df = MagicMock()
         mock_df.__len__ = MagicMock(return_value=1)
         mock_df.columns = ["messages", "predictions"]
-        mock_df.iterrows.return_value = iter([
-            (0, {"messages": "q1", "predictions": "a1"}),
-        ])
+        mock_df.iterrows.return_value = iter(
+            [
+                (0, {"messages": "q1", "predictions": "a1"}),
+            ]
+        )
         mock_pd.DataFrame.from_records.return_value = mock_df
 
         mock_client_cls = MagicMock()
@@ -1139,15 +1263,20 @@ class TestCompleteEvaluation:
         mock_client_inst.get_run.return_value = SimpleNamespace(
             info=SimpleNamespace(experiment_id="exp-100")
         )
-        mock_client_inst.get_experiment.return_value = SimpleNamespace(name="/Shared/test")
+        mock_client_inst.get_experiment.return_value = SimpleNamespace(
+            name="/Shared/test"
+        )
         mock_client_cls.return_value = mock_client_inst
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "pandas": mock_pd,
-            "mlflow.genai": mock_mlflow.genai,
-            "mlflow.tracking": MagicMock(MlflowClient=mock_client_cls),
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "pandas": mock_pd,
+                "mlflow.genai": mock_mlflow.genai,
+                "mlflow.tracking": MagicMock(MlflowClient=mock_client_cls),
+            },
+        ):
             runner = _make_runner()
             runner._save_environment_vars = MagicMock(return_value={})
             runner._set_environment_vars = MagicMock()
@@ -1165,6 +1294,7 @@ class TestCompleteEvaluation:
 # ===========================================================================
 # TestJudgeModelUriConversion
 # ===========================================================================
+
 
 class TestJudgeModelUriConversion:
     """Tests for the _to_scorer_model_uri logic inside complete_evaluation."""
@@ -1207,6 +1337,7 @@ class TestCompleteEvaluationPaths:
     def _setup_complete_eval_mocks(self):
         """Build a comprehensive mock mlflow for complete_evaluation."""
         import sys
+
         mock_mlflow = MagicMock()
         mock_mlflow.set_tracking_uri = MagicMock()
         mock_mlflow.get_trace = MagicMock(return_value=None)
@@ -1257,13 +1388,17 @@ class TestCompleteEvaluationPaths:
     def test_complete_evaluation_basic_success(self):
         """complete_evaluation runs without error with basic setup."""
         import sys
+
         mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_mlflow_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_mlflow_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
@@ -1280,6 +1415,7 @@ class TestCompleteEvaluationPaths:
     def test_complete_evaluation_with_trace_ids(self):
         """complete_evaluation fetches and uses trace objects when IDs available."""
         import sys
+
         mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
 
         mock_trace = MagicMock()
@@ -1289,18 +1425,23 @@ class TestCompleteEvaluationPaths:
         mock_trace.data = mock_data
         mock_mlflow.get_trace = MagicMock(return_value=mock_trace)
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_mlflow_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_mlflow_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
             runner._save_environment_vars = MagicMock(return_value={})
             runner._set_environment_vars = MagicMock()
             runner._restore_environment_vars = MagicMock()
-            runner._discover_traces_and_build_dataset = MagicMock(return_value=(["trace-abc"], []))
+            runner._discover_traces_and_build_dataset = MagicMock(
+                return_value=(["trace-abc"], [])
+            )
 
             runner.complete_evaluation(run_id="run-123", auth_ctx=auth_ctx)
 
@@ -1310,20 +1451,27 @@ class TestCompleteEvaluationPaths:
     def test_complete_evaluation_with_eval_table(self):
         """complete_evaluation processes eval_results_table when present."""
         import sys
+
         import pandas as pd_real
+
         mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
 
         # Create a real-ish eval result table
-        tbl = pd_real.DataFrame({"score_metric": [0.8, 0.9], "another_metric": [0.7, 0.85]})
+        tbl = pd_real.DataFrame(
+            {"score_metric": [0.8, 0.9], "another_metric": [0.7, 0.85]}
+        )
         eval_result = MagicMock()
         eval_result.tables = {"eval_results_table": tbl}
         mock_mlflow.genai.evaluate = MagicMock(return_value=eval_result)
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_mlflow_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_mlflow_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
@@ -1340,14 +1488,19 @@ class TestCompleteEvaluationPaths:
     def test_complete_evaluation_with_contexts(self):
         """complete_evaluation adds Groundedness/Relevance scorers when has_ctx_col=True."""
         import sys
+
         import pandas as pd_real
+
         mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_mlflow_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_mlflow_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
@@ -1356,7 +1509,9 @@ class TestCompleteEvaluationPaths:
             runner._restore_environment_vars = MagicMock()
             # Return records with contexts
             records = [{"messages": "q", "predictions": "a", "contexts": "ctx"}]
-            runner._discover_traces_and_build_dataset = MagicMock(return_value=([], records))
+            runner._discover_traces_and_build_dataset = MagicMock(
+                return_value=([], records)
+            )
 
             runner.complete_evaluation(run_id="run-123", auth_ctx=auth_ctx)
 
@@ -1366,13 +1521,17 @@ class TestCompleteEvaluationPaths:
     def test_complete_evaluation_with_references(self):
         """complete_evaluation adds Correctness scorer when has_ref_col=True."""
         import sys
+
         mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_mlflow_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_mlflow_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
@@ -1380,7 +1539,9 @@ class TestCompleteEvaluationPaths:
             runner._set_environment_vars = MagicMock()
             runner._restore_environment_vars = MagicMock()
             records = [{"messages": "q", "predictions": "a", "references": "expected"}]
-            runner._discover_traces_and_build_dataset = MagicMock(return_value=([], records))
+            runner._discover_traces_and_build_dataset = MagicMock(
+                return_value=([], records)
+            )
 
             runner.complete_evaluation(run_id="run-123", auth_ctx=auth_ctx)
 
@@ -1389,13 +1550,17 @@ class TestCompleteEvaluationPaths:
     def test_complete_evaluation_no_auth_ctx(self):
         """complete_evaluation works with auth_ctx=None."""
         import sys
+
         mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_mlflow_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_mlflow_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
 
             runner._save_environment_vars = MagicMock(return_value={})
@@ -1411,14 +1576,20 @@ class TestCompleteEvaluationPaths:
     def test_complete_evaluation_genai_evaluate_fails(self):
         """complete_evaluation handles mlflow.genai.evaluate failure gracefully."""
         import sys
-        mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
-        mock_mlflow.genai.evaluate = MagicMock(side_effect=RuntimeError("evaluate failed"))
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_mlflow_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
+        mock_mlflow.genai.evaluate = MagicMock(
+            side_effect=RuntimeError("evaluate failed")
+        )
+
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_mlflow_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
@@ -1436,21 +1607,27 @@ class TestCompleteEvaluationPaths:
     def test_complete_evaluation_trace_fetch_failure(self):
         """complete_evaluation handles trace fetch failure for individual traces."""
         import sys
+
         mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
         mock_mlflow.get_trace = MagicMock(side_effect=RuntimeError("trace not found"))
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_mlflow_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_mlflow_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
             runner._save_environment_vars = MagicMock(return_value={})
             runner._set_environment_vars = MagicMock()
             runner._restore_environment_vars = MagicMock()
-            runner._discover_traces_and_build_dataset = MagicMock(return_value=(["t1", "t2"], []))
+            runner._discover_traces_and_build_dataset = MagicMock(
+                return_value=(["t1", "t2"], [])
+            )
 
             # Should not raise
             runner.complete_evaluation(run_id="run-123", auth_ctx=auth_ctx)
@@ -1458,6 +1635,7 @@ class TestCompleteEvaluationPaths:
     def test_complete_evaluation_with_valid_traces_uses_trace_format(self):
         """complete_evaluation uses trace format when valid trace objects with request JSON."""
         import sys
+
         mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
 
         mock_trace = MagicMock()
@@ -1467,18 +1645,23 @@ class TestCompleteEvaluationPaths:
         mock_trace.data = mock_data
         mock_mlflow.get_trace = MagicMock(return_value=mock_trace)
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_mlflow_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_mlflow_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
             runner._save_environment_vars = MagicMock(return_value={})
             runner._set_environment_vars = MagicMock()
             runner._restore_environment_vars = MagicMock()
-            runner._discover_traces_and_build_dataset = MagicMock(return_value=(["t1"], []))
+            runner._discover_traces_and_build_dataset = MagicMock(
+                return_value=(["t1"], [])
+            )
 
             runner.complete_evaluation(run_id="run-123", auth_ctx=auth_ctx)
 
@@ -1487,14 +1670,20 @@ class TestCompleteEvaluationPaths:
     def test_complete_evaluation_scorer_init_fails(self):
         """complete_evaluation handles scorer instantiation failure gracefully."""
         import sys
-        mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
-        mock_mlflow.genai.scorers.RelevanceToQuery = MagicMock(side_effect=RuntimeError("scorer error"))
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_mlflow_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        mock_mlflow, mock_mlflow_tracking = self._setup_complete_eval_mocks()
+        mock_mlflow.genai.scorers.RelevanceToQuery = MagicMock(
+            side_effect=RuntimeError("scorer error")
+        )
+
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_mlflow_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
@@ -1513,6 +1702,7 @@ class TestDiscoverTracesAdditional:
     def test_exception_getting_mlflow_trace_id(self):
         """Handles exception when accessing exec_obj.mlflow_trace_id."""
         import sys
+
         mock_mlflow = MagicMock()
 
         class RaisingExecObj:
@@ -1534,12 +1724,17 @@ class TestDiscoverTracesAdditional:
     def test_searches_without_experiment_id(self):
         """Falls back to search_traces() without experiment_ids when no experiment found."""
         import sys
+
         mock_mlflow = MagicMock()
         mock_mlflow.get_experiment_by_name.return_value = None
-        search_df = pd.DataFrame({
-            "trace_id": ["t-no-exp"],
-            "attributes": [{"execution_id": "exec-123", "prompt": "q", "output": "a"}],
-        })
+        search_df = pd.DataFrame(
+            {
+                "trace_id": ["t-no-exp"],
+                "attributes": [
+                    {"execution_id": "exec-123", "prompt": "q", "output": "a"}
+                ],
+            }
+        )
         mock_mlflow.search_traces = MagicMock(return_value=search_df)
 
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
@@ -1583,12 +1778,14 @@ class TestExtractRecordsAdditional:
     def test_pick_falls_back_to_row_value(self):
         """_pick falls back to row value when attrs doesn't have the key."""
         runner = _make_runner()
-        df = pd.DataFrame({
-            "trace_id": ["t1"],
-            "attributes": [{"execution_id": "exec-123"}],  # no prompt/output
-            "prompt": ["from_row_prompt"],  # value in row itself
-            "output": ["from_row_output"],
-        })
+        df = pd.DataFrame(
+            {
+                "trace_id": ["t1"],
+                "attributes": [{"execution_id": "exec-123"}],  # no prompt/output
+                "prompt": ["from_row_prompt"],  # value in row itself
+                "output": ["from_row_output"],
+            }
+        )
         _, records = runner._extract_records_from_traces(df)
         assert len(records) == 1
         assert records[0]["messages"] == "from_row_prompt"
@@ -1619,6 +1816,7 @@ class TestCreateRunDatasetException:
     def test_create_run_handles_from_pandas_exception(self):
         """create_run handles mlflow.data.from_pandas exception (lines 131-132)."""
         import sys
+
         mock_mlflow = self._setup_mlflow_mocks()
         mock_pd = MagicMock()
         mock_df = MagicMock()
@@ -1649,6 +1847,7 @@ class TestLogRunParametersException:
     def test_log_params_exception_swallowed(self):
         """_log_run_parameters swallows mlflow.log_params exception."""
         import sys
+
         mock_mlflow = MagicMock()
         mock_mlflow.log_params.side_effect = RuntimeError("log params failed")
 
@@ -1669,16 +1868,18 @@ class TestExtractRecordsExceptionPaths:
             def __repr__(self):
                 return "<unserializable>"
 
-        df = pd.DataFrame({
-            "trace_id": ["t1"],
-            "attributes": [
-                {
-                    "execution_id": "exec-123",
-                    "prompt": UnserializableObj(),  # will fail json.dumps
-                    "output": "answer",
-                }
-            ],
-        })
+        df = pd.DataFrame(
+            {
+                "trace_id": ["t1"],
+                "attributes": [
+                    {
+                        "execution_id": "exec-123",
+                        "prompt": UnserializableObj(),  # will fail json.dumps
+                        "output": "answer",
+                    }
+                ],
+            }
+        )
         _, records = runner._extract_records_from_traces(df)
         # May or may not extract depending on fallback behavior
         assert isinstance(records, list)
@@ -1691,8 +1892,10 @@ class TestExtractRecordsExceptionPaths:
         class BadIterrows:
             def head(self, n):
                 return self
+
             def iterrows(self):
                 raise RuntimeError("iteration error")
+
             columns = []
 
         trace_ids, records = runner._extract_records_from_traces(BadIterrows())
@@ -1706,30 +1909,36 @@ class TestLogBaselineMetricsExceptionPaths:
     def test_log_metric_exception_swallowed(self):
         """_log_baseline_metrics swallows mlflow.log_metric exception."""
         import sys
+
         mock_mlflow = MagicMock()
         mock_mlflow.log_metric.side_effect = RuntimeError("metric log failed")
 
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             runner = _make_runner()
-            eval_df = pd.DataFrame({
-                "messages": ["question"],
-                "predictions": ["answer"],
-            })
+            eval_df = pd.DataFrame(
+                {
+                    "messages": ["question"],
+                    "predictions": ["answer"],
+                }
+            )
             # Should not raise
             runner._log_baseline_metrics(eval_df)
 
     def test_log_metric_overlap_calculation_exception(self):
         """Overlap calculation exception doesn't propagate."""
         import sys
+
         mock_mlflow = MagicMock()
 
         with patch.dict(sys.modules, {"mlflow": mock_mlflow}):
             runner = _make_runner()
             # Dataframe where overlap calculation fails (rare edge case)
-            eval_df = pd.DataFrame({
-                "messages": [None],  # None might cause issues
-                "predictions": [None],
-            })
+            eval_df = pd.DataFrame(
+                {
+                    "messages": [None],  # None might cause issues
+                    "predictions": [None],
+                }
+            )
             # Should not raise
             runner._log_baseline_metrics(eval_df)
 
@@ -1766,13 +1975,17 @@ class TestCompleteEvaluationContextsRefsException:
     def test_has_ctx_col_exception_uses_fallback(self):
         """Exception in has_ctx_col detection falls back to list comprehension."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
@@ -1782,7 +1995,9 @@ class TestCompleteEvaluationContextsRefsException:
 
             # Records with contexts - but make astype() raise so fallback runs
             records = [{"messages": "q", "predictions": "a", "contexts": "ctx_value"}]
-            runner._discover_traces_and_build_dataset = MagicMock(return_value=([], records))
+            runner._discover_traces_and_build_dataset = MagicMock(
+                return_value=([], records)
+            )
 
             # Should not raise even with contexts column present
             runner.complete_evaluation(run_id="run-1", auth_ctx=auth_ctx)
@@ -1820,6 +2035,7 @@ class TestCompleteEvaluationEnrichedRecords:
     def test_enriched_records_from_trace_with_contexts(self):
         """complete_evaluation builds enriched records when trace has contexts."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
 
         # Trace with contexts in request
@@ -1830,18 +2046,23 @@ class TestCompleteEvaluationEnrichedRecords:
         mock_trace.data = mock_data
         mock_mlflow.get_trace = MagicMock(return_value=mock_trace)
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
             runner._save_environment_vars = MagicMock(return_value={})
             runner._set_environment_vars = MagicMock()
             runner._restore_environment_vars = MagicMock()
-            runner._discover_traces_and_build_dataset = MagicMock(return_value=(["t1"], []))
+            runner._discover_traces_and_build_dataset = MagicMock(
+                return_value=(["t1"], [])
+            )
 
             runner.complete_evaluation(run_id="run-1", auth_ctx=auth_ctx)
 
@@ -1854,6 +2075,7 @@ class TestCompleteEvaluationEnrichedRecords:
     def test_trace_with_invalid_request_json(self):
         """complete_evaluation handles traces with invalid request JSON."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
 
         mock_trace = MagicMock()
@@ -1863,18 +2085,23 @@ class TestCompleteEvaluationEnrichedRecords:
         mock_trace.data = mock_data
         mock_mlflow.get_trace = MagicMock(return_value=mock_trace)
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
             runner._save_environment_vars = MagicMock(return_value={})
             runner._set_environment_vars = MagicMock()
             runner._restore_environment_vars = MagicMock()
-            runner._discover_traces_and_build_dataset = MagicMock(return_value=(["t1"], []))
+            runner._discover_traces_and_build_dataset = MagicMock(
+                return_value=(["t1"], [])
+            )
 
             # Should not raise
             runner.complete_evaluation(run_id="run-1", auth_ctx=auth_ctx)
@@ -1882,15 +2109,19 @@ class TestCompleteEvaluationEnrichedRecords:
     def test_complete_evaluation_scorer_none_when_m_scorers_none(self):
         """complete_evaluation handles missing genai.scorers module."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
         # Remove genai.scorers
         mock_mlflow.genai.scorers = None
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
@@ -1905,7 +2136,9 @@ class TestCompleteEvaluationEnrichedRecords:
     def test_complete_evaluation_with_eval_result_table_dataframe(self):
         """complete_evaluation processes eval_results_table as DataFrame."""
         import sys
+
         import pandas as pd_real
+
         mock_mlflow, mock_tracking = self._setup_mocks()
 
         tbl = pd_real.DataFrame({"relevance_score": [0.8, 0.9]})
@@ -1913,11 +2146,14 @@ class TestCompleteEvaluationEnrichedRecords:
         eval_result.tables = {"eval_results_table": tbl}
         mock_mlflow.genai.evaluate = MagicMock(return_value=eval_result)
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
@@ -1963,6 +2199,7 @@ class TestCompleteEvaluationRecordBasedPath:
     def test_records_based_eval_when_trace_has_no_request(self):
         """Lines 544-561: Use records format when trace has no request JSON."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
 
         # Trace without request field → not added to valid_traces
@@ -1972,11 +2209,14 @@ class TestCompleteEvaluationRecordBasedPath:
         mock_trace.data = mock_data
         mock_mlflow.get_trace = MagicMock(return_value=mock_trace)
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
@@ -1984,7 +2224,9 @@ class TestCompleteEvaluationRecordBasedPath:
             runner._set_environment_vars = MagicMock()
             runner._restore_environment_vars = MagicMock()
             # trace IDs exist but trace has no valid request → falls into records path
-            runner._discover_traces_and_build_dataset = MagicMock(return_value=(["t1"], []))
+            runner._discover_traces_and_build_dataset = MagicMock(
+                return_value=(["t1"], [])
+            )
 
             runner.complete_evaluation(run_id="run-1", auth_ctx=auth_ctx)
 
@@ -1993,6 +2235,7 @@ class TestCompleteEvaluationRecordBasedPath:
     def test_records_based_with_contexts_and_references(self):
         """Lines 544-561: Records path includes contexts and references."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
 
         # Trace with no useful data
@@ -2002,11 +2245,14 @@ class TestCompleteEvaluationRecordBasedPath:
         mock_trace.data = mock_data
         mock_mlflow.get_trace = MagicMock(return_value=mock_trace)
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
@@ -2014,13 +2260,17 @@ class TestCompleteEvaluationRecordBasedPath:
             runner._set_environment_vars = MagicMock()
             runner._restore_environment_vars = MagicMock()
             # Records with contexts and references
-            records = [{
-                "messages": "question",
-                "predictions": "answer",
-                "contexts": "some context",
-                "references": "expected answer",
-            }]
-            runner._discover_traces_and_build_dataset = MagicMock(return_value=(["t1"], records))
+            records = [
+                {
+                    "messages": "question",
+                    "predictions": "answer",
+                    "contexts": "some context",
+                    "references": "expected answer",
+                }
+            ]
+            runner._discover_traces_and_build_dataset = MagicMock(
+                return_value=(["t1"], records)
+            )
 
             runner.complete_evaluation(run_id="run-1", auth_ctx=auth_ctx)
 
@@ -2029,13 +2279,17 @@ class TestCompleteEvaluationRecordBasedPath:
     def test_scorer_route_with_colon_slash(self):
         """Scorer model URI with ':/' prefix is returned as-is."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner(judge_model_route="databricks:/my-model")
             auth_ctx = _make_auth_ctx()
 
@@ -2051,13 +2305,17 @@ class TestCompleteEvaluationRecordBasedPath:
     def test_scorer_route_databricks_string(self):
         """Scorer model URI 'databricks' is returned as-is."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner(judge_model_route="databricks")
             auth_ctx = _make_auth_ctx()
 
@@ -2103,13 +2361,17 @@ class TestCompleteEvaluationScorerRoutePaths:
     def test_scorer_cls_is_none_skips(self):
         """When scorer class is None (not found), it logs warning and skips."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
@@ -2124,14 +2386,18 @@ class TestCompleteEvaluationScorerRoutePaths:
     def test_no_judge_model_route_scorer_has_no_model(self):
         """When judge_model_route is None, scorer is instantiated without model arg."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
         mock_mlflow.genai.scorers.Safety = MagicMock(return_value=MagicMock())
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner(judge_model_route=None)  # no route → line 584
             auth_ctx = _make_auth_ctx()
 
@@ -2176,6 +2442,7 @@ class TestCompleteEvaluationRemainingPaths:
     def test_active_run_mismatch_ends_run(self):
         """When active_run has different run_id, mlflow.end_run() is called."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
 
         # active_run returns a run with different id
@@ -2183,11 +2450,14 @@ class TestCompleteEvaluationRemainingPaths:
         ar.info.run_id = "different-run-id"
         mock_mlflow.active_run = MagicMock(return_value=ar)
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
@@ -2203,7 +2473,9 @@ class TestCompleteEvaluationRemainingPaths:
     def test_eval_result_with_table_as_csv(self):
         """Eval result table is logged as CSV artifact."""
         import sys
+
         import pandas as pd_real
+
         mock_mlflow, mock_tracking = self._setup_mocks()
 
         tbl = pd_real.DataFrame({"score": [0.85], "another": [0.75]})
@@ -2211,11 +2483,14 @@ class TestCompleteEvaluationRemainingPaths:
         eval_result.tables = {"eval_results_table": tbl}
         mock_mlflow.genai.evaluate = MagicMock(return_value=eval_result)
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
 
@@ -2265,15 +2540,21 @@ class TestCompleteEvaluationExceptionHandlers:
     def test_scorer_names_exception_swallowed(self):
         """Exception getting scorer names is swallowed (lines 630-631)."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
         # Make scorer type() fail somehow (very unusual but valid test)
-        mock_mlflow.genai.scorers.RelevanceToQuery = MagicMock(side_effect=RuntimeError("scorer error"))
+        mock_mlflow.genai.scorers.RelevanceToQuery = MagicMock(
+            side_effect=RuntimeError("scorer error")
+        )
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
             runner._save_environment_vars = MagicMock(return_value={})
@@ -2287,14 +2568,18 @@ class TestCompleteEvaluationExceptionHandlers:
     def test_mlflow_client_exception_swallowed(self):
         """MlflowClient exception is swallowed (lines 644-647)."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
         mock_tracking.MlflowClient = MagicMock(side_effect=RuntimeError("client error"))
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
             runner._save_environment_vars = MagicMock(return_value={})
@@ -2307,14 +2592,18 @@ class TestCompleteEvaluationExceptionHandlers:
     def test_active_run_exception_swallowed(self):
         """Exception from active_run() is swallowed (lines 653-654)."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
         mock_mlflow.active_run = MagicMock(side_effect=RuntimeError("active run error"))
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
             runner._save_environment_vars = MagicMock(return_value={})
@@ -2327,13 +2616,17 @@ class TestCompleteEvaluationExceptionHandlers:
     def test_eval_data_keys_exception_swallowed(self):
         """Exception getting eval_data[0].keys() is swallowed (lines 678-679)."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
             runner._save_environment_vars = MagicMock(return_value={})
@@ -2347,9 +2640,11 @@ class TestCompleteEvaluationExceptionHandlers:
     def test_log_params_exception_in_metrics_block_swallowed(self):
         """Exception in log_params for genai scorers is swallowed (lines 710-711)."""
         import sys
+
         mock_mlflow, mock_tracking = self._setup_mocks()
         # Make log_params raise
         call_count = [0]
+
         def conditional_raise(*args, **kwargs):
             call_count[0] += 1
             if call_count[0] > 1:  # First call OK, second raises
@@ -2357,11 +2652,14 @@ class TestCompleteEvaluationExceptionHandlers:
 
         mock_mlflow.log_params = MagicMock(side_effect=conditional_raise)
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
             runner._save_environment_vars = MagicMock(return_value={})
@@ -2374,7 +2672,9 @@ class TestCompleteEvaluationExceptionHandlers:
     def test_metric_mean_exception_continues(self):
         """Exception computing metric mean is swallowed with continue (lines 736-737)."""
         import sys
+
         import pandas as pd_real
+
         mock_mlflow, mock_tracking = self._setup_mocks()
 
         # Create a dataframe with a column that fails mean()
@@ -2386,13 +2686,18 @@ class TestCompleteEvaluationExceptionHandlers:
         eval_result = MagicMock()
         eval_result.tables = {"eval_results_table": tbl}
         mock_mlflow.genai.evaluate = MagicMock(return_value=eval_result)
-        mock_mlflow.log_metric = MagicMock(side_effect=RuntimeError("log_metric failed"))
+        mock_mlflow.log_metric = MagicMock(
+            side_effect=RuntimeError("log_metric failed")
+        )
 
-        with patch.dict(sys.modules, {
-            "mlflow": mock_mlflow,
-            "mlflow.tracking": mock_tracking,
-            "mlflow.genai": mock_mlflow.genai,
-        }):
+        with patch.dict(
+            sys.modules,
+            {
+                "mlflow": mock_mlflow,
+                "mlflow.tracking": mock_tracking,
+                "mlflow.genai": mock_mlflow.genai,
+            },
+        ):
             runner = _make_runner()
             auth_ctx = _make_auth_ctx()
             runner._save_environment_vars = MagicMock(return_value={})

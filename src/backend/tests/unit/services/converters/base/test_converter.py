@@ -7,16 +7,18 @@ Tests:
 - Concrete subclasses can be instantiated with and without config
 - config defaults to empty dict when not supplied
 """
-import pytest
+
 from abc import ABC
 from typing import Any
 
-from src.services.converters.base.converter import BaseConverter, ConversionFormat
+import pytest
 
+from src.services.converters.base.converter import BaseConverter, ConversionFormat
 
 # ---------------------------------------------------------------------------
 # Minimal concrete implementations used across multiple tests
 # ---------------------------------------------------------------------------
+
 
 class YamlToDaxConverter(BaseConverter):
     """Concrete converter: YAML -> DAX."""
@@ -57,6 +59,7 @@ class YamlToSqlConverter(BaseConverter):
 # ---------------------------------------------------------------------------
 # Tests for ConversionFormat enum
 # ---------------------------------------------------------------------------
+
 
 class TestConversionFormat:
     """Tests for the ConversionFormat str-enum."""
@@ -121,6 +124,7 @@ class TestConversionFormat:
 # Tests for BaseConverter abstract class
 # ---------------------------------------------------------------------------
 
+
 class TestBaseConverterAbstract:
     """Tests that BaseConverter is properly abstract and cannot be instantiated."""
 
@@ -140,6 +144,7 @@ class TestBaseConverterAbstract:
 
     def test_partial_implementation_cannot_be_instantiated(self):
         """A subclass missing one abstract method cannot be instantiated."""
+
         class PartialConverter(BaseConverter):
             @property
             def source_format(self) -> ConversionFormat:
@@ -159,6 +164,7 @@ class TestBaseConverterAbstract:
 
     def test_missing_source_format_cannot_be_instantiated(self):
         """Missing source_format property prevents instantiation."""
+
         class MissingSourceFormat(BaseConverter):
             @property
             def target_format(self) -> ConversionFormat:
@@ -177,6 +183,7 @@ class TestBaseConverterAbstract:
 # ---------------------------------------------------------------------------
 # Tests for concrete BaseConverter subclasses
 # ---------------------------------------------------------------------------
+
 
 class TestConcreteConverterInstantiation:
     """Tests that concrete subclasses can be instantiated correctly."""
@@ -245,6 +252,7 @@ class TestConcreteConverterInstantiation:
 
     def test_convert_with_kwargs(self):
         """convert() forwards keyword arguments."""
+
         class KwargsConverter(BaseConverter):
             @property
             def source_format(self) -> ConversionFormat:

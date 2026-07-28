@@ -134,8 +134,17 @@ class _InstantSpan:
 
 
 # Event types that belong to each hierarchy level
-_CREW_EVENTS = {"crew_started", "crew_completed", "flow_started", "flow_completed", "flow_created"}
-_AGENT_EVENTS = {"agent_execution", "llm_response"}  # agent_execution start, llm_response is its end
+_CREW_EVENTS = {
+    "crew_started",
+    "crew_completed",
+    "flow_started",
+    "flow_completed",
+    "flow_created",
+}
+_AGENT_EVENTS = {
+    "agent_execution",
+    "llm_response",
+}  # agent_execution start, llm_response is its end
 _TASK_EVENTS = {"task_started", "task_completed", "task_failed"}
 
 
@@ -172,19 +181,13 @@ def _build_pairing_key(event_type: str, attrs: Dict[str, Any]) -> str:
 def _extract_agent_name(attrs: Dict[str, Any]) -> str:
     """Extract agent name from span attributes."""
     return str(
-        attrs.get("kasal.agent_name")
-        or attrs.get("kasal.extra.agent_role")
-        or ""
+        attrs.get("kasal.agent_name") or attrs.get("kasal.extra.agent_role") or ""
     )
 
 
 def _extract_task_name(attrs: Dict[str, Any]) -> str:
     """Extract task name from span attributes."""
-    return str(
-        attrs.get("kasal.task_name")
-        or attrs.get("kasal.extra.task_name")
-        or ""
-    )
+    return str(attrs.get("kasal.task_name") or attrs.get("kasal.extra.task_name") or "")
 
 
 def _extract_span_outputs(span: ReadableSpan) -> Dict[str, Any]:
@@ -199,7 +202,7 @@ def _extract_span_outputs(span: ReadableSpan) -> Dict[str, Any]:
     # Extra data
     for key, val in attrs.items():
         if key.startswith("kasal.extra.") and val is not None:
-            outputs[key[len("kasal.extra."):]] = val
+            outputs[key[len("kasal.extra.") :]] = val
 
     return outputs
 
@@ -358,7 +361,11 @@ class KasalMLflowSpanExporter(SpanExporter):
             task_name = _extract_task_name(attrs)
             outputs = _extract_span_outputs(span)
             span_attrs = _extract_span_attrs(span)
-            status = "ERROR" if (span.status and span.status.status_code.name == "ERROR") else "OK"
+            status = (
+                "ERROR"
+                if (span.status and span.status.status_code.name == "ERROR")
+                else "OK"
+            )
 
             # Try to PAIR first (check if a pending start matches this end).
             # This must come before the start-buffer check because some event
@@ -367,11 +374,19 @@ class KasalMLflowSpanExporter(SpanExporter):
             paired_this = False
             if event_type in _END_TO_STARTS:
                 for possible_start in _END_TO_STARTS[event_type]:
-                    pairing_key = f"{possible_start}:{_build_pairing_key(possible_start, attrs)}"
+                    pairing_key = (
+                        f"{possible_start}:{_build_pairing_key(possible_start, attrs)}"
+                    )
                     if pairing_key in pending:
-                        start_time, start_name, start_evt, start_agent, start_task, start_attrs, start_outputs = pending.pop(
-                            pairing_key
-                        )
+                        (
+                            start_time,
+                            start_name,
+                            start_evt,
+                            start_agent,
+                            start_task,
+                            start_attrs,
+                            start_outputs,
+                        ) = pending.pop(pairing_key)
                         merged_attrs = {**start_attrs, **span_attrs}
                         merged_outputs = {**start_outputs, **outputs}
                         merged_agent = agent_name or start_agent
@@ -421,7 +436,15 @@ class KasalMLflowSpanExporter(SpanExporter):
                 )
 
         # Any unmatched start events become instants
-        for pairing_key, (start_time, start_name, start_evt, start_agent, start_task, start_attrs, start_outputs) in pending.items():
+        for pairing_key, (
+            start_time,
+            start_name,
+            start_evt,
+            start_agent,
+            start_task,
+            start_attrs,
+            start_outputs,
+        ) in pending.items():
             instants.append(
                 _InstantSpan(
                     name=start_name,
@@ -639,31 +662,35 @@ class KasalMLflowSpanExporter(SpanExporter):
             # Combine all items with a unified interface for ordering
             all_items: List[Dict[str, Any]] = []
             for p in paired:
-                all_items.append({
-                    "type": "paired",
-                    "name": p.name,
-                    "start_time": p.start_time,
-                    "end_time": p.end_time,
-                    "event_type": p.event_type,
-                    "agent_name": p.agent_name,
-                    "task_name": p.task_name,
-                    "outputs": p.outputs,
-                    "attributes": p.attributes,
-                    "status": p.status,
-                })
+                all_items.append(
+                    {
+                        "type": "paired",
+                        "name": p.name,
+                        "start_time": p.start_time,
+                        "end_time": p.end_time,
+                        "event_type": p.event_type,
+                        "agent_name": p.agent_name,
+                        "task_name": p.task_name,
+                        "outputs": p.outputs,
+                        "attributes": p.attributes,
+                        "status": p.status,
+                    }
+                )
             for i in instants:
-                all_items.append({
-                    "type": "instant",
-                    "name": i.name,
-                    "start_time": i.timestamp,
-                    "end_time": i.timestamp,
-                    "event_type": i.event_type,
-                    "agent_name": i.agent_name,
-                    "task_name": i.task_name,
-                    "outputs": i.outputs,
-                    "attributes": i.attributes,
-                    "status": i.status,
-                })
+                all_items.append(
+                    {
+                        "type": "instant",
+                        "name": i.name,
+                        "start_time": i.timestamp,
+                        "end_time": i.timestamp,
+                        "event_type": i.event_type,
+                        "agent_name": i.agent_name,
+                        "task_name": i.task_name,
+                        "outputs": i.outputs,
+                        "attributes": i.attributes,
+                        "status": i.status,
+                    }
+                )
 
             # Sort by start_time to process in chronological order
             all_items.sort(key=lambda x: x["start_time"])
@@ -699,7 +726,9 @@ class KasalMLflowSpanExporter(SpanExporter):
             # Create agent spans under root
             for agent, info in agent_info.items():
                 span_id = self._create_mlflow_span(
-                    client, root_trace_id, root_span_id,
+                    client,
+                    root_trace_id,
+                    root_span_id,
                     name=f"agent:{agent}",
                     start_time=info["start_time"],
                     end_time=info["end_time"],
@@ -726,7 +755,9 @@ class KasalMLflowSpanExporter(SpanExporter):
                 if task_key not in task_spans:
                     parent = agent_spans.get(agent, root_span_id)
                     span_id = self._create_mlflow_span(
-                        client, root_trace_id, parent,
+                        client,
+                        root_trace_id,
+                        parent,
                         name=item["name"],
                         start_time=item["start_time"],
                         end_time=item["end_time"],
@@ -738,7 +769,8 @@ class KasalMLflowSpanExporter(SpanExporter):
                     if span_id:
                         task_spans[task_key] = span_id
                         task_time_ranges[task_key] = (
-                            item["start_time"], item["end_time"]
+                            item["start_time"],
+                            item["end_time"],
                         )
 
             # ── Pass 3: Create LEAF spans (llm, tool, memory, etc.) ──
@@ -766,7 +798,10 @@ class KasalMLflowSpanExporter(SpanExporter):
                     resolved_task_id = None
                     best_fallback_id = None
                     best_fallback_start = -1
-                    for (tk_agent, tk_task), (t_start, t_end) in task_time_ranges.items():
+                    for (tk_agent, tk_task), (
+                        t_start,
+                        t_end,
+                    ) in task_time_ranges.items():
                         if tk_agent != agent:
                             continue
                         if t_start <= ts <= t_end:
@@ -795,7 +830,9 @@ class KasalMLflowSpanExporter(SpanExporter):
                         outputs = chat_outputs
 
                 self._create_mlflow_span(
-                    client, root_trace_id, parent_id,
+                    client,
+                    root_trace_id,
+                    parent_id,
                     name=item["name"],
                     start_time=item["start_time"],
                     end_time=item["end_time"],
@@ -836,6 +873,7 @@ class KasalMLflowSpanExporter(SpanExporter):
             # alive so flow runs with multiple crews still export.
             try:
                 import mlflow
+
                 mlflow.flush_trace_async_logging(terminate=False)
                 logger.info(
                     f"[OTel-MLflow][{self._job_id}] Flushed async trace logging "

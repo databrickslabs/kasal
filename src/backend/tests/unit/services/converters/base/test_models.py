@@ -16,12 +16,12 @@ import pytest
 from pydantic import ValidationError
 
 from src.services.converters.base.models import (
-    KPIFilter,
-    Structure,
     KPI,
-    QueryFilter,
-    KPIDefinition,
     DAXMeasure,
+    KPIDefinition,
+    KPIFilter,
+    QueryFilter,
+    Structure,
 )
 
 
@@ -30,11 +30,7 @@ class TestKPIFilter:
 
     def test_create_kpi_filter_with_required_fields(self):
         """Test creating KPIFilter with required fields"""
-        filter_obj = KPIFilter(
-            field="Region",
-            operator="=",
-            value="West"
-        )
+        filter_obj = KPIFilter(field="Region", operator="=", value="West")
 
         assert filter_obj.field == "Region"
         assert filter_obj.operator == "="
@@ -47,7 +43,7 @@ class TestKPIFilter:
             field="Status",
             operator="IN",
             value=["Active", "Pending"],
-            logical_operator="OR"
+            logical_operator="OR",
         )
 
         assert filter_obj.logical_operator == "OR"
@@ -80,7 +76,7 @@ class TestStructure:
             display_sign=-1,
             technical_name="PY_Comparison",
             aggregation_type="SUM",
-            variables={"year_offset": -1}
+            variables={"year_offset": -1},
         )
 
         assert struct.description == "Previous Year Comparison"
@@ -94,7 +90,7 @@ class TestStructure:
         # Structure.filters field uses alias="filter", so must pass 'filter' as kwarg
         struct = Structure(
             description="Filtered Structure",
-            filter=[{"field": "Region", "operator": "=", "value": "West"}]
+            filter=[{"field": "Region", "operator": "=", "value": "West"}],
         )
 
         assert len(struct.filters) == 1
@@ -106,10 +102,7 @@ class TestKPI:
 
     def test_create_kpi_minimal(self):
         """Test creating KPI with minimal required fields"""
-        kpi = KPI(
-            description="Total Sales",
-            formula="SUM(Sales[Amount])"
-        )
+        kpi = KPI(description="Total Sales", formula="SUM(Sales[Amount])")
 
         assert kpi.description == "Total Sales"
         assert kpi.formula == "SUM(Sales[Amount])"
@@ -131,7 +124,7 @@ class TestKPI:
             currency_column="Currency",
             target_currency="USD",
             uom_column="Unit",
-            target_uom="KG"
+            target_uom="KG",
         )
 
         assert kpi.technical_name == "Avg_Price"
@@ -146,7 +139,7 @@ class TestKPI:
             description="Sales in USD",
             formula="SUM(Sales[Amount])",
             currency_column="SourceCurrency",
-            target_currency="USD"
+            target_currency="USD",
         )
 
         assert kpi.currency_column == "SourceCurrency"
@@ -159,7 +152,7 @@ class TestKPI:
             description="EUR Sales",
             formula="SUM(Sales[Amount])",
             fixed_currency="EUR",
-            target_currency="USD"
+            target_currency="USD",
         )
 
         assert kpi.fixed_currency == "EUR"
@@ -172,7 +165,7 @@ class TestKPI:
             formula="SUM(Inventory[Weight])",
             uom_column="WeightUnit",
             target_uom="KG",
-            uom_preset="mass"
+            uom_preset="mass",
         )
 
         assert kpi.uom_column == "WeightUnit"
@@ -184,7 +177,7 @@ class TestKPI:
         kpi = KPI(
             description="Sales YTD",
             formula="SUM(Sales[Amount])",
-            apply_structures=["YTD", "PY_Comparison"]
+            apply_structures=["YTD", "PY_Comparison"],
         )
 
         assert len(kpi.apply_structures) == 2
@@ -197,7 +190,7 @@ class TestKPI:
             formula="SUM(Sales[Amount])",
             exceptions=[{"field": "Category", "values": ["Electronics", "Toys"]}],
             exception_aggregation="AVERAGE",
-            fields_for_exception_aggregation=["Category", "Region"]
+            fields_for_exception_aggregation=["Category", "Region"],
         )
 
         assert len(kpi.exceptions) == 1
@@ -209,7 +202,7 @@ class TestKPI:
         kpi = KPI(
             description="Filtered Sales",
             formula="SUM(Sales[Amount])",
-            filter=["Region = 'West'"]  # Using alias
+            filter=["Region = 'West'"],  # Using alias
         )
 
         assert len(kpi.filters) == 1
@@ -225,10 +218,7 @@ class TestQueryFilter:
 
     def test_create_query_filter(self):
         """Test creating QueryFilter"""
-        qf = QueryFilter(
-            name="ActiveOnly",
-            expression="Status = 'Active'"
-        )
+        qf = QueryFilter(name="ActiveOnly", expression="Status = 'Active'")
 
         assert qf.name == "ActiveOnly"
         assert qf.expression == "Status = 'Active'"
@@ -247,9 +237,7 @@ class TestKPIDefinition:
         kpi_def = KPIDefinition(
             description="Sales Metrics",
             technical_name="sales_metrics",
-            kpis=[
-                KPI(description="Total Sales", formula="SUM(Sales[Amount])")
-            ]
+            kpis=[KPI(description="Total Sales", formula="SUM(Sales[Amount])")],
         )
 
         assert kpi_def.description == "Sales Metrics"
@@ -264,25 +252,23 @@ class TestKPIDefinition:
             description="Comprehensive Sales Analysis",
             technical_name="sales_analysis",
             default_variables={"fiscal_year": 2024, "region": "Global"},
-            query_filters=[
-                QueryFilter(name="CurrentYear", expression="Year = 2024")
-            ],
+            query_filters=[QueryFilter(name="CurrentYear", expression="Year = 2024")],
             filters={
                 "time_filters": {
                     "current_year": "Year = 2024",
-                    "current_quarter": "Quarter = 'Q1'"
+                    "current_quarter": "Quarter = 'Q1'",
                 }
             },
             structures={
                 "YTD": Structure(
                     description="Year to Date",
-                    formula="CALCULATE([Measure], DATESYTD(Calendar[Date]))"
+                    formula="CALCULATE([Measure], DATESYTD(Calendar[Date]))",
                 )
             },
             kpis=[
                 KPI(description="Total Sales", formula="SUM(Sales[Amount])"),
-                KPI(description="Total Cost", formula="SUM(Cost[Amount])")
-            ]
+                KPI(description="Total Cost", formula="SUM(Cost[Amount])"),
+            ],
         )
 
         assert kpi_def.default_variables["fiscal_year"] == 2024
@@ -299,13 +285,11 @@ class TestKPIDefinition:
             filters={
                 "time_filters": {
                     "current_year": "Year = 2024",
-                    "current_month": "Month = 'January'"
+                    "current_month": "Month = 'January'",
                 },
-                "location_filters": {
-                    "region": "Region = 'West'"
-                }
+                "location_filters": {"region": "Region = 'West'"},
             },
-            kpis=[]
+            kpis=[],
         )
 
         expanded = kpi_def.get_expanded_filters()
@@ -317,11 +301,7 @@ class TestKPIDefinition:
 
     def test_get_expanded_filters_empty(self):
         """Test get_expanded_filters with no filters"""
-        kpi_def = KPIDefinition(
-            description="Test",
-            technical_name="test",
-            kpis=[]
-        )
+        kpi_def = KPIDefinition(description="Test", technical_name="test", kpis=[])
 
         expanded = kpi_def.get_expanded_filters()
         assert expanded == {}
@@ -334,9 +314,9 @@ class TestKPIDefinition:
             structures={
                 "YTD": Structure(description="Year to Date"),
                 "QTD": Structure(description="Quarter to Date"),
-                "MTD": Structure(description="Month to Date")
+                "MTD": Structure(description="Month to Date"),
             },
-            kpis=[]
+            kpis=[],
         )
 
         assert len(kpi_def.structures) == 3
@@ -346,9 +326,7 @@ class TestKPIDefinition:
     def test_kpi_definition_empty_kpis_list(self):
         """Test KPIDefinition with empty KPIs list is valid"""
         kpi_def = KPIDefinition(
-            description="Empty Definition",
-            technical_name="empty",
-            kpis=[]
+            description="Empty Definition", technical_name="empty", kpis=[]
         )
 
         assert len(kpi_def.kpis) == 0
@@ -367,7 +345,7 @@ class TestDAXMeasure:
         dax = DAXMeasure(
             name="Total Sales",
             description="Sum of all sales",
-            dax_formula="SUM(Sales[Amount])"
+            dax_formula="SUM(Sales[Amount])",
         )
 
         assert dax.name == "Total Sales"
@@ -377,10 +355,7 @@ class TestDAXMeasure:
 
     def test_create_dax_measure_full(self):
         """Test creating DAXMeasure with all fields"""
-        original_kpi = KPI(
-            description="Sales Metric",
-            formula="SUM(Sales[Amount])"
-        )
+        original_kpi = KPI(description="Sales Metric", formula="SUM(Sales[Amount])")
 
         dax = DAXMeasure(
             name="Total Sales",
@@ -388,7 +363,7 @@ class TestDAXMeasure:
             dax_formula="SUM(Sales[Amount])",
             original_kbi=original_kpi,
             format_string="#,##0.00",
-            display_folder="Sales Metrics"
+            display_folder="Sales Metrics",
         )
 
         assert dax.original_kbi is not None
@@ -402,7 +377,7 @@ class TestDAXMeasure:
             name="Sales",
             description="Sales measure",
             dax_formula="SUM(Sales[Amount])",
-            display_folder="Sales"
+            display_folder="Sales",
         )
 
         assert dax.name == "Sales"
@@ -419,14 +394,17 @@ class TestModelInteroperability:
             formula="SUM(Sales[Amount])",
             technical_name="advanced_sales",
             source_table="Sales",
-            filters=["Region = 'West'", {"field": "Status", "operator": "=", "value": "Active"}],
+            filters=[
+                "Region = 'West'",
+                {"field": "Status", "operator": "=", "value": "Active"},
+            ],
             currency_column="Currency",
             target_currency="USD",
             uom_column="Unit",
             target_uom="KG",
             apply_structures=["YTD", "QTD"],
             exceptions=[{"category": "Electronics"}],
-            exception_aggregation="AVERAGE"
+            exception_aggregation="AVERAGE",
         )
 
         kpi_def = KPIDefinition(
@@ -434,9 +412,9 @@ class TestModelInteroperability:
             technical_name="complete",
             structures={
                 "YTD": Structure(description="Year to Date"),
-                "QTD": Structure(description="Quarter to Date")
+                "QTD": Structure(description="Quarter to Date"),
             },
-            kpis=[complex_kpi]
+            kpis=[complex_kpi],
         )
 
         assert len(kpi_def.kpis) == 1
@@ -451,8 +429,8 @@ class TestModelInteroperability:
             technical_name="test",
             kpis=[
                 KPI(description="KPI 1", formula="SUM(A)"),
-                KPI(description="KPI 2", formula="SUM(B)")
-            ]
+                KPI(description="KPI 2", formula="SUM(B)"),
+            ],
         )
 
         # Serialize to dict

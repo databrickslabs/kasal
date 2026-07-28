@@ -5,21 +5,22 @@ Tests the functionality of group tool management service including
 listing, adding, enabling/disabling, configuring, and removing
 group-tool mappings with group context isolation.
 """
-import pytest
-from unittest.mock import AsyncMock, patch
+
 from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.services.groups.group_tools import GroupToolService
-from src.core.exceptions import NotFoundError, ForbiddenError, BadRequestError
 from src.utils.user_context import GroupContext
-
 
 # ---------------------------------------------------------------------------
 # Helpers to build lightweight mock domain objects
 # ---------------------------------------------------------------------------
+
 
 def _make_tool(
     id: int = 1,
@@ -75,6 +76,7 @@ def _make_group_tool(
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def mock_session():
     """Create a mock async database session."""
@@ -98,12 +100,15 @@ def mock_group_tool_repo():
 @pytest.fixture
 def service(mock_session, mock_tool_repo, mock_group_tool_repo):
     """Create a GroupToolService with mocked repository dependencies."""
-    with patch(
-        "src.services.groups.group_tools.ToolRepository",
-        return_value=mock_tool_repo,
-    ), patch(
-        "src.services.groups.group_tools.GroupToolRepository",
-        return_value=mock_group_tool_repo,
+    with (
+        patch(
+            "src.services.groups.group_tools.ToolRepository",
+            return_value=mock_tool_repo,
+        ),
+        patch(
+            "src.services.groups.group_tools.GroupToolRepository",
+            return_value=mock_group_tool_repo,
+        ),
     ):
         svc = GroupToolService(session=mock_session)
     return svc
@@ -134,6 +139,7 @@ def empty_group_context():
 # ===========================================================================
 # Tests for list_added_for_group
 # ===========================================================================
+
 
 class TestListAddedForGroup:
     """Tests for GroupToolService.list_added_for_group."""
@@ -173,6 +179,7 @@ class TestListAddedForGroup:
 # ===========================================================================
 # Tests for list_available_to_add_for_group
 # ===========================================================================
+
 
 class TestListAvailableToAddForGroup:
     """Tests for GroupToolService.list_available_to_add_for_group."""
@@ -218,6 +225,7 @@ class TestListAvailableToAddForGroup:
 # Tests for add_tool_to_group
 # ===========================================================================
 
+
 class TestAddToolToGroup:
     """Tests for GroupToolService.add_tool_to_group."""
 
@@ -254,7 +262,10 @@ class TestAddToolToGroup:
 
         defaults = {"enabled": True, "config": {"api_key": "secret"}}
         mapping = _make_group_tool(
-            id=201, tool_id=6, group_id="group-abc", enabled=True,
+            id=201,
+            tool_id=6,
+            group_id="group-abc",
+            enabled=True,
             config={"api_key": "secret"},
         )
         mock_group_tool_repo.upsert.return_value = mapping
@@ -310,6 +321,7 @@ class TestAddToolToGroup:
 # ===========================================================================
 # Tests for set_group_tool_enabled
 # ===========================================================================
+
 
 class TestSetGroupToolEnabled:
     """Tests for GroupToolService.set_group_tool_enabled."""
@@ -372,6 +384,7 @@ class TestSetGroupToolEnabled:
 # Tests for update_group_tool_config
 # ===========================================================================
 
+
 class TestUpdateGroupToolConfig:
     """Tests for GroupToolService.update_group_tool_config."""
 
@@ -400,7 +413,9 @@ class TestUpdateGroupToolConfig:
     ):
         """Raises ForbiddenError when group context has no primary group ID."""
         with pytest.raises(ForbiddenError, match="Group context required"):
-            await service.update_group_tool_config(1, {"key": "val"}, empty_group_context)
+            await service.update_group_tool_config(
+                1, {"key": "val"}, empty_group_context
+            )
 
     @pytest.mark.asyncio
     async def test_not_found_when_mapping_does_not_exist(
@@ -416,6 +431,7 @@ class TestUpdateGroupToolConfig:
 # ===========================================================================
 # Tests for remove_tool_from_group
 # ===========================================================================
+
 
 class TestRemoveToolFromGroup:
     """Tests for GroupToolService.remove_tool_from_group."""

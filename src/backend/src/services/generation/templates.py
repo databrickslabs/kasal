@@ -5,21 +5,24 @@ This module provides business logic for generating agent templates
 using LLM models and prompt templates.
 """
 
-import logging
 import json
+import logging
 import traceback
-
 from typing import Optional
 
+from src.schemas.template_generation import (
+    TemplateGenerationRequest,
+    TemplateGenerationResponse,
+)
 from src.services.catalog.templates import TemplateService
-from src.schemas.template_generation import TemplateGenerationRequest, TemplateGenerationResponse
 from src.services.execution.logs.llm_log_service import LLMLogService
-from src.utils.prompt_utils import robust_json_parser
 from src.services.llm.manager import LLMManager
 from src.services.settings.models import ModelConfigService
+from src.utils.prompt_utils import robust_json_parser
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
 
 class TemplateGenerationService:
     """Service for template generation operations."""
@@ -43,13 +46,19 @@ class TemplateGenerationService:
         self.session = session
         self.group_id = group_id  # SECURITY: Store for multi-tenant API key operations
         self.log_service = LLMLogService(session)
-    
-    
-    async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str, 
-                                  status: str = 'success', error_message: Optional[str] = None) -> None:
+
+    async def _log_llm_interaction(
+        self,
+        endpoint: str,
+        prompt: str,
+        response: str,
+        model: str,
+        status: str = "success",
+        error_message: Optional[str] = None,
+    ) -> None:
         """
         Log LLM interaction using the log service.
-        
+
         Args:
             endpoint: API endpoint name
             prompt: Input prompt
@@ -65,23 +74,25 @@ class TemplateGenerationService:
                 response=response,
                 model=model,
                 status=status,
-                error_message=error_message
+                error_message=error_message,
             )
             logger.info(f"Logged {endpoint} interaction to database")
         except Exception as e:
             logger.error(f"Failed to log LLM interaction: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
-    
-    async def generate_templates(self, request: TemplateGenerationRequest) -> TemplateGenerationResponse:
+
+    async def generate_templates(
+        self, request: TemplateGenerationRequest
+    ) -> TemplateGenerationResponse:
         """
         Generate templates for an agent based on role, goal, and backstory.
-        
+
         Args:
             request: Template generation request with role, goal, backstory, and model
-            
+
         Returns:
             TemplateGenerationResponse with system, prompt, and response templates
-            
+
         Raises:
             ValueError: If required prompt template is not found
             ValueError: If response is missing required fields
@@ -90,26 +101,34 @@ class TemplateGenerationService:
         try:
             # Get model configuration from database using ModelConfigService
             # SECURITY: Pass group_id for multi-tenant isolation
-            model_config_service = ModelConfigService(self.session, group_id=self.group_id)
+            model_config_service = ModelConfigService(
+                self.session, group_id=self.group_id
+            )
             model_config = await model_config_service.get_model_config(request.model)
-            
+
             # Check if model configuration was found
             if not model_config:
                 raise ValueError(f"Model {request.model} not found in the database")
-                
+
             logger.info(f"Using model for template generation: {model_config['name']}")
-            
+
             # Get prompt template from database
             template_service = TemplateService(self.session)
-            system_message = await template_service.get_template_content("generate_templates")
-            
+            system_message = await template_service.get_template_content(
+                "generate_templates"
+            )
+
             # Check if we have a prompt template
             if not system_message:
-                logger.error("No prompt template found in database for generate_templates")
-                raise ValueError("Required prompt template 'generate_templates' not found in database")
-            
+                logger.error(
+                    "No prompt template found in database for generate_templates"
+                )
+                raise ValueError(
+                    "Required prompt template 'generate_templates' not found in database"
+                )
+
             logger.info("Using prompt template for generate_templates from database")
-            
+
             # Create the user prompt with agent details
             user_prompt = f"""Create templates for an AI agent with:
             Role: {request.role}
@@ -117,22 +136,25 @@ class TemplateGenerationService:
             Backstory: {request.backstory}
             
             Generate all three templates following CrewAI and LangChain best practices."""
-            
+
             # Prepare messages for LLM
             messages = [
                 {"role": "system", "content": system_message},
-                {"role": "user", "content": user_prompt}
+                {"role": "user", "content": user_prompt},
             ]
-            
+
             try:
                 # Generate completion via unified LLMManager.completion()
-                from src.utils.telemetry import get_user_agent_header, KasalProduct
+                from src.utils.telemetry import KasalProduct, get_user_agent_header
+
                 content = await LLMManager.completion(
                     messages=messages,
                     model=model_config["name"],
                     temperature=0.7,
                     max_tokens=4000,
-                    extra_headers=get_user_agent_header(KasalProduct.TEMPLATE_GENERATION)
+                    extra_headers=get_user_agent_header(
+                        KasalProduct.TEMPLATE_GENERATION
+                    ),
                 )
 
                 logger.info(f"Generated templates successfully")
@@ -140,10 +162,10 @@ class TemplateGenerationService:
 
                 # Log the successful interaction
                 await self._log_llm_interaction(
-                    endpoint='generate-templates',
+                    endpoint="generate-templates",
                     prompt=f"System: {system_message}\nUser: {user_prompt}",
                     response=content,
-                    model=model_config["name"]
+                    model=model_config["name"],
                 )
             except Exception as e:
                 error_msg = f"Error generating completion: {str(e)}"
@@ -151,38 +173,44 @@ class TemplateGenerationService:
 
                 # Log the error interaction
                 await self._log_llm_interaction(
-                    endpoint='generate-templates',
+                    endpoint="generate-templates",
                     prompt=f"System: {system_message}\nUser: {user_prompt}",
                     response=str(e),
                     model=model_config["name"],
-                    status='error',
-                    error_message=error_msg
+                    status="error",
+                    error_message=error_msg,
                 )
 
                 raise ValueError(f"Failed to generate templates: {str(e)}")
-            
+
             # Parse the response as JSON using robust parser
             templates = robust_json_parser(content)
-            
+
             # Normalize the field names to lowercase if needed
             normalized_templates = {
-                "system_template": templates.get("system_template") or templates.get("System Template") or templates.get("System_Template"),
-                "prompt_template": templates.get("prompt_template") or templates.get("Prompt Template") or templates.get("Prompt_Template"),
-                "response_template": templates.get("response_template") or templates.get("Response Template") or templates.get("Response_Template")
+                "system_template": templates.get("system_template")
+                or templates.get("System Template")
+                or templates.get("System_Template"),
+                "prompt_template": templates.get("prompt_template")
+                or templates.get("Prompt Template")
+                or templates.get("Prompt_Template"),
+                "response_template": templates.get("response_template")
+                or templates.get("Response Template")
+                or templates.get("Response_Template"),
             }
-            
+
             # Validate that all required fields are present and non-empty
             for field, value in normalized_templates.items():
                 if not value:
                     raise ValueError(f"Missing or empty required field: {field}")
-            
+
             # Create response object from normalized templates
             response = TemplateGenerationResponse(**normalized_templates)
             return response
-            
+
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse AI response as JSON: {str(e)}")
             raise ValueError("Failed to parse AI response as JSON")
         except Exception as e:
             logger.error(f"Error generating templates: {str(e)}")
-            raise 
+            raise

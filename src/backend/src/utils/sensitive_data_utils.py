@@ -16,27 +16,27 @@ logger = logging.getLogger(__name__)
 
 # Sensitive key patterns - any key containing these substrings will be treated as sensitive
 SENSITIVE_KEY_PATTERNS: Set[str] = {
-    'secret',
-    'password',
-    'token',
-    'api_key',
-    'apikey',
-    'credential',
-    'private_key',
-    'privatekey',
-    'auth_token',
-    'access_token',
-    'refresh_token',
-    'bearer',
+    "secret",
+    "password",
+    "token",
+    "api_key",
+    "apikey",
+    "credential",
+    "private_key",
+    "privatekey",
+    "auth_token",
+    "access_token",
+    "refresh_token",
+    "bearer",
 }
 
 # Exact key matches that should always be treated as sensitive
 SENSITIVE_EXACT_KEYS: Set[str] = {
-    'powerbi_client_secret',
-    'client_secret',
-    'databricks_token',
-    'openai_api_key',
-    'anthropic_api_key',
+    "powerbi_client_secret",
+    "client_secret",
+    "databricks_token",
+    "openai_api_key",
+    "anthropic_api_key",
 }
 
 # Prefix used to identify encrypted values
@@ -49,13 +49,13 @@ REDACTED_PLACEHOLDER = "***REDACTED***"
 # Matched as case-insensitive substrings so e.g. "X-Forwarded-Access-Token"
 # and "X-Auth-Request-Access-Token" are caught by "token".
 SENSITIVE_HEADER_PATTERNS: Set[str] = {
-    'authorization',
-    'cookie',
-    'token',
-    'api-key',
-    'apikey',
-    'secret',
-    'x-databricks',
+    "authorization",
+    "cookie",
+    "token",
+    "api-key",
+    "apikey",
+    "secret",
+    "x-databricks",
 }
 
 
@@ -138,7 +138,7 @@ def decrypt_value(encrypted_value: str) -> str:
 
     try:
         # Remove the prefix before decryption
-        encrypted_data = encrypted_value[len(ENCRYPTED_PREFIX):]
+        encrypted_data = encrypted_value[len(ENCRYPTED_PREFIX) :]
         return EncryptionUtils.decrypt_value(encrypted_data)
     except Exception as e:
         # Almost always a KEY MISMATCH: the value was encrypted with a different
@@ -154,7 +154,9 @@ def decrypt_value(encrypted_value: str) -> str:
         return ""
 
 
-def encrypt_sensitive_fields(data: Dict[str, Any], recursive: bool = True) -> Dict[str, Any]:
+def encrypt_sensitive_fields(
+    data: Dict[str, Any], recursive: bool = True
+) -> Dict[str, Any]:
     """
     Encrypt sensitive fields in a dictionary (e.g., tool_configs).
 
@@ -191,7 +193,9 @@ def encrypt_sensitive_fields(data: Dict[str, Any], recursive: bool = True) -> Di
     return result
 
 
-def decrypt_sensitive_fields(data: Dict[str, Any], recursive: bool = True) -> Dict[str, Any]:
+def decrypt_sensitive_fields(
+    data: Dict[str, Any], recursive: bool = True
+) -> Dict[str, Any]:
     """
     Decrypt sensitive fields in a dictionary (e.g., tool_configs).
 
@@ -234,7 +238,9 @@ def decrypt_sensitive_fields(data: Dict[str, Any], recursive: bool = True) -> Di
     return result
 
 
-def mask_sensitive_fields(data: Dict[str, Any], recursive: bool = True) -> Dict[str, Any]:
+def mask_sensitive_fields(
+    data: Dict[str, Any], recursive: bool = True
+) -> Dict[str, Any]:
     """
     Mask sensitive fields in a dictionary for logging or API responses.
 
@@ -257,7 +263,11 @@ def mask_sensitive_fields(data: Dict[str, Any], recursive: bool = True) -> Dict[
         elif isinstance(value, list) and recursive:
             # Process lists that may contain dictionaries
             result[key] = [
-                mask_sensitive_fields(item, recursive=True) if isinstance(item, dict) else item
+                (
+                    mask_sensitive_fields(item, recursive=True)
+                    if isinstance(item, dict)
+                    else item
+                )
                 for item in value
             ]
         elif is_sensitive_key(key) and value:
@@ -320,27 +330,34 @@ def mask_sensitive_string(text: str) -> str:
     def mask_key_value(m: Match[str]) -> str:
         """Mask values in key=value or key:value format."""
         matched = m.group(0)
-        if '=' in matched:
-            return matched.split('=')[0] + '=' + REDACTED_PLACEHOLDER
-        return matched.split(':')[0] + ':' + REDACTED_PLACEHOLDER
+        if "=" in matched:
+            return matched.split("=")[0] + "=" + REDACTED_PLACEHOLDER
+        return matched.split(":")[0] + ":" + REDACTED_PLACEHOLDER
 
     result = text
     # Mask Bearer tokens
-    result = re.sub(r'Bearer\s+[A-Za-z0-9\-_\.]+', 'Bearer ***REDACTED***', result, flags=re.IGNORECASE)
+    result = re.sub(
+        r"Bearer\s+[A-Za-z0-9\-_\.]+",
+        "Bearer ***REDACTED***",
+        result,
+        flags=re.IGNORECASE,
+    )
     # Mask API keys (common formats - 32+ character strings)
-    result = re.sub(r'[A-Za-z0-9]{32,}', mask_long_string, result)
+    result = re.sub(r"[A-Za-z0-9]{32,}", mask_long_string, result)
     # Mask secrets in key=value format
     result = re.sub(
         r'(secret|password|token|api_key|apikey|credential)["\']?\s*[:=]\s*["\']?[^"\'\s,}]+',
         mask_key_value,
         result,
-        flags=re.IGNORECASE
+        flags=re.IGNORECASE,
     )
 
     return result
 
 
-def safe_log_tool_configs(tool_configs: Optional[Dict[str, Any]], prefix: str = "") -> str:
+def safe_log_tool_configs(
+    tool_configs: Optional[Dict[str, Any]], prefix: str = ""
+) -> str:
     """
     Create a safe string representation of tool_configs for logging.
 

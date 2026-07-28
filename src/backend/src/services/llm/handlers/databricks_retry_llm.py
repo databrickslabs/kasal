@@ -13,9 +13,10 @@ import concurrent.futures
 import re
 import time as _time_mod
 from typing import Any, ClassVar, Dict, List, Optional, Union
-from src.core.llm.transport import LLM
-from src.core.llm.transport import LLMContextLengthExceededError
+
 import litellm
+
+from src.core.llm.transport import LLM, LLMContextLengthExceededError
 
 # Use centralized logger
 from src.core.logger import get_logger
@@ -208,7 +209,9 @@ class DatabricksRetryLLM(LLM):
 
     def _current_model_key(self) -> str:
         """The bare model key (no provider prefix) for the model in use."""
-        return str(getattr(self, "model", "") or self._original_model_name).split("/")[-1]
+        return str(getattr(self, "model", "") or self._original_model_name).split("/")[
+            -1
+        ]
 
     # ---- model fallback -------------------------------------------------
 
@@ -238,7 +241,9 @@ class DatabricksRetryLLM(LLM):
         try:
             from src.core.llm.transport import LLM_CONTEXT_WINDOW_SIZES
 
-            current_window = LLM_CONTEXT_WINDOW_SIZES.get(getattr(self, "model", ""), 0) or 0
+            current_window = (
+                LLM_CONTEXT_WINDOW_SIZES.get(getattr(self, "model", ""), 0) or 0
+            )
         except Exception:
             pass
         return select_fallback(
@@ -474,6 +479,7 @@ class DatabricksRetryLLM(LLM):
         crew_log = self._get_crew_logger()
         try:
             import asyncio
+
             from src.utils.databricks_auth import get_auth_context
 
             # get_auth_context is async; run it in a new event loop if needed
@@ -753,10 +759,14 @@ class DatabricksRetryLLM(LLM):
         # Bounded cascade: try successive candidates until one answers or none remain.
         max_hops = 4
         for _ in range(max_hops):
-            candidate = self._select_fallback(self._ensure_fallback_candidates(), reason)
+            candidate = self._select_fallback(
+                self._ensure_fallback_candidates(), reason
+            )
             if candidate is None:
                 return _NO_FALLBACK
-            self._tried_models.add(candidate.name)  # mark tried BEFORE call, so a failing one is skipped next hop
+            self._tried_models.add(
+                candidate.name
+            )  # mark tried BEFORE call, so a failing one is skipped next hop
             fallback_llm = self._build_fallback_llm(candidate)
             if fallback_llm is None:
                 continue
@@ -776,6 +786,7 @@ class DatabricksRetryLLM(LLM):
                     ENDPOINT_MISSING,
                     mark_endpoint_missing,
                 )
+
                 if fb_reason == ENDPOINT_MISSING:
                     # This model has no serving endpoint here — remember it so it's
                     # never offered again (this run or later), preventing the
@@ -798,7 +809,9 @@ class DatabricksRetryLLM(LLM):
             return _NO_FALLBACK
         max_hops = 4
         for _ in range(max_hops):
-            candidate = self._select_fallback(self._ensure_fallback_candidates(), reason)
+            candidate = self._select_fallback(
+                self._ensure_fallback_candidates(), reason
+            )
             if candidate is None:
                 return _NO_FALLBACK
             self._tried_models.add(candidate.name)  # mark tried BEFORE call
@@ -821,6 +834,7 @@ class DatabricksRetryLLM(LLM):
                     ENDPOINT_MISSING,
                     mark_endpoint_missing,
                 )
+
                 if fb_reason == ENDPOINT_MISSING:
                     mark_endpoint_missing(candidate.name)
                 self._get_crew_logger().warning(
@@ -899,7 +913,9 @@ class DatabricksRetryLLM(LLM):
         # one is supported) and $defs/$ref in tool schemas (rejected). Applying them
         # on the path the request actually takes is both the fix and the reason the
         # patch could be deleted.
-        _merge_system_messages_for_gemini(fixed_messages, str(getattr(self, "model", "")))
+        _merge_system_messages_for_gemini(
+            fixed_messages, str(getattr(self, "model", ""))
+        )
         if tools and isinstance(tools, list):
             _sanitize_tools_for_gemini(tools, str(getattr(self, "model", "")))
         msg_count = len(fixed_messages) if isinstance(fixed_messages, list) else 1
@@ -1153,7 +1169,6 @@ class DatabricksRetryLLM(LLM):
 # kasal_engine: its completions loop executes tool_calls whenever they are
 # present, even when the response also carries content text
 # (see src.core.llm.transport.completion.OpenAICompletion._call_completions_api).
-
 
 
 def _resolve_schema_refs(schema):

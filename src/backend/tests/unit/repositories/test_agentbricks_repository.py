@@ -3,22 +3,22 @@ Unit tests for AgentBricks repository.
 """
 
 import asyncio
-
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import httpx
+import pytest
 
 from src.repositories.agentbricks_repository import AgentBricksRepository
 from src.schemas.agentbricks import (
+    AgentBricksAuthConfig,
     AgentBricksEndpoint,
     AgentBricksEndpointsRequest,
     AgentBricksEndpointsResponse,
-    AgentBricksQueryRequest,
-    AgentBricksQueryResponse,
     AgentBricksExecutionRequest,
     AgentBricksExecutionResponse,
-    AgentBricksAuthConfig,
     AgentBricksMessage,
+    AgentBricksQueryRequest,
+    AgentBricksQueryResponse,
     AgentBricksQueryStatus,
 )
 
@@ -36,8 +36,7 @@ class TestAgentBricksRepositoryInit:
     def test_init_with_auth_config(self):
         """Test repository initialization with auth config."""
         auth_config = AgentBricksAuthConfig(
-            use_obo=True,
-            host="https://workspace.databricks.com"
+            use_obo=True, host="https://workspace.databricks.com"
         )
         repo = AgentBricksRepository(auth_config=auth_config)
         assert repo.auth_config == auth_config
@@ -60,9 +59,7 @@ class TestGetHost:
     @pytest.mark.asyncio
     async def test_get_host_from_config(self):
         """Test getting host from auth config."""
-        auth_config = AgentBricksAuthConfig(
-            host="https://workspace.databricks.com"
-        )
+        auth_config = AgentBricksAuthConfig(host="https://workspace.databricks.com")
         repo = AgentBricksRepository(auth_config=auth_config)
 
         host = await repo._get_host()
@@ -84,7 +81,10 @@ class TestGetHost:
         mock_auth = MagicMock()
         mock_auth.workspace_url = "https://auth-context.databricks.com"
 
-        with patch('src.repositories.agentbricks_repository.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with patch(
+            "src.repositories.agentbricks_repository.get_auth_context",
+            new_callable=AsyncMock,
+        ) as mock_get_auth:
             mock_get_auth.return_value = mock_auth
 
             host = await repo._get_host()
@@ -100,11 +100,16 @@ class TestGetHost:
         mock_sdk_config = MagicMock()
         mock_sdk_config.host = "https://sdk-host.databricks.com"
 
-        with patch('src.repositories.agentbricks_repository.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with patch(
+            "src.repositories.agentbricks_repository.get_auth_context",
+            new_callable=AsyncMock,
+        ) as mock_get_auth:
             mock_get_auth.return_value = mock_auth
 
-            with patch.dict('sys.modules', {'databricks.sdk.config': MagicMock()}):
-                with patch('databricks.sdk.config.Config', return_value=mock_sdk_config):
+            with patch.dict("sys.modules", {"databricks.sdk.config": MagicMock()}):
+                with patch(
+                    "databricks.sdk.config.Config", return_value=mock_sdk_config
+                ):
                     host = await repo._get_host()
 
                     assert host == "sdk-host.databricks.com"
@@ -117,17 +122,32 @@ class TestGetHost:
 
         mock_db_auth = MagicMock()
         mock_db_auth._load_config = AsyncMock()
-        mock_db_auth.get_workspace_host.return_value = "https://dbauth-host.databricks.com"
+        mock_db_auth.get_workspace_host.return_value = (
+            "https://dbauth-host.databricks.com"
+        )
 
-        with patch('src.repositories.agentbricks_repository.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with patch(
+            "src.repositories.agentbricks_repository.get_auth_context",
+            new_callable=AsyncMock,
+        ) as mock_get_auth:
             mock_get_auth.return_value = mock_auth
 
-            with patch.dict('sys.modules', {'databricks': MagicMock(), 'databricks.sdk': MagicMock(), 'databricks.sdk.config': MagicMock()}):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "databricks": MagicMock(),
+                    "databricks.sdk": MagicMock(),
+                    "databricks.sdk.config": MagicMock(),
+                },
+            ):
                 import sys
-                sdk_config_mod = sys.modules['databricks.sdk.config']
-                sdk_config_mod.Config = MagicMock(side_effect=Exception("SDK not available"))
 
-                with patch('src.utils.databricks_auth._databricks_auth', mock_db_auth):
+                sdk_config_mod = sys.modules["databricks.sdk.config"]
+                sdk_config_mod.Config = MagicMock(
+                    side_effect=Exception("SDK not available")
+                )
+
+                with patch("src.utils.databricks_auth._databricks_auth", mock_db_auth):
                     host = await repo._get_host()
 
                     assert host == "dbauth-host.databricks.com"
@@ -143,17 +163,30 @@ class TestGetHost:
 
         mock_db_auth = MagicMock()
         mock_db_auth._load_config = AsyncMock()
-        mock_db_auth.get_workspace_host.return_value = "https://dbauth-host.databricks.com"
+        mock_db_auth.get_workspace_host.return_value = (
+            "https://dbauth-host.databricks.com"
+        )
 
-        with patch('src.repositories.agentbricks_repository.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with patch(
+            "src.repositories.agentbricks_repository.get_auth_context",
+            new_callable=AsyncMock,
+        ) as mock_get_auth:
             mock_get_auth.return_value = mock_auth
 
-            with patch.dict('sys.modules', {'databricks': MagicMock(), 'databricks.sdk': MagicMock(), 'databricks.sdk.config': MagicMock()}):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "databricks": MagicMock(),
+                    "databricks.sdk": MagicMock(),
+                    "databricks.sdk.config": MagicMock(),
+                },
+            ):
                 import sys
-                sdk_config_mod = sys.modules['databricks.sdk.config']
+
+                sdk_config_mod = sys.modules["databricks.sdk.config"]
                 sdk_config_mod.Config = MagicMock(return_value=mock_sdk_config)
 
-                with patch('src.utils.databricks_auth._databricks_auth', mock_db_auth):
+                with patch("src.utils.databricks_auth._databricks_auth", mock_db_auth):
                     host = await repo._get_host()
 
                     assert host == "dbauth-host.databricks.com"
@@ -164,18 +197,33 @@ class TestGetHost:
         mock_auth = MagicMock()
         mock_auth.workspace_url = None
 
-        with patch('src.repositories.agentbricks_repository.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with patch(
+            "src.repositories.agentbricks_repository.get_auth_context",
+            new_callable=AsyncMock,
+        ) as mock_get_auth:
             mock_get_auth.return_value = mock_auth
 
-            with patch.dict('sys.modules', {'databricks': MagicMock(), 'databricks.sdk': MagicMock(), 'databricks.sdk.config': MagicMock()}):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "databricks": MagicMock(),
+                    "databricks.sdk": MagicMock(),
+                    "databricks.sdk.config": MagicMock(),
+                },
+            ):
                 import sys
-                sdk_config_mod = sys.modules['databricks.sdk.config']
-                sdk_config_mod.Config = MagicMock(side_effect=Exception("SDK not available"))
+
+                sdk_config_mod = sys.modules["databricks.sdk.config"]
+                sdk_config_mod.Config = MagicMock(
+                    side_effect=Exception("SDK not available")
+                )
 
                 mock_db_auth = MagicMock()
-                mock_db_auth._load_config = AsyncMock(side_effect=Exception("databricks_auth not available"))
+                mock_db_auth._load_config = AsyncMock(
+                    side_effect=Exception("databricks_auth not available")
+                )
 
-                with patch('src.utils.databricks_auth._databricks_auth', mock_db_auth):
+                with patch("src.utils.databricks_auth._databricks_auth", mock_db_auth):
                     host = await repo._get_host()
 
                     # Falls back to the default host
@@ -194,15 +242,26 @@ class TestGetHost:
         mock_db_auth._load_config = AsyncMock()
         mock_db_auth.get_workspace_host.return_value = None
 
-        with patch('src.repositories.agentbricks_repository.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with patch(
+            "src.repositories.agentbricks_repository.get_auth_context",
+            new_callable=AsyncMock,
+        ) as mock_get_auth:
             mock_get_auth.return_value = mock_auth
 
-            with patch.dict('sys.modules', {'databricks': MagicMock(), 'databricks.sdk': MagicMock(), 'databricks.sdk.config': MagicMock()}):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "databricks": MagicMock(),
+                    "databricks.sdk": MagicMock(),
+                    "databricks.sdk.config": MagicMock(),
+                },
+            ):
                 import sys
-                sdk_config_mod = sys.modules['databricks.sdk.config']
+
+                sdk_config_mod = sys.modules["databricks.sdk.config"]
                 sdk_config_mod.Config = MagicMock(return_value=mock_sdk_config)
 
-                with patch('src.utils.databricks_auth._databricks_auth', mock_db_auth):
+                with patch("src.utils.databricks_auth._databricks_auth", mock_db_auth):
                     host = await repo._get_host()
 
                     assert host == "your-workspace.cloud.databricks.com"
@@ -213,7 +272,10 @@ class TestGetHost:
         mock_auth = MagicMock()
         mock_auth.workspace_url = "https://workspace.databricks.com/"
 
-        with patch('src.repositories.agentbricks_repository.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with patch(
+            "src.repositories.agentbricks_repository.get_auth_context",
+            new_callable=AsyncMock,
+        ) as mock_get_auth:
             mock_get_auth.return_value = mock_auth
 
             host = await repo._get_host()
@@ -236,7 +298,10 @@ class TestGetAuthHeaders:
         mock_auth = MagicMock()
         mock_auth.get_headers.return_value = {"Authorization": "Bearer token123"}
 
-        with patch('src.repositories.agentbricks_repository.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with patch(
+            "src.repositories.agentbricks_repository.get_auth_context",
+            new_callable=AsyncMock,
+        ) as mock_get_auth:
             mock_get_auth.return_value = mock_auth
 
             headers, error = await repo._get_auth_headers()
@@ -248,16 +313,16 @@ class TestGetAuthHeaders:
     @pytest.mark.asyncio
     async def test_get_auth_headers_with_user_token(self):
         """Test auth headers with user token for OBO."""
-        auth_config = AgentBricksAuthConfig(
-            use_obo=True,
-            user_token="user-token-123"
-        )
+        auth_config = AgentBricksAuthConfig(use_obo=True, user_token="user-token-123")
         repo = AgentBricksRepository(auth_config=auth_config)
 
         mock_auth = MagicMock()
         mock_auth.get_headers.return_value = {"Authorization": "Bearer obo-token"}
 
-        with patch('src.repositories.agentbricks_repository.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with patch(
+            "src.repositories.agentbricks_repository.get_auth_context",
+            new_callable=AsyncMock,
+        ) as mock_get_auth:
             mock_get_auth.return_value = mock_auth
 
             headers, error = await repo._get_auth_headers()
@@ -268,7 +333,10 @@ class TestGetAuthHeaders:
     @pytest.mark.asyncio
     async def test_get_auth_headers_no_auth(self, repo):
         """Test when no authentication is available."""
-        with patch('src.repositories.agentbricks_repository.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with patch(
+            "src.repositories.agentbricks_repository.get_auth_context",
+            new_callable=AsyncMock,
+        ) as mock_get_auth:
             mock_get_auth.return_value = None
 
             headers, error = await repo._get_auth_headers()
@@ -279,7 +347,10 @@ class TestGetAuthHeaders:
     @pytest.mark.asyncio
     async def test_get_auth_headers_exception(self, repo):
         """Test handling exceptions in auth header retrieval."""
-        with patch('src.repositories.agentbricks_repository.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with patch(
+            "src.repositories.agentbricks_repository.get_auth_context",
+            new_callable=AsyncMock,
+        ) as mock_get_auth:
             mock_get_auth.side_effect = Exception("Auth error")
 
             headers, error = await repo._get_auth_headers()
@@ -325,18 +396,12 @@ class TestIsAgentBricksEndpoint:
 
     def test_is_agentbricks_endpoint_by_name(self, repo):
         """Test detection by endpoint name."""
-        endpoint_data = {
-            "name": "mas-agent-endpoint",
-            "config": {}
-        }
+        endpoint_data = {"name": "mas-agent-endpoint", "config": {}}
         assert repo._is_agentbricks_endpoint(endpoint_data) is True
 
     def test_is_agentbricks_endpoint_by_agent_name(self, repo):
         """Test detection by 'agent' in name."""
-        endpoint_data = {
-            "name": "my-agent-service",
-            "config": {}
-        }
+        endpoint_data = {"name": "my-agent-service", "config": {}}
         assert repo._is_agentbricks_endpoint(endpoint_data) is True
 
     def test_is_agentbricks_endpoint_by_tag(self, repo):
@@ -344,7 +409,7 @@ class TestIsAgentBricksEndpoint:
         endpoint_data = {
             "name": "some-endpoint",
             "tags": [{"key": "type", "value": "agentbricks"}],
-            "config": {}
+            "config": {},
         }
         assert repo._is_agentbricks_endpoint(endpoint_data) is True
 
@@ -352,11 +417,7 @@ class TestIsAgentBricksEndpoint:
         """Test detection by external model in config."""
         endpoint_data = {
             "name": "some-endpoint",
-            "config": {
-                "served_entities": [
-                    {"external_model": {"name": "gpt-4"}}
-                ]
-            }
+            "config": {"served_entities": [{"external_model": {"name": "gpt-4"}}]},
         }
         assert repo._is_agentbricks_endpoint(endpoint_data) is True
 
@@ -365,10 +426,8 @@ class TestIsAgentBricksEndpoint:
         endpoint_data = {
             "name": "regular-model-serving",
             "config": {
-                "served_entities": [
-                    {"model_name": "some-model", "model_version": "1"}
-                ]
-            }
+                "served_entities": [{"model_name": "some-model", "model_version": "1"}]
+            },
         }
         assert repo._is_agentbricks_endpoint(endpoint_data) is False
 
@@ -378,12 +437,9 @@ class TestIsAgentBricksEndpoint:
             "name": "some-endpoint",
             "config": {
                 "served_entities": [
-                    {
-                        "foundation_model_name": "llama-2-70b",
-                        "workload_size": "Small"
-                    }
+                    {"foundation_model_name": "llama-2-70b", "workload_size": "Small"}
                 ]
-            }
+            },
         }
         assert repo._is_agentbricks_endpoint(endpoint_data) is True
 
@@ -391,13 +447,7 @@ class TestIsAgentBricksEndpoint:
         """Test that foundation_model_name without workload_size does not match."""
         endpoint_data = {
             "name": "some-endpoint",
-            "config": {
-                "served_entities": [
-                    {
-                        "foundation_model_name": "llama-2-70b"
-                    }
-                ]
-            }
+            "config": {"served_entities": [{"foundation_model_name": "llama-2-70b"}]},
         }
         # No workload_size, no external_model, name does not match patterns
         assert repo._is_agentbricks_endpoint(endpoint_data) is False
@@ -407,7 +457,7 @@ class TestIsAgentBricksEndpoint:
         endpoint_data = {
             "name": "some-endpoint",
             "tags": [{"key": "agent-type", "value": "custom"}],
-            "config": {}
+            "config": {},
         }
         assert repo._is_agentbricks_endpoint(endpoint_data) is True
 
@@ -416,7 +466,7 @@ class TestIsAgentBricksEndpoint:
         endpoint_data = {
             "name": "some-endpoint",
             "tags": [{"key": "mosaic-service", "value": "something"}],
-            "config": {}
+            "config": {},
         }
         assert repo._is_agentbricks_endpoint(endpoint_data) is True
 
@@ -469,19 +519,26 @@ class TestGetEndpoints:
                     "id": "ep-1",
                     "name": "agent-endpoint",
                     "state": {"ready": "READY"},
-                    "config": {}
+                    "config": {},
                 }
             ]
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_get_host', new_callable=AsyncMock) as mock_host:
+            with patch.object(repo, "_get_host", new_callable=AsyncMock) as mock_host:
                 mock_host.return_value = "workspace.databricks.com"
 
-                with patch.object(repo._client, 'get', new_callable=AsyncMock, return_value=mock_response) as mock_get:
+                with patch.object(
+                    repo._client,
+                    "get",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ) as mock_get:
                     request = AgentBricksEndpointsRequest()
                     result = await repo.get_endpoints(request)
 
@@ -499,29 +556,55 @@ class TestGetEndpoints:
         serving_resp.raise_for_status = MagicMock()
         serving_resp.json.return_value = {
             "endpoints": [
-                {"id": "e1", "name": "mas-81a3c6bb-endpoint", "state": {"ready": "READY"}, "config": {}}
+                {
+                    "id": "e1",
+                    "name": "mas-81a3c6bb-endpoint",
+                    "state": {"ready": "READY"},
+                    "config": {},
+                }
             ]
         }
         tiles_resp = MagicMock()
         tiles_resp.status_code = 200
         tiles_resp.json.return_value = {
             "tiles": [
-                {"serving_endpoint_name": "mas-81a3c6bb-endpoint",
-                 "name": "supervisor-agent-2026-06-21-21-25-55"}
+                {
+                    "serving_endpoint_name": "mas-81a3c6bb-endpoint",
+                    "name": "supervisor-agent-2026-06-21-21-25-55",
+                }
             ]
         }
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock,
-                          return_value=({"Authorization": "Bearer t"}, None)), \
-             patch.object(repo, '_get_host', new_callable=AsyncMock, return_value="ws.databricks.com"), \
-             patch.object(repo._client, 'get', new_callable=AsyncMock,
-                          side_effect=[serving_resp, tiles_resp]):
-            result = await repo.get_endpoints(AgentBricksEndpointsRequest(ready_only=False))
+        with (
+            patch.object(
+                repo,
+                "_get_auth_headers",
+                new_callable=AsyncMock,
+                return_value=({"Authorization": "Bearer t"}, None),
+            ),
+            patch.object(
+                repo,
+                "_get_host",
+                new_callable=AsyncMock,
+                return_value="ws.databricks.com",
+            ),
+            patch.object(
+                repo._client,
+                "get",
+                new_callable=AsyncMock,
+                side_effect=[serving_resp, tiles_resp],
+            ),
+        ):
+            result = await repo.get_endpoints(
+                AgentBricksEndpointsRequest(ready_only=False)
+            )
 
         assert len(result.endpoints) == 1
         ep = result.endpoints[0]
-        assert ep.name == "mas-81a3c6bb-endpoint"            # execution identifier unchanged
-        assert ep.display_name == "supervisor-agent-2026-06-21-21-25-55"  # friendly name for UI
+        assert ep.name == "mas-81a3c6bb-endpoint"  # execution identifier unchanged
+        assert (
+            ep.display_name == "supervisor-agent-2026-06-21-21-25-55"
+        )  # friendly name for UI
 
     @pytest.mark.asyncio
     async def test_get_endpoints_display_name_none_when_no_matching_tile(self, repo):
@@ -530,25 +613,51 @@ class TestGetEndpoints:
         serving_resp.status_code = 200
         serving_resp.raise_for_status = MagicMock()
         serving_resp.json.return_value = {
-            "endpoints": [{"id": "e1", "name": "mas-zzz-endpoint", "state": {"ready": "READY"}, "config": {}}]
+            "endpoints": [
+                {
+                    "id": "e1",
+                    "name": "mas-zzz-endpoint",
+                    "state": {"ready": "READY"},
+                    "config": {},
+                }
+            ]
         }
         tiles_resp = MagicMock()
         tiles_resp.status_code = 404  # older workspace without the tiles API
         tiles_resp.json.return_value = {}
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock,
-                          return_value=({"Authorization": "Bearer t"}, None)), \
-             patch.object(repo, '_get_host', new_callable=AsyncMock, return_value="ws.databricks.com"), \
-             patch.object(repo._client, 'get', new_callable=AsyncMock,
-                          side_effect=[serving_resp, tiles_resp]):
-            result = await repo.get_endpoints(AgentBricksEndpointsRequest(ready_only=False))
+        with (
+            patch.object(
+                repo,
+                "_get_auth_headers",
+                new_callable=AsyncMock,
+                return_value=({"Authorization": "Bearer t"}, None),
+            ),
+            patch.object(
+                repo,
+                "_get_host",
+                new_callable=AsyncMock,
+                return_value="ws.databricks.com",
+            ),
+            patch.object(
+                repo._client,
+                "get",
+                new_callable=AsyncMock,
+                side_effect=[serving_resp, tiles_resp],
+            ),
+        ):
+            result = await repo.get_endpoints(
+                AgentBricksEndpointsRequest(ready_only=False)
+            )
 
         assert result.endpoints[0].display_name is None
 
     @pytest.mark.asyncio
     async def test_get_endpoints_auth_failure(self, repo):
         """Test handling auth failure."""
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = (None, "Authentication failed")
 
             request = AgentBricksEndpointsRequest()
@@ -563,13 +672,20 @@ class TestGetEndpoints:
         mock_response.status_code = 403
         mock_response.text = "Forbidden"
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_get_host', new_callable=AsyncMock) as mock_host:
+            with patch.object(repo, "_get_host", new_callable=AsyncMock) as mock_host:
                 mock_host.return_value = "workspace.databricks.com"
 
-                with patch.object(repo._client, 'get', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "get",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     request = AgentBricksEndpointsRequest()
                     result = await repo.get_endpoints(request)
 
@@ -587,31 +703,40 @@ class TestGetEndpoints:
                     "id": "ep-1",
                     "name": "mas-agent-1",
                     "state": {"ready": "READY"},
-                    "creator": "user@example.com"
+                    "creator": "user@example.com",
                 },
                 {
                     "id": "ep-2",
                     "name": "mas-agent-2",
                     "state": {"ready": "NOT_READY"},
-                    "creator": "other@example.com"
-                }
+                    "creator": "other@example.com",
+                },
             ]
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_get_host', new_callable=AsyncMock) as mock_host:
+            with patch.object(repo, "_get_host", new_callable=AsyncMock) as mock_host:
                 mock_host.return_value = "workspace.databricks.com"
 
-                with patch.object(repo._client, 'get', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "get",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     # Test filtering by ready_only
                     request = AgentBricksEndpointsRequest(ready_only=True)
                     result = await repo.get_endpoints(request)
 
                     # Only ready endpoints should be returned
-                    ready_endpoints = [ep for ep in result.endpoints if ep.state == "READY"]
+                    ready_endpoints = [
+                        ep for ep in result.endpoints if ep.state == "READY"
+                    ]
                     assert len(ready_endpoints) == len(result.endpoints)
 
     @pytest.mark.asyncio
@@ -619,7 +744,9 @@ class TestGetEndpoints:
         """Test that non-agentbricks endpoints are skipped (line 230 continue)."""
         endpoints_data = [
             # This one IS an agentbricks endpoint (name starts with "mas-")
-            _make_agentbricks_endpoint_data("ep-1", "mas-my-agent", state_ready="READY"),
+            _make_agentbricks_endpoint_data(
+                "ep-1", "mas-my-agent", state_ready="READY"
+            ),
             # This one is NOT an agentbricks endpoint
             {
                 "id": "ep-2",
@@ -634,13 +761,20 @@ class TestGetEndpoints:
         ]
         mock_response = _mock_get_endpoints_response(endpoints_data)
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_get_host', new_callable=AsyncMock) as mock_host:
+            with patch.object(repo, "_get_host", new_callable=AsyncMock) as mock_host:
                 mock_host.return_value = "workspace.databricks.com"
 
-                with patch.object(repo._client, 'get', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "get",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     request = AgentBricksEndpointsRequest(ready_only=False)
                     result = await repo.get_endpoints(request)
 
@@ -658,13 +792,20 @@ class TestGetEndpoints:
         ]
         mock_response = _mock_get_endpoints_response(endpoints_data)
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_get_host', new_callable=AsyncMock) as mock_host:
+            with patch.object(repo, "_get_host", new_callable=AsyncMock) as mock_host:
                 mock_host.return_value = "workspace.databricks.com"
 
-                with patch.object(repo._client, 'get', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "get",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     request = AgentBricksEndpointsRequest(ready_only=False)
                     result = await repo.get_endpoints(request)
 
@@ -680,13 +821,20 @@ class TestGetEndpoints:
         ]
         mock_response = _mock_get_endpoints_response(endpoints_data)
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_get_host', new_callable=AsyncMock) as mock_host:
+            with patch.object(repo, "_get_host", new_callable=AsyncMock) as mock_host:
                 mock_host.return_value = "workspace.databricks.com"
 
-                with patch.object(repo._client, 'get', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "get",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     request = AgentBricksEndpointsRequest(ready_only=False)
                     result = await repo.get_endpoints(request)
 
@@ -703,16 +851,22 @@ class TestGetEndpoints:
         ]
         mock_response = _mock_get_endpoints_response(endpoints_data)
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_get_host', new_callable=AsyncMock) as mock_host:
+            with patch.object(repo, "_get_host", new_callable=AsyncMock) as mock_host:
                 mock_host.return_value = "workspace.databricks.com"
 
-                with patch.object(repo._client, 'get', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "get",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     request = AgentBricksEndpointsRequest(
-                        ready_only=False,
-                        endpoint_ids=["ep-1", "ep-3"]
+                        ready_only=False, endpoint_ids=["ep-1", "ep-3"]
                     )
                     result = await repo.get_endpoints(request)
 
@@ -725,23 +879,41 @@ class TestGetEndpoints:
     async def test_get_endpoints_filter_by_search_query(self, repo):
         """Test filtering by search query matching name or creator (lines 282-288)."""
         endpoints_data = [
-            _make_agentbricks_endpoint_data("ep-1", "mas-agent-alpha", state_ready="READY", creator="alice@example.com"),
-            _make_agentbricks_endpoint_data("ep-2", "mas-agent-beta", state_ready="READY", creator="bob@example.com"),
-            _make_agentbricks_endpoint_data("ep-3", "mas-agent-gamma", state_ready="READY", creator="alice@example.com"),
+            _make_agentbricks_endpoint_data(
+                "ep-1",
+                "mas-agent-alpha",
+                state_ready="READY",
+                creator="alice@example.com",
+            ),
+            _make_agentbricks_endpoint_data(
+                "ep-2", "mas-agent-beta", state_ready="READY", creator="bob@example.com"
+            ),
+            _make_agentbricks_endpoint_data(
+                "ep-3",
+                "mas-agent-gamma",
+                state_ready="READY",
+                creator="alice@example.com",
+            ),
         ]
         mock_response = _mock_get_endpoints_response(endpoints_data)
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_get_host', new_callable=AsyncMock) as mock_host:
+            with patch.object(repo, "_get_host", new_callable=AsyncMock) as mock_host:
                 mock_host.return_value = "workspace.databricks.com"
 
-                with patch.object(repo._client, 'get', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "get",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     # Search by name
                     request = AgentBricksEndpointsRequest(
-                        ready_only=False,
-                        search_query="alpha"
+                        ready_only=False, search_query="alpha"
                     )
                     result = await repo.get_endpoints(request)
 
@@ -753,22 +925,35 @@ class TestGetEndpoints:
     async def test_get_endpoints_filter_by_search_query_creator_match(self, repo):
         """Test search query matching on creator field."""
         endpoints_data = [
-            _make_agentbricks_endpoint_data("ep-1", "mas-agent-one", state_ready="READY", creator="alice@example.com"),
-            _make_agentbricks_endpoint_data("ep-2", "mas-agent-two", state_ready="READY", creator="bob@example.com"),
+            _make_agentbricks_endpoint_data(
+                "ep-1",
+                "mas-agent-one",
+                state_ready="READY",
+                creator="alice@example.com",
+            ),
+            _make_agentbricks_endpoint_data(
+                "ep-2", "mas-agent-two", state_ready="READY", creator="bob@example.com"
+            ),
         ]
         mock_response = _mock_get_endpoints_response(endpoints_data)
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_get_host', new_callable=AsyncMock) as mock_host:
+            with patch.object(repo, "_get_host", new_callable=AsyncMock) as mock_host:
                 mock_host.return_value = "workspace.databricks.com"
 
-                with patch.object(repo._client, 'get', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "get",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     # Search by creator
                     request = AgentBricksEndpointsRequest(
-                        ready_only=False,
-                        search_query="bob"
+                        ready_only=False, search_query="bob"
                     )
                     result = await repo.get_endpoints(request)
 
@@ -779,22 +964,34 @@ class TestGetEndpoints:
     async def test_get_endpoints_filter_by_creator_filter(self, repo):
         """Test filtering by creator_filter (lines 292-296)."""
         endpoints_data = [
-            _make_agentbricks_endpoint_data("ep-1", "mas-agent-1", state_ready="READY", creator="alice@example.com"),
-            _make_agentbricks_endpoint_data("ep-2", "mas-agent-2", state_ready="READY", creator="bob@example.com"),
-            _make_agentbricks_endpoint_data("ep-3", "mas-agent-3", state_ready="READY", creator="alice@example.com"),
+            _make_agentbricks_endpoint_data(
+                "ep-1", "mas-agent-1", state_ready="READY", creator="alice@example.com"
+            ),
+            _make_agentbricks_endpoint_data(
+                "ep-2", "mas-agent-2", state_ready="READY", creator="bob@example.com"
+            ),
+            _make_agentbricks_endpoint_data(
+                "ep-3", "mas-agent-3", state_ready="READY", creator="alice@example.com"
+            ),
         ]
         mock_response = _mock_get_endpoints_response(endpoints_data)
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_get_host', new_callable=AsyncMock) as mock_host:
+            with patch.object(repo, "_get_host", new_callable=AsyncMock) as mock_host:
                 mock_host.return_value = "workspace.databricks.com"
 
-                with patch.object(repo._client, 'get', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "get",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     request = AgentBricksEndpointsRequest(
-                        ready_only=False,
-                        creator_filter="alice"
+                        ready_only=False, creator_filter="alice"
                     )
                     result = await repo.get_endpoints(request)
 
@@ -806,7 +1003,9 @@ class TestGetEndpoints:
     @pytest.mark.asyncio
     async def test_get_endpoints_exception_handling(self, repo):
         """Test exception handling in get_endpoints (lines 306-308)."""
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.side_effect = Exception("Unexpected error")
 
             request = AgentBricksEndpointsRequest()
@@ -819,18 +1018,29 @@ class TestGetEndpoints:
     async def test_get_endpoints_ready_only_filters_not_ready(self, repo):
         """Test that ready_only=True filters out non-READY endpoints (lines 274-278)."""
         endpoints_data = [
-            _make_agentbricks_endpoint_data("ep-1", "mas-agent-ready", state_ready="READY"),
-            _make_agentbricks_endpoint_data("ep-2", "mas-agent-not-ready", state_ready="NOT_READY"),
+            _make_agentbricks_endpoint_data(
+                "ep-1", "mas-agent-ready", state_ready="READY"
+            ),
+            _make_agentbricks_endpoint_data(
+                "ep-2", "mas-agent-not-ready", state_ready="NOT_READY"
+            ),
         ]
         mock_response = _mock_get_endpoints_response(endpoints_data)
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_get_host', new_callable=AsyncMock) as mock_host:
+            with patch.object(repo, "_get_host", new_callable=AsyncMock) as mock_host:
                 mock_host.return_value = "workspace.databricks.com"
 
-                with patch.object(repo._client, 'get', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "get",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     request = AgentBricksEndpointsRequest(ready_only=True)
                     result = await repo.get_endpoints(request)
 
@@ -853,23 +1063,27 @@ class TestQueryEndpoint:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "choices": [
-                {"message": {"content": "Hello! How can I help?"}}
-            ]
+            "choices": [{"message": {"content": "Hello! How can I help?"}}]
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_make_url', new_callable=AsyncMock) as mock_url:
+            with patch.object(repo, "_make_url", new_callable=AsyncMock) as mock_url:
                 mock_url.return_value = "https://workspace.databricks.com/serving-endpoints/test/invocations"
 
-                with patch.object(repo._client, 'post', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "post",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     messages = [AgentBricksMessage(role="user", content="Hello")]
                     request = AgentBricksQueryRequest(
-                        endpoint_name="test-endpoint",
-                        messages=messages
+                        endpoint_name="test-endpoint", messages=messages
                     )
                     result = await repo.query_endpoint(request)
 
@@ -879,13 +1093,14 @@ class TestQueryEndpoint:
     @pytest.mark.asyncio
     async def test_query_endpoint_auth_failure(self, repo):
         """Test query when auth fails."""
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = (None, "Auth failed")
 
             messages = [AgentBricksMessage(role="user", content="Hello")]
             request = AgentBricksQueryRequest(
-                endpoint_name="test-endpoint",
-                messages=messages
+                endpoint_name="test-endpoint", messages=messages
             )
             result = await repo.query_endpoint(request)
 
@@ -899,17 +1114,23 @@ class TestQueryEndpoint:
         mock_response.status_code = 500
         mock_response.text = "Internal Server Error"
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_make_url', new_callable=AsyncMock) as mock_url:
+            with patch.object(repo, "_make_url", new_callable=AsyncMock) as mock_url:
                 mock_url.return_value = "https://workspace.databricks.com/test"
 
-                with patch.object(repo._client, 'post', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "post",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     messages = [AgentBricksMessage(role="user", content="Hello")]
                     request = AgentBricksQueryRequest(
-                        endpoint_name="test-endpoint",
-                        messages=messages
+                        endpoint_name="test-endpoint", messages=messages
                     )
                     result = await repo.query_endpoint(request)
 
@@ -921,22 +1142,26 @@ class TestQueryEndpoint:
         """Test parsing predictions format response."""
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "predictions": ["This is the prediction"]
-        }
+        mock_response.json.return_value = {"predictions": ["This is the prediction"]}
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_make_url', new_callable=AsyncMock) as mock_url:
+            with patch.object(repo, "_make_url", new_callable=AsyncMock) as mock_url:
                 mock_url.return_value = "https://workspace.databricks.com/test"
 
-                with patch.object(repo._client, 'post', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "post",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     messages = [AgentBricksMessage(role="user", content="Hello")]
                     request = AgentBricksQueryRequest(
-                        endpoint_name="test-endpoint",
-                        messages=messages
+                        endpoint_name="test-endpoint", messages=messages
                     )
                     result = await repo.query_endpoint(request)
 
@@ -953,25 +1178,34 @@ class TestQueryEndpoint:
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_make_url', new_callable=AsyncMock) as mock_url:
+            with patch.object(repo, "_make_url", new_callable=AsyncMock) as mock_url:
                 mock_url.return_value = "https://workspace.databricks.com/test"
 
-                with patch.object(repo._client, 'post', new_callable=AsyncMock, return_value=mock_response) as mock_post:
+                with patch.object(
+                    repo._client,
+                    "post",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ) as mock_post:
                     messages = [AgentBricksMessage(role="user", content="Hello")]
                     request = AgentBricksQueryRequest(
                         endpoint_name="test-endpoint",
                         messages=messages,
-                        custom_inputs={"temperature": 0.5, "max_tokens": 100}
+                        custom_inputs={"temperature": 0.5, "max_tokens": 100},
                     )
                     result = await repo.query_endpoint(request)
 
                     assert result.status == "SUCCESS"
                     # Verify the payload included custom_inputs
                     call_kwargs = mock_post.call_args
-                    payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
+                    payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get(
+                        "json"
+                    )
                     assert "temperature" in payload
                     assert payload["temperature"] == 0.5
 
@@ -985,25 +1219,32 @@ class TestQueryEndpoint:
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_make_url', new_callable=AsyncMock) as mock_url:
+            with patch.object(repo, "_make_url", new_callable=AsyncMock) as mock_url:
                 mock_url.return_value = "https://workspace.databricks.com/test"
 
-                with patch.object(repo._client, 'post', new_callable=AsyncMock, return_value=mock_response) as mock_post:
+                with patch.object(
+                    repo._client,
+                    "post",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ) as mock_post:
                     messages = [AgentBricksMessage(role="user", content="Hello")]
                     request = AgentBricksQueryRequest(
-                        endpoint_name="test-endpoint",
-                        messages=messages,
-                        stream=True
+                        endpoint_name="test-endpoint", messages=messages, stream=True
                     )
                     result = await repo.query_endpoint(request)
 
                     assert result.status == "SUCCESS"
                     # Verify the payload included stream flag
                     call_kwargs = mock_post.call_args
-                    payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
+                    payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get(
+                        "json"
+                    )
                     assert payload.get("stream") is True
 
     @pytest.mark.asyncio
@@ -1011,22 +1252,26 @@ class TestQueryEndpoint:
         """Test parsing direct 'response' field format (line 393)."""
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "response": "Direct response content"
-        }
+        mock_response.json.return_value = {"response": "Direct response content"}
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_make_url', new_callable=AsyncMock) as mock_url:
+            with patch.object(repo, "_make_url", new_callable=AsyncMock) as mock_url:
                 mock_url.return_value = "https://workspace.databricks.com/test"
 
-                with patch.object(repo._client, 'post', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "post",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     messages = [AgentBricksMessage(role="user", content="Hello")]
                     request = AgentBricksQueryRequest(
-                        endpoint_name="test-endpoint",
-                        messages=messages
+                        endpoint_name="test-endpoint", messages=messages
                     )
                     result = await repo.query_endpoint(request)
 
@@ -1041,17 +1286,23 @@ class TestQueryEndpoint:
         mock_response.json.return_value = "Plain string response"
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_make_url', new_callable=AsyncMock) as mock_url:
+            with patch.object(repo, "_make_url", new_callable=AsyncMock) as mock_url:
                 mock_url.return_value = "https://workspace.databricks.com/test"
 
-                with patch.object(repo._client, 'post', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "post",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     messages = [AgentBricksMessage(role="user", content="Hello")]
                     request = AgentBricksQueryRequest(
-                        endpoint_name="test-endpoint",
-                        messages=messages
+                        endpoint_name="test-endpoint", messages=messages
                     )
                     result = await repo.query_endpoint(request)
 
@@ -1065,21 +1316,27 @@ class TestQueryEndpoint:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "choices": [{"message": {"content": "Response with usage"}}],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_make_url', new_callable=AsyncMock) as mock_url:
+            with patch.object(repo, "_make_url", new_callable=AsyncMock) as mock_url:
                 mock_url.return_value = "https://workspace.databricks.com/test"
 
-                with patch.object(repo._client, 'post', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "post",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     messages = [AgentBricksMessage(role="user", content="Hello")]
                     request = AgentBricksQueryRequest(
-                        endpoint_name="test-endpoint",
-                        messages=messages
+                        endpoint_name="test-endpoint", messages=messages
                     )
                     result = await repo.query_endpoint(request)
 
@@ -1094,22 +1351,29 @@ class TestQueryEndpoint:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "choices": [{"message": {"content": "Response with trace"}}],
-            "trace": {"steps": ["step1", "step2"]}
+            "trace": {"steps": ["step1", "step2"]},
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_make_url', new_callable=AsyncMock) as mock_url:
+            with patch.object(repo, "_make_url", new_callable=AsyncMock) as mock_url:
                 mock_url.return_value = "https://workspace.databricks.com/test"
 
-                with patch.object(repo._client, 'post', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "post",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     messages = [AgentBricksMessage(role="user", content="Hello")]
                     request = AgentBricksQueryRequest(
                         endpoint_name="test-endpoint",
                         messages=messages,
-                        return_trace=True
+                        return_trace=True,
                     )
                     result = await repo.query_endpoint(request)
 
@@ -1124,22 +1388,29 @@ class TestQueryEndpoint:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "choices": [{"message": {"content": "Response with metadata"}}],
-            "metadata": {"run_id": "abc123"}
+            "metadata": {"run_id": "abc123"},
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_make_url', new_callable=AsyncMock) as mock_url:
+            with patch.object(repo, "_make_url", new_callable=AsyncMock) as mock_url:
                 mock_url.return_value = "https://workspace.databricks.com/test"
 
-                with patch.object(repo._client, 'post', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "post",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     messages = [AgentBricksMessage(role="user", content="Hello")]
                     request = AgentBricksQueryRequest(
                         endpoint_name="test-endpoint",
                         messages=messages,
-                        return_trace=True
+                        return_trace=True,
                     )
                     result = await repo.query_endpoint(request)
 
@@ -1150,13 +1421,14 @@ class TestQueryEndpoint:
     @pytest.mark.asyncio
     async def test_query_endpoint_exception_handling(self, repo):
         """Test exception handling in query_endpoint (lines 422-424)."""
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.side_effect = Exception("Unexpected connection error")
 
             messages = [AgentBricksMessage(role="user", content="Hello")]
             request = AgentBricksQueryRequest(
-                endpoint_name="test-endpoint",
-                messages=messages
+                endpoint_name="test-endpoint", messages=messages
             )
             result = await repo.query_endpoint(request)
 
@@ -1171,22 +1443,29 @@ class TestQueryEndpoint:
         mock_response.json.return_value = {
             "choices": [{"message": {"content": "Response"}}],
             "trace": {"steps": ["step1"]},
-            "usage": {"total_tokens": 5}
+            "usage": {"total_tokens": 5},
         }
         mock_response.raise_for_status = MagicMock()
 
-        with patch.object(repo, '_get_auth_headers', new_callable=AsyncMock) as mock_auth:
+        with patch.object(
+            repo, "_get_auth_headers", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = ({"Authorization": "Bearer token"}, None)
 
-            with patch.object(repo, '_make_url', new_callable=AsyncMock) as mock_url:
+            with patch.object(repo, "_make_url", new_callable=AsyncMock) as mock_url:
                 mock_url.return_value = "https://workspace.databricks.com/test"
 
-                with patch.object(repo._client, 'post', new_callable=AsyncMock, return_value=mock_response):
+                with patch.object(
+                    repo._client,
+                    "post",
+                    new_callable=AsyncMock,
+                    return_value=mock_response,
+                ):
                     messages = [AgentBricksMessage(role="user", content="Hello")]
                     request = AgentBricksQueryRequest(
                         endpoint_name="test-endpoint",
                         messages=messages,
-                        return_trace=False
+                        return_trace=False,
                     )
                     result = await repo.query_endpoint(request)
 
@@ -1209,16 +1488,14 @@ class TestExecuteQuery:
     async def test_execute_query_success(self, repo):
         """Test successful query execution."""
         mock_query_response = AgentBricksQueryResponse(
-            response="Answer to your question",
-            status=AgentBricksQueryStatus.SUCCESS
+            response="Answer to your question", status=AgentBricksQueryStatus.SUCCESS
         )
 
-        with patch.object(repo, 'query_endpoint', new_callable=AsyncMock) as mock_query:
+        with patch.object(repo, "query_endpoint", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = mock_query_response
 
             request = AgentBricksExecutionRequest(
-                endpoint_name="test-endpoint",
-                question="What is the answer?"
+                endpoint_name="test-endpoint", question="What is the answer?"
             )
             result = await repo.execute_query(request)
 
@@ -1229,17 +1506,14 @@ class TestExecuteQuery:
     async def test_execute_query_failure(self, repo):
         """Test query execution failure."""
         mock_query_response = AgentBricksQueryResponse(
-            response="",
-            status=AgentBricksQueryStatus.FAILED,
-            error="Query failed"
+            response="", status=AgentBricksQueryStatus.FAILED, error="Query failed"
         )
 
-        with patch.object(repo, 'query_endpoint', new_callable=AsyncMock) as mock_query:
+        with patch.object(repo, "query_endpoint", new_callable=AsyncMock) as mock_query:
             mock_query.return_value = mock_query_response
 
             request = AgentBricksExecutionRequest(
-                endpoint_name="test-endpoint",
-                question="Hello"
+                endpoint_name="test-endpoint", question="Hello"
             )
             result = await repo.execute_query(request)
 
@@ -1249,12 +1523,11 @@ class TestExecuteQuery:
     @pytest.mark.asyncio
     async def test_execute_query_exception(self, repo):
         """Test handling exceptions in execute."""
-        with patch.object(repo, 'query_endpoint', new_callable=AsyncMock) as mock_query:
+        with patch.object(repo, "query_endpoint", new_callable=AsyncMock) as mock_query:
             mock_query.side_effect = Exception("Network error")
 
             request = AgentBricksExecutionRequest(
-                endpoint_name="test-endpoint",
-                question="Hello"
+                endpoint_name="test-endpoint", question="Hello"
             )
             result = await repo.execute_query(request)
 
@@ -1268,22 +1541,29 @@ class TestRepositoryCleanup:
     @pytest.mark.asyncio
     async def test_aclose_closes_client(self):
         """Test that client is closed via aclose."""
-        repo = AgentBricksRepository(auth_config=AgentBricksAuthConfig(host="test.databricks.com"))
+        repo = AgentBricksRepository(
+            auth_config=AgentBricksAuthConfig(host="test.databricks.com")
+        )
         await repo.aclose()
         assert repo._client.is_closed
 
     @pytest.mark.asyncio
     async def test_aclose_with_no_client(self):
         """Test that aclose handles None client without raising."""
-        repo = AgentBricksRepository(auth_config=AgentBricksAuthConfig(host="test.databricks.com"))
+        repo = AgentBricksRepository(
+            auth_config=AgentBricksAuthConfig(host="test.databricks.com")
+        )
         repo._client = None
         await repo.aclose()  # Should not raise
 
     def test_del_with_running_loop(self):
         """Test __del__ schedules client close when event loop is running."""
         import gc
+
         gc.collect()  # Finalize any stale repo instances before patching
-        repo = AgentBricksRepository(auth_config=AgentBricksAuthConfig(host="test.databricks.com"))
+        repo = AgentBricksRepository(
+            auth_config=AgentBricksAuthConfig(host="test.databricks.com")
+        )
         mock_loop = MagicMock()
         with patch("asyncio.get_running_loop", return_value=mock_loop):
             repo.__del__()
@@ -1292,13 +1572,17 @@ class TestRepositoryCleanup:
 
     def test_del_without_running_loop(self):
         """Test __del__ catches RuntimeError when no event loop is running."""
-        repo = AgentBricksRepository(auth_config=AgentBricksAuthConfig(host="test.databricks.com"))
+        repo = AgentBricksRepository(
+            auth_config=AgentBricksAuthConfig(host="test.databricks.com")
+        )
         with patch("asyncio.get_running_loop", side_effect=RuntimeError):
             repo.__del__()  # Should not raise
 
     def test_del_with_closed_client(self):
         """Test __del__ does not schedule close when client is already closed."""
-        repo = AgentBricksRepository(auth_config=AgentBricksAuthConfig(host="test.databricks.com"))
+        repo = AgentBricksRepository(
+            auth_config=AgentBricksAuthConfig(host="test.databricks.com")
+        )
         repo._client = MagicMock(is_closed=True)
         with patch("asyncio.get_running_loop") as mock_get_loop:
             repo.__del__()

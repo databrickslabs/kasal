@@ -17,10 +17,10 @@ from .sql_expression_builder import SQLExpressionEngine, detect_aggregation_type
 from .sql_structures import SQLStructureExpander
 
 __all__ = [
-    'SQLAggregationBuilder',
-    'SQLBaseKBIContext',
-    'SQLKBIContextCache',
-    'SQLExpressionEngine',
-    'detect_aggregation_type',
-    'SQLStructureExpander',
+    "SQLAggregationBuilder",
+    "SQLBaseKBIContext",
+    "SQLKBIContextCache",
+    "SQLExpressionEngine",
+    "detect_aggregation_type",
+    "SQLStructureExpander",
 ]

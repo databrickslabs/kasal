@@ -4,13 +4,14 @@ Unit tests for flow execution exceptions.
 Tests the FlowPausedForApprovalException, FlowResumeError,
 FlowCheckpointError, HITLGateConfigError, and FlowExecutionError classes.
 """
+
 import pytest
 
 from src.services.flow_builder.exceptions import (
+    FlowCheckpointError,
     FlowExecutionError,
     FlowPausedForApprovalException,
     FlowResumeError,
-    FlowCheckpointError,
     HITLGateConfigError,
 )
 
@@ -93,7 +94,9 @@ class TestFlowPausedForApprovalException:
 
     def test_is_exception_subclass(self):
         """FlowPausedForApprovalException IS a plain Exception subclass."""
-        assert issubclass(FlowPausedForApprovalException, BaseException)  # control-flow signal, not a catchable Exception
+        assert issubclass(
+            FlowPausedForApprovalException, BaseException
+        )  # control-flow signal, not a catchable Exception
 
     # --- String representation ---
 
@@ -373,7 +376,9 @@ class TestExceptionInheritanceHierarchy:
                     approval_id=1, gate_node_id="g", message="m"
                 )
             except FlowExecutionError:
-                pytest.fail("FlowPausedForApprovalException should NOT be caught as FlowExecutionError")
+                pytest.fail(
+                    "FlowPausedForApprovalException should NOT be caught as FlowExecutionError"
+                )
 
     def test_catching_flow_execution_error_catches_subclasses(self):
         """A single FlowExecutionError handler catches all its subclasses."""

@@ -9,18 +9,19 @@ Note: the @require_admin() decorator raises fastapi.HTTPException(403)
 (not a custom ForbiddenError), so we assert against that.
 """
 
-import pytest
-from types import SimpleNamespace
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
+import pytest
 from fastapi import HTTPException
 
 from src.utils.user_context import GroupContext
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _admin_ctx(group_id="g1"):
     return GroupContext(
@@ -56,6 +57,7 @@ def _make_tool_response(i=1):
 # Tests – list_available_to_add
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_list_available_to_add_admin_success():
     """Admin can list globally available tools."""
@@ -87,6 +89,7 @@ async def test_list_available_to_add_user_forbidden():
 # Tests – list_added
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_list_added_admin_success():
     """Admin can list tools already in their group."""
@@ -117,6 +120,7 @@ async def test_list_added_user_forbidden():
 # Tests – add_tool
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_add_tool_admin_success():
     """Admin can add a global tool to their group."""
@@ -145,6 +149,7 @@ async def test_add_tool_user_forbidden():
 # ---------------------------------------------------------------------------
 # Tests – set_enabled
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_set_enabled_admin_success():
@@ -219,6 +224,7 @@ async def test_set_enabled_user_forbidden():
 # Tests – update_config
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_update_config_admin_success():
     """Admin can update group-scoped tool configuration."""
@@ -258,6 +264,7 @@ async def test_update_config_user_forbidden():
 # ---------------------------------------------------------------------------
 # Tests – remove_tool
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_remove_tool_admin_success():

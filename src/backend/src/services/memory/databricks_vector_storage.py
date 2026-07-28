@@ -12,24 +12,25 @@ import os
 if not os.environ.get("USE_NULLPOOL"):
     os.environ["USE_NULLPOOL"] = "true"
 
-import uuid
+import asyncio
+import base64
+import hashlib
 import json
 import logging
-from typing import Dict, List, Any, Optional
-from datetime import datetime
-import hashlib
-import base64
-import time
 import random
-from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
+import time
+import uuid
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from src.core.logger import LoggerManager
 
 # DatabricksAuthHelper removed - now using unified auth via get_auth_context()
 from src.repositories.databricks_vector_index_repository import (
     DatabricksVectorIndexRepository,
 )
-from src.core.logger import LoggerManager
+from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
 from src.utils.databricks_auth import get_databricks_auth_headers
-import asyncio
 
 logger = LoggerManager.get_instance().crew
 # Get all memory-type specific loggers
@@ -119,8 +120,9 @@ class DatabricksVectorStorage:
         # Get workspace URL from unified auth if not provided
         if not workspace_url:
             try:
-                from src.utils.databricks_auth import get_auth_context
                 import asyncio
+
+                from src.utils.databricks_auth import get_auth_context
 
                 auth = asyncio.run(get_auth_context())
                 if auth:
@@ -453,7 +455,7 @@ class DatabricksVectorStorage:
             # even when contextvars don't propagate across async boundaries
             if self.group_id:
                 try:
-                    from src.utils.user_context import UserContext, GroupContext
+                    from src.utils.user_context import GroupContext, UserContext
 
                     group_context_obj = GroupContext(
                         group_ids=[self.group_id],

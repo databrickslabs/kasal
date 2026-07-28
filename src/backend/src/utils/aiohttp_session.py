@@ -58,7 +58,9 @@ async def get_shared_session() -> aiohttp.ClientSession:
     _prune_dead_loops()
     session = aiohttp.ClientSession()
     _SESSIONS[key] = (loop, session)
-    logger.debug("Created shared aiohttp session for loop %s (%d live)", key, len(_SESSIONS))
+    logger.debug(
+        "Created shared aiohttp session for loop %s (%d live)", key, len(_SESSIONS)
+    )
     return session
 
 

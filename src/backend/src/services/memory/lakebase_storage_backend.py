@@ -21,11 +21,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from src.services.memory.engine import MemoryRecord, ScopeInfo
 from sqlalchemy import text
 
 from src.core.logger import LoggerManager
 from src.db.lakebase_session import get_lakebase_session
+from src.services.memory.engine import MemoryRecord, ScopeInfo
 
 # SECURITY: ``table_name`` (from the LakebaseMemoryConfig.memory_table config
 # field) is interpolated into raw SQL throughout this backend. Validate it as a

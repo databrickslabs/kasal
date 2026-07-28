@@ -5,17 +5,18 @@ This module provides comprehensive test coverage for the flow execution runner
 functions that handle running CrewAI flows and managing the flow execution lifecycle.
 """
 
-import pytest
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.flow_builder.flow_execution_runner import (
-    update_execution_status_with_retry,
-    run_flow_in_process,
-    run_flow
-)
+import pytest
+
 from src.models.execution_status import ExecutionStatus
+from src.services.flow_builder.flow_execution_runner import (
+    run_flow,
+    run_flow_in_process,
+    update_execution_status_with_retry,
+)
 
 
 class TestUpdateExecutionStatusWithRetry:
@@ -25,38 +26,38 @@ class TestUpdateExecutionStatusWithRetry:
     async def test_update_status_success_first_attempt(self):
         """Test successful status update on first attempt."""
         # Patch at the source module since import happens inside the function
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
+        with patch(
+            "src.services.execution.status.ExecutionStatusService"
+        ) as mock_service:
             mock_service.update_status = AsyncMock(return_value=True)
 
             result = await update_execution_status_with_retry(
-                execution_id='exec-123',
-                status='COMPLETED',
-                message='Test message'
+                execution_id="exec-123", status="COMPLETED", message="Test message"
             )
 
             assert result is True
             mock_service.update_status.assert_called_once_with(
-                job_id='exec-123',
-                status='COMPLETED',
-                message='Test message',
-                result=None
+                job_id="exec-123",
+                status="COMPLETED",
+                message="Test message",
+                result=None,
             )
 
     @pytest.mark.asyncio
     async def test_update_status_retries_on_failure(self):
         """Test that status update retries on failure."""
         # Patch at the source module since import happens inside the function
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
+        with patch(
+            "src.services.execution.status.ExecutionStatusService"
+        ) as mock_service:
             # Fail twice, succeed on third attempt
-            mock_service.update_status = AsyncMock(
-                side_effect=[False, False, True]
-            )
+            mock_service.update_status = AsyncMock(side_effect=[False, False, True])
 
             result = await update_execution_status_with_retry(
-                execution_id='exec-123',
-                status='COMPLETED',
+                execution_id="exec-123",
+                status="COMPLETED",
                 max_retries=3,
-                retry_delay=0.01  # Short delay for tests
+                retry_delay=0.01,  # Short delay for tests
             )
 
             assert result is True
@@ -66,14 +67,16 @@ class TestUpdateExecutionStatusWithRetry:
     async def test_update_status_returns_false_after_max_retries(self):
         """Test that False is returned after exhausting all retries."""
         # Patch at the source module since import happens inside the function
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
+        with patch(
+            "src.services.execution.status.ExecutionStatusService"
+        ) as mock_service:
             mock_service.update_status = AsyncMock(return_value=False)
 
             result = await update_execution_status_with_retry(
-                execution_id='exec-123',
-                status='COMPLETED',
+                execution_id="exec-123",
+                status="COMPLETED",
                 max_retries=3,
-                retry_delay=0.01
+                retry_delay=0.01,
             )
 
             assert result is False
@@ -83,16 +86,18 @@ class TestUpdateExecutionStatusWithRetry:
     async def test_update_status_handles_exceptions(self):
         """Test that exceptions are handled and retried."""
         # Patch at the source module since import happens inside the function
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
+        with patch(
+            "src.services.execution.status.ExecutionStatusService"
+        ) as mock_service:
             mock_service.update_status = AsyncMock(
                 side_effect=[Exception("Network error"), Exception("Timeout"), True]
             )
 
             result = await update_execution_status_with_retry(
-                execution_id='exec-123',
-                status='COMPLETED',
+                execution_id="exec-123",
+                status="COMPLETED",
                 max_retries=3,
-                retry_delay=0.01
+                retry_delay=0.01,
             )
 
             assert result is True
@@ -102,16 +107,18 @@ class TestUpdateExecutionStatusWithRetry:
     async def test_update_status_returns_false_on_persistent_exceptions(self):
         """Test that False is returned when all attempts raise exceptions."""
         # Patch at the source module since import happens inside the function
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
+        with patch(
+            "src.services.execution.status.ExecutionStatusService"
+        ) as mock_service:
             mock_service.update_status = AsyncMock(
                 side_effect=Exception("Persistent error")
             )
 
             result = await update_execution_status_with_retry(
-                execution_id='exec-123',
-                status='COMPLETED',
+                execution_id="exec-123",
+                status="COMPLETED",
                 max_retries=3,
-                retry_delay=0.01
+                retry_delay=0.01,
             )
 
             assert result is False
@@ -120,15 +127,17 @@ class TestUpdateExecutionStatusWithRetry:
     async def test_update_status_exponential_backoff(self):
         """Test that retry delay increases exponentially."""
         # Patch at the source module since import happens inside the function
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
+        with patch(
+            "src.services.execution.status.ExecutionStatusService"
+        ) as mock_service:
             mock_service.update_status = AsyncMock(return_value=False)
 
-            with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+            with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
                 await update_execution_status_with_retry(
-                    execution_id='exec-123',
-                    status='COMPLETED',
+                    execution_id="exec-123",
+                    status="COMPLETED",
                     max_retries=3,
-                    retry_delay=0.5
+                    retry_delay=0.5,
                 )
 
                 # Check exponential backoff: 0.5, 1.0
@@ -145,10 +154,10 @@ class TestRunFlowInProcess:
     def mock_config(self):
         """Create a mock flow configuration."""
         return {
-            'nodes': [{'id': 'node1', 'type': 'crewnode'}],
-            'edges': [],
-            'flow_config': {},
-            'inputs': {'topic': 'AI'}
+            "nodes": [{"id": "node1", "type": "crewnode"}],
+            "edges": [],
+            "flow_config": {},
+            "inputs": {"topic": "AI"},
         }
 
     @pytest.fixture
@@ -160,107 +169,133 @@ class TestRunFlowInProcess:
     def mock_group_context(self):
         """Create a mock group context."""
         context = MagicMock()
-        context.primary_group_id = 'group-123'
+        context.primary_group_id = "group-123"
         return context
 
     @pytest.mark.asyncio
     async def test_run_flow_in_process_success(self, mock_config, mock_running_jobs):
         """Test successful flow execution in process."""
-        execution_id = 'exec-123'
+        execution_id = "exec-123"
 
-        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+        ) as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
-                return_value={'status': 'COMPLETED', 'result': {'output': 'test'}}
+                return_value={"status": "COMPLETED", "result": {"output": "test"}}
             )
 
-            with patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch(
+                "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+            ) as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
                     execution_id=execution_id,
                     config=mock_config,
-                    running_jobs=mock_running_jobs
+                    running_jobs=mock_running_jobs,
                 )
 
                 mock_executor.run_flow_isolated.assert_called_once()
                 mock_update.assert_called_with(
                     execution_id=execution_id,
                     status=ExecutionStatus.COMPLETED.value,
-                    message='Flow execution completed successfully',
-                    result={'output': 'test'}
+                    message="Flow execution completed successfully",
+                    result={"output": "test"},
                 )
 
     @pytest.mark.asyncio
     async def test_run_flow_in_process_failure(self, mock_config, mock_running_jobs):
         """Test flow execution failure handling."""
-        execution_id = 'exec-123'
+        execution_id = "exec-123"
 
-        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+        ) as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
-                return_value={'status': 'FAILED', 'error': 'Task failed'}
+                return_value={"status": "FAILED", "error": "Task failed"}
             )
 
             # Patch at the source module since import happens inside the function
-            with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
-                mock_service.get_status = AsyncMock(return_value=MagicMock(status='RUNNING'))
+            with patch(
+                "src.services.execution.status.ExecutionStatusService"
+            ) as mock_service:
+                mock_service.get_status = AsyncMock(
+                    return_value=MagicMock(status="RUNNING")
+                )
 
-                with patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+                with patch(
+                    "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+                ) as mock_update:
                     mock_update.return_value = True
 
                     await run_flow_in_process(
                         execution_id=execution_id,
                         config=mock_config,
-                        running_jobs=mock_running_jobs
+                        running_jobs=mock_running_jobs,
                     )
 
                     # Should update status to FAILED
                     mock_update.assert_called()
                     call_args = mock_update.call_args
-                    assert call_args.kwargs['status'] == ExecutionStatus.FAILED.value
+                    assert call_args.kwargs["status"] == ExecutionStatus.FAILED.value
 
     @pytest.mark.asyncio
-    async def test_run_flow_in_process_preserves_stopped_status(self, mock_config, mock_running_jobs):
+    async def test_run_flow_in_process_preserves_stopped_status(
+        self, mock_config, mock_running_jobs
+    ):
         """Test that STOPPED status is preserved and not overwritten."""
-        execution_id = 'exec-123'
+        execution_id = "exec-123"
 
-        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+        ) as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
-                return_value={'status': 'FAILED', 'error': 'Process terminated'}
+                return_value={"status": "FAILED", "error": "Process terminated"}
             )
 
             # Patch at the source module since import happens inside the function
-            with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
+            with patch(
+                "src.services.execution.status.ExecutionStatusService"
+            ) as mock_service:
                 # Simulate that execution was stopped
                 mock_service.get_status = AsyncMock(
-                    return_value=MagicMock(status='STOPPED')
+                    return_value=MagicMock(status="STOPPED")
                 )
 
-                with patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+                with patch(
+                    "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+                ) as mock_update:
                     await run_flow_in_process(
                         execution_id=execution_id,
                         config=mock_config,
-                        running_jobs=mock_running_jobs
+                        running_jobs=mock_running_jobs,
                     )
 
                     # Status should NOT be updated since it's already STOPPED
                     # The function should skip status update
                     # Check that update was not called with FAILED status
                     for call in mock_update.call_args_list:
-                        if call.kwargs.get('status'):
-                            assert call.kwargs['status'] != ExecutionStatus.FAILED.value
+                        if call.kwargs.get("status"):
+                            assert call.kwargs["status"] != ExecutionStatus.FAILED.value
 
     @pytest.mark.asyncio
-    async def test_run_flow_in_process_with_user_token(self, mock_config, mock_running_jobs, mock_group_context):
+    async def test_run_flow_in_process_with_user_token(
+        self, mock_config, mock_running_jobs, mock_group_context
+    ):
         """Test flow execution passes user token for OBO authentication."""
-        execution_id = 'exec-123'
-        user_token = 'test-token-xyz'
+        execution_id = "exec-123"
+        user_token = "test-token-xyz"
 
-        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+        ) as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
-                return_value={'status': 'COMPLETED'}
+                return_value={"status": "COMPLETED"}
             )
 
-            with patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch(
+                "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+            ) as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
@@ -268,80 +303,96 @@ class TestRunFlowInProcess:
                     config=mock_config,
                     running_jobs=mock_running_jobs,
                     group_context=mock_group_context,
-                    user_token=user_token
+                    user_token=user_token,
                 )
 
                 # Verify user_token was added to config
                 call_args = mock_executor.run_flow_isolated.call_args
-                passed_config = call_args.kwargs['flow_config']
-                assert passed_config.get('user_token') == user_token
+                passed_config = call_args.kwargs["flow_config"]
+                assert passed_config.get("user_token") == user_token
 
     @pytest.mark.asyncio
-    async def test_run_flow_in_process_adds_group_id_from_context(self, mock_config, mock_running_jobs, mock_group_context):
+    async def test_run_flow_in_process_adds_group_id_from_context(
+        self, mock_config, mock_running_jobs, mock_group_context
+    ):
         """Test that group_id is added from group_context."""
-        execution_id = 'exec-123'
+        execution_id = "exec-123"
 
-        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+        ) as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
-                return_value={'status': 'COMPLETED'}
+                return_value={"status": "COMPLETED"}
             )
 
-            with patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch(
+                "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+            ) as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
                     execution_id=execution_id,
                     config=mock_config,
                     running_jobs=mock_running_jobs,
-                    group_context=mock_group_context
+                    group_context=mock_group_context,
                 )
 
                 # Verify group_id was added to config
                 call_args = mock_executor.run_flow_isolated.call_args
-                passed_config = call_args.kwargs['flow_config']
-                assert passed_config.get('group_id') == 'group-123'
+                passed_config = call_args.kwargs["flow_config"]
+                assert passed_config.get("group_id") == "group-123"
 
     @pytest.mark.asyncio
     async def test_run_flow_in_process_removes_from_running_jobs(self, mock_config):
         """Test that execution is removed from running_jobs after completion."""
-        execution_id = 'exec-123'
-        running_jobs = {execution_id: {'task': MagicMock()}}
+        execution_id = "exec-123"
+        running_jobs = {execution_id: {"task": MagicMock()}}
 
-        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+        ) as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
-                return_value={'status': 'COMPLETED'}
+                return_value={"status": "COMPLETED"}
             )
 
-            with patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch(
+                "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+            ) as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
                     execution_id=execution_id,
                     config=mock_config,
-                    running_jobs=running_jobs
+                    running_jobs=running_jobs,
                 )
 
                 # Execution should be removed from running_jobs
                 assert execution_id not in running_jobs
 
     @pytest.mark.asyncio
-    async def test_run_flow_in_process_cancelled_error(self, mock_config, mock_running_jobs):
+    async def test_run_flow_in_process_cancelled_error(
+        self, mock_config, mock_running_jobs
+    ):
         """Test handling of CancelledError (execution cancellation)."""
-        execution_id = 'exec-123'
+        execution_id = "exec-123"
 
-        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+        ) as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
                 side_effect=asyncio.CancelledError()
             )
             mock_executor.terminate_execution = AsyncMock()
 
-            with patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch(
+                "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+            ) as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
                     execution_id=execution_id,
                     config=mock_config,
-                    running_jobs=mock_running_jobs
+                    running_jobs=mock_running_jobs,
                 )
 
                 # Should attempt to terminate the process
@@ -351,34 +402,40 @@ class TestRunFlowInProcess:
                 mock_update.assert_called_with(
                     execution_id=execution_id,
                     status=ExecutionStatus.CANCELLED.value,
-                    message='Flow execution was cancelled',
-                    result=None
+                    message="Flow execution was cancelled",
+                    result=None,
                 )
 
     @pytest.mark.asyncio
-    async def test_run_flow_in_process_exception_handling(self, mock_config, mock_running_jobs):
+    async def test_run_flow_in_process_exception_handling(
+        self, mock_config, mock_running_jobs
+    ):
         """Test handling of general exceptions."""
-        execution_id = 'exec-123'
+        execution_id = "exec-123"
 
-        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+        ) as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
-                side_effect=RuntimeError('Unexpected error')
+                side_effect=RuntimeError("Unexpected error")
             )
 
-            with patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch(
+                "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+            ) as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
                     execution_id=execution_id,
                     config=mock_config,
-                    running_jobs=mock_running_jobs
+                    running_jobs=mock_running_jobs,
                 )
 
                 # Should update status to FAILED
                 mock_update.assert_called()
                 call_args = mock_update.call_args
-                assert call_args.kwargs['status'] == ExecutionStatus.FAILED.value
-                assert 'Unexpected error' in call_args.kwargs['message']
+                assert call_args.kwargs["status"] == ExecutionStatus.FAILED.value
+                assert "Unexpected error" in call_args.kwargs["message"]
 
 
 class TestRunFlow:
@@ -387,11 +444,7 @@ class TestRunFlow:
     @pytest.fixture
     def mock_config(self):
         """Create a mock flow configuration."""
-        return {
-            'nodes': [{'id': 'node1'}],
-            'edges': [],
-            'flow_config': {}
-        }
+        return {"nodes": [{"id": "node1"}], "edges": [], "flow_config": {}}
 
     @pytest.fixture
     def mock_running_jobs(self):
@@ -399,17 +452,21 @@ class TestRunFlow:
         return {}
 
     @pytest.mark.asyncio
-    async def test_run_flow_delegates_to_run_flow_in_process(self, mock_config, mock_running_jobs):
+    async def test_run_flow_delegates_to_run_flow_in_process(
+        self, mock_config, mock_running_jobs
+    ):
         """Test that run_flow delegates to run_flow_in_process."""
-        execution_id = 'exec-123'
+        execution_id = "exec-123"
 
-        with patch('src.services.flow_builder.flow_execution_runner.run_flow_in_process') as mock_run:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.run_flow_in_process"
+        ) as mock_run:
             mock_run.return_value = None
 
             await run_flow(
                 execution_id=execution_id,
                 config=mock_config,
-                running_jobs=mock_running_jobs
+                running_jobs=mock_running_jobs,
             )
 
             mock_run.assert_called_once_with(
@@ -417,46 +474,50 @@ class TestRunFlow:
                 config=mock_config,
                 running_jobs=mock_running_jobs,
                 group_context=None,
-                user_token=None
+                user_token=None,
             )
 
     @pytest.mark.asyncio
     async def test_run_flow_passes_group_context(self, mock_config, mock_running_jobs):
         """Test that run_flow passes group_context to run_flow_in_process."""
-        execution_id = 'exec-123'
+        execution_id = "exec-123"
         mock_group_context = MagicMock()
 
-        with patch('src.services.flow_builder.flow_execution_runner.run_flow_in_process') as mock_run:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.run_flow_in_process"
+        ) as mock_run:
             mock_run.return_value = None
 
             await run_flow(
                 execution_id=execution_id,
                 config=mock_config,
                 running_jobs=mock_running_jobs,
-                group_context=mock_group_context
+                group_context=mock_group_context,
             )
 
             call_args = mock_run.call_args
-            assert call_args.kwargs['group_context'] == mock_group_context
+            assert call_args.kwargs["group_context"] == mock_group_context
 
     @pytest.mark.asyncio
     async def test_run_flow_passes_user_token(self, mock_config, mock_running_jobs):
         """Test that run_flow passes user_token to run_flow_in_process."""
-        execution_id = 'exec-123'
-        user_token = 'test-token'
+        execution_id = "exec-123"
+        user_token = "test-token"
 
-        with patch('src.services.flow_builder.flow_execution_runner.run_flow_in_process') as mock_run:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.run_flow_in_process"
+        ) as mock_run:
             mock_run.return_value = None
 
             await run_flow(
                 execution_id=execution_id,
                 config=mock_config,
                 running_jobs=mock_running_jobs,
-                user_token=user_token
+                user_token=user_token,
             )
 
             call_args = mock_run.call_args
-            assert call_args.kwargs['user_token'] == user_token
+            assert call_args.kwargs["user_token"] == user_token
 
 
 class TestRunFlowInProcessLogging:
@@ -465,23 +526,29 @@ class TestRunFlowInProcessLogging:
     @pytest.mark.asyncio
     async def test_run_flow_logs_function_entry(self):
         """Test that function entry is logged."""
-        execution_id = 'exec-123'
-        config = {'nodes': [], 'edges': []}
+        execution_id = "exec-123"
+        config = {"nodes": [], "edges": []}
         running_jobs = {}
 
-        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+        ) as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
-                return_value={'status': 'COMPLETED'}
+                return_value={"status": "COMPLETED"}
             )
 
-            with patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch(
+                "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+            ) as mock_update:
                 mock_update.return_value = True
 
-                with patch('src.services.flow_builder.flow_execution_runner.logger') as mock_logger:
+                with patch(
+                    "src.services.flow_builder.flow_execution_runner.logger"
+                ) as mock_logger:
                     await run_flow_in_process(
                         execution_id=execution_id,
                         config=config,
-                        running_jobs=running_jobs
+                        running_jobs=running_jobs,
                     )
 
                     # Verify logging was called
@@ -490,28 +557,39 @@ class TestRunFlowInProcessLogging:
     @pytest.mark.asyncio
     async def test_run_flow_logs_completion_status(self):
         """Test that completion status is logged."""
-        execution_id = 'exec-123'
-        config = {'nodes': [], 'edges': []}
+        execution_id = "exec-123"
+        config = {"nodes": [], "edges": []}
         running_jobs = {}
 
-        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+        ) as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
-                return_value={'status': 'COMPLETED'}
+                return_value={"status": "COMPLETED"}
             )
 
-            with patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch(
+                "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+            ) as mock_update:
                 mock_update.return_value = True
 
-                with patch('src.services.flow_builder.flow_execution_runner.logger') as mock_logger:
+                with patch(
+                    "src.services.flow_builder.flow_execution_runner.logger"
+                ) as mock_logger:
                     await run_flow_in_process(
                         execution_id=execution_id,
                         config=config,
-                        running_jobs=running_jobs
+                        running_jobs=running_jobs,
                     )
 
                     # Check that completion was logged
-                    log_messages = [str(call) for call in mock_logger.info.call_args_list]
-                    assert any('COMPLETED' in msg or 'completed' in msg.lower() for msg in log_messages)
+                    log_messages = [
+                        str(call) for call in mock_logger.info.call_args_list
+                    ]
+                    assert any(
+                        "COMPLETED" in msg or "completed" in msg.lower()
+                        for msg in log_messages
+                    )
 
 
 class TestRunFlowInProcessInputExtraction:
@@ -520,54 +598,54 @@ class TestRunFlowInProcessInputExtraction:
     @pytest.mark.asyncio
     async def test_extracts_inputs_from_config(self):
         """Test that inputs are extracted from config and passed to executor."""
-        execution_id = 'exec-123'
-        user_inputs = {'topic': 'AI', 'depth': 'detailed'}
-        config = {
-            'nodes': [],
-            'edges': [],
-            'inputs': user_inputs
-        }
+        execution_id = "exec-123"
+        user_inputs = {"topic": "AI", "depth": "detailed"}
+        config = {"nodes": [], "edges": [], "inputs": user_inputs}
         running_jobs = {}
 
-        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+        ) as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
-                return_value={'status': 'COMPLETED'}
+                return_value={"status": "COMPLETED"}
             )
 
-            with patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch(
+                "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+            ) as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
-                    execution_id=execution_id,
-                    config=config,
-                    running_jobs=running_jobs
+                    execution_id=execution_id, config=config, running_jobs=running_jobs
                 )
 
                 # Verify inputs were passed to executor
                 call_args = mock_executor.run_flow_isolated.call_args
-                assert call_args.kwargs['inputs'] == user_inputs
+                assert call_args.kwargs["inputs"] == user_inputs
 
     @pytest.mark.asyncio
     async def test_handles_missing_inputs(self):
         """Test handling when inputs are not in config."""
-        execution_id = 'exec-123'
-        config = {'nodes': [], 'edges': []}  # No inputs key
+        execution_id = "exec-123"
+        config = {"nodes": [], "edges": []}  # No inputs key
         running_jobs = {}
 
-        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor:
+        with patch(
+            "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+        ) as mock_executor:
             mock_executor.run_flow_isolated = AsyncMock(
-                return_value={'status': 'COMPLETED'}
+                return_value={"status": "COMPLETED"}
             )
 
-            with patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+            with patch(
+                "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+            ) as mock_update:
                 mock_update.return_value = True
 
                 await run_flow_in_process(
-                    execution_id=execution_id,
-                    config=config,
-                    running_jobs=running_jobs
+                    execution_id=execution_id, config=config, running_jobs=running_jobs
                 )
 
                 # Should pass empty dict for inputs
                 call_args = mock_executor.run_flow_isolated.call_args
-                assert call_args.kwargs['inputs'] == {}
+                assert call_args.kwargs["inputs"] == {}

@@ -10,8 +10,9 @@ The memory-backend *config rows* always live in the app DB, so we read the
 active config from the app session, then open a Lakebase session for the actual
 embedding storage/search when Lakebase is the active backend.
 """
-import os
+
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional, Tuple
 
@@ -100,10 +101,12 @@ async def ensure_lakebase_doc_table(session: AsyncSession) -> None:
     """
     from sqlalchemy import text
 
-    result = await session.execute(text(
-        "SELECT column_name FROM information_schema.columns "
-        f"WHERE table_name = '{_KNOWLEDGE_TABLE}'"
-    ))
+    result = await session.execute(
+        text(
+            "SELECT column_name FROM information_schema.columns "
+            f"WHERE table_name = '{_KNOWLEDGE_TABLE}'"
+        )
+    )
     existing = {row[0] for row in result.fetchall()}
 
     if not existing:
@@ -137,8 +140,8 @@ async def resolve_lakebase_instance(
     config cannot be read.
     """
     try:
-        from src.services.memory.config_service import MemoryConfigService
         from src.schemas.memory_backend import MemoryBackendType
+        from src.services.memory.config_service import MemoryConfigService
 
         config = await MemoryConfigService(app_session).get_active_config(group_id)
         backend_type = getattr(config, "backend_type", None) if config else None
@@ -175,7 +178,11 @@ async def resolve_lakebase_instance(
         )
         emit_knowledge_span(
             "knowledge_store_resolve",
-            {"group_id": group_id, "lakebase": False, "error": f"{type(e).__name__}: {e}"[:300]},
+            {
+                "group_id": group_id,
+                "lakebase": False,
+                "error": f"{type(e).__name__}: {e}"[:300],
+            },
         )
         return None
 
@@ -198,13 +205,16 @@ async def _assume_knowledge_role(session: AsyncSession) -> None:
     if not role or not _SAFE_ROLE.match(role):
         return
     from sqlalchemy import text
+
     try:
         await session.execute(text("SAVEPOINT knowledge_set_role"))
         await session.execute(text(f'SET ROLE "{role}"'))
         await session.execute(text("RELEASE SAVEPOINT knowledge_set_role"))
         logger.info(f"[KNOWLEDGE] Operating as role '{role}' on Lakebase session")
     except Exception as e:
-        logger.warning(f"[KNOWLEDGE] Could not SET ROLE '{role}' ({e}); continuing as connection role")
+        logger.warning(
+            f"[KNOWLEDGE] Could not SET ROLE '{role}' ({e}); continuing as connection role"
+        )
         try:
             await session.execute(text("ROLLBACK TO SAVEPOINT knowledge_set_role"))
         except Exception:
@@ -230,7 +240,9 @@ async def knowledge_embedding_session(
     if instance:
         from src.db.lakebase_session import get_lakebase_session
 
-        logger.info(f"[KNOWLEDGE] Using Lakebase instance '{instance}' for document embeddings")
+        logger.info(
+            f"[KNOWLEDGE] Using Lakebase instance '{instance}' for document embeddings"
+        )
         emit_knowledge_span(
             "knowledge_store_session",
             {"group_id": group_id, "lakebase": True, "instance": instance},

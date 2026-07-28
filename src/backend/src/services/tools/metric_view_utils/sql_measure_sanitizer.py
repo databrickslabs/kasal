@@ -100,24 +100,41 @@ _SILENT_WRONG_CHECKS: list[tuple[str, "re.Pattern[str]"]] = [
     # 3+-arg NULLIF (malformed): NULLIF(x, 0, 0)
     ("malformed NULLIF (3 args)", re.compile(r"NULLIF\([^()]*,[^()]*,[^()]*\)")),
     # unresolved DAX measure ref or placeholder left in the SQL
-    ("unresolved DAX measure ref", re.compile(r"\bTODO\b|/\*\s*UNRESOLVED|\b\w+\[[^\]]+\]")),
+    (
+        "unresolved DAX measure ref",
+        re.compile(r"\bTODO\b|/\*\s*UNRESOLVED|\b\w+\[[^\]]+\]"),
+    ),
     # surviving prior-year time-intel (would silently emit the current-period value)
-    ("prior-year time-intel not applied",
-     re.compile(r"SAMEPERIODLASTYEAR|DATEADD|PARALLELPERIOD|SAMEPERIOD", re.IGNORECASE)),
+    (
+        "prior-year time-intel not applied",
+        re.compile(
+            r"SAMEPERIODLASTYEAR|DATEADD|PARALLELPERIOD|SAMEPERIOD", re.IGNORECASE
+        ),
+    ),
     # raw DAX constructs that never got translated
-    ("untranslated DAX (SUMX/FILTER/CALCULATE)",
-     re.compile(r"\b(SUMX|CALCULATE)\s*\(|FILTER\s*\(\s*\w+\s*,", re.IGNORECASE)),
+    (
+        "untranslated DAX (SUMX/FILTER/CALCULATE)",
+        re.compile(r"\b(SUMX|CALCULATE)\s*\(|FILTER\s*\(\s*\w+\s*,", re.IGNORECASE),
+    ),
     # dangling bare single-letter var identifiers (a, b) left in arithmetic
-    ("dangling DAX var identifier",
-     re.compile(r"(?<![\w.])[a-z]\d?(?![\w.(])\s*[-+/*]|[-+/*]\s*(?<![\w.])[a-z]\d?(?![\w.(])")),
+    (
+        "dangling DAX var identifier",
+        re.compile(
+            r"(?<![\w.])[a-z]\d?(?![\w.(])\s*[-+/*]|[-+/*]\s*(?<![\w.])[a-z]\d?(?![\w.(])"
+        ),
+    ),
     # dangling multi-letter DAX var names (res1, res2, std, etd, num, den) — a
     # var whose CALCULATE body never got inlined, left as a bare identifier
     # adjacent to arithmetic. Bounded to a small known set to avoid matching real
     # SQL identifiers/columns.
-    ("dangling DAX var name",
-     re.compile(r"(?<![\w.])(res\d+|std|etd|num|den|val\d+)(?![\w.(])\s*[-+/*]"
-                r"|[-+(]\s*(?<![\w.])(res\d+|std|etd|num|den|val\d+)(?![\w.(])",
-                re.IGNORECASE)),
+    (
+        "dangling DAX var name",
+        re.compile(
+            r"(?<![\w.])(res\d+|std|etd|num|den|val\d+)(?![\w.(])\s*[-+/*]"
+            r"|[-+(]\s*(?<![\w.])(res\d+|std|etd|num|den|val\d+)(?![\w.(])",
+            re.IGNORECASE,
+        ),
+    ),
 ]
 
 
@@ -142,29 +159,36 @@ def detect_lost_dax_component(dax: str, sql: str) -> str | None:
     #    (A faithful PY translation would carry a window spec, a calendar self-join
     #    on a *_py column, a LAG(), or a DATE_ADD — none present ⇒ silently emits
     #    the current-period value, identical to the non-PY sibling.)
-    if re.search(r'SAMEPERIODLASTYEAR|PARALLELPERIOD|PREVIOUSYEAR|DATEADD', du):
-        if not re.search(r'\bLAG\s*\(|\bLEAD\s*\(|DATE_ADD|_PY\b|OVER\s*\(|WINDOW', su):
-            return ('prior-year shift dropped — SQL emits the current-period value '
-                    '(SAMEPERIODLASTYEAR/DATEADD in DAX not reflected in SQL)')
+    if re.search(r"SAMEPERIODLASTYEAR|PARALLELPERIOD|PREVIOUSYEAR|DATEADD", du):
+        if not re.search(r"\bLAG\s*\(|\bLEAD\s*\(|DATE_ADD|_PY\b|OVER\s*\(|WINDOW", su):
+            return (
+                "prior-year shift dropped — SQL emits the current-period value "
+                "(SAMEPERIODLASTYEAR/DATEADD in DAX not reflected in SQL)"
+            )
 
     # 2. DAX is a DIVIDE/ratio but the SQL has no division at all → the whole
     #    denominator was dropped, leaving a bare numerator.
-    if re.search(r'\bDIVIDE\s*\(', du):
-        if '/' not in sql and 'NULLIF' not in su:
-            return ('ratio denominator dropped — DAX has DIVIDE(...) but SQL has no '
-                    'division (numerator emitted alone)')
+    if re.search(r"\bDIVIDE\s*\(", du):
+        if "/" not in sql and "NULLIF" not in su:
+            return (
+                "ratio denominator dropped — DAX has DIVIDE(...) but SQL has no "
+                "division (numerator emitted alone)"
+            )
 
     # 3. DAX has an exclusion predicate (<> / != / NOT ... IN) but the SQL carries
     #    no exclusion of any form → the exclusion was dropped and totals will
     #    include rows the DAX excludes.
     dax_has_excl = (
-        '<>' in dax or '!=' in dax
-        or re.search(r'NOT\s+[\w\'.\[\]]+\s+IN', du) is not None
+        "<>" in dax
+        or "!=" in dax
+        or re.search(r"NOT\s+[\w\'.\[\]]+\s+IN", du) is not None
     )
     if dax_has_excl:
-        if '<>' not in sql and 'NOT IN' not in su and '!=' not in sql:
-            return ('exclusion filter dropped — DAX excludes values (<> / NOT IN) '
-                    'but SQL has no exclusion (totals will include excluded rows)')
+        if "<>" not in sql and "NOT IN" not in su and "!=" not in sql:
+            return (
+                "exclusion filter dropped — DAX excludes values (<> / NOT IN) "
+                "but SQL has no exclusion (totals will include excluded rows)"
+            )
 
     # 4. Multi-block arithmetic collapse: the DAX binds >=2 aggregate blocks to
     #    vars and the RETURN combines them with + / - (NOT inside a DIVIDE), but
@@ -172,21 +196,30 @@ def detect_lost_dax_component(dax: str, sql: str) -> str | None:
     #    survived and the `- b` / `+ b` was dropped. Produces clean-looking SQL
     #    that is silently wrong (e.g. cost_to_supply = a - b emitted as just a).
     #    Only fires on the non-ratio case (the DIVIDE case is covered by check 2).
-    if '/' not in sql and 'DIVIDE' not in du:
+    if "/" not in sql and "DIVIDE" not in du:
         # Count aggregate blocks the DAX evaluates (CALCULATE/SUMX wrappers).
-        agg_blocks = len(re.findall(r'\bCALCULATE\s*\(|\bSUMX\s*\(', du))
+        agg_blocks = len(re.findall(r"\bCALCULATE\s*\(|\bSUMX\s*\(", du))
         # The RETURN (or whole expr) combines vars/terms with + or - at the top.
-        ret_m = re.search(r'\bRETURN\b(.+)$', dax, re.I | re.S)
+        ret_m = re.search(r"\bRETURN\b(.+)$", dax, re.I | re.S)
         ret_expr = ret_m.group(1) if ret_m else dax
-        combines_terms = re.search(r'\b\w+\s*[-+]\s*\w+', ret_expr) is not None
+        combines_terms = re.search(r"\b\w+\s*[-+]\s*\w+", ret_expr) is not None
         # The SQL has a single aggregate term: one FILTER (or none) and no top-level
         # + / - joining two aggregates.
-        sql_agg_terms = len(re.findall(r'\bFILTER\b', su)) or su.count('SUM(')
-        sql_combines = re.search(r'\)\s*[-+]\s*(?:\(|SUM|COUNT|AVG|MIN|MAX)', su) is not None
-        if agg_blocks >= 2 and combines_terms and sql_agg_terms <= 1 and not sql_combines:
-            return ('additive term dropped — DAX combines multiple aggregate blocks '
-                    'with + / - (e.g. a - b) but SQL emitted a single term '
-                    '(the other term was silently dropped)')
+        sql_agg_terms = len(re.findall(r"\bFILTER\b", su)) or su.count("SUM(")
+        sql_combines = (
+            re.search(r"\)\s*[-+]\s*(?:\(|SUM|COUNT|AVG|MIN|MAX)", su) is not None
+        )
+        if (
+            agg_blocks >= 2
+            and combines_terms
+            and sql_agg_terms <= 1
+            and not sql_combines
+        ):
+            return (
+                "additive term dropped — DAX combines multiple aggregate blocks "
+                "with + / - (e.g. a - b) but SQL emitted a single term "
+                "(the other term was silently dropped)"
+            )
 
     # 5. Share-of-total collapse: DAX is a ratio whose denominator removes filter
     #    context with ALL()/ALLSELECTED (CALCULATE([M], ALL(dim))), but the SQL
@@ -194,22 +227,28 @@ def detect_lost_dax_component(dax: str, sql: str) -> str | None:
     #    AND its two ratio sides are identical → the "total" side collapsed to the
     #    same value as the numerator, so the share is a constant 1.0. Only fires
     #    when the DAX genuinely divides (a share-of-total, not a bare ALL total).
-    dax_has_all_total = re.search(r'\bALL\s*\(|\bALLSELECTED\s*\(', du) is not None
-    if dax_has_all_total and re.search(r'\bDIVIDE\s*\(', du) and '/' in sql:
+    dax_has_all_total = re.search(r"\bALL\s*\(|\bALLSELECTED\s*\(", du) is not None
+    if dax_has_all_total and re.search(r"\bDIVIDE\s*\(", du) and "/" in sql:
         has_lod_signal = (
-            'WINDOW' in su or 'RANGE: ALL' in su or 'RANGE:ALL' in su
-            or re.search(r'MEASURE\s*\(\s*\w*_ALL\w*\s*\)', su) is not None
+            "WINDOW" in su
+            or "RANGE: ALL" in su
+            or "RANGE:ALL" in su
+            or re.search(r"MEASURE\s*\(\s*\w*_ALL\w*\s*\)", su) is not None
         )
         if not has_lod_signal:
             # Compare the two sides of the top-level division.
-            sides = re.split(r'/\s*NULLIF|/', sql, maxsplit=1)
+            sides = re.split(r"/\s*NULLIF|/", sql, maxsplit=1)
             if len(sides) == 2:
-                norm = lambda s: re.sub(r'[^a-z0-9<>=]', '', s.lower().replace('nullif', '').rstrip(', 0)'))
+                norm = lambda s: re.sub(
+                    r"[^a-z0-9<>=]", "", s.lower().replace("nullif", "").rstrip(", 0)")
+                )
                 if norm(sides[0]) and norm(sides[0]) == norm(sides[1]):
-                    return ('share-of-total collapsed — DAX removes filter context with '
-                            'ALL()/ALLSELECTED for the denominator but SQL has no coarser-LOD '
-                            'window (range: all); numerator == denominator so the share is a '
-                            'constant 1.0')
+                    return (
+                        "share-of-total collapsed — DAX removes filter context with "
+                        "ALL()/ALLSELECTED for the denominator but SQL has no coarser-LOD "
+                        "window (range: all); numerator == denominator so the share is a "
+                        "constant 1.0"
+                    )
 
     return None
 

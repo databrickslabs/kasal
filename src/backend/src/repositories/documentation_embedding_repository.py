@@ -1,12 +1,13 @@
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Union, Type
-from sqlalchemy.orm import Session
+from typing import Any, Dict, List, Optional, Type, Union
+
 from sqlalchemy import desc, literal_column, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
+from src.core.base_repository import BaseRepository
 from src.models.documentation_embedding import DocumentationEmbedding
 from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
-from src.core.base_repository import BaseRepository
 
 #: Where a similarity search stashes each row's score.
 #:
@@ -54,8 +55,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
         return {}
 
     async def create(
-        self,
-        doc_embedding: DocumentationEmbeddingCreate
+        self, doc_embedding: DocumentationEmbeddingCreate
     ) -> DocumentationEmbedding:
         """Create a new documentation embedding in the database."""
         db_embedding = self._model(
@@ -111,12 +111,14 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
             )
             return result.scalar_one_or_none()
         else:
-            return self.db.query(self._model).filter(self._model.id == embedding_id).first()
+            return (
+                self.db.query(self._model)
+                .filter(self._model.id == embedding_id)
+                .first()
+            )
 
     async def get_all(
-        self,
-        skip: int = 0,
-        limit: int = 100
+        self, skip: int = 0, limit: int = 100
     ) -> List[DocumentationEmbedding]:
         """Get a list of documentation embeddings with pagination."""
         if isinstance(self.db, AsyncSession):
@@ -128,9 +130,7 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
             return self.db.query(self._model).offset(skip).limit(limit).all()
 
     async def update(
-        self,
-        embedding_id: int,
-        update_data: Dict[str, Any]
+        self, embedding_id: int, update_data: Dict[str, Any]
     ) -> Optional[DocumentationEmbedding]:
         """Update a documentation embedding by ID with the provided data."""
         db_embedding = await self.get_by_id(embedding_id)
@@ -165,7 +165,8 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
         knowledge. Returns the number of rows deleted. autoescape neutralizes
         LIKE wildcards in the user-supplied filename/execution_id.
         """
-        from sqlalchemy import delete as sa_delete, or_
+        from sqlalchemy import delete as sa_delete
+        from sqlalchemy import or_
 
         conditions = [
             self._model.group_id == group_id,
@@ -183,8 +184,10 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
             result = await self.db.execute(sa_delete(self._model).where(*conditions))
             return result.rowcount or 0
         else:
-            deleted = self.db.query(self._model).filter(*conditions).delete(
-                synchronize_session=False
+            deleted = (
+                self.db.query(self._model)
+                .filter(*conditions)
+                .delete(synchronize_session=False)
             )
             return deleted or 0
 
@@ -257,9 +260,13 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
             db_type = await self._get_database_type()
 
             if db_type == "sqlite":
-                return await self._search_similar_sqlite(query_embedding, limit, group_id, file_paths)
+                return await self._search_similar_sqlite(
+                    query_embedding, limit, group_id, file_paths
+                )
             else:
-                return await self._search_similar_postgres(query_embedding, limit, group_id, file_paths)
+                return await self._search_similar_postgres(
+                    query_embedding, limit, group_id, file_paths
+                )
         else:
             # Sync version for backwards compatibility
             query = self.db.query(self._model)
@@ -269,15 +276,14 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
                 query = query.filter(self._model.group_id == group_id)
                 if file_paths:
                     query = query.filter(self._model.file_path.in_(file_paths))
-            return query.order_by(
-                self._model.embedding.cosine_distance(query_embedding)
-            ).limit(limit).all()
+            return (
+                query.order_by(self._model.embedding.cosine_distance(query_embedding))
+                .limit(limit)
+                .all()
+            )
 
     async def search_by_source(
-        self,
-        source: str,
-        skip: int = 0,
-        limit: int = 100
+        self, source: str, skip: int = 0, limit: int = 100
     ) -> List[DocumentationEmbedding]:
         """Search for documentation embeddings by source."""
         if isinstance(self.db, AsyncSession):
@@ -289,15 +295,16 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
             )
             return result.scalars().all()
         else:
-            return self.db.query(self._model).filter(
-                self._model.source.contains(source)
-            ).offset(skip).limit(limit).all()
+            return (
+                self.db.query(self._model)
+                .filter(self._model.source.contains(source))
+                .offset(skip)
+                .limit(limit)
+                .all()
+            )
 
     async def search_by_title(
-        self,
-        title: str,
-        skip: int = 0,
-        limit: int = 100
+        self, title: str, skip: int = 0, limit: int = 100
     ) -> List[DocumentationEmbedding]:
         """Search for documentation embeddings by title."""
         if isinstance(self.db, AsyncSession):
@@ -309,40 +316,43 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
             )
             return result.scalars().all()
         else:
-            return self.db.query(self._model).filter(
-                self._model.title.contains(title)
-            ).offset(skip).limit(limit).all()
+            return (
+                self.db.query(self._model)
+                .filter(self._model.title.contains(title))
+                .offset(skip)
+                .limit(limit)
+                .all()
+            )
 
-    async def get_recent(
-        self,
-        limit: int = 10
-    ) -> List[DocumentationEmbedding]:
+    async def get_recent(self, limit: int = 10) -> List[DocumentationEmbedding]:
         """Get most recently created documentation embeddings."""
         if isinstance(self.db, AsyncSession):
             result = await self.db.execute(
-                select(self._model)
-                .order_by(desc(self._model.created_at))
-                .limit(limit)
+                select(self._model).order_by(desc(self._model.created_at)).limit(limit)
             )
             return result.scalars().all()
         else:
-            return self.db.query(self._model).order_by(
-                desc(self._model.created_at)
-            ).limit(limit).all()
+            return (
+                self.db.query(self._model)
+                .order_by(desc(self._model.created_at))
+                .limit(limit)
+                .all()
+            )
 
     async def _get_database_type(self) -> str:
         """Detect the database type from the session."""
         try:
-            if hasattr(self.db, 'bind') and self.db.bind:
+            if hasattr(self.db, "bind") and self.db.bind:
                 dialect_name = self.db.bind.dialect.name.lower()
                 return dialect_name
-            elif hasattr(self.db, 'get_bind'):
+            elif hasattr(self.db, "get_bind"):
                 bind = await self.db.get_bind()
                 if bind:
                     dialect_name = bind.dialect.name.lower()
                     return dialect_name
             # Fallback: try to detect from settings
             from src.config.settings import settings
+
             return settings.DATABASE_TYPE.lower()
         except Exception as e:
             # Default to postgres if detection fails
@@ -428,7 +438,8 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
             return [r for (r,) in result.all() if r]
         # Sync fallback
         return [
-            r for (r,) in self.db.query(self._model.file_path)
+            r
+            for (r,) in self.db.query(self._model.file_path)
             .filter(self._model.group_id == group_id)
             .distinct()
             .all()
@@ -468,7 +479,9 @@ class DocumentationEmbeddingRepository(BaseRepository[DocumentationEmbedding]):
         # looking for the answer they did not contain.
         # literal_column, not text(): a bare TextClause is not a column role, so
         # add_columns() rejects it — the ORDER BY alone accepted either.
-        distance = literal_column("embedding <=> (:embedding)::vector").label("distance")
+        distance = literal_column("embedding <=> (:embedding)::vector").label(
+            "distance"
+        )
         query = query.add_columns(distance).order_by(distance).limit(limit)
         result = await self.db.execute(query, {"embedding": embedding_str})
         rows = []

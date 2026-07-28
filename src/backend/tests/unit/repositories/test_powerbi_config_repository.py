@@ -4,23 +4,34 @@ Unit tests for PowerBIConfigRepository.
 Tests the functionality of Power BI configuration repository including
 active configuration management, deactivation operations, and configuration creation.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock
+
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 
-from sqlalchemy.ext.asyncio import AsyncSession
+import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.repositories.powerbi_config_repository import PowerBIConfigRepository
 from src.models.powerbi_config import PowerBIConfig
+from src.repositories.powerbi_config_repository import PowerBIConfigRepository
 
 
 # Mock Power BI config model
 class MockPowerBIConfig:
-    def __init__(self, id=1, tenant_id="test-tenant", client_id="test-client",
-                 workspace_id="test-workspace", semantic_model_id="test-model",
-                 is_active=True, is_enabled=True, group_id=None,
-                 created_at=None, updated_at=None, **kwargs):
+    def __init__(
+        self,
+        id=1,
+        tenant_id="test-tenant",
+        client_id="test-client",
+        workspace_id="test-workspace",
+        semantic_model_id="test-model",
+        is_active=True,
+        is_enabled=True,
+        group_id=None,
+        created_at=None,
+        updated_at=None,
+        **kwargs,
+    ):
         self.id = id
         self.tenant_id = tenant_id
         self.client_id = client_id
@@ -57,9 +68,15 @@ def powerbi_config_repository(mock_async_session):
 def sample_powerbi_configs():
     """Create sample Power BI configurations for testing."""
     return [
-        MockPowerBIConfig(id=1, tenant_id="active-tenant", is_active=True, group_id="group1"),
-        MockPowerBIConfig(id=2, tenant_id="inactive-tenant", is_active=False, group_id="group1"),
-        MockPowerBIConfig(id=3, tenant_id="other-group", is_active=True, group_id="group2")
+        MockPowerBIConfig(
+            id=1, tenant_id="active-tenant", is_active=True, group_id="group1"
+        ),
+        MockPowerBIConfig(
+            id=2, tenant_id="inactive-tenant", is_active=False, group_id="group1"
+        ),
+        MockPowerBIConfig(
+            id=3, tenant_id="other-group", is_active=True, group_id="group2"
+        ),
     ]
 
 
@@ -73,7 +90,7 @@ def sample_config_data():
         "semantic_model_id": "new-model",
         "is_active": True,
         "is_enabled": True,
-        "group_id": "group1"
+        "group_id": "group1",
     }
 
 
@@ -92,7 +109,9 @@ class TestPowerBIConfigRepositoryGetActiveConfig:
     """Test cases for get_active_config method."""
 
     @pytest.mark.asyncio
-    async def test_get_active_config_success(self, powerbi_config_repository, mock_async_session, sample_powerbi_configs):
+    async def test_get_active_config_success(
+        self, powerbi_config_repository, mock_async_session, sample_powerbi_configs
+    ):
         """Test successful retrieval of active configuration."""
         active_config = sample_powerbi_configs[0]  # is_active=True, group1
 
@@ -108,7 +127,9 @@ class TestPowerBIConfigRepositoryGetActiveConfig:
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_active_config_no_group_filter(self, powerbi_config_repository, mock_async_session, sample_powerbi_configs):
+    async def test_get_active_config_no_group_filter(
+        self, powerbi_config_repository, mock_async_session, sample_powerbi_configs
+    ):
         """Test get active config without group filter."""
         active_config = sample_powerbi_configs[0]
 
@@ -124,7 +145,9 @@ class TestPowerBIConfigRepositoryGetActiveConfig:
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_active_config_none_found(self, powerbi_config_repository, mock_async_session):
+    async def test_get_active_config_none_found(
+        self, powerbi_config_repository, mock_async_session
+    ):
         """Test get active config when no active configuration exists."""
         mock_result = MagicMock()
         mock_scalars = MagicMock()
@@ -132,13 +155,17 @@ class TestPowerBIConfigRepositoryGetActiveConfig:
         mock_result.scalars.return_value = mock_scalars
         mock_async_session.execute.return_value = mock_result
 
-        result = await powerbi_config_repository.get_active_config(group_id="nonexistent")
+        result = await powerbi_config_repository.get_active_config(
+            group_id="nonexistent"
+        )
 
         assert result is None
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_active_config_database_error(self, powerbi_config_repository, mock_async_session):
+    async def test_get_active_config_database_error(
+        self, powerbi_config_repository, mock_async_session
+    ):
         """Test get active config handles database errors."""
         mock_async_session.execute.side_effect = Exception("Database connection error")
 
@@ -150,7 +177,9 @@ class TestPowerBIConfigRepositoryDeactivateAll:
     """Test cases for deactivate_all method."""
 
     @pytest.mark.asyncio
-    async def test_deactivate_all_success(self, powerbi_config_repository, mock_async_session):
+    async def test_deactivate_all_success(
+        self, powerbi_config_repository, mock_async_session
+    ):
         """Test successful deactivation of all configs for a group."""
         mock_result = MagicMock()
         mock_async_session.execute.return_value = mock_result
@@ -162,7 +191,9 @@ class TestPowerBIConfigRepositoryDeactivateAll:
         mock_async_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_deactivate_all_no_group_filter(self, powerbi_config_repository, mock_async_session):
+    async def test_deactivate_all_no_group_filter(
+        self, powerbi_config_repository, mock_async_session
+    ):
         """Test deactivate all without group filter."""
         mock_result = MagicMock()
         mock_async_session.execute.return_value = mock_result
@@ -173,7 +204,9 @@ class TestPowerBIConfigRepositoryDeactivateAll:
         mock_async_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_deactivate_all_database_error(self, powerbi_config_repository, mock_async_session):
+    async def test_deactivate_all_database_error(
+        self, powerbi_config_repository, mock_async_session
+    ):
         """Test deactivate all handles database errors."""
         mock_async_session.execute.side_effect = Exception("Database error")
 
@@ -185,7 +218,9 @@ class TestPowerBIConfigRepositoryCreateConfig:
     """Test cases for create_config method."""
 
     @pytest.mark.asyncio
-    async def test_create_config_success(self, powerbi_config_repository, mock_async_session, sample_config_data):
+    async def test_create_config_success(
+        self, powerbi_config_repository, mock_async_session, sample_config_data
+    ):
         """Test successful configuration creation."""
         # Mock deactivate_all
         mock_result = MagicMock()
@@ -206,12 +241,14 @@ class TestPowerBIConfigRepositoryCreateConfig:
         assert isinstance(result, PowerBIConfig)
 
     @pytest.mark.asyncio
-    async def test_create_config_with_group_id(self, powerbi_config_repository, mock_async_session):
+    async def test_create_config_with_group_id(
+        self, powerbi_config_repository, mock_async_session
+    ):
         """Test config creation with group_id."""
         config_data = {
             "tenant_id": "test-tenant",
             "client_id": "test-client",
-            "group_id": "test-group"
+            "group_id": "test-group",
         }
 
         mock_result = MagicMock()
@@ -229,7 +266,9 @@ class TestPowerBIConfigRepositoryCreateConfig:
             await powerbi_config_repository.create_config(None)
 
     @pytest.mark.asyncio
-    async def test_create_config_database_error(self, powerbi_config_repository, mock_async_session, sample_config_data):
+    async def test_create_config_database_error(
+        self, powerbi_config_repository, mock_async_session, sample_config_data
+    ):
         """Test create config handles database errors."""
         mock_async_session.add.side_effect = Exception("Database error")
 
@@ -241,7 +280,9 @@ class TestPowerBIConfigRepositoryMultiTenancy:
     """Test cases for multi-tenant functionality."""
 
     @pytest.mark.asyncio
-    async def test_get_active_config_different_groups(self, powerbi_config_repository, mock_async_session):
+    async def test_get_active_config_different_groups(
+        self, powerbi_config_repository, mock_async_session
+    ):
         """Test that get_active_config properly filters by group."""
         # Mock two different configs for different groups
         group1_config = MockPowerBIConfig(id=1, group_id="group1", is_active=True)
@@ -259,7 +300,9 @@ class TestPowerBIConfigRepositoryMultiTenancy:
         assert result.group_id == "group1"
 
     @pytest.mark.asyncio
-    async def test_deactivate_only_affects_specified_group(self, powerbi_config_repository, mock_async_session):
+    async def test_deactivate_only_affects_specified_group(
+        self, powerbi_config_repository, mock_async_session
+    ):
         """Test that deactivate_all only affects the specified group."""
         mock_result = MagicMock()
         mock_async_session.execute.return_value = mock_result

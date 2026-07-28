@@ -10,9 +10,13 @@ from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Path, status
 
-from src.core.exceptions import BadRequestError, ForbiddenError, KasalError, NotFoundError
-
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import (
+    BadRequestError,
+    ForbiddenError,
+    KasalError,
+    NotFoundError,
+)
 from src.core.permissions import check_role_in_context
 from src.schemas.databricks_secret import (
     DatabricksTokenRequest,

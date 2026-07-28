@@ -1,12 +1,11 @@
-from typing import List, Optional, Any
 import logging
+from typing import Any, List, Optional
 
-from src.repositories.template_repository import TemplateRepository
 from src.models.template import PromptTemplate
+from src.repositories.template_repository import TemplateRepository
 from src.schemas.template import PromptTemplateCreate, PromptTemplateUpdate
 from src.seeds.prompt_templates import DEFAULT_TEMPLATES
 from src.utils.user_context import GroupContext
-
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -41,7 +40,9 @@ class TemplateService:
         """
         return await self.find_all()
 
-    async def find_all_templates_for_group(self, group_context: GroupContext) -> List[PromptTemplate]:
+    async def find_all_templates_for_group(
+        self, group_context: GroupContext
+    ) -> List[PromptTemplate]:
         """
         Return a flat list of templates, one per base name, preferring the
         current group's row (same name) when it exists; otherwise the global row.
@@ -59,18 +60,20 @@ class TemplateService:
 
         # Ensure base rows exist for all DEFAULT_TEMPLATES
         for seed in DEFAULT_TEMPLATES:
-            name = seed['name']
+            name = seed["name"]
             base_key = (name, None)
             if base_key not in existing_by_key:
                 try:
-                    created = await self.repository.create({
-                        'name': name,
-                        'description': seed.get('description'),
-                        'template': seed.get('template', ''),
-                        'is_active': seed.get('is_active', True),
-                        'group_id': None,
-                        'created_by_email': None,
-                    })
+                    created = await self.repository.create(
+                        {
+                            "name": name,
+                            "description": seed.get("description"),
+                            "template": seed.get("template", ""),
+                            "is_active": seed.get("is_active", True),
+                            "group_id": None,
+                            "created_by_email": None,
+                        }
+                    )
                     existing_by_key[base_key] = created
                 except Exception:
                     # If unique constraint or race, ignore; we'll pick up after
@@ -116,7 +119,8 @@ class TemplateService:
         all_templates = await self.repository.find_active_templates()
         # Filter templates by group_id
         return [
-            template for template in all_templates
+            template
+            for template in all_templates
             if template.group_id in group_context.group_ids
         ]
 
@@ -132,7 +136,9 @@ class TemplateService:
         """
         return await self.get(id)
 
-    async def get_template_with_group_check(self, id: int, group_context: GroupContext) -> Optional[PromptTemplate]:
+    async def get_template_with_group_check(
+        self, id: int, group_context: GroupContext
+    ) -> Optional[PromptTemplate]:
         """
         Get a template by ID with group verification.
 
@@ -157,7 +163,9 @@ class TemplateService:
         """
         return await self.repository.get(id)
 
-    async def get_with_group_check(self, id: int, group_context: GroupContext) -> Optional[PromptTemplate]:
+    async def get_with_group_check(
+        self, id: int, group_context: GroupContext
+    ) -> Optional[PromptTemplate]:
         """
         Get a template with group verification.
 
@@ -170,7 +178,11 @@ class TemplateService:
         if template.group_id is None:
             return template
         # Group-scoped template must match one of the user's groups
-        if group_context and group_context.group_ids and template.group_id in group_context.group_ids:
+        if (
+            group_context
+            and group_context.group_ids
+            and template.group_id in group_context.group_ids
+        ):
             return template
         return None
 
@@ -186,7 +198,9 @@ class TemplateService:
         """
         return await self.find_by_name(name)
 
-    async def find_template_by_name_with_group(self, name: str, group_context: GroupContext) -> Optional[PromptTemplate]:
+    async def find_template_by_name_with_group(
+        self, name: str, group_context: GroupContext
+    ) -> Optional[PromptTemplate]:
         """
         Find a template by name with group verification.
 
@@ -211,7 +225,9 @@ class TemplateService:
         """
         return await self.repository.find_by_name(name)
 
-    async def find_by_name_with_group_check(self, name: str, group_context: GroupContext) -> Optional[PromptTemplate]:
+    async def find_by_name_with_group_check(
+        self, name: str, group_context: GroupContext
+    ) -> Optional[PromptTemplate]:
         """
         Find a template by name with group semantics:
         - Prefer the current group's same-name row
@@ -229,22 +245,26 @@ class TemplateService:
             return base
         # lazily seed base from DEFAULT_TEMPLATES if available
         try:
-            seed = next((t for t in DEFAULT_TEMPLATES if t['name'] == name), None)
+            seed = next((t for t in DEFAULT_TEMPLATES if t["name"] == name), None)
             if seed:
-                created = await self.repository.create({
-                    'name': seed['name'],
-                    'description': seed.get('description'),
-                    'template': seed.get('template', ''),
-                    'is_active': seed.get('is_active', True),
-                    'group_id': None,
-                    'created_by_email': None,
-                })
+                created = await self.repository.create(
+                    {
+                        "name": seed["name"],
+                        "description": seed.get("description"),
+                        "template": seed.get("template", ""),
+                        "is_active": seed.get("is_active", True),
+                        "group_id": None,
+                        "created_by_email": None,
+                    }
+                )
                 return created
         except Exception:
             pass
         return None
 
-    async def create_new_template(self, template_data: PromptTemplateCreate) -> PromptTemplate:
+    async def create_new_template(
+        self, template_data: PromptTemplateCreate
+    ) -> PromptTemplate:
         """
         Create a new prompt template.
 
@@ -258,7 +278,9 @@ class TemplateService:
         # Repository handles flush, session handles commit
         return template
 
-    async def create_template_with_group(self, template_data: PromptTemplateCreate, group_context: GroupContext) -> PromptTemplate:
+    async def create_template_with_group(
+        self, template_data: PromptTemplateCreate, group_context: GroupContext
+    ) -> PromptTemplate:
         """
         Create a new template with group assignment.
 
@@ -273,7 +295,9 @@ class TemplateService:
         # Repository handles flush, session handles commit
         return template
 
-    async def create_template(self, template_data: PromptTemplateCreate) -> PromptTemplate:
+    async def create_template(
+        self, template_data: PromptTemplateCreate
+    ) -> PromptTemplate:
         """
         Create a new prompt template.
 
@@ -288,7 +312,9 @@ class TemplateService:
         await TemplateService.invalidate_template_cache()
         return result
 
-    async def create_with_group(self, template_data: PromptTemplateCreate, group_context: GroupContext) -> PromptTemplate:
+    async def create_with_group(
+        self, template_data: PromptTemplateCreate, group_context: GroupContext
+    ) -> PromptTemplate:
         """
         Create a template with group assignment.
 
@@ -303,8 +329,8 @@ class TemplateService:
 
         # Add group information
         if group_context and group_context.is_valid():
-            template_dict['group_id'] = group_context.primary_group_id
-            template_dict['created_by_email'] = group_context.group_email
+            template_dict["group_id"] = group_context.primary_group_id
+            template_dict["created_by_email"] = group_context.group_email
 
         result = await self.repository.create(template_dict)
         await TemplateService.invalidate_template_cache()
@@ -314,7 +340,9 @@ class TemplateService:
 
     # Removed UoW-based class method - use instance method instead
 
-    async def update_template(self, id: int, template_data: PromptTemplateUpdate) -> Optional[PromptTemplate]:
+    async def update_template(
+        self, id: int, template_data: PromptTemplateUpdate
+    ) -> Optional[PromptTemplate]:
         """
         Update an existing prompt template.
 
@@ -330,7 +358,9 @@ class TemplateService:
         await TemplateService.invalidate_template_cache()
         return result
 
-    async def update_with_group_check(self, id: int, template_data: PromptTemplateUpdate, group_context: GroupContext) -> Optional[PromptTemplate]:
+    async def update_with_group_check(
+        self, id: int, template_data: PromptTemplateUpdate, group_context: GroupContext
+    ) -> Optional[PromptTemplate]:
         """
         Update semantics aligned with flat list and same-name overrides:
         - If the row belongs to the current group, update it in place
@@ -347,7 +377,7 @@ class TemplateService:
         # If record already belongs to this group, update it directly
         if current_group_id and original.group_id == current_group_id:
             update_data = template_data.model_dump(exclude_unset=True)
-            update_data.pop('name', None)  # prevent cross-scope renames
+            update_data.pop("name", None)  # prevent cross-scope renames
             result = await self.repository.update_template(id, update_data)
             await TemplateService.invalidate_template_cache()
             return result
@@ -356,23 +386,27 @@ class TemplateService:
         if not current_group_id:
             return None
 
-        existing_group_row = await self.repository.find_by_name_and_group(original.name, current_group_id)
+        existing_group_row = await self.repository.find_by_name_and_group(
+            original.name, current_group_id
+        )
 
         incoming = template_data.model_dump(exclude_unset=True)
-        incoming.pop('name', None)
+        incoming.pop("name", None)
 
         if existing_group_row:
-            result = await self.repository.update_template(existing_group_row.id, incoming)
+            result = await self.repository.update_template(
+                existing_group_row.id, incoming
+            )
             await TemplateService.invalidate_template_cache()
             return result
         else:
             create_payload = {
-                'name': original.name,
-                'description': incoming.get('description', original.description),
-                'template': incoming.get('template', original.template),
-                'is_active': incoming.get('is_active', True),
-                'group_id': current_group_id,
-                'created_by_email': current_email,
+                "name": original.name,
+                "description": incoming.get("description", original.description),
+                "template": incoming.get("template", original.template),
+                "is_active": incoming.get("is_active", True),
+                "group_id": current_group_id,
+                "created_by_email": current_email,
             }
             result = await self.repository.create(create_payload)
             await TemplateService.invalidate_template_cache()
@@ -396,7 +430,9 @@ class TemplateService:
         await TemplateService.invalidate_template_cache()
         return result
 
-    async def delete_with_group_check(self, id: int, group_context: GroupContext) -> bool:
+    async def delete_with_group_check(
+        self, id: int, group_context: GroupContext
+    ) -> bool:
         """
         Delete a template with group verification.
 
@@ -489,16 +525,20 @@ class TemplateService:
         for template_data in DEFAULT_TEMPLATES:
             try:
                 # Always resolve against base/global row
-                existing_template = await self.repository.find_by_name_and_group(template_data['name'], None)
+                existing_template = await self.repository.find_by_name_and_group(
+                    template_data["name"], None
+                )
 
                 if existing_template:
                     # Update base/default content only; do NOT set group_id/created_by_email
                     update_data = {
-                        'description': template_data['description'],
-                        'template': template_data['template'],
-                        'is_active': template_data['is_active']
+                        "description": template_data["description"],
+                        "template": template_data["template"],
+                        "is_active": template_data["is_active"],
                     }
-                    await self.repository.update_template(existing_template.id, update_data)
+                    await self.repository.update_template(
+                        existing_template.id, update_data
+                    )
                     logger.debug(f"Updated base template: {template_data['name']}")
                     count += 1
                 else:
@@ -508,12 +548,16 @@ class TemplateService:
                     logger.debug(f"Created base template: {template_data['name']}")
                     count += 1
             except Exception as e:
-                logger.error(f"Failed to reset template {template_data['name']}: {str(e)}")
+                logger.error(
+                    f"Failed to reset template {template_data['name']}: {str(e)}"
+                )
                 continue
 
         return count
 
-    async def _get_template_content_instance(self, name: str, default_template: str = None) -> str:
+    async def _get_template_content_instance(
+        self, name: str, default_template: str = None
+    ) -> str:
         """
         Get the content of a template by name (instance method).
 
@@ -539,7 +583,9 @@ class TemplateService:
                 return default_template
             return ""
 
-    async def get_template_content(self, name: str, default_template: str = None) -> str:
+    async def get_template_content(
+        self, name: str, default_template: str = None
+    ) -> str:
         """
         Get the content of a template by name.
 
@@ -552,7 +598,9 @@ class TemplateService:
         """
         return await self._get_template_content_instance(name, default_template)
 
-    async def _get_effective_template_content_instance(self, name: str, group_context: GroupContext) -> str:
+    async def _get_effective_template_content_instance(
+        self, name: str, group_context: GroupContext
+    ) -> str:
         """
         Get effective template content for current group: prefer the group's
         same-name row; if absent, fall back to the global/base row.
@@ -584,7 +632,9 @@ class TemplateService:
             return ""
 
     @staticmethod
-    async def get_effective_template_content(name: str, group_context: GroupContext) -> str:
+    async def get_effective_template_content(
+        name: str, group_context: GroupContext
+    ) -> str:
         """
         Static helper to retrieve composed template content for the current group/user.
 
@@ -600,9 +650,12 @@ class TemplateService:
             return cached
 
         from src.db.database_router import get_smart_db_session
+
         async for session in get_smart_db_session():
             service = TemplateService(session)
-            return await service._get_effective_template_content_instance(name, group_context)
+            return await service._get_effective_template_content_instance(
+                name, group_context
+            )
 
     @staticmethod
     async def invalidate_template_cache() -> None:
@@ -614,4 +667,3 @@ class TemplateService:
         from src.core.cache import template_cache
 
         await template_cache.clear()
-

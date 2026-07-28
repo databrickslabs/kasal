@@ -10,18 +10,19 @@ Updated for app-modes refactoring:
 """
 
 import sys
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.memory.backend_factory import (
-    MemoryBackendFactory,
-    DatabricksIndexValidationError,
-)
+import pytest
+
 from src.schemas.memory_backend import (
-    MemoryBackendConfig,
-    MemoryBackendType,
     DatabricksMemoryConfig,
     LakebaseMemoryConfig,
+    MemoryBackendConfig,
+    MemoryBackendType,
+)
+from src.services.memory.backend_factory import (
+    DatabricksIndexValidationError,
+    MemoryBackendFactory,
 )
 
 # ─── _validate_databricks_index extra state branches ──────────────────────────

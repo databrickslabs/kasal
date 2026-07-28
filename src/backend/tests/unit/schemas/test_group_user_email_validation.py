@@ -3,6 +3,7 @@
 Production / Databricks Apps enforce strict RFC email validation, while local dev
 also accepts synthetic no-TLD emails (e.g. dev@localhost) that the app itself issues.
 """
+
 import pytest
 from pydantic import ValidationError
 

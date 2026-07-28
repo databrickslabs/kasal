@@ -1,6 +1,7 @@
 """Shared execution trace-context attach — the single entry point both the crew
 path (crew_preparation) and the flow path (flow_methods) use to tag a crew's
 memory + tools with job_id/group attribution."""
+
 from unittest.mock import MagicMock
 
 from src.services.execution.kernel.trace_context import attach_execution_trace_context
@@ -12,8 +13,12 @@ class TestAttachExecutionTraceContext:
         # from that service's config (no new service constructed).
         svc = MagicMock()
         calls = []
-        svc.attach_memory_trace_context.side_effect = lambda *a, **k: calls.append("memory")
-        svc.attach_tools_trace_context.side_effect = lambda *a, **k: calls.append("tools")
+        svc.attach_memory_trace_context.side_effect = lambda *a, **k: calls.append(
+            "memory"
+        )
+        svc.attach_tools_trace_context.side_effect = lambda *a, **k: calls.append(
+            "tools"
+        )
         crew = MagicMock()
         crew_kwargs = {"k": "v"}
 

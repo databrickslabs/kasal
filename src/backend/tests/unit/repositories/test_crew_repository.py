@@ -4,22 +4,24 @@ Unit tests for CrewRepository.
 Tests all methods of the crew repository including
 CRUD operations, group isolation, flush behavior, and edge cases.
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.repositories.crew_repository import CrewRepository
 from src.models.crew import Crew
-
+from src.repositories.crew_repository import CrewRepository
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class _Scalars:
     """Minimal mock for ``Result.scalars()``."""
+
     def __init__(self, items):
         self._items = items
 
@@ -32,6 +34,7 @@ class _Scalars:
 
 class _Result:
     """Minimal mock for ``session.execute()`` return value."""
+
     def __init__(self, items):
         self._scalars = _Scalars(items)
 
@@ -56,6 +59,7 @@ def _make_crew(**overrides):
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def session():
     s = AsyncMock(spec=AsyncSession)
@@ -74,6 +78,7 @@ def repo(session):
 # __init__
 # ---------------------------------------------------------------------------
 
+
 class TestInit:
     def test_sets_model_and_session(self, session):
         repo = CrewRepository(session=session)
@@ -84,6 +89,7 @@ class TestInit:
 # ---------------------------------------------------------------------------
 # find_by_name
 # ---------------------------------------------------------------------------
+
 
 class TestFindByName:
     @pytest.mark.asyncio
@@ -109,6 +115,7 @@ class TestFindByName:
 # find_all
 # ---------------------------------------------------------------------------
 
+
 class TestFindAll:
     @pytest.mark.asyncio
     async def test_returns_all_crews(self, repo, session):
@@ -132,6 +139,7 @@ class TestFindAll:
 # ---------------------------------------------------------------------------
 # find_by_group
 # ---------------------------------------------------------------------------
+
 
 class TestFindByGroup:
     @pytest.mark.asyncio
@@ -163,6 +171,7 @@ class TestFindByGroup:
 # ---------------------------------------------------------------------------
 # get_by_group
 # ---------------------------------------------------------------------------
+
 
 class TestGetByGroup:
     @pytest.mark.asyncio
@@ -204,6 +213,7 @@ class TestGetByGroup:
 # ---------------------------------------------------------------------------
 # delete_by_group
 # ---------------------------------------------------------------------------
+
 
 class TestDeleteByGroup:
     @pytest.mark.asyncio
@@ -251,6 +261,7 @@ class TestDeleteByGroup:
 # delete_all_by_group
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteAllByGroup:
     @pytest.mark.asyncio
     async def test_executes_delete_and_flushes(self, repo, session):
@@ -277,6 +288,7 @@ class TestDeleteAllByGroup:
 # ---------------------------------------------------------------------------
 # delete_all
 # ---------------------------------------------------------------------------
+
 
 class TestDeleteAll:
     @pytest.mark.asyncio

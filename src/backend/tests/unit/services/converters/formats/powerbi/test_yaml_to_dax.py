@@ -6,8 +6,9 @@ syntax validation, and dependency tree building.
 """
 
 import pytest
+
+from src.services.converters.base.models import KPI, DAXMeasure, KPIDefinition
 from src.services.converters.formats.powerbi.yaml_to_dax import DAXGenerator
-from src.services.converters.base.models import KPI, KPIDefinition, DAXMeasure
 
 
 class TestDAXGenerator:
@@ -26,7 +27,7 @@ class TestDAXGenerator:
             technical_name="total_sales",
             formula="amount",
             source_table="Sales",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
     @pytest.fixture
@@ -41,9 +42,9 @@ class TestDAXGenerator:
                     technical_name="revenue",
                     formula="amount",
                     source_table="Sales",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 )
-            ]
+            ],
         )
 
     @pytest.fixture
@@ -59,9 +60,9 @@ class TestDAXGenerator:
                     formula="amount",
                     source_table="Sales",
                     aggregation_type="SUM",
-                    filters=["region = 'EMEA'"]
+                    filters=["region = 'EMEA'"],
                 )
-            ]
+            ],
         )
 
     # ========== Initialization Tests ==========
@@ -69,25 +70,27 @@ class TestDAXGenerator:
     def test_generator_initialization(self, generator):
         """Test DAXGenerator initializes correctly"""
         assert generator is not None
-        assert hasattr(generator, 'filter_resolver')
-        assert hasattr(generator, 'formula_translator')
-        assert hasattr(generator, 'formula_parser')
-        assert hasattr(generator, 'currency_converter')
-        assert hasattr(generator, 'uom_converter')
+        assert hasattr(generator, "filter_resolver")
+        assert hasattr(generator, "formula_translator")
+        assert hasattr(generator, "formula_parser")
+        assert hasattr(generator, "currency_converter")
+        assert hasattr(generator, "uom_converter")
 
     def test_generator_has_dependency_resolver(self, generator):
         """Test generator has dependency resolver"""
-        assert hasattr(generator, '_dependency_resolver')
+        assert hasattr(generator, "_dependency_resolver")
         assert generator._dependency_resolver is not None
 
     def test_generator_has_context_tracking(self, generator):
         """Test generator has context tracking"""
-        assert hasattr(generator, '_kbi_contexts')
-        assert hasattr(generator, '_base_kbi_contexts')
+        assert hasattr(generator, "_kbi_contexts")
+        assert hasattr(generator, "_base_kbi_contexts")
 
     # ========== Generate DAX Measure Tests ==========
 
-    def test_generate_dax_measure_simple(self, generator, simple_definition, simple_kpi):
+    def test_generate_dax_measure_simple(
+        self, generator, simple_definition, simple_kpi
+    ):
         """Test generating simple DAX measure"""
         result = generator.generate_dax_measure(simple_definition, simple_kpi)
 
@@ -98,7 +101,9 @@ class TestDAXGenerator:
         assert "Sales[amount]" in result.dax_formula
         assert result.description == "Total Sales"
 
-    def test_generate_dax_measure_with_filters(self, generator, definition_with_filters):
+    def test_generate_dax_measure_with_filters(
+        self, generator, definition_with_filters
+    ):
         """Test generating DAX measure with filters"""
         kpi = definition_with_filters.kpis[0]
         result = generator.generate_dax_measure(definition_with_filters, kpi)
@@ -115,7 +120,7 @@ class TestDAXGenerator:
             technical_name="order_count",
             formula="order_id",
             source_table="Orders",
-            aggregation_type="COUNT"
+            aggregation_type="COUNT",
         )
         result = generator.generate_dax_measure(simple_definition, kpi)
 
@@ -129,14 +134,16 @@ class TestDAXGenerator:
             technical_name="avg_price",
             formula="price",
             source_table="Products",
-            aggregation_type="AVERAGE"
+            aggregation_type="AVERAGE",
         )
         result = generator.generate_dax_measure(simple_definition, kpi)
 
         assert isinstance(result, DAXMeasure)
         assert "AVERAGE" in result.dax_formula or "AVG" in result.dax_formula
 
-    def test_generate_dax_measure_with_constant_selection(self, generator, simple_definition):
+    def test_generate_dax_measure_with_constant_selection(
+        self, generator, simple_definition
+    ):
         """Test generating DAX measure with constant selection"""
         kpi = KPI(
             description="Sales",
@@ -144,13 +151,16 @@ class TestDAXGenerator:
             formula="amount",
             source_table="Sales",
             aggregation_type="SUM",
-            fields_for_constant_selection=["region", "product"]
+            fields_for_constant_selection=["region", "product"],
         )
         result = generator.generate_dax_measure(simple_definition, kpi)
 
         assert isinstance(result, DAXMeasure)
         assert "REMOVEFILTERS" in result.dax_formula
-        assert "Sales[region]" in result.dax_formula or "Sales[product]" in result.dax_formula
+        assert (
+            "Sales[region]" in result.dax_formula
+            or "Sales[product]" in result.dax_formula
+        )
 
     def test_generate_dax_measure_with_display_sign(self, generator, simple_definition):
         """Test generating DAX measure with display_sign"""
@@ -160,7 +170,7 @@ class TestDAXGenerator:
             formula="cost_amount",
             source_table="Sales",
             aggregation_type="SUM",
-            display_sign=-1
+            display_sign=-1,
         )
         result = generator.generate_dax_measure(simple_definition, kpi)
 
@@ -255,7 +265,9 @@ class TestDAXGenerator:
 
     def test_validate_dax_syntax_valid_calculate(self, generator):
         """Test validating valid CALCULATE syntax"""
-        dax_formula = "CALCULATE(SUM(Sales[Amount]), FILTER(Sales, Sales[Region] = \"EMEA\"))"
+        dax_formula = (
+            'CALCULATE(SUM(Sales[Amount]), FILTER(Sales, Sales[Region] = "EMEA"))'
+        )
         is_valid, message = generator.validate_dax_syntax(dax_formula)
 
         assert is_valid is True
@@ -278,7 +290,9 @@ class TestDAXGenerator:
 
     def test_validate_dax_syntax_invalid_not_in(self, generator):
         """Test detecting invalid NOT IN syntax"""
-        dax_formula = "CALCULATE(SUM(Sales[Amount]), Sales[Region] NOT IN ('EMEA', 'APAC'))"
+        dax_formula = (
+            "CALCULATE(SUM(Sales[Amount]), Sales[Region] NOT IN ('EMEA', 'APAC'))"
+        )
         is_valid, message = generator.validate_dax_syntax(dax_formula)
 
         assert is_valid is False
@@ -316,7 +330,7 @@ class TestDAXGenerator:
         generator.process_definition(simple_definition)
 
         # Dependency resolver should have KBIs
-        assert hasattr(generator._dependency_resolver, '_kbi_lookup')
+        assert hasattr(generator._dependency_resolver, "_kbi_lookup")
 
     def test_process_definition_with_dependencies(self, generator):
         """Test processing definition with calculated KPIs"""
@@ -329,16 +343,16 @@ class TestDAXGenerator:
                     technical_name="revenue",
                     formula="amount",
                     source_table="Sales",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Cost",
                     technical_name="cost",
                     formula="cost_amount",
                     source_table="Sales",
-                    aggregation_type="SUM"
-                )
-            ]
+                    aggregation_type="SUM",
+                ),
+            ],
         )
 
         # Process definition with only base KPIs (no calculated ones to avoid _extract_formula_kbis bug)
@@ -349,11 +363,7 @@ class TestDAXGenerator:
 
     def test_process_definition_empty_kpis(self, generator):
         """Test processing definition with no KPIs"""
-        definition = KPIDefinition(
-            description="Empty",
-            technical_name="empty",
-            kpis=[]
-        )
+        definition = KPIDefinition(description="Empty", technical_name="empty", kpis=[])
 
         # Should not raise errors
         generator.process_definition(definition)
@@ -367,7 +377,7 @@ class TestDAXGenerator:
             technical_name="revenue",
             formula="amount",
             source_table="Sales",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         result = generator._is_base_kbi(kpi)
@@ -379,7 +389,7 @@ class TestDAXGenerator:
             description="Profit",
             technical_name="profit",
             formula="[revenue] - [cost]",
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         result = generator._is_base_kbi(kpi)
@@ -391,7 +401,7 @@ class TestDAXGenerator:
             description="Empty",
             technical_name="empty",
             formula="",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         result = generator._is_base_kbi(kpi)
@@ -408,15 +418,15 @@ class TestDAXGenerator:
                     description="Revenue",
                     technical_name="revenue",
                     formula="amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Profit",
                     technical_name="profit",
                     formula="[revenue] * 0.2",
-                    aggregation_type="CALCULATED"
-                )
-            ]
+                    aggregation_type="CALCULATED",
+                ),
+            ],
         )
         generator._dependency_resolver.build_kbi_lookup(definition.kpis)
 
@@ -433,7 +443,7 @@ class TestDAXGenerator:
             description="Empty",
             technical_name="empty",
             formula="",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         result = generator._extract_formula_kbis(kpi)
@@ -447,7 +457,7 @@ class TestDAXGenerator:
             description="Unnamed",
             formula="amount",
             source_table="Sales",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         result = generator.generate_dax_measure(simple_definition, kpi)

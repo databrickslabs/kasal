@@ -8,24 +8,40 @@ Tests the TTL cache integration including:
 - Bulk operation cache clearing
 """
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 import pytest_asyncio
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch, MagicMock
 
+from src.core.cache import TTLCache, model_config_cache
 from src.services.settings.models import ModelConfigService
-from src.core.cache import model_config_cache, TTLCache
 from src.utils.user_context import GroupContext
 
 
-def mk_model(key="k", name="N", provider="openai", enabled=True, group_id=None,
-             temperature=0.1, context_window=8192, max_output_tokens=2048, extended_thinking=False):
+def mk_model(
+    key="k",
+    name="N",
+    provider="openai",
+    enabled=True,
+    group_id=None,
+    temperature=0.1,
+    context_window=8192,
+    max_output_tokens=2048,
+    extended_thinking=False,
+):
     """Create a mock model configuration."""
     return SimpleNamespace(
-        key=key, name=name, provider=provider, enabled=enabled, group_id=group_id,
-        temperature=temperature, context_window=context_window,
-        max_output_tokens=max_output_tokens, extended_thinking=extended_thinking,
-        id=1
+        key=key,
+        name=name,
+        provider=provider,
+        enabled=enabled,
+        group_id=group_id,
+        temperature=temperature,
+        context_window=context_window,
+        max_output_tokens=max_output_tokens,
+        extended_thinking=extended_thinking,
+        id=1,
     )
 
 
@@ -98,7 +114,9 @@ class TestFindAllForGroupCaching:
         assert result1 == result2
 
     @pytest.mark.asyncio
-    async def test_different_groups_have_separate_cache_entries(self, clean_model_cache):
+    async def test_different_groups_have_separate_cache_entries(
+        self, clean_model_cache
+    ):
         """Test that different groups have isolated cache entries."""
         svc = ModelConfigService(session=SimpleNamespace())
         repo = svc.repository = AsyncMock()
@@ -191,6 +209,7 @@ class TestCacheInvalidationOnMutations:
 
         class NewModel:
             key = "new_model"
+
             def model_dump(self):
                 return {"key": self.key}
 
@@ -300,7 +319,9 @@ class TestCacheInvalidationOnMutations:
         await svc.find_all_for_group(gc1)
         await svc.find_all_for_group(gc2)
         # Each should trigger a new database call
-        assert repo.find_all.call_count == initial_call_count + 3  # +1 for enable_all, +2 for find_all_for_group
+        assert (
+            repo.find_all.call_count == initial_call_count + 3
+        )  # +1 for enable_all, +2 for find_all_for_group
 
     @pytest.mark.asyncio
     async def test_disable_all_models_clears_entire_cache(self, clean_model_cache):
@@ -373,7 +394,9 @@ class TestToggleModelEnabledWithGroupCaching:
 
         # Toggle with group (creates group-specific copy)
         repo.find_by_key_and_group = AsyncMock(return_value=None)
-        repo.create = AsyncMock(return_value=mk_model("m1", group_id="group1", enabled=False))
+        repo.create = AsyncMock(
+            return_value=mk_model("m1", group_id="group1", enabled=False)
+        )
 
         await svc.toggle_model_enabled_with_group("m1", False, gc)
 
@@ -384,7 +407,9 @@ class TestToggleModelEnabledWithGroupCaching:
         assert repo.find_all.call_count == initial_count + 2
 
     @pytest.mark.asyncio
-    async def test_toggle_existing_group_override_invalidates_cache(self, clean_model_cache):
+    async def test_toggle_existing_group_override_invalidates_cache(
+        self, clean_model_cache
+    ):
         """Test toggling existing group override invalidates cache."""
         svc = ModelConfigService(session=SimpleNamespace())
         repo = svc.repository = AsyncMock()
@@ -399,7 +424,9 @@ class TestToggleModelEnabledWithGroupCaching:
         initial_count = repo.find_all.call_count
 
         # Toggle existing group override
-        repo.find_by_key_and_group = AsyncMock(return_value=mk_model("m1", group_id="group1", enabled=True))
+        repo.find_by_key_and_group = AsyncMock(
+            return_value=mk_model("m1", group_id="group1", enabled=True)
+        )
         repo.toggle_enabled_in_group = AsyncMock(return_value=True)
 
         await svc.toggle_model_enabled_with_group("m1", False, gc)
@@ -517,7 +544,9 @@ class TestGetModelConfigCaching:
     def _svc(self, model=None):
         svc = ModelConfigService(session=SimpleNamespace())
         repo = svc.repository = AsyncMock()
-        repo.find_by_key = AsyncMock(return_value=model or mk_model("mkey", provider="databricks"))
+        repo.find_by_key = AsyncMock(
+            return_value=model or mk_model("mkey", provider="databricks")
+        )
         return svc, repo
 
     @pytest.mark.asyncio
@@ -582,8 +611,14 @@ class TestGetModelConfigCaching:
         repo.find_by_key = AsyncMock(return_value=None)
         repo.create = AsyncMock(return_value=mk_model("mkey"))
         model_data = SimpleNamespace(key="mkey")
-        model_data.model_dump = lambda: {"key": "mkey", "name": "N", "provider": "databricks"}
+        model_data.model_dump = lambda: {
+            "key": "mkey",
+            "name": "N",
+            "provider": "databricks",
+        }
         await svc.create_model_config(model_data)
-        repo.find_by_key = AsyncMock(return_value=mk_model("mkey", provider="databricks"))
+        repo.find_by_key = AsyncMock(
+            return_value=mk_model("mkey", provider="databricks")
+        )
         await svc.get_model_config("mkey")
         repo.find_by_key.assert_awaited()  # refetched after create invalidated

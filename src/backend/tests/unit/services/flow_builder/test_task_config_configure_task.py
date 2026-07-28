@@ -6,18 +6,22 @@ Targets uncovered lines:
  410, 440-442, 449-451, 453-456
 """
 
-import pytest
-import uuid
 import json
+import uuid
 from types import SimpleNamespace
-from unittest.mock import MagicMock, AsyncMock, patch, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-from src.services.flow_builder.modules.task_adapter import TaskConfig, _resolve_tool_override
+import pytest
 
+from src.services.flow_builder.modules.task_adapter import (
+    TaskConfig,
+    _resolve_tool_override,
+)
 
 # ---------------------------------------------------------------------------
 # _resolve_tool_override (module-level helper)
 # ---------------------------------------------------------------------------
+
 
 class TestResolveToolOverride:
 
@@ -68,6 +72,7 @@ class TestResolveToolOverride:
 # TaskConfig.configure_task
 # ---------------------------------------------------------------------------
 
+
 def _make_task_data(**kwargs):
     defaults = dict(
         name="Test Task",
@@ -88,9 +93,10 @@ def _make_task_data(**kwargs):
 
 def _make_agent():
     """Create a real CrewAI Agent that passes pydantic validation."""
-    from src.services.execution.runtime import Agent
-    from src.core.llm.transport import LLM
     from unittest.mock import patch
+
+    from src.core.llm.transport import LLM
+    from src.services.execution.runtime import Agent
 
     with patch("crewai.agent.Agent._setup_agent_executor"):
         with patch("crewai.utilities.rpm_controller.RPMController", MagicMock()):
@@ -99,6 +105,7 @@ def _make_agent():
             agent.tools = []
             # Make it pass pydantic isinstance check by making it look like BaseAgent
             from src.services.execution.runtime import BaseAgent
+
             agent.__class__ = BaseAgent
             return agent
 
@@ -168,8 +175,12 @@ class TestConfigureTask:
     async def test_configure_task_no_agent_returns_none(self):
         task_data = _make_task_data()
 
-        with patch.object(TaskConfig, "_resolve_agent_for_task", new=AsyncMock(return_value=None)), \
-             patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()):
+        with (
+            patch.object(
+                TaskConfig, "_resolve_agent_for_task", new=AsyncMock(return_value=None)
+            ),
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+        ):
             result = await TaskConfig.configure_task(task_data)
         assert result is None
 
@@ -178,8 +189,10 @@ class TestConfigureTask:
         task_data = _make_task_data()
         task, agent = _make_real_task_with_mock_agent()
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", return_value=task):
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", return_value=task),
+        ):
             result = await TaskConfig.configure_task(task_data, agent=agent)
 
         assert result is task
@@ -190,9 +203,13 @@ class TestConfigureTask:
         task, agent = _make_real_task_with_mock_agent()
         callback = MagicMock()
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", return_value=task):
-            result = await TaskConfig.configure_task(task_data, agent=agent, task_output_callback=callback)
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", return_value=task),
+        ):
+            result = await TaskConfig.configure_task(
+                task_data, agent=agent, task_output_callback=callback
+            )
 
         assert task.callback == callback
 
@@ -207,8 +224,10 @@ class TestConfigureTask:
             captured_kwargs.update(kwargs)
             return task
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor):
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor),
+        ):
             result = await TaskConfig.configure_task(task_data, agent=agent)
 
         # Unified to the crew path's wording ("markdown syntax").
@@ -225,8 +244,10 @@ class TestConfigureTask:
             captured_kwargs.update(kwargs)
             return task
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor):
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor),
+        ):
             await TaskConfig.configure_task(task_data, agent=agent)
 
         assert captured_kwargs.get("async_execution") is True
@@ -242,8 +263,10 @@ class TestConfigureTask:
             captured_kwargs.update(kwargs)
             return task
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor):
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor),
+        ):
             await TaskConfig.configure_task(task_data, agent=agent)
 
         assert captured_kwargs.get("human_input") is True
@@ -260,9 +283,13 @@ class TestConfigureTask:
             captured_kwargs.update(kwargs)
             return task
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor), \
-             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as MockGF:
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor),
+            patch(
+                "src.services.guardrails.guardrail_factory.GuardrailFactory"
+            ) as MockGF,
+        ):
             MockGF.create_guardrail.return_value = MagicMock()
 
             await TaskConfig.configure_task(task_data, agent=agent)
@@ -289,10 +316,17 @@ class TestConfigureTask:
             captured["cfg"] = cfg
             return MagicMock()
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", return_value=task), \
-             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as MockGF, \
-             patch("src.services.guardrails.wrapper.GuardrailWrapper", return_value=MagicMock()):
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", return_value=task),
+            patch(
+                "src.services.guardrails.guardrail_factory.GuardrailFactory"
+            ) as MockGF,
+            patch(
+                "src.services.guardrails.wrapper.GuardrailWrapper",
+                return_value=MagicMock(),
+            ),
+        ):
             MockGF.create_guardrail.side_effect = _capture
 
             await TaskConfig.configure_task(task_data, agent=agent)
@@ -317,10 +351,17 @@ class TestConfigureTask:
             captured["cfg"] = cfg
             return MagicMock()
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", return_value=task), \
-             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as MockGF, \
-             patch("src.services.guardrails.wrapper.GuardrailWrapper", return_value=MagicMock()):
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", return_value=task),
+            patch(
+                "src.services.guardrails.guardrail_factory.GuardrailFactory"
+            ) as MockGF,
+            patch(
+                "src.services.guardrails.wrapper.GuardrailWrapper",
+                return_value=MagicMock(),
+            ),
+        ):
             MockGF.create_guardrail.side_effect = _capture
 
             await TaskConfig.configure_task(task_data, agent=agent)
@@ -333,9 +374,13 @@ class TestConfigureTask:
         task_data = _make_task_data(guardrail='{"type": "unknown"}')
         task, agent = _make_real_task_with_mock_agent()
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", return_value=task), \
-             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as MockGF:
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", return_value=task),
+            patch(
+                "src.services.guardrails.guardrail_factory.GuardrailFactory"
+            ) as MockGF,
+        ):
             MockGF.create_guardrail.return_value = None
 
             result = await TaskConfig.configure_task(task_data, agent=agent)
@@ -347,9 +392,14 @@ class TestConfigureTask:
         task_data = _make_task_data(guardrail="bad_guardrail_string")
         task, agent = _make_real_task_with_mock_agent()
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", return_value=task), \
-             patch("src.services.guardrails.guardrail_factory.GuardrailFactory", side_effect=ImportError("no module")):
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", return_value=task),
+            patch(
+                "src.services.guardrails.guardrail_factory.GuardrailFactory",
+                side_effect=ImportError("no module"),
+            ),
+        ):
             result = await TaskConfig.configure_task(task_data, agent=agent)
 
         # Should still return task even if guardrail setup fails
@@ -358,7 +408,12 @@ class TestConfigureTask:
     @pytest.mark.asyncio
     async def test_configure_task_llm_guardrail_dict_config(self):
         task_data = _make_task_data(
-            config={"llm_guardrail": {"description": "Validate output", "llm_model": "databricks-claude"}}
+            config={
+                "llm_guardrail": {
+                    "description": "Validate output",
+                    "llm_model": "databricks-claude",
+                }
+            }
         )
         task, agent = _make_real_task_with_mock_agent()
 
@@ -371,11 +426,20 @@ class TestConfigureTask:
             captured_kwargs.update(kwargs)
             return task
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor), \
-             patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG, \
-             patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
-             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor),
+            patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG,
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_gc,
+            ),
+        ):
             MockLLMG.return_value = MagicMock()
 
             await TaskConfig.configure_task(task_data, agent=agent)
@@ -398,11 +462,20 @@ class TestConfigureTask:
         mock_gc = MagicMock()
         mock_gc.primary_group_id = "test-group"
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", return_value=task), \
-             patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG, \
-             patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
-             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", return_value=task),
+            patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG,
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_gc,
+            ),
+        ):
             mock_llm_guardrail = MagicMock()
             MockLLMG.return_value = mock_llm_guardrail
 
@@ -421,17 +494,29 @@ class TestConfigureTask:
         mock_gc.primary_group_id = "test-group"
         mock_configure_llm = AsyncMock(return_value=MagicMock())
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", return_value=task), \
-             patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG, \
-             patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new=mock_configure_llm), \
-             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", return_value=task),
+            patch("src.services.execution.runtime.LLMGuardrail") as MockLLMG,
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new=mock_configure_llm,
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_gc,
+            ),
+        ):
             MockLLMG.return_value = MagicMock()
             await TaskConfig.configure_task(task_data, agent=agent)
 
         mock_configure_llm.assert_called_once()
         call_args = mock_configure_llm.call_args
-        return call_args.args[0] if call_args.args else call_args.kwargs.get("model_name", "")
+        return (
+            call_args.args[0]
+            if call_args.args
+            else call_args.kwargs.get("model_name", "")
+        )
 
     @pytest.mark.asyncio
     async def test_configure_task_llm_guardrail_defaults_to_agent_model(self):
@@ -456,10 +541,12 @@ class TestConfigureTask:
     async def test_configure_task_llm_guardrail_augments_description(self):
         """Non-default guardrail description augments task description."""
         task_data = _make_task_data(
-            config={"llm_guardrail": {
-                "description": "Check for exactly 5 items",
-                "llm_model": "databricks/claude"
-            }}
+            config={
+                "llm_guardrail": {
+                    "description": "Check for exactly 5 items",
+                    "llm_model": "databricks/claude",
+                }
+            }
         )
         task, agent = _make_real_task_with_mock_agent()
 
@@ -472,16 +559,27 @@ class TestConfigureTask:
             captured_desc["description"] = kwargs.get("description", "")
             return task
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor), \
-             patch("src.services.execution.runtime.LLMGuardrail"), \
-             patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
-             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", side_effect=mock_task_ctor),
+            patch("src.services.execution.runtime.LLMGuardrail"),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_gc,
+            ),
+        ):
             await TaskConfig.configure_task(task_data, agent=agent)
 
         # description should include VALIDATION REQUIREMENTS
-        assert "VALIDATION REQUIREMENTS" in task.description or \
-               "VALIDATION REQUIREMENTS" in captured_desc.get("description", "")
+        assert (
+            "VALIDATION REQUIREMENTS" in task.description
+            or "VALIDATION REQUIREMENTS" in captured_desc.get("description", "")
+        )
 
     @pytest.mark.asyncio
     async def test_configure_task_llm_guardrail_exception_continues(self):
@@ -493,11 +591,23 @@ class TestConfigureTask:
         mock_gc = MagicMock()
         mock_gc.primary_group_id = "test-group"
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch("src.services.execution.runtime.Task", return_value=task), \
-             patch("src.services.execution.runtime.LLMGuardrail", side_effect=ImportError("no crewai")), \
-             patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()), \
-             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_gc):
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch("src.services.execution.runtime.Task", return_value=task),
+            patch(
+                "src.services.execution.runtime.LLMGuardrail",
+                side_effect=ImportError("no crewai"),
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_gc,
+            ),
+        ):
             result = await TaskConfig.configure_task(task_data, agent=agent)
 
         assert result is task
@@ -507,7 +617,11 @@ class TestConfigureTask:
         task_data = _make_task_data()
         _, agent = _make_real_task_with_mock_agent()
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock(side_effect=RuntimeError("tools fail"))):
+        with patch.object(
+            TaskConfig,
+            "_configure_task_tools",
+            new=AsyncMock(side_effect=RuntimeError("tools fail")),
+        ):
             result = await TaskConfig.configure_task(task_data, agent=agent)
 
         assert result is None
@@ -516,6 +630,7 @@ class TestConfigureTask:
 # ---------------------------------------------------------------------------
 # _resolve_agent_for_task
 # ---------------------------------------------------------------------------
+
 
 class TestResolveAgentForTask:
 
@@ -536,8 +651,10 @@ class TestResolveAgentForTask:
         agent_repo = MagicMock()
         agent_repo.get = AsyncMock(return_value=agent_data)
 
-        with patch("src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
-                   new=AsyncMock(return_value=mock_agent)):
+        with patch(
+            "src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
+            new=AsyncMock(return_value=mock_agent),
+        ):
             result = await TaskConfig._resolve_agent_for_task(
                 task_data, None, {"agent": agent_repo}
             )
@@ -556,10 +673,17 @@ class TestResolveAgentForTask:
         fallback_repo = MagicMock()
         fallback_repo.get = AsyncMock(return_value=MagicMock())
 
-        with patch("src.db.session.request_scoped_session") as MockSession, \
-             patch("src.repositories.agent_repository.AgentRepository", return_value=fallback_repo), \
-             patch("src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
-                   new=AsyncMock(return_value=mock_agent)):
+        with (
+            patch("src.db.session.request_scoped_session") as MockSession,
+            patch(
+                "src.repositories.agent_repository.AgentRepository",
+                return_value=fallback_repo,
+            ),
+            patch(
+                "src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
+                new=AsyncMock(return_value=mock_agent),
+            ),
+        ):
             mock_session_ctx = MagicMock()
             mock_session = AsyncMock()
             mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
@@ -582,8 +706,10 @@ class TestResolveAgentForTask:
         agent_repo = MagicMock()
         agent_repo.get = AsyncMock(return_value=agent_data)
 
-        with patch("src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
-                   new=AsyncMock(return_value=None)):
+        with patch(
+            "src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
+            new=AsyncMock(return_value=None),
+        ):
             result = await TaskConfig._resolve_agent_for_task(
                 task_data, None, {"agent": agent_repo}
             )
@@ -601,8 +727,13 @@ class TestResolveAgentForTask:
         fallback_repo = MagicMock()
         fallback_repo.get = AsyncMock(return_value=None)
 
-        with patch("src.db.session.request_scoped_session") as MockSession, \
-             patch("src.repositories.agent_repository.AgentRepository", return_value=fallback_repo):
+        with (
+            patch("src.db.session.request_scoped_session") as MockSession,
+            patch(
+                "src.repositories.agent_repository.AgentRepository",
+                return_value=fallback_repo,
+            ),
+        ):
             mock_session_ctx = MagicMock()
             mock_session = AsyncMock()
             mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
@@ -641,9 +772,11 @@ class TestResolveAgentForTask:
 # _configure_task_tools
 # ---------------------------------------------------------------------------
 
+
 def _make_mock_session_ctx():
     """Helper to create a mock session context manager."""
     from contextlib import asynccontextmanager
+
     mock_session = AsyncMock()
     mock_session_ctx = MagicMock()
     mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
@@ -661,9 +794,11 @@ class TestConfigureTaskTools:
 
         session_ctx, _ = _make_mock_session_ctx()
 
-        with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.settings.api_keys.ApiKeysService"), \
-             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.services.settings.api_keys.ApiKeysService"),
+            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+        ):
             MockTF.create = AsyncMock(return_value=MagicMock())
 
             await TaskConfig._configure_task_tools(task_data, agent, None)
@@ -684,9 +819,11 @@ class TestConfigureTaskTools:
 
         session_ctx, _ = _make_mock_session_ctx()
 
-        with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.settings.api_keys.ApiKeysService"), \
-             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.services.settings.api_keys.ApiKeysService"),
+            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+        ):
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
             await TaskConfig._configure_task_tools(task_data, agent, None)
@@ -705,9 +842,11 @@ class TestConfigureTaskTools:
 
         session_ctx, _ = _make_mock_session_ctx()
 
-        with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.settings.api_keys.ApiKeysService"), \
-             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.services.settings.api_keys.ApiKeysService"),
+            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+        ):
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
             await TaskConfig._configure_task_tools(task_data, agent, None)
@@ -722,9 +861,11 @@ class TestConfigureTaskTools:
 
         session_ctx, _ = _make_mock_session_ctx()
 
-        with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.settings.api_keys.ApiKeysService"), \
-             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.services.settings.api_keys.ApiKeysService"),
+            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+        ):
             MockTF.create = AsyncMock(return_value=MagicMock())
 
             # Should not raise
@@ -738,9 +879,11 @@ class TestConfigureTaskTools:
 
         session_ctx, _ = _make_mock_session_ctx()
 
-        with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.settings.api_keys.ApiKeysService"), \
-             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.services.settings.api_keys.ApiKeysService"),
+            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+        ):
             MockTF.create = AsyncMock(return_value=MagicMock())
 
             await TaskConfig._configure_task_tools(task_data, agent, None)
@@ -760,9 +903,11 @@ class TestConfigureTaskTools:
 
         session_ctx, _ = _make_mock_session_ctx()
 
-        with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.settings.api_keys.ApiKeysService"), \
-             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.services.settings.api_keys.ApiKeysService"),
+            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+        ):
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
             await TaskConfig._configure_task_tools(task_data, agent, None)
@@ -782,9 +927,11 @@ class TestConfigureTaskTools:
 
         session_ctx, _ = _make_mock_session_ctx()
 
-        with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.settings.api_keys.ApiKeysService"), \
-             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.services.settings.api_keys.ApiKeysService"),
+            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+        ):
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
             await TaskConfig._configure_task_tools(task_data, agent, None)
@@ -801,13 +948,17 @@ class TestConfigureTaskTools:
 
         session_ctx, _ = _make_mock_session_ctx()
 
-        with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.settings.api_keys.ApiKeysService"), \
-             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.services.settings.api_keys.ApiKeysService"),
+            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+        ):
             mock_tf = AsyncMock()
             MockTF.create = AsyncMock(return_value=mock_tf)
 
-            await TaskConfig._configure_task_tools(task_data, agent, None, group_context=group_ctx)
+            await TaskConfig._configure_task_tools(
+                task_data, agent, None, group_context=group_ctx
+            )
 
         # factory should have been called with group_id
         MockTF.create.assert_called_once()
@@ -822,6 +973,7 @@ class TestConfigureTaskTools:
         agent.tools = []
 
         from contextlib import asynccontextmanager
+
         fail_ctx = MagicMock()
         fail_ctx.__aenter__ = AsyncMock(side_effect=Exception("session fail"))
         fail_ctx.__aexit__ = AsyncMock(return_value=False)
@@ -832,9 +984,11 @@ class TestConfigureTaskTools:
         mock_factory.create_tool.return_value = mock_tool
         mock_factory.get_tool_info.return_value = None
 
-        with patch("src.db.session.request_scoped_session", return_value=fail_ctx), \
-             patch("src.services.settings.api_keys.ApiKeysService"), \
-             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=fail_ctx),
+            patch("src.services.settings.api_keys.ApiKeysService"),
+            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+        ):
             MockTF.return_value = mock_factory
 
             await TaskConfig._configure_task_tools(task_data, agent, None)
@@ -853,7 +1007,7 @@ class TestConfigureTaskTools:
                 {
                     "id": f"task-{task_id}",
                     "type": "taskNode",
-                    "data": {"tools": ["node-tool-1"]}
+                    "data": {"tools": ["node-tool-1"]},
                 }
             ]
         )
@@ -867,9 +1021,11 @@ class TestConfigureTaskTools:
 
         session_ctx, _ = _make_mock_session_ctx()
 
-        with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.settings.api_keys.ApiKeysService"), \
-             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.services.settings.api_keys.ApiKeysService"),
+            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+        ):
             MockTF.create = AsyncMock(return_value=mock_factory)
 
             await TaskConfig._configure_task_tools(task_data, agent, flow_data)
@@ -885,9 +1041,11 @@ class TestConfigureTaskTools:
 
         session_ctx, _ = _make_mock_session_ctx()
 
-        with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.settings.api_keys.ApiKeysService"), \
-             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch("src.services.settings.api_keys.ApiKeysService"),
+            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+        ):
             MockTF.create = AsyncMock(return_value=MagicMock())
 
             await TaskConfig._configure_task_tools(task_data, agent, None)

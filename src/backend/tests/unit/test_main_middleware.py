@@ -8,22 +8,23 @@ Tests focus on:
 - App attributes
 """
 
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, Mock, patch, call
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 
 # ---------------------------------------------------------------------------
 # Exception handler tests via TestClient
 # ---------------------------------------------------------------------------
 
+
 class TestExceptionHandlers:
     """Test global exception handlers fire correctly."""
 
     def test_kasal_error_handler_returns_correct_status(self):
-        from src.main import app
         from src.core.exceptions import KasalError
+        from src.main import app
 
         # Add a test route that raises KasalError
         test_router = FastAPI()
@@ -40,6 +41,7 @@ class TestExceptionHandlers:
 
     def test_health_returns_healthy_json(self):
         from src.main import app
+
         client = TestClient(app, raise_server_exceptions=False)
         response = client.get("/health")
         assert response.status_code == 200
@@ -47,29 +49,34 @@ class TestExceptionHandlers:
 
     def test_app_returns_404_for_unknown_route(self):
         from src.main import app
+
         client = TestClient(app, raise_server_exceptions=False)
         response = client.get("/nonexistent_route_xyz")
         assert response.status_code == 404
 
     def test_kasal_error_handler_is_registered(self):
-        from src.main import app
         from src.core.exceptions import KasalError
+        from src.main import app
+
         assert KasalError in app.exception_handlers
 
     def test_value_error_handler_is_registered(self):
         from src.main import app
+
         assert ValueError in app.exception_handlers
 
     def test_exception_handler_is_registered(self):
         from src.main import app
+
         assert Exception in app.exception_handlers
 
     @pytest.mark.asyncio
     async def test_kasal_error_handler_returns_json(self):
         """Test kasal_error_handler function directly."""
         import json
-        from src.main import kasal_error_handler
+
         from src.core.exceptions import KasalError
+        from src.main import kasal_error_handler
 
         exc = KasalError(status_code=400, detail="test error")
         mock_request = MagicMock()
@@ -82,6 +89,7 @@ class TestExceptionHandlers:
     @pytest.mark.asyncio
     async def test_value_error_handler_returns_400(self):
         import json
+
         from src.main import value_error_handler
 
         exc = ValueError("bad value input")
@@ -95,6 +103,7 @@ class TestExceptionHandlers:
     @pytest.mark.asyncio
     async def test_generic_error_handler_returns_500(self):
         import json
+
         from src.main import generic_error_handler
 
         exc = RuntimeError("some unexpected error")
@@ -109,6 +118,7 @@ class TestExceptionHandlers:
 # ---------------------------------------------------------------------------
 # LocalDevAuthMiddleware tests
 # ---------------------------------------------------------------------------
+
 
 class TestLocalDevAuthMiddleware:
     """Tests for LocalDevAuthMiddleware pure ASGI class."""
@@ -197,6 +207,7 @@ class TestLocalDevAuthMiddleware:
 # SecurityHeadersMiddleware tests
 # ---------------------------------------------------------------------------
 
+
 class TestSecurityHeadersMiddleware:
     """Tests for SecurityHeadersMiddleware pure ASGI class."""
 
@@ -208,11 +219,13 @@ class TestSecurityHeadersMiddleware:
 
         async def mock_app(scope, receive, send):
             # Simulate sending a response start message
-            await send({
-                "type": "http.response.start",
-                "status": 200,
-                "headers": [(b"content-type", b"application/json")],
-            })
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [(b"content-type", b"application/json")],
+                }
+            )
 
         middleware = SecurityHeadersMiddleware(mock_app)
 
@@ -238,10 +251,12 @@ class TestSecurityHeadersMiddleware:
         sent_messages = []
 
         async def mock_app(scope, receive, send):
-            await send({
-                "type": "http.response.body",
-                "body": b"body content",
-            })
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": b"body content",
+                }
+            )
 
         middleware = SecurityHeadersMiddleware(mock_app)
         scope = {"type": "http"}
@@ -273,11 +288,13 @@ class TestSecurityHeadersMiddleware:
 
     def test_csp_header_value(self):
         from src.main import SecurityHeadersMiddleware
+
         assert "default-src" in SecurityHeadersMiddleware._CSP
         assert "script-src" in SecurityHeadersMiddleware._CSP
 
     def test_security_headers_list(self):
         from src.main import SecurityHeadersMiddleware
+
         header_names = [h[0] for h in SecurityHeadersMiddleware._SECURITY_HEADERS]
         assert b"content-security-policy" in header_names
         assert b"x-content-type-options" in header_names
@@ -289,17 +306,22 @@ class TestSecurityHeadersMiddleware:
 # App configuration
 # ---------------------------------------------------------------------------
 
+
 class TestAppConfiguration:
     def test_app_has_cors_middleware(self):
         from src.main import app
+
         middleware_classes = [
             m.cls.__name__ if hasattr(m, "cls") else str(type(m))
             for m in app.user_middleware
         ]
-        assert any("CORS" in c for c in middleware_classes) or len(app.user_middleware) > 0
+        assert (
+            any("CORS" in c for c in middleware_classes) or len(app.user_middleware) > 0
+        )
 
     def test_app_routes_include_api_v1_prefix(self):
         from src.main import app, settings
+
         routes = [r.path for r in app.routes]
         api_routes = [r for r in routes if r.startswith(settings.API_V1_STR)]
         assert len(api_routes) > 0
@@ -307,6 +329,7 @@ class TestAppConfiguration:
     def test_app_does_not_raise_on_import(self):
         """Importing main should not raise any exceptions."""
         import src.main
+
         assert src.main.app is not None
 
 
@@ -329,6 +352,6 @@ class TestMiddlewareOrder:
         names = [getattr(m.cls, "__name__", "") for m in app.user_middleware]
         assert "LocalDevAuthMiddleware" in names, names
         assert "UserContextMiddleware" in names, names
-        assert names.index("LocalDevAuthMiddleware") < names.index("UserContextMiddleware"), (
-            f"LocalDevAuthMiddleware must run before UserContextMiddleware; order={names}"
-        )
+        assert names.index("LocalDevAuthMiddleware") < names.index(
+            "UserContextMiddleware"
+        ), f"LocalDevAuthMiddleware must run before UserContextMiddleware; order={names}"

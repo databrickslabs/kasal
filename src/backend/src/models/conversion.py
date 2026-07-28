@@ -4,7 +4,19 @@ SQLAlchemy models for measure conversion tracking and management
 """
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, JSON, DateTime, Float, Text, ForeignKey, Index
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import relationship
 
 from src.db.base import Base
@@ -24,12 +36,20 @@ class ConversionHistory(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
 
     # Execution tracking
-    execution_id = Column(String(100), nullable=True, index=True)  # Optional link to crew execution
-    job_id = Column(String(100), nullable=True, index=True)  # Link to ConversionJob if async
+    execution_id = Column(
+        String(100), nullable=True, index=True
+    )  # Optional link to crew execution
+    job_id = Column(
+        String(100), nullable=True, index=True
+    )  # Link to ConversionJob if async
 
     # Conversion details
-    source_format = Column(String(50), nullable=False, index=True)  # powerbi, yaml, etc.
-    target_format = Column(String(50), nullable=False, index=True)  # dax, sql, uc_metrics, yaml
+    source_format = Column(
+        String(50), nullable=False, index=True
+    )  # powerbi, yaml, etc.
+    target_format = Column(
+        String(50), nullable=False, index=True
+    )  # dax, sql, uc_metrics, yaml
 
     # Data (stored as JSON for flexibility)
     input_data = Column(JSON, nullable=True)  # Source data
@@ -41,7 +61,9 @@ class ConversionHistory(Base):
     configuration = Column(JSON, nullable=True)  # Converter configuration parameters
 
     # Status and results
-    status = Column(String(20), nullable=False, default="pending")  # pending, running, success, failed
+    status = Column(
+        String(20), nullable=False, default="pending"
+    )  # pending, running, success, failed
     error_message = Column(Text, nullable=True)
     warnings = Column(JSON, nullable=True)  # List of warning messages
 
@@ -59,13 +81,15 @@ class ConversionHistory(Base):
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
     # Indexes for common queries
     __table_args__ = (
-        Index('ix_conversion_history_group_created', 'group_id', 'created_at'),
-        Index('ix_conversion_history_status_created', 'status', 'created_at'),
-        Index('ix_conversion_history_formats', 'source_format', 'target_format'),
+        Index("ix_conversion_history_group_created", "group_id", "created_at"),
+        Index("ix_conversion_history_status_created", "status", "created_at"),
+        Index("ix_conversion_history_formats", "source_format", "target_format"),
     )
 
     def __repr__(self):
@@ -94,7 +118,7 @@ class ConversionJob(Base):
     description = Column(Text, nullable=True)
 
     # Tool association
-    tool_id = Column(Integer, ForeignKey('tools.id'), nullable=True)
+    tool_id = Column(Integer, ForeignKey("tools.id"), nullable=True)
 
     # Conversion configuration
     source_format = Column(String(50), nullable=False)
@@ -102,7 +126,9 @@ class ConversionJob(Base):
     configuration = Column(JSON, nullable=False)  # Full converter configuration
 
     # Job status
-    status = Column(String(20), nullable=False, default="pending")  # pending, running, completed, failed, cancelled
+    status = Column(
+        String(20), nullable=False, default="pending"
+    )  # pending, running, completed, failed, cancelled
     progress = Column(Float, nullable=True)  # 0.0 to 1.0 (0% to 100%)
 
     # Results
@@ -110,8 +136,12 @@ class ConversionJob(Base):
     error_message = Column(Text, nullable=True)
 
     # Execution tracking
-    execution_id = Column(String(100), nullable=True, index=True)  # Link to crew execution
-    history_id = Column(Integer, ForeignKey('conversion_history.id'), nullable=True)  # Link to history
+    execution_id = Column(
+        String(100), nullable=True, index=True
+    )  # Link to crew execution
+    history_id = Column(
+        Integer, ForeignKey("conversion_history.id"), nullable=True
+    )  # Link to history
 
     # Metadata
     extra_metadata = Column(JSON, nullable=True)
@@ -122,7 +152,9 @@ class ConversionJob(Base):
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
 
@@ -132,8 +164,8 @@ class ConversionJob(Base):
 
     # Indexes
     __table_args__ = (
-        Index('ix_conversion_jobs_group_created', 'group_id', 'created_at'),
-        Index('ix_conversion_jobs_status', 'status'),
+        Index("ix_conversion_jobs_group_created", "group_id", "created_at"),
+        Index("ix_conversion_jobs_status", "status"),
     )
 
     def __repr__(self):
@@ -187,13 +219,15 @@ class SavedConverterConfiguration(Base):
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
     # Indexes
     __table_args__ = (
-        Index('ix_saved_configs_group_user', 'group_id', 'created_by_email'),
-        Index('ix_saved_configs_formats', 'source_format', 'target_format'),
-        Index('ix_saved_configs_public', 'is_public', 'is_template'),
+        Index("ix_saved_configs_group_user", "group_id", "created_by_email"),
+        Index("ix_saved_configs_formats", "source_format", "target_format"),
+        Index("ix_saved_configs_public", "is_public", "is_template"),
     )
 
     def __repr__(self):

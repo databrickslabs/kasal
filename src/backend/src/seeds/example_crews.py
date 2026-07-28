@@ -6,16 +6,16 @@ These serve as templates that users can import and customize.
 """
 
 import uuid
-from typing import Dict, Any
+from typing import Any, Dict
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.session import async_session_factory
-from src.models.crew import Crew
-from src.models.agent import Agent
-from src.models.task import Task
 from src.core.logger import get_logger
+from src.db.session import async_session_factory
+from src.models.agent import Agent
+from src.models.crew import Crew
+from src.models.task import Task
 
 logger = get_logger(__name__)
 
@@ -51,9 +51,7 @@ DYNAMIC_CREW_AGENT = {
     "memory": True,
     "embedder_config": {
         "provider": "databricks",
-        "config": {
-            "model": "databricks-gte-large-en"
-        }
+        "config": {"model": "databricks-gte-large-en"},
     },
     "allow_code_execution": False,
     "code_execution_mode": "safe",
@@ -214,9 +212,7 @@ STATIC_CREW_AGENT = {
     "memory": True,
     "embedder_config": {
         "provider": "databricks",
-        "config": {
-            "model": "databricks-gte-large-en"
-        }
+        "config": {"model": "databricks-gte-large-en"},
     },
     "allow_code_execution": False,
     "code_execution_mode": "safe",
@@ -372,9 +368,7 @@ MQUERY_DYNAMIC_CREW_AGENT = {
     "memory": True,
     "embedder_config": {
         "provider": "databricks",
-        "config": {
-            "model": "databricks-gte-large-en"
-        }
+        "config": {"model": "databricks-gte-large-en"},
     },
     "allow_code_execution": False,
     "code_execution_mode": "safe",
@@ -545,9 +539,7 @@ MQUERY_STATIC_CREW_AGENT = {
     "memory": True,
     "embedder_config": {
         "provider": "databricks",
-        "config": {
-            "model": "databricks-gte-large-en"
-        }
+        "config": {"model": "databricks-gte-large-en"},
     },
     "allow_code_execution": False,
     "code_execution_mode": "safe",
@@ -709,9 +701,7 @@ EXAMPLE_CREWS = [
 
 async def seed_agent(session: AsyncSession, agent_data: Dict[str, Any]) -> None:
     """Seed a single agent if it doesn't exist."""
-    result = await session.execute(
-        select(Agent).where(Agent.id == agent_data["id"])
-    )
+    result = await session.execute(select(Agent).where(Agent.id == agent_data["id"]))
     existing = result.scalar_one_or_none()
 
     if existing:
@@ -747,9 +737,7 @@ async def seed_agent(session: AsyncSession, agent_data: Dict[str, Any]) -> None:
 
 async def seed_task(session: AsyncSession, task_data: Dict[str, Any]) -> None:
     """Seed a single task if it doesn't exist."""
-    result = await session.execute(
-        select(Task).where(Task.id == task_data["id"])
-    )
+    result = await session.execute(select(Task).where(Task.id == task_data["id"]))
     existing = result.scalar_one_or_none()
 
     if existing:
@@ -775,14 +763,16 @@ async def seed_task(session: AsyncSession, task_data: Dict[str, Any]) -> None:
 async def seed_crew(session: AsyncSession, crew_data: Dict[str, Any]) -> None:
     """Seed a single crew if it doesn't exist."""
     try:
-        crew_id = uuid.UUID(crew_data["id"]) if isinstance(crew_data["id"], str) else crew_data["id"]
+        crew_id = (
+            uuid.UUID(crew_data["id"])
+            if isinstance(crew_data["id"], str)
+            else crew_data["id"]
+        )
     except ValueError:
         # Non-UUID string ID — generate a deterministic UUID from it
         crew_id = uuid.uuid5(uuid.NAMESPACE_DNS, crew_data["id"])
 
-    result = await session.execute(
-        select(Crew).where(Crew.id == crew_id)
-    )
+    result = await session.execute(select(Crew).where(Crew.id == crew_id))
     existing = result.scalar_one_or_none()
 
     if existing:
@@ -841,4 +831,5 @@ async def seed() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(seed())

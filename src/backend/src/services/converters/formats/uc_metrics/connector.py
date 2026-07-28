@@ -11,8 +11,9 @@ This connector can be used to:
 """
 
 import logging
+from typing import Any, Dict, List, Optional
+
 import requests
-from typing import Dict, Any, List, Optional
 
 from .authentication import DatabricksAuthService
 
@@ -64,7 +65,7 @@ class DatabricksConnector:
         client_secret: Optional[str] = None,
         project_id: Optional[str] = None,
         use_database: bool = False,
-        **kwargs
+        **kwargs,
     ):
         """
         Initialize Databricks connector.
@@ -78,7 +79,7 @@ class DatabricksConnector:
             project_id: Project ID for database credential lookup (future)
             use_database: Enable database credential lookup (future)
         """
-        self.workspace_url = workspace_url.rstrip('/')
+        self.workspace_url = workspace_url.rstrip("/")
         self.logger = logging.getLogger(__name__)
 
         # Initialize authentication service

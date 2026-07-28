@@ -7,18 +7,19 @@ and internal helpers.
 
 import asyncio
 import os
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 import pytest
-from datetime import datetime, UTC
-from unittest.mock import MagicMock, patch, AsyncMock, Mock
 
-from src.services.execution.engine_service import KasalEngineService
 from src.models.execution_status import ExecutionStatus
+from src.services.execution.engine_service import KasalEngineService
 from src.utils.user_context import GroupContext
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def service():
@@ -41,9 +42,7 @@ def sample_execution_config():
                 "backstory": "Test backstory",
             }
         ],
-        "tasks": [
-            {"description": "Test task", "expected_output": "Test output"}
-        ],
+        "tasks": [{"description": "Test task", "expected_output": "Test output"}],
     }
 
 
@@ -72,6 +71,7 @@ def group_context():
 # Initialization
 # ---------------------------------------------------------------------------
 
+
 class TestInit:
     """Tests for __init__."""
 
@@ -94,6 +94,7 @@ class TestInit:
 # ---------------------------------------------------------------------------
 # initialize()
 # ---------------------------------------------------------------------------
+
 
 class TestInitialize:
     """Tests for the async initialize method."""
@@ -118,15 +119,20 @@ class TestInitialize:
 
     @pytest.mark.asyncio
     async def test_returns_false_on_exception(self, service):
-        with patch(
-            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
-            new_callable=AsyncMock,
-        ), patch(
-            "src.services.execution.logs.capture.execution_log_capture",
-            side_effect=Exception("boom"),
+        with (
+            patch(
+                "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.services.execution.logs.capture.execution_log_capture",
+                side_effect=Exception("boom"),
+            ),
         ):
             # Force the import inside initialize() to fail
-            with patch.dict("sys.modules", {"src.services.execution.logs.capture": None}):
+            with patch.dict(
+                "sys.modules", {"src.services.execution.logs.capture": None}
+            ):
                 result = await service.initialize()
                 assert result is False
 
@@ -143,6 +149,7 @@ class TestInitialize:
 # ---------------------------------------------------------------------------
 # _update_execution_status()
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateExecutionStatus:
 
@@ -166,6 +173,7 @@ class TestUpdateExecutionStatus:
 # ---------------------------------------------------------------------------
 # get_execution_status()
 # ---------------------------------------------------------------------------
+
 
 class TestGetExecutionStatus:
 
@@ -226,6 +234,7 @@ class TestGetExecutionStatus:
 # cancel_execution()
 # ---------------------------------------------------------------------------
 
+
 class TestCancelExecution:
 
     @pytest.mark.asyncio
@@ -261,10 +270,13 @@ class TestCancelExecution:
         mock_executor = AsyncMock()
         mock_executor.terminate_execution = AsyncMock(return_value=True)
 
-        with patch(
-            "src.services.agent_builder.process_executor.process_crew_executor",
-            mock_executor,
-        ), patch.object(service, "_update_execution_status", new_callable=AsyncMock):
+        with (
+            patch(
+                "src.services.agent_builder.process_executor.process_crew_executor",
+                mock_executor,
+            ),
+            patch.object(service, "_update_execution_status", new_callable=AsyncMock),
+        ):
             result = await service.cancel_execution("exec_p")
             assert result is True
             assert "exec_p" not in service._running_jobs
@@ -283,22 +295,29 @@ class TestCancelExecution:
 # run_execution()
 # ---------------------------------------------------------------------------
 
+
 class TestRunExecution:
 
     @pytest.mark.asyncio
-    async def test_successful_execution_returns_id(self, service, sample_execution_config, group_context):
+    async def test_successful_execution_returns_id(
+        self, service, sample_execution_config, group_context
+    ):
         mock_session = AsyncMock()
 
-        with patch(
-            "src.services.execution.engine_service.normalize_config",
-            return_value=sample_execution_config,
-        ), patch(
-            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
-            new_callable=AsyncMock,
-        ), patch(
-            "src.services.execution.engine_service.run_crew_in_process",
-            new_callable=AsyncMock,
-        ) as mock_run:
+        with (
+            patch(
+                "src.services.execution.engine_service.normalize_config",
+                return_value=sample_execution_config,
+            ),
+            patch(
+                "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.services.execution.engine_service.run_crew_in_process",
+                new_callable=AsyncMock,
+            ) as mock_run,
+        ):
             result = await service.run_execution(
                 "exec_1", sample_execution_config, group_context, session=mock_session
             )
@@ -307,32 +326,44 @@ class TestRunExecution:
             assert service._running_jobs["exec_1"]["execution_mode"] == "process"
 
     @pytest.mark.asyncio
-    async def test_no_parent_side_tool_factory(self, service, sample_execution_config, group_context):
+    async def test_no_parent_side_tool_factory(
+        self, service, sample_execution_config, group_context
+    ):
         """Regression (PERF-015): the parent process must NOT build a ToolFactory —
         the subprocess builds its own; the parent-side one was ~1s of dead work
         plus 5 DB round-trips per execution."""
         mock_session = AsyncMock()
 
-        with patch(
-            "src.services.execution.engine_service.normalize_config",
-            return_value=sample_execution_config,
-        ), patch(
-            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
-            new_callable=AsyncMock,
-        ), patch(
-            "src.services.tools.tool_factory.ToolFactory.create",
-            new_callable=AsyncMock,
-        ) as mock_factory_create, patch(
-            "src.services.execution.engine_service.run_crew_in_process",
-            new_callable=AsyncMock,
+        with (
+            patch(
+                "src.services.execution.engine_service.normalize_config",
+                return_value=sample_execution_config,
+            ),
+            patch(
+                "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.services.tools.tool_factory.ToolFactory.create",
+                new_callable=AsyncMock,
+            ) as mock_factory_create,
+            patch(
+                "src.services.execution.engine_service.run_crew_in_process",
+                new_callable=AsyncMock,
+            ),
         ):
             await service.run_execution(
-                "exec_notf", sample_execution_config, group_context, session=mock_session
+                "exec_notf",
+                sample_execution_config,
+                group_context,
+                session=mock_session,
             )
             mock_factory_create.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_adds_group_id_to_config(self, service, sample_execution_config, group_context):
+    async def test_adds_group_id_to_config(
+        self, service, sample_execution_config, group_context
+    ):
         captured_config = {}
         mock_session = AsyncMock()
 
@@ -340,15 +371,19 @@ class TestRunExecution:
             captured_config.update(cfg)
             return cfg
 
-        with patch(
-            "src.services.execution.engine_service.normalize_config",
-            side_effect=capture_normalize,
-        ), patch(
-            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
-            new_callable=AsyncMock,
-        ), patch(
-            "src.services.execution.engine_service.run_crew_in_process",
-            new_callable=AsyncMock,
+        with (
+            patch(
+                "src.services.execution.engine_service.normalize_config",
+                side_effect=capture_normalize,
+            ),
+            patch(
+                "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.services.execution.engine_service.run_crew_in_process",
+                new_callable=AsyncMock,
+            ),
         ):
             await service.run_execution(
                 "exec_g", sample_execution_config, group_context, session=mock_session
@@ -358,7 +393,9 @@ class TestRunExecution:
             # We just check it didn't raise
 
     @pytest.mark.asyncio
-    async def test_updates_status_on_prep_failure(self, service, sample_execution_config):
+    async def test_updates_status_on_prep_failure(
+        self, service, sample_execution_config
+    ):
         mock_session = AsyncMock()
 
         # Raise from inside the prep try-block (the pre-subprocess debug log).
@@ -366,18 +403,23 @@ class TestRunExecution:
             if "DEBUG: Config before subprocess" in str(msg):
                 raise Exception("prep fail")
 
-        with patch(
-            "src.services.execution.engine_service.normalize_config",
-            return_value=sample_execution_config,
-        ), patch(
-            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
-            new_callable=AsyncMock,
-        ), patch(
-            "src.services.execution.engine_service.logger.info",
-            side_effect=raise_in_prep,
-        ), patch.object(
-            service, "_update_execution_status", new_callable=AsyncMock
-        ) as mock_update:
+        with (
+            patch(
+                "src.services.execution.engine_service.normalize_config",
+                return_value=sample_execution_config,
+            ),
+            patch(
+                "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.services.execution.engine_service.logger.info",
+                side_effect=raise_in_prep,
+            ),
+            patch.object(
+                service, "_update_execution_status", new_callable=AsyncMock
+            ) as mock_update,
+        ):
             with pytest.raises(Exception, match="prep fail"):
                 await service.run_execution(
                     "exec_fail", sample_execution_config, session=mock_session
@@ -398,19 +440,26 @@ class TestRunExecution:
 # run_flow()
 # ---------------------------------------------------------------------------
 
+
 class TestRunFlow:
 
     @pytest.mark.asyncio
-    async def test_successful_flow_returns_id(self, service, sample_flow_config, group_context):
-        with patch(
-            "src.services.execution.engine_service.normalize_flow_config",
-            return_value=sample_flow_config,
-        ), patch(
-            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
-            new_callable=AsyncMock,
-        ), patch(
-            "src.services.execution.engine_service.run_flow_in_process",
-            new_callable=AsyncMock,
+    async def test_successful_flow_returns_id(
+        self, service, sample_flow_config, group_context
+    ):
+        with (
+            patch(
+                "src.services.execution.engine_service.normalize_flow_config",
+                return_value=sample_flow_config,
+            ),
+            patch(
+                "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.services.execution.engine_service.run_flow_in_process",
+                new_callable=AsyncMock,
+            ),
         ):
             result = await service.run_flow(
                 "flow_1", sample_flow_config, group_context, user_token="tok"
@@ -420,28 +469,37 @@ class TestRunFlow:
             assert service._running_jobs["flow_1"]["execution_mode"] == "process"
 
     @pytest.mark.asyncio
-    async def test_adds_group_id_to_flow_config(self, service, sample_flow_config, group_context):
-        with patch(
-            "src.services.execution.engine_service.normalize_flow_config",
-            side_effect=lambda c: c,
-        ), patch(
-            "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
-            new_callable=AsyncMock,
-        ), patch(
-            "src.services.execution.engine_service.run_flow_in_process",
-            new_callable=AsyncMock,
+    async def test_adds_group_id_to_flow_config(
+        self, service, sample_flow_config, group_context
+    ):
+        with (
+            patch(
+                "src.services.execution.engine_service.normalize_flow_config",
+                side_effect=lambda c: c,
+            ),
+            patch(
+                "src.services.execution.engine_service.LogWriterTask.ensure_writer_started",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.services.execution.engine_service.run_flow_in_process",
+                new_callable=AsyncMock,
+            ),
         ):
             await service.run_flow("fg", sample_flow_config, group_context)
             assert sample_flow_config["group_id"] == "grp_123"
 
     @pytest.mark.asyncio
     async def test_flow_failure_updates_status(self, service, sample_flow_config):
-        with patch(
-            "src.services.execution.engine_service.normalize_flow_config",
-            side_effect=Exception("norm fail"),
-        ), patch.object(
-            service, "_update_execution_status", new_callable=AsyncMock
-        ) as mock_update:
+        with (
+            patch(
+                "src.services.execution.engine_service.normalize_flow_config",
+                side_effect=Exception("norm fail"),
+            ),
+            patch.object(
+                service, "_update_execution_status", new_callable=AsyncMock
+            ) as mock_update,
+        ):
             with pytest.raises(Exception, match="norm fail"):
                 await service.run_flow("ff", sample_flow_config)
             mock_update.assert_awaited_once()

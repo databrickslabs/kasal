@@ -6,7 +6,7 @@ one implementation. The engine builds it per task (see the ToolFactory/task
 adapter) and auto-adds it when the active memory backend is Databricks.
 """
 
-from src.services.databricks.volumes.base import KasalCallback, CallbackFailedError
+from src.services.databricks.volumes.base import CallbackFailedError, KasalCallback
 from src.services.databricks.volumes.volume_callback import DatabricksVolumeCallback
 
-__all__ = ['KasalCallback', 'CallbackFailedError', 'DatabricksVolumeCallback']
+__all__ = ["KasalCallback", "CallbackFailedError", "DatabricksVolumeCallback"]

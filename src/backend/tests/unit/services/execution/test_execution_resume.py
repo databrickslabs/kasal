@@ -36,24 +36,31 @@ def make_execution_row(
     row.execution_type = execution_type
     row.run_name = "My Run"
     row.checkpoint_data = checkpoint_data
-    row.inputs = inputs if inputs is not None else {
-        "agents_yaml": {"agent_1": {"role": "worker"}},
-        "tasks_yaml": {"task_1": {"description": "do it"}},
-        "inputs": {"run_name": "My Run"},
-        "planning": False,
-        "model": "some-model",
-        "schema_detection_enabled": True,
-    }
+    row.inputs = (
+        inputs
+        if inputs is not None
+        else {
+            "agents_yaml": {"agent_1": {"role": "worker"}},
+            "tasks_yaml": {"task_1": {"description": "do it"}},
+            "inputs": {"run_name": "My Run"},
+            "planning": False,
+            "model": "some-model",
+            "schema_detection_enabled": True,
+        }
+    )
     return row
 
 
 def patch_repo(row):
     repo = MagicMock()
     repo.get_execution_by_job_id = AsyncMock(return_value=row)
-    return patch(
-        "src.repositories.execution_history_repository.ExecutionHistoryRepository",
-        return_value=repo,
-    ), repo
+    return (
+        patch(
+            "src.repositories.execution_history_repository.ExecutionHistoryRepository",
+            return_value=repo,
+        ),
+        repo,
+    )
 
 
 class TestResumeExecutionValidation:
@@ -120,15 +127,17 @@ class TestResumeExecutionHappyPath:
         row = make_execution_row(status="FAILED", checkpoint_data=checkpoint_data)
         patcher, _ = patch_repo(row)
 
-        with patcher, \
-             patch.object(
-                 ExecutionService, "_run_in_background", new_callable=AsyncMock
-             ) as run_bg, \
-             patch(
-                 "src.services.execution.service.ExecutionStatusService.update_status",
-                 new_callable=AsyncMock,
-                 return_value=True,
-             ) as update_status:
+        with (
+            patcher,
+            patch.object(
+                ExecutionService, "_run_in_background", new_callable=AsyncMock
+            ) as run_bg,
+            patch(
+                "src.services.execution.service.ExecutionStatusService.update_status",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as update_status,
+        ):
             result = await service.resume_execution("job-1", group_context)
             # let the created background task start/finish
             await asyncio.sleep(0)
@@ -163,15 +172,17 @@ class TestResumeExecutionHappyPath:
         row = make_execution_row(status="STOPPED", checkpoint_data=None)
         patcher, _ = patch_repo(row)
 
-        with patcher, \
-             patch.object(
-                 ExecutionService, "_run_in_background", new_callable=AsyncMock
-             ) as run_bg, \
-             patch(
-                 "src.services.execution.service.ExecutionStatusService.update_status",
-                 new_callable=AsyncMock,
-                 return_value=True,
-             ) as update_status:
+        with (
+            patcher,
+            patch.object(
+                ExecutionService, "_run_in_background", new_callable=AsyncMock
+            ) as run_bg,
+            patch(
+                "src.services.execution.service.ExecutionStatusService.update_status",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as update_status,
+        ):
             result = await service.resume_execution("job-1", group_context)
             await asyncio.sleep(0)
 
@@ -184,15 +195,17 @@ class TestResumeExecutionHappyPath:
         row = make_execution_row(status="FAILED")
         patcher, _ = patch_repo(row)
 
-        with patcher, \
-             patch.object(
-                 ExecutionService, "_run_in_background", new_callable=AsyncMock
-             ) as run_bg, \
-             patch(
-                 "src.services.execution.service.ExecutionStatusService.update_status",
-                 new_callable=AsyncMock,
-                 return_value=False,
-             ):
+        with (
+            patcher,
+            patch.object(
+                ExecutionService, "_run_in_background", new_callable=AsyncMock
+            ) as run_bg,
+            patch(
+                "src.services.execution.service.ExecutionStatusService.update_status",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+        ):
             with pytest.raises(ValueError, match="Failed to reset status"):
                 await service.resume_execution("job-1", group_context)
         run_bg.assert_not_awaited()

@@ -12,12 +12,12 @@ from agent_server import progress
 
 try:
     from crewai.events import (
-        event_bus,
-        CrewKickoffStartedEvent,
-        TaskStartedEvent,
         AgentExecutionStartedEvent,
+        CrewKickoffStartedEvent,
         LiteAgentExecutionStartedEvent,
+        TaskStartedEvent,
         ToolUsageStartedEvent,
+        event_bus,
     )
     from crewai.events.base_event_listener import BaseEventListener
 

@@ -3,12 +3,13 @@
 import logging
 from typing import Any, Optional, Type
 
-from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
+
+from src.services.converters.base.connectors import ConnectorType
 
 # Import converters
 from src.services.converters.pipeline import ConversionPipeline, OutboundFormat
-from src.services.converters.base.connectors import ConnectorType
+from src.services.tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -17,13 +18,9 @@ class PowerBIConnectorToolSchema(BaseModel):
     """Input schema for PowerBIConnectorTool."""
 
     semantic_model_id: str = Field(
-        ...,
-        description="Power BI dataset/semantic model ID (required)"
+        ..., description="Power BI dataset/semantic model ID (required)"
     )
-    group_id: str = Field(
-        ...,
-        description="Power BI workspace ID (required)"
-    )
+    group_id: str = Field(..., description="Power BI workspace ID (required)")
     # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
     # schema. Those values are injected at tool-construction time from
     # tool_configs (see __init__) — exposing them as LLM-fillable parameters
@@ -31,39 +28,37 @@ class PowerBIConnectorToolSchema(BaseModel):
 
     username_env: Optional[str] = Field(
         None,
-        description="Environment variable name containing service account username (alternative to direct username)"
+        description="Environment variable name containing service account username (alternative to direct username)",
     )
     password_env: Optional[str] = Field(
         None,
-        description="Environment variable name containing service account password (alternative to direct password)"
+        description="Environment variable name containing service account password (alternative to direct password)",
     )
     outbound_format: str = Field(
         "dax",
-        description="Target output format: 'dax', 'sql', 'uc_metrics', or 'yaml' (default: 'dax')"
+        description="Target output format: 'dax', 'sql', 'uc_metrics', or 'yaml' (default: 'dax')",
     )
     include_hidden: bool = Field(
-        False,
-        description="Include hidden measures in extraction (default: False)"
+        False, description="Include hidden measures in extraction (default: False)"
     )
     filter_pattern: Optional[str] = Field(
-        None,
-        description="Regex pattern to filter measure names (optional)"
+        None, description="Regex pattern to filter measure names (optional)"
     )
     sql_dialect: str = Field(
         "databricks",
-        description="SQL dialect for SQL output: 'databricks', 'postgresql', 'mysql', 'sqlserver', 'snowflake', 'bigquery', 'standard' (default: 'databricks')"
+        description="SQL dialect for SQL output: 'databricks', 'postgresql', 'mysql', 'sqlserver', 'snowflake', 'bigquery', 'standard' (default: 'databricks')",
     )
     uc_catalog: str = Field(
         "main",
-        description="Unity Catalog catalog name for UC Metrics output (default: 'main')"
+        description="Unity Catalog catalog name for UC Metrics output (default: 'main')",
     )
     uc_schema: str = Field(
         "default",
-        description="Unity Catalog schema name for UC Metrics output (default: 'default')"
+        description="Unity Catalog schema name for UC Metrics output (default: 'default')",
     )
     info_table_name: str = Field(
         "Info Measures",
-        description="Name of the Power BI Info Measures table (default: 'Info Measures')"
+        description="Name of the Power BI Info Measures table (default: 'Info Measures')",
     )
 
 
@@ -219,9 +214,11 @@ class PowerBIConnectorTool(BaseTool):
             # Validate authentication - need either access_token OR service_principal/service_account credentials
             has_access_token = bool(access_token)
             has_service_principal = bool(client_id and client_secret and tenant_id)
-            has_service_account = bool(client_id and tenant_id and (
-                (username and password) or (username_env and password_env)
-            ))
+            has_service_account = bool(
+                client_id
+                and tenant_id
+                and ((username and password) or (username_env and password_env))
+            )
 
             if not any([has_access_token, has_service_principal, has_service_account]):
                 return (
@@ -236,15 +233,19 @@ class PowerBIConnectorTool(BaseTool):
                 "dax": OutboundFormat.DAX,
                 "sql": OutboundFormat.SQL,
                 "uc_metrics": OutboundFormat.UC_METRICS,
-                "yaml": OutboundFormat.YAML
+                "yaml": OutboundFormat.YAML,
             }
             outbound_format_enum = format_map.get(outbound_format.lower())
             if not outbound_format_enum:
                 return f"Error: Invalid outbound_format '{outbound_format}'. Must be one of: dax, sql, uc_metrics, yaml"
 
             # Determine auth method for logging
-            auth_type = "access_token" if has_access_token else (
-                "service_principal" if has_service_principal else "service_account"
+            auth_type = (
+                "access_token"
+                if has_access_token
+                else (
+                    "service_principal" if has_service_principal else "service_account"
+                )
             )
             logger.info(
                 f"Executing Power BI conversion: dataset={semantic_model_id}, "
@@ -264,13 +265,11 @@ class PowerBIConnectorTool(BaseTool):
                 "password": password,
                 "username_env": username_env,
                 "password_env": password_env,
-                "info_table_name": info_table_name
+                "info_table_name": info_table_name,
             }
 
             # Build extract parameters
-            extract_params = {
-                "include_hidden": include_hidden
-            }
+            extract_params = {"include_hidden": include_hidden}
             if filter_pattern:
                 extract_params["filter_pattern"] = filter_pattern
 
@@ -289,7 +288,7 @@ class PowerBIConnectorTool(BaseTool):
                 outbound_format=outbound_format_enum,
                 outbound_params=outbound_params,
                 extract_params=extract_params,
-                definition_name=f"powerbi_{semantic_model_id}"
+                definition_name=f"powerbi_{semantic_model_id}",
             )
 
             if not result["success"]:
@@ -307,7 +306,7 @@ class PowerBIConnectorTool(BaseTool):
                 for measure in output:
                     formatted += f"## {measure['name']}\n\n"
                     formatted += f"```dax\n{measure['name']} = \n{measure['expression']}\n```\n\n"
-                    if measure.get('description'):
+                    if measure.get("description"):
                         formatted += f"*Description: {measure['description']}*\n\n"
                 return formatted
 

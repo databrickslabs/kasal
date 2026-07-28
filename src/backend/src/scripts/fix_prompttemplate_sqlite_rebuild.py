@@ -67,4 +67,3 @@ try:
 finally:
     cur.execute("PRAGMA foreign_keys=ON;")
     conn.close()
-

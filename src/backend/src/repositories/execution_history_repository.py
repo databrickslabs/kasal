@@ -6,18 +6,19 @@ This module provides database operations for execution history models.
 
 import logging
 from datetime import datetime
-from typing import Tuple, List, Optional, Dict, Any, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from uuid import UUID
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import distinct, func
-from sqlalchemy.future import select
-from sqlalchemy import desc, func, delete, update
-from sqlalchemy.exc import SQLAlchemyError
 
-from src.models.execution_history import ExecutionHistory, TaskStatus, ErrorTrace
-from src.models.execution_trace import ExecutionTrace
-from src.models.execution_status import ExecutionStatus
+from sqlalchemy import delete, desc, distinct, func, update
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+
 from src.models.billing import LLMUsageBilling
+from src.models.execution_history import ErrorTrace, ExecutionHistory, TaskStatus
+from src.models.execution_status import ExecutionStatus
+from src.models.execution_trace import ExecutionTrace
+
 # Removed async_session_factory import - using injected session only
 
 logger = logging.getLogger(__name__)
@@ -25,16 +26,13 @@ logger = logging.getLogger(__name__)
 
 class ExecutionHistoryRepository:
     """Repository for execution history data access operations."""
-    
+
     def __init__(self, session: AsyncSession):
         """Initialize with required session."""
         self.session = session
-    
+
     async def get_execution_history(
-        self,
-        limit: int = 50,
-        offset: int = 0,
-        group_ids: List[str] = None
+        self, limit: int = 50, offset: int = 0, group_ids: List[str] = None
     ) -> tuple[List[ExecutionHistory], int]:
         """
         Get paginated execution history with group filtering.
@@ -60,21 +58,25 @@ class ExecutionHistoryRepository:
             base_filter = True
 
         # Get total count
-        count_stmt = select(func.count()).select_from(ExecutionHistory).where(base_filter)
+        count_stmt = (
+            select(func.count()).select_from(ExecutionHistory).where(base_filter)
+        )
         total_count_result = await session.execute(count_stmt)
         total_count = total_count_result.scalar() or 0
 
         # Get paginated runs
-        stmt = (select(ExecutionHistory)
-               .where(base_filter)
-               .order_by(ExecutionHistory.created_at.desc())
-               .offset(offset)
-               .limit(limit))
+        stmt = (
+            select(ExecutionHistory)
+            .where(base_filter)
+            .order_by(ExecutionHistory.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
         result = await session.execute(stmt)
         runs = result.scalars().all()
 
         return runs, total_count
-    
+
     async def get_job_ids_for_groups(self, group_ids: List[str]) -> List[str]:
         """Job ids belonging to any of these groups."""
         if not group_ids:
@@ -89,8 +91,9 @@ class ExecutionHistoryRepository:
     async def count_by_group(self) -> List[Tuple[Optional[str], int]]:
         """(group_id, run count) across every group. Admin reporting."""
         result = await self.session.execute(
-            select(distinct(ExecutionHistory.group_id), func.count(ExecutionHistory.id))
-            .group_by(ExecutionHistory.group_id)
+            select(
+                distinct(ExecutionHistory.group_id), func.count(ExecutionHistory.id)
+            ).group_by(ExecutionHistory.group_id)
         )
         return [(row[0], row[1]) for row in result.fetchall()]
 
@@ -110,7 +113,9 @@ class ExecutionHistoryRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_execution_by_id(self, execution_id: int, group_ids: List[str] = None) -> Optional[ExecutionHistory]:
+    async def get_execution_by_id(
+        self, execution_id: int, group_ids: List[str] = None
+    ) -> Optional[ExecutionHistory]:
         """
         Get a specific execution by ID with group filtering.
 
@@ -134,8 +139,10 @@ class ExecutionHistoryRepository:
         stmt = select(ExecutionHistory).where(*filters)
         result = await session.execute(stmt)
         return result.scalars().first()
-    
-    async def get_execution_by_job_id(self, job_id: str, group_ids: List[str] = None) -> Optional[ExecutionHistory]:
+
+    async def get_execution_by_job_id(
+        self, job_id: str, group_ids: List[str] = None
+    ) -> Optional[ExecutionHistory]:
         """
         Get a specific execution by job_id with group filtering.
 
@@ -160,7 +167,9 @@ class ExecutionHistoryRepository:
         result = await session.execute(stmt)
         return result.scalars().first()
 
-    async def get_execution_summary_by_job_id(self, job_id: str, group_ids: List[str] = None):
+    async def get_execution_summary_by_job_id(
+        self, job_id: str, group_ids: List[str] = None
+    ):
         """Slim scalar-only lookup for hot polling paths.
 
         The full-row variant drags the result/inputs/partial_results/checkpoint
@@ -208,8 +217,10 @@ class ExecutionHistoryRepository:
             raise RuntimeError("ExecutionHistoryRepository requires a session")
         # Use existing session
         return await self._get_execution_by_id_internal(self.session, execution_id)
-    
-    async def check_execution_exists(self, execution_id: int, group_ids: List[str] = None) -> bool:
+
+    async def check_execution_exists(
+        self, execution_id: int, group_ids: List[str] = None
+    ) -> bool:
         """
         Check if an execution exists, scoped to the given groups.
 
@@ -231,7 +242,7 @@ class ExecutionHistoryRepository:
         result = await self.session.execute(stmt)
         count = result.scalar() or 0
         return count > 0
-    
+
     async def delete_execution(self, execution_id: int) -> Optional[Dict[str, Any]]:
         """
         Delete a specific execution and its associated data.
@@ -249,15 +260,22 @@ class ExecutionHistoryRepository:
 
         # Use the provided session without committing
         # The database router or service layer will handle commits
-        return await self._delete_execution_with_session(self.session, execution_id, commit=False)
+        return await self._delete_execution_with_session(
+            self.session, execution_id, commit=False
+        )
 
-    async def _delete_execution_with_session(self, session: AsyncSession, execution_id: int, commit: bool = False) -> Optional[Dict[str, Any]]:
+    async def _delete_execution_with_session(
+        self, session: AsyncSession, execution_id: int, commit: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """Internal method to handle deletion with a given session."""
         import logging
+
         logger = logging.getLogger(__name__)
 
         try:
-            logger.debug(f"[DELETE] Starting deletion of execution {execution_id}, commit={commit}, session={id(session)}")
+            logger.debug(
+                f"[DELETE] Starting deletion of execution {execution_id}, commit={commit}, session={id(session)}"
+            )
 
             # Get the run first to check existence and get job_id
             run = await self._get_execution_by_id_internal(session, execution_id)
@@ -266,23 +284,31 @@ class ExecutionHistoryRepository:
                 return None
 
             job_id = run.job_id
-            logger.debug(f"[DELETE] Found execution {execution_id} with job_id={job_id}")
+            logger.debug(
+                f"[DELETE] Found execution {execution_id} with job_id={job_id}"
+            )
             result = {}
 
             # Delete associated task statuses
             task_status_stmt = delete(TaskStatus).where(TaskStatus.job_id == job_id)
             task_status_result = await session.execute(task_status_stmt)
-            result['task_status_count'] = task_status_result.rowcount
+            result["task_status_count"] = task_status_result.rowcount
 
             # Delete associated error traces
-            error_trace_stmt = delete(ErrorTrace).where(ErrorTrace.run_id == execution_id)
+            error_trace_stmt = delete(ErrorTrace).where(
+                ErrorTrace.run_id == execution_id
+            )
             error_trace_result = await session.execute(error_trace_stmt)
-            result['error_trace_count'] = error_trace_result.rowcount
+            result["error_trace_count"] = error_trace_result.rowcount
 
             # Delete the run
-            run_stmt = delete(ExecutionHistory).where(ExecutionHistory.id == execution_id)
+            run_stmt = delete(ExecutionHistory).where(
+                ExecutionHistory.id == execution_id
+            )
             delete_result = await session.execute(run_stmt)
-            logger.debug(f"[DELETE] Deleted execution record, affected rows: {delete_result.rowcount}")
+            logger.debug(
+                f"[DELETE] Deleted execution record, affected rows: {delete_result.rowcount}"
+            )
 
             # Flush to ensure operations are sent to database
             await session.flush()
@@ -290,7 +316,9 @@ class ExecutionHistoryRepository:
 
             # Only commit if we created our own session
             if commit:
-                logger.debug(f"[DELETE] Committing transaction for session {id(session)}")
+                logger.debug(
+                    f"[DELETE] Committing transaction for session {id(session)}"
+                )
                 await session.commit()
                 logger.debug(f"[DELETE] Transaction committed successfully")
             else:
@@ -298,22 +326,24 @@ class ExecutionHistoryRepository:
 
             logger.debug(f"[DELETE] Successfully deleted execution {execution_id}")
             return {
-                'execution_id': execution_id,
-                'job_id': job_id,
-                'task_status_count': result['task_status_count'],
-                'error_trace_count': result['error_trace_count']
+                "execution_id": execution_id,
+                "job_id": job_id,
+                "task_status_count": result["task_status_count"],
+                "error_trace_count": result["error_trace_count"],
             }
         except Exception as e:
             if commit:
                 await session.rollback()
             raise e
-    
-    async def _get_execution_by_id_internal(self, session: AsyncSession, execution_id: int) -> Optional[ExecutionHistory]:
+
+    async def _get_execution_by_id_internal(
+        self, session: AsyncSession, execution_id: int
+    ) -> Optional[ExecutionHistory]:
         """Internal method to get execution by ID using provided session."""
         stmt = select(ExecutionHistory).where(ExecutionHistory.id == execution_id)
         result = await session.execute(stmt)
         return result.scalars().first()
-    
+
     async def delete_execution_by_job_id(self, job_id: str) -> Optional[Dict[str, Any]]:
         """
         Delete a specific execution and its associated data by job_id.
@@ -327,9 +357,13 @@ class ExecutionHistoryRepository:
         # ALWAYS use the session passed to the repository
         if not self.session:
             raise RuntimeError("ExecutionHistoryRepository requires a session")
-        return await self._delete_execution_by_job_id_with_session(self.session, job_id, commit=False)
+        return await self._delete_execution_by_job_id_with_session(
+            self.session, job_id, commit=False
+        )
 
-    async def _delete_execution_by_job_id_with_session(self, session: AsyncSession, job_id: str, commit: bool = False) -> Optional[Dict[str, Any]]:
+    async def _delete_execution_by_job_id_with_session(
+        self, session: AsyncSession, job_id: str, commit: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """Internal method to handle deletion by job_id with a given session."""
         try:
             # Get the run first to check existence
@@ -343,12 +377,14 @@ class ExecutionHistoryRepository:
             # Delete associated task statuses
             task_status_stmt = delete(TaskStatus).where(TaskStatus.job_id == job_id)
             task_status_result = await session.execute(task_status_stmt)
-            result['task_status_count'] = task_status_result.rowcount
+            result["task_status_count"] = task_status_result.rowcount
 
             # Delete associated error traces
-            error_trace_stmt = delete(ErrorTrace).where(ErrorTrace.run_id == execution_id)
+            error_trace_stmt = delete(ErrorTrace).where(
+                ErrorTrace.run_id == execution_id
+            )
             error_trace_result = await session.execute(error_trace_stmt)
-            result['error_trace_count'] = error_trace_result.rowcount
+            result["error_trace_count"] = error_trace_result.rowcount
 
             # Delete the run
             run_stmt = delete(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
@@ -362,23 +398,27 @@ class ExecutionHistoryRepository:
                 await session.commit()
 
             return {
-                'execution_id': execution_id,
-                'job_id': job_id,
-                'task_status_count': result['task_status_count'],
-                'error_trace_count': result['error_trace_count']
+                "execution_id": execution_id,
+                "job_id": job_id,
+                "task_status_count": result["task_status_count"],
+                "error_trace_count": result["error_trace_count"],
             }
         except Exception as e:
             if commit:
                 await session.rollback()
             raise e
-    
-    async def _get_execution_by_job_id_internal(self, session: AsyncSession, job_id: str) -> Optional[ExecutionHistory]:
+
+    async def _get_execution_by_job_id_internal(
+        self, session: AsyncSession, job_id: str
+    ) -> Optional[ExecutionHistory]:
         """Internal method to get execution by job ID using provided session."""
         stmt = select(ExecutionHistory).where(ExecutionHistory.job_id == job_id)
         result = await session.execute(stmt)
         return result.scalars().first()
 
-    async def update_mlflow_evaluation_run_id(self, job_id: str, evaluation_run_id: str) -> bool:
+    async def update_mlflow_evaluation_run_id(
+        self, job_id: str, evaluation_run_id: str
+    ) -> bool:
         """
         Update the MLflow evaluation run ID for an execution.
 
@@ -393,6 +433,7 @@ class ExecutionHistoryRepository:
             raise RuntimeError("ExecutionHistoryRepository requires a session")
 
         import logging
+
         logger = logging.getLogger(__name__)
 
         try:
@@ -410,14 +451,21 @@ class ExecutionHistoryRepository:
 
             # Flush changes to database
             await self.session.flush()
-            logger.info(f"Successfully updated MLflow evaluation run ID for job_id: {job_id}")
+            logger.info(
+                f"Successfully updated MLflow evaluation run ID for job_id: {job_id}"
+            )
             return True
 
         except Exception as e:
-            logger.error(f"Error updating MLflow evaluation run ID for job_id {job_id}: {str(e)}", exc_info=True)
+            logger.error(
+                f"Error updating MLflow evaluation run ID for job_id {job_id}: {str(e)}",
+                exc_info=True,
+            )
             return False
-    
-    async def delete_all_executions(self, group_ids: List[str] = None) -> Dict[str, int]:
+
+    async def delete_all_executions(
+        self, group_ids: List[str] = None
+    ) -> Dict[str, int]:
         """
         Delete all executions and associated data for specified groups.
 
@@ -432,9 +480,13 @@ class ExecutionHistoryRepository:
         # ALWAYS use the session passed to the repository
         if not self.session:
             raise RuntimeError("ExecutionHistoryRepository requires a session")
-        return await self._delete_all_executions_with_session(self.session, group_ids=group_ids, commit=False)
+        return await self._delete_all_executions_with_session(
+            self.session, group_ids=group_ids, commit=False
+        )
 
-    async def _delete_all_executions_with_session(self, session: AsyncSession, group_ids: List[str] = None, commit: bool = False) -> Dict[str, int]:
+    async def _delete_all_executions_with_session(
+        self, session: AsyncSession, group_ids: List[str] = None, commit: bool = False
+    ) -> Dict[str, int]:
         """Internal method to handle deletion of all executions with a given session."""
         try:
             result = {}
@@ -453,24 +505,30 @@ class ExecutionHistoryRepository:
 
                 if not execution_ids:
                     return {
-                        'run_count': 0,
-                        'task_status_count': 0,
-                        'error_trace_count': 0
+                        "run_count": 0,
+                        "task_status_count": 0,
+                        "error_trace_count": 0,
                     }
 
                 # Delete task statuses for these job_ids
-                task_status_stmt = delete(TaskStatus).where(TaskStatus.job_id.in_(job_ids))
+                task_status_stmt = delete(TaskStatus).where(
+                    TaskStatus.job_id.in_(job_ids)
+                )
                 task_status_result = await session.execute(task_status_stmt)
-                result['task_status_count'] = task_status_result.rowcount
+                result["task_status_count"] = task_status_result.rowcount
 
                 # Delete error traces for these execution_ids
-                error_trace_stmt = delete(ErrorTrace).where(ErrorTrace.run_id.in_(execution_ids))
+                error_trace_stmt = delete(ErrorTrace).where(
+                    ErrorTrace.run_id.in_(execution_ids)
+                )
                 error_trace_result = await session.execute(error_trace_stmt)
-                result['error_trace_count'] = error_trace_result.rowcount
+                result["error_trace_count"] = error_trace_result.rowcount
 
                 # Delete execution traces (FK to executionhistory.id and .job_id)
                 await session.execute(
-                    delete(ExecutionTrace).where(ExecutionTrace.run_id.in_(execution_ids))
+                    delete(ExecutionTrace).where(
+                        ExecutionTrace.run_id.in_(execution_ids)
+                    )
                 )
                 await session.execute(
                     delete(ExecutionTrace).where(ExecutionTrace.job_id.in_(job_ids))
@@ -478,24 +536,28 @@ class ExecutionHistoryRepository:
 
                 # Delete billing records (FK to executionhistory.job_id)
                 await session.execute(
-                    delete(LLMUsageBilling).where(LLMUsageBilling.execution_id.in_(job_ids))
+                    delete(LLMUsageBilling).where(
+                        LLMUsageBilling.execution_id.in_(job_ids)
+                    )
                 )
 
                 # Delete executions for the group
                 run_count = len(execution_ids)
-                run_stmt = delete(ExecutionHistory).where(ExecutionHistory.group_id.in_(group_ids))
+                run_stmt = delete(ExecutionHistory).where(
+                    ExecutionHistory.group_id.in_(group_ids)
+                )
                 await session.execute(run_stmt)
             else:
                 # No group filtering - delete ALL (admin/system access)
                 # Delete all task statuses
                 task_status_stmt = delete(TaskStatus)
                 task_status_result = await session.execute(task_status_stmt)
-                result['task_status_count'] = task_status_result.rowcount
+                result["task_status_count"] = task_status_result.rowcount
 
                 # Delete all error traces
                 error_trace_stmt = delete(ErrorTrace)
                 error_trace_result = await session.execute(error_trace_stmt)
-                result['error_trace_count'] = error_trace_result.rowcount
+                result["error_trace_count"] = error_trace_result.rowcount
 
                 # Delete all execution traces (FK to executionhistory.id and .job_id)
                 await session.execute(delete(ExecutionTrace))
@@ -519,21 +581,20 @@ class ExecutionHistoryRepository:
                 await session.commit()
 
             return {
-                'run_count': run_count,
-                'task_status_count': result['task_status_count'],
-                'error_trace_count': result['error_trace_count']
+                "run_count": run_count,
+                "task_status_count": result["task_status_count"],
+                "error_trace_count": result["error_trace_count"],
             }
         except Exception as e:
             if commit:
                 await session.rollback()
             raise e
 
-
     async def get_checkpoints_for_flow(
         self,
         flow_id,
         group_id: Optional[str] = None,
-        status_filter: Optional[str] = "active"
+        status_filter: Optional[str] = "active",
     ) -> List[ExecutionHistory]:
         """
         Get available checkpoints for a specific flow.
@@ -550,13 +611,16 @@ class ExecutionHistoryRepository:
             raise RuntimeError("ExecutionHistoryRepository requires a session")
 
         import logging
+
         logger = logging.getLogger(__name__)
 
         try:
             # Build filters - must have flow_uuid (checkpoint enabled) and match flow_id
             filters = [
                 ExecutionHistory.flow_id == flow_id,
-                ExecutionHistory.flow_uuid.isnot(None)  # Only executions with checkpoints
+                ExecutionHistory.flow_uuid.isnot(
+                    None
+                ),  # Only executions with checkpoints
             ]
 
             # Add group filtering for multi-tenant isolation
@@ -567,7 +631,9 @@ class ExecutionHistoryRepository:
             if status_filter:
                 filters.append(ExecutionHistory.checkpoint_status == status_filter)
 
-            logger.info(f"🔍 Checkpoint query for flow_id={flow_id}, group_id={group_id}, status_filter={status_filter}")
+            logger.info(
+                f"🔍 Checkpoint query for flow_id={flow_id}, group_id={group_id}, status_filter={status_filter}"
+            )
 
             # Query for checkpoints ordered by most recent
             stmt = (
@@ -581,24 +647,27 @@ class ExecutionHistoryRepository:
             logger.info(f"📊 Found {len(checkpoints)} checkpoints for flow {flow_id}")
             if len(checkpoints) == 0:
                 # Debug: Check if any executions exist for this flow
-                debug_stmt = select(ExecutionHistory).where(ExecutionHistory.flow_id == flow_id)
+                debug_stmt = select(ExecutionHistory).where(
+                    ExecutionHistory.flow_id == flow_id
+                )
                 debug_result = await self.session.execute(debug_stmt)
                 all_executions = debug_result.scalars().all()
                 logger.info(f"   Total executions for flow: {len(all_executions)}")
                 for ex in all_executions[:5]:  # Log first 5
-                    logger.info(f"   - Execution {ex.id}: flow_uuid={ex.flow_uuid}, checkpoint_status={ex.checkpoint_status}, status={ex.status}")
+                    logger.info(
+                        f"   - Execution {ex.id}: flow_uuid={ex.flow_uuid}, checkpoint_status={ex.checkpoint_status}, status={ex.status}"
+                    )
 
             return list(checkpoints)
 
         except Exception as e:
-            logger.error(f"Error getting checkpoints for flow {flow_id}: {str(e)}", exc_info=True)
+            logger.error(
+                f"Error getting checkpoints for flow {flow_id}: {str(e)}", exc_info=True
+            )
             raise
 
     async def update_checkpoint_status(
-        self,
-        execution_id: int,
-        status: str,
-        group_id: Optional[str] = None
+        self, execution_id: int, status: str, group_id: Optional[str] = None
     ) -> bool:
         """
         Update the checkpoint status for an execution.
@@ -615,6 +684,7 @@ class ExecutionHistoryRepository:
             raise RuntimeError("ExecutionHistoryRepository requires a session")
 
         import logging
+
         logger = logging.getLogger(__name__)
 
         try:
@@ -637,11 +707,16 @@ class ExecutionHistoryRepository:
 
             # Flush changes to database
             await self.session.flush()
-            logger.info(f"Updated checkpoint status to '{status}' for execution {execution_id}")
+            logger.info(
+                f"Updated checkpoint status to '{status}' for execution {execution_id}"
+            )
             return True
 
         except Exception as e:
-            logger.error(f"Error updating checkpoint status for execution {execution_id}: {str(e)}", exc_info=True)
+            logger.error(
+                f"Error updating checkpoint status for execution {execution_id}: {str(e)}",
+                exc_info=True,
+            )
             return False
 
     async def set_checkpoint_info(
@@ -649,7 +724,7 @@ class ExecutionHistoryRepository:
         execution_id: int,
         flow_uuid: str,
         checkpoint_status: str = "active",
-        checkpoint_method: Optional[str] = None
+        checkpoint_method: Optional[str] = None,
     ) -> bool:
         """
         Set checkpoint information for an execution.
@@ -669,10 +744,13 @@ class ExecutionHistoryRepository:
             raise RuntimeError("ExecutionHistoryRepository requires a session")
 
         import logging
+
         logger = logging.getLogger(__name__)
 
         try:
-            logger.info(f"✏️ set_checkpoint_info called: execution_id={execution_id}, flow_uuid={flow_uuid}, status={checkpoint_status}")
+            logger.info(
+                f"✏️ set_checkpoint_info called: execution_id={execution_id}, flow_uuid={flow_uuid}, status={checkpoint_status}"
+            )
 
             # Find the execution
             stmt = select(ExecutionHistory).where(ExecutionHistory.id == execution_id)
@@ -683,7 +761,9 @@ class ExecutionHistoryRepository:
                 logger.warning(f"❌ No execution found with id: {execution_id}")
                 return False
 
-            logger.info(f"   Found execution {execution_id}: flow_id={execution.flow_id}, current flow_uuid={execution.flow_uuid}, current checkpoint_status={execution.checkpoint_status}")
+            logger.info(
+                f"   Found execution {execution_id}: flow_id={execution.flow_id}, current flow_uuid={execution.flow_uuid}, current checkpoint_status={execution.checkpoint_status}"
+            )
 
             # Set checkpoint information
             execution.flow_uuid = flow_uuid
@@ -692,11 +772,16 @@ class ExecutionHistoryRepository:
 
             # Flush changes to database
             await self.session.flush()
-            logger.info(f"✅ Set checkpoint info for execution {execution_id}: flow_uuid={flow_uuid}, status={checkpoint_status}, method={checkpoint_method}")
+            logger.info(
+                f"✅ Set checkpoint info for execution {execution_id}: flow_uuid={flow_uuid}, status={checkpoint_status}, method={checkpoint_method}"
+            )
             return True
 
         except Exception as e:
-            logger.error(f"Error setting checkpoint info for execution {execution_id}: {str(e)}", exc_info=True)
+            logger.error(
+                f"Error setting checkpoint info for execution {execution_id}: {str(e)}",
+                exc_info=True,
+            )
             return False
 
     async def add_crew_checkpoint(
@@ -707,7 +792,7 @@ class ExecutionHistoryRepository:
         sequence: int,
         status: str,
         output_preview: str,
-        completed_at: str
+        completed_at: str,
     ) -> bool:
         """
         Add a crew checkpoint to the execution's checkpoint_data.
@@ -748,7 +833,7 @@ class ExecutionHistoryRepository:
                 "sequence": sequence,
                 "status": status,
                 "output_preview": output_preview[:500] if output_preview else "",
-                "completed_at": completed_at
+                "completed_at": completed_at,
             }
             crew_checkpoints.append(new_checkpoint)
 
@@ -758,11 +843,16 @@ class ExecutionHistoryRepository:
 
             # Flush changes
             await self.session.flush()
-            logger.info(f"Added crew checkpoint for job {job_id}: crew={crew_name}, sequence={sequence}")
+            logger.info(
+                f"Added crew checkpoint for job {job_id}: crew={crew_name}, sequence={sequence}"
+            )
             return True
 
         except Exception as e:
-            logger.error(f"Error adding crew checkpoint for job {job_id}: {str(e)}", exc_info=True)
+            logger.error(
+                f"Error adding crew checkpoint for job {job_id}: {str(e)}",
+                exc_info=True,
+            )
             return False
 
     async def upsert_crew_task_checkpoint(
@@ -850,7 +940,10 @@ class ExecutionHistoryRepository:
                 logger.warning(f"Execution not found for job_id: {job_id}")
                 return False
 
-            if not execution.checkpoint_data or "crew_task_checkpoint" not in execution.checkpoint_data:
+            if (
+                not execution.checkpoint_data
+                or "crew_task_checkpoint" not in execution.checkpoint_data
+            ):
                 return True
 
             checkpoint_data = dict(execution.checkpoint_data)
@@ -923,7 +1016,10 @@ class ExecutionHistoryRepository:
             return execution.checkpoint_data.get("crew_checkpoints", [])
 
         except Exception as e:
-            logger.error(f"Error getting crew checkpoints for job {job_id}: {str(e)}", exc_info=True)
+            logger.error(
+                f"Error getting crew checkpoints for job {job_id}: {str(e)}",
+                exc_info=True,
+            )
             return []
 
     async def update_execution_result(
@@ -960,8 +1056,12 @@ class ExecutionHistoryRepository:
 
             # Detect the type of result being saved so we use a dedicated
             # checkpoint_data key and never collide with other tools.
-            is_ucmv = isinstance(result_data, dict) and 'yaml' in result_data and 'sql' in result_data
-            is_config = isinstance(result_data, dict) and 'join_key_map' in result_data
+            is_ucmv = (
+                isinstance(result_data, dict)
+                and "yaml" in result_data
+                and "sql" in result_data
+            )
+            is_config = isinstance(result_data, dict) and "join_key_map" in result_data
 
             checkpoint_data = execution.checkpoint_data or {}
 
@@ -969,21 +1069,30 @@ class ExecutionHistoryRepository:
                 # UCMV Generator edit: use a dedicated key so Config Generator
                 # saves (which also use edited_config) never overwrite it.
                 checkpoint_data["ucmv_yaml_edits"] = result_data
-                logger.info(f"Saved UCMV yaml edits to checkpoint_data.ucmv_yaml_edits for job_id: {job_id}")
+                logger.info(
+                    f"Saved UCMV yaml edits to checkpoint_data.ucmv_yaml_edits for job_id: {job_id}"
+                )
                 # Also write to /tmp so the Validator subprocess can read the
                 # user's edits (subprocess can't connect to DB in deployed env).
                 try:
                     import os as _os
-                    _tmp_path = '/tmp/ucmv_user_edits.json'
-                    with open(_tmp_path, 'w') as _f:
+
+                    _tmp_path = "/tmp/ucmv_user_edits.json"
+                    with open(_tmp_path, "w") as _f:
                         _json.dump(result_data, _f)
-                    logger.info(f"[UCMV] Wrote user edits to {_tmp_path} for validator subprocess access")
+                    logger.info(
+                        f"[UCMV] Wrote user edits to {_tmp_path} for validator subprocess access"
+                    )
                 except Exception as _tmp_err:
-                    logger.debug(f"[UCMV] Could not write user edits to /tmp: {_tmp_err}")
+                    logger.debug(
+                        f"[UCMV] Could not write user edits to /tmp: {_tmp_err}"
+                    )
             elif is_config:
                 # Config Generator edit: keep using edited_config (existing behaviour)
                 checkpoint_data["edited_config"] = result_data
-                logger.info(f"Saved config edits to checkpoint_data.edited_config for job_id: {job_id}")
+                logger.info(
+                    f"Saved config edits to checkpoint_data.edited_config for job_id: {job_id}"
+                )
             else:
                 # Generic: store under edited_config as before
                 checkpoint_data["edited_config"] = result_data
@@ -1138,11 +1247,7 @@ class ExecutionHistoryRepository:
             job_ids = [row[1] for row in executions]
 
             if not execution_ids:
-                return {
-                    'executionhistory': 0,
-                    'taskstatus': 0,
-                    'errortrace': 0
-                }
+                return {"executionhistory": 0, "taskstatus": 0, "errortrace": 0}
 
             # Delete associated task statuses
             task_status_stmt = delete(TaskStatus).where(TaskStatus.job_id.in_(job_ids))
@@ -1150,24 +1255,31 @@ class ExecutionHistoryRepository:
             task_status_count = task_status_result.rowcount
 
             # Delete associated error traces
-            error_trace_stmt = delete(ErrorTrace).where(ErrorTrace.run_id.in_(execution_ids))
+            error_trace_stmt = delete(ErrorTrace).where(
+                ErrorTrace.run_id.in_(execution_ids)
+            )
             error_trace_result = await self.session.execute(error_trace_stmt)
             error_trace_count = error_trace_result.rowcount
 
             # Delete the execution history records
-            run_stmt = delete(ExecutionHistory).where(ExecutionHistory.created_at < cutoff)
+            run_stmt = delete(ExecutionHistory).where(
+                ExecutionHistory.created_at < cutoff
+            )
             run_result = await self.session.execute(run_stmt)
             run_count = run_result.rowcount
 
             await self.session.flush()
 
             return {
-                'executionhistory': run_count,
-                'taskstatus': task_status_count,
-                'errortrace': error_trace_count
+                "executionhistory": run_count,
+                "taskstatus": task_status_count,
+                "errortrace": error_trace_count,
             }
         except Exception as e:
-            logger.error(f"Error deleting execution history older than {cutoff}: {str(e)}", exc_info=True)
+            logger.error(
+                f"Error deleting execution history older than {cutoff}: {str(e)}",
+                exc_info=True,
+            )
             raise
 
 

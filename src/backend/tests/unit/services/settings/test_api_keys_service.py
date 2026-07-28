@@ -6,12 +6,13 @@ in src/services/api_keys_service.py.
 """
 
 import os
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
-from src.services.settings.api_keys import ApiKeysService
+import pytest
+
 from src.schemas.api_key import ApiKeyCreate, ApiKeyUpdate
+from src.services.settings.api_keys import ApiKeysService
 
 # Save a direct reference to the real static method before any patches.
 # This allows us to call it even when the ApiKeysService name is patched
@@ -22,6 +23,7 @@ _real_setup_provider_api_key_sync = ApiKeysService.setup_provider_api_key_sync
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_api_key(**overrides):
     """Return a lightweight mock that behaves like an ApiKey ORM instance."""
@@ -43,8 +45,10 @@ def _build_service(group_id="grp_1"):
     a mocked repository, returning (service, mock_repo).
     """
     session = AsyncMock()
-    with patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass, \
-         patch("src.services.settings.api_keys.EncryptionUtils"):
+    with (
+        patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
+        patch("src.services.settings.api_keys.EncryptionUtils"),
+    ):
         repo = AsyncMock()
         RepoClass.return_value = repo
         service = ApiKeysService(session, group_id=group_id)
@@ -72,13 +76,16 @@ def _mock_request_scoped_session():
 # __init__
 # ===========================================================================
 
+
 class TestInit:
     """Tests for the constructor."""
 
     def test_init_sets_attributes(self):
         session = AsyncMock()
-        with patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass, \
-             patch("src.services.settings.api_keys.EncryptionUtils"):
+        with (
+            patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
+            patch("src.services.settings.api_keys.EncryptionUtils"),
+        ):
             service = ApiKeysService(session, group_id="g1")
 
         assert service.group_id == "g1"
@@ -88,8 +95,10 @@ class TestInit:
 
     def test_init_default_group_id_is_none(self):
         session = AsyncMock()
-        with patch("src.services.settings.api_keys.ApiKeyRepository"), \
-             patch("src.services.settings.api_keys.EncryptionUtils"):
+        with (
+            patch("src.services.settings.api_keys.ApiKeyRepository"),
+            patch("src.services.settings.api_keys.EncryptionUtils"),
+        ):
             service = ApiKeysService(session)
 
         assert service.group_id is None
@@ -98,6 +107,7 @@ class TestInit:
 # ===========================================================================
 # find_by_name (async)
 # ===========================================================================
+
 
 class TestFindByName:
     """Tests for the async find_by_name method."""
@@ -136,6 +146,7 @@ class TestFindByName:
         service.is_async = False
         # Provide a sync session to avoid TypeError in find_by_name_sync
         from sqlalchemy.orm import Session
+
         service.session = MagicMock(spec=Session)
         expected = _make_api_key()
         repo.find_by_name_sync = MagicMock(return_value=expected)
@@ -150,6 +161,7 @@ class TestFindByName:
 # find_by_name_sync
 # ===========================================================================
 
+
 class TestFindByNameSync:
     """Tests for the synchronous find_by_name_sync method."""
 
@@ -161,6 +173,7 @@ class TestFindByNameSync:
 
     def test_sync_raises_when_no_group_id(self):
         from sqlalchemy.orm import Session
+
         service, _repo = _build_service(group_id=None)
         service.session = MagicMock(spec=Session)
 
@@ -169,6 +182,7 @@ class TestFindByNameSync:
 
     def test_sync_returns_key_on_success(self):
         from sqlalchemy.orm import Session
+
         service, repo = _build_service(group_id="grp_1")
         service.session = MagicMock(spec=Session)
         expected = _make_api_key()
@@ -176,11 +190,14 @@ class TestFindByNameSync:
 
         result = service.find_by_name_sync("OPENAI_API_KEY")
 
-        repo.find_by_name_sync.assert_called_once_with("OPENAI_API_KEY", group_id="grp_1")
+        repo.find_by_name_sync.assert_called_once_with(
+            "OPENAI_API_KEY", group_id="grp_1"
+        )
         assert result is expected
 
     def test_sync_returns_none_when_not_found(self):
         from sqlalchemy.orm import Session
+
         service, repo = _build_service(group_id="grp_1")
         service.session = MagicMock(spec=Session)
         repo.find_by_name_sync = MagicMock(return_value=None)
@@ -193,6 +210,7 @@ class TestFindByNameSync:
 # create_api_key
 # ===========================================================================
 
+
 class TestCreateApiKey:
     """Tests for create_api_key."""
 
@@ -202,11 +220,15 @@ class TestCreateApiKey:
         created = _make_api_key()
         repo.create = AsyncMock(return_value=created)
 
-        data = ApiKeyCreate(name="OPENAI_API_KEY", value="sk-abc123", description="OpenAI")
+        data = ApiKeyCreate(
+            name="OPENAI_API_KEY", value="sk-abc123", description="OpenAI"
+        )
 
         with patch("src.services.settings.api_keys.EncryptionUtils") as EU:
             EU.encrypt_value.return_value = "encrypted_sk"
-            result = await service.create_api_key(data, created_by_email="user@example.com")
+            result = await service.create_api_key(
+                data, created_by_email="user@example.com"
+            )
 
         EU.encrypt_value.assert_called_once_with("sk-abc123")
         repo.create.assert_awaited_once()
@@ -252,6 +274,7 @@ class TestCreateApiKey:
 # ===========================================================================
 # update_api_key
 # ===========================================================================
+
 
 class TestUpdateApiKey:
     """Tests for update_api_key."""
@@ -312,6 +335,7 @@ class TestUpdateApiKey:
 # delete_api_key
 # ===========================================================================
 
+
 class TestDeleteApiKey:
     """Tests for delete_api_key."""
 
@@ -341,6 +365,7 @@ class TestDeleteApiKey:
 # ===========================================================================
 # get_all_api_keys
 # ===========================================================================
+
 
 class TestGetAllApiKeys:
     """Tests for get_all_api_keys."""
@@ -385,6 +410,7 @@ class TestGetAllApiKeys:
 # ===========================================================================
 # get_api_keys_metadata
 # ===========================================================================
+
 
 class TestGetApiKeysMetadata:
     """Tests for get_api_keys_metadata."""
@@ -443,6 +469,7 @@ class TestGetApiKeysMetadata:
 # get_api_key_value (classmethod)
 # ===========================================================================
 
+
 class TestGetApiKeyValue:
     """Tests for the classmethod get_api_key_value."""
 
@@ -451,9 +478,11 @@ class TestGetApiKeyValue:
         fake_key = _make_api_key(encrypted_value="enc_val")
         factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.request_scoped_session", factory_mock), \
-             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass, \
-             patch("src.services.settings.api_keys.EncryptionUtils") as EU:
+        with (
+            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
+            patch("src.services.settings.api_keys.EncryptionUtils") as EU,
+        ):
             repo_mock = AsyncMock()
             repo_mock.find_by_name = AsyncMock(return_value=fake_key)
             RepoClass.return_value = repo_mock
@@ -474,9 +503,11 @@ class TestGetApiKeyValue:
     async def test_returns_none_when_key_not_found(self):
         factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.request_scoped_session", factory_mock), \
-             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass, \
-             patch("src.services.settings.api_keys.EncryptionUtils"):
+        with (
+            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
+            patch("src.services.settings.api_keys.EncryptionUtils"),
+        ):
             repo_mock = AsyncMock()
             repo_mock.find_by_name = AsyncMock(return_value=None)
             RepoClass.return_value = repo_mock
@@ -492,9 +523,11 @@ class TestGetApiKeyValue:
         fake_key = _make_api_key(encrypted_value="bad")
         factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.request_scoped_session", factory_mock), \
-             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass, \
-             patch("src.services.settings.api_keys.EncryptionUtils") as EU:
+        with (
+            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
+            patch("src.services.settings.api_keys.EncryptionUtils") as EU,
+        ):
             repo_mock = AsyncMock()
             repo_mock.find_by_name = AsyncMock(return_value=fake_key)
             RepoClass.return_value = repo_mock
@@ -511,9 +544,11 @@ class TestGetApiKeyValue:
         """When db is passed as a string, it is treated as key_name."""
         factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.request_scoped_session", factory_mock), \
-             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass, \
-             patch("src.services.settings.api_keys.EncryptionUtils") as EU:
+        with (
+            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
+            patch("src.services.settings.api_keys.EncryptionUtils") as EU,
+        ):
             repo_mock = AsyncMock()
             fake_key = _make_api_key(encrypted_value="enc")
             repo_mock.find_by_name = AsyncMock(return_value=fake_key)
@@ -534,13 +569,17 @@ class TestGetApiKeyValue:
 # setup_provider_api_key (classmethod, async)
 # ===========================================================================
 
+
 class TestSetupProviderApiKey:
     """Tests for the async classmethod setup_provider_api_key."""
 
     @pytest.mark.asyncio
     async def test_sets_env_var_on_success(self):
         with patch.object(
-            ApiKeysService, "get_api_key_value", new_callable=AsyncMock, return_value="secret"
+            ApiKeysService,
+            "get_api_key_value",
+            new_callable=AsyncMock,
+            return_value="secret",
         ):
             result = await ApiKeysService.setup_provider_api_key(
                 AsyncMock(), "MY_API_KEY"
@@ -554,7 +593,10 @@ class TestSetupProviderApiKey:
     @pytest.mark.asyncio
     async def test_returns_false_when_value_not_found(self):
         with patch.object(
-            ApiKeysService, "get_api_key_value", new_callable=AsyncMock, return_value=None
+            ApiKeysService,
+            "get_api_key_value",
+            new_callable=AsyncMock,
+            return_value=None,
         ):
             result = await ApiKeysService.setup_provider_api_key(
                 AsyncMock(), "MISSING_KEY"
@@ -566,6 +608,7 @@ class TestSetupProviderApiKey:
 # ===========================================================================
 # setup_provider_api_key_sync (staticmethod)
 # ===========================================================================
+
 
 class TestSetupProviderApiKeySync:
     """Tests for the sync staticmethod setup_provider_api_key_sync.
@@ -580,14 +623,19 @@ class TestSetupProviderApiKeySync:
 
     def test_sets_env_var_on_success(self):
         from sqlalchemy.orm import Session
+
         mock_session = MagicMock(spec=Session)
 
         fake_key = _make_api_key(encrypted_value="enc_val")
         mock_svc = MagicMock()
         mock_svc.find_by_name_sync.return_value = fake_key
 
-        with patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_svc), \
-             patch("src.services.settings.api_keys.EncryptionUtils") as EU:
+        with (
+            patch(
+                "src.services.settings.api_keys.ApiKeysService", return_value=mock_svc
+            ),
+            patch("src.services.settings.api_keys.EncryptionUtils") as EU,
+        ):
             EU.decrypt_value.return_value = "decrypted_secret"
             result = _real_setup_provider_api_key_sync(mock_session, "MY_KEY")
 
@@ -597,40 +645,55 @@ class TestSetupProviderApiKeySync:
 
     def test_returns_false_when_key_not_found(self):
         from sqlalchemy.orm import Session
+
         mock_session = MagicMock(spec=Session)
 
         mock_svc = MagicMock()
         mock_svc.find_by_name_sync.return_value = None
 
-        with patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_svc), \
-             patch("src.services.settings.api_keys.EncryptionUtils"):
+        with (
+            patch(
+                "src.services.settings.api_keys.ApiKeysService", return_value=mock_svc
+            ),
+            patch("src.services.settings.api_keys.EncryptionUtils"),
+        ):
             result = _real_setup_provider_api_key_sync(mock_session, "MISSING")
 
         assert result is False
 
     def test_returns_false_when_encrypted_value_is_none(self):
         from sqlalchemy.orm import Session
+
         mock_session = MagicMock(spec=Session)
 
         fake_key = _make_api_key(encrypted_value=None)
         mock_svc = MagicMock()
         mock_svc.find_by_name_sync.return_value = fake_key
 
-        with patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_svc), \
-             patch("src.services.settings.api_keys.EncryptionUtils"):
+        with (
+            patch(
+                "src.services.settings.api_keys.ApiKeysService", return_value=mock_svc
+            ),
+            patch("src.services.settings.api_keys.EncryptionUtils"),
+        ):
             result = _real_setup_provider_api_key_sync(mock_session, "K")
 
         assert result is False
 
     def test_returns_false_on_exception(self):
         from sqlalchemy.orm import Session
+
         mock_session = MagicMock(spec=Session)
 
         mock_svc = MagicMock()
         mock_svc.find_by_name_sync.side_effect = Exception("db error")
 
-        with patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_svc), \
-             patch("src.services.settings.api_keys.EncryptionUtils"):
+        with (
+            patch(
+                "src.services.settings.api_keys.ApiKeysService", return_value=mock_svc
+            ),
+            patch("src.services.settings.api_keys.EncryptionUtils"),
+        ):
             result = _real_setup_provider_api_key_sync(mock_session, "K")
 
         assert result is False
@@ -640,14 +703,17 @@ class TestSetupProviderApiKeySync:
 # setup_openai_api_key
 # ===========================================================================
 
+
 class TestSetupOpenaiApiKey:
     """Tests for setup_openai_api_key."""
 
     @pytest.mark.asyncio
     async def test_sets_openai_env_var(self):
         with patch.object(
-            ApiKeysService, "get_provider_api_key",
-            new_callable=AsyncMock, return_value="sk-openai"
+            ApiKeysService,
+            "get_provider_api_key",
+            new_callable=AsyncMock,
+            return_value="sk-openai",
         ):
             result = await ApiKeysService.setup_openai_api_key(group_id="grp_1")
 
@@ -658,8 +724,10 @@ class TestSetupOpenaiApiKey:
     @pytest.mark.asyncio
     async def test_returns_false_when_no_key(self):
         with patch.object(
-            ApiKeysService, "get_provider_api_key",
-            new_callable=AsyncMock, return_value=None
+            ApiKeysService,
+            "get_provider_api_key",
+            new_callable=AsyncMock,
+            return_value=None,
         ):
             result = await ApiKeysService.setup_openai_api_key(group_id="grp_1")
 
@@ -673,8 +741,10 @@ class TestSetupOpenaiApiKey:
     @pytest.mark.asyncio
     async def test_returns_false_on_exception(self):
         with patch.object(
-            ApiKeysService, "get_provider_api_key",
-            new_callable=AsyncMock, side_effect=Exception("network error")
+            ApiKeysService,
+            "get_provider_api_key",
+            new_callable=AsyncMock,
+            side_effect=Exception("network error"),
         ):
             result = await ApiKeysService.setup_openai_api_key(group_id="grp_1")
 
@@ -685,14 +755,17 @@ class TestSetupOpenaiApiKey:
 # setup_anthropic_api_key
 # ===========================================================================
 
+
 class TestSetupAnthropicApiKey:
     """Tests for setup_anthropic_api_key."""
 
     @pytest.mark.asyncio
     async def test_sets_anthropic_env_var(self):
         with patch.object(
-            ApiKeysService, "get_provider_api_key",
-            new_callable=AsyncMock, return_value="sk-ant"
+            ApiKeysService,
+            "get_provider_api_key",
+            new_callable=AsyncMock,
+            return_value="sk-ant",
         ):
             result = await ApiKeysService.setup_anthropic_api_key(group_id="grp_1")
 
@@ -703,8 +776,10 @@ class TestSetupAnthropicApiKey:
     @pytest.mark.asyncio
     async def test_returns_false_when_no_key(self):
         with patch.object(
-            ApiKeysService, "get_provider_api_key",
-            new_callable=AsyncMock, return_value=None
+            ApiKeysService,
+            "get_provider_api_key",
+            new_callable=AsyncMock,
+            return_value=None,
         ):
             result = await ApiKeysService.setup_anthropic_api_key(group_id="grp_1")
 
@@ -718,8 +793,10 @@ class TestSetupAnthropicApiKey:
     @pytest.mark.asyncio
     async def test_returns_false_on_exception(self):
         with patch.object(
-            ApiKeysService, "get_provider_api_key",
-            new_callable=AsyncMock, side_effect=Exception("fail")
+            ApiKeysService,
+            "get_provider_api_key",
+            new_callable=AsyncMock,
+            side_effect=Exception("fail"),
         ):
             result = await ApiKeysService.setup_anthropic_api_key(group_id="grp_1")
 
@@ -730,14 +807,17 @@ class TestSetupAnthropicApiKey:
 # setup_deepseek_api_key
 # ===========================================================================
 
+
 class TestSetupDeepseekApiKey:
     """Tests for setup_deepseek_api_key."""
 
     @pytest.mark.asyncio
     async def test_sets_deepseek_env_var(self):
         with patch.object(
-            ApiKeysService, "get_provider_api_key",
-            new_callable=AsyncMock, return_value="sk-ds"
+            ApiKeysService,
+            "get_provider_api_key",
+            new_callable=AsyncMock,
+            return_value="sk-ds",
         ):
             result = await ApiKeysService.setup_deepseek_api_key(group_id="grp_1")
 
@@ -748,8 +828,10 @@ class TestSetupDeepseekApiKey:
     @pytest.mark.asyncio
     async def test_returns_false_when_no_key(self):
         with patch.object(
-            ApiKeysService, "get_provider_api_key",
-            new_callable=AsyncMock, return_value=None
+            ApiKeysService,
+            "get_provider_api_key",
+            new_callable=AsyncMock,
+            return_value=None,
         ):
             result = await ApiKeysService.setup_deepseek_api_key(group_id="grp_1")
 
@@ -763,8 +845,10 @@ class TestSetupDeepseekApiKey:
     @pytest.mark.asyncio
     async def test_returns_false_on_exception(self):
         with patch.object(
-            ApiKeysService, "get_provider_api_key",
-            new_callable=AsyncMock, side_effect=Exception("fail")
+            ApiKeysService,
+            "get_provider_api_key",
+            new_callable=AsyncMock,
+            side_effect=Exception("fail"),
         ):
             result = await ApiKeysService.setup_deepseek_api_key(group_id="grp_1")
 
@@ -775,14 +859,17 @@ class TestSetupDeepseekApiKey:
 # setup_gemini_api_key
 # ===========================================================================
 
+
 class TestSetupGeminiApiKey:
     """Tests for setup_gemini_api_key."""
 
     @pytest.mark.asyncio
     async def test_sets_gemini_env_var(self):
         with patch.object(
-            ApiKeysService, "get_provider_api_key",
-            new_callable=AsyncMock, return_value="sk-gem"
+            ApiKeysService,
+            "get_provider_api_key",
+            new_callable=AsyncMock,
+            return_value="sk-gem",
         ):
             result = await ApiKeysService.setup_gemini_api_key(group_id="grp_1")
 
@@ -793,8 +880,10 @@ class TestSetupGeminiApiKey:
     @pytest.mark.asyncio
     async def test_returns_false_when_no_key(self):
         with patch.object(
-            ApiKeysService, "get_provider_api_key",
-            new_callable=AsyncMock, return_value=None
+            ApiKeysService,
+            "get_provider_api_key",
+            new_callable=AsyncMock,
+            return_value=None,
         ):
             result = await ApiKeysService.setup_gemini_api_key(group_id="grp_1")
 
@@ -808,8 +897,10 @@ class TestSetupGeminiApiKey:
     @pytest.mark.asyncio
     async def test_returns_false_on_exception(self):
         with patch.object(
-            ApiKeysService, "get_provider_api_key",
-            new_callable=AsyncMock, side_effect=Exception("fail")
+            ApiKeysService,
+            "get_provider_api_key",
+            new_callable=AsyncMock,
+            side_effect=Exception("fail"),
         ):
             result = await ApiKeysService.setup_gemini_api_key(group_id="grp_1")
 
@@ -819,6 +910,7 @@ class TestSetupGeminiApiKey:
 # ===========================================================================
 # setup_all_api_keys
 # ===========================================================================
+
 
 class TestSetupAllApiKeys:
     """Tests for setup_all_api_keys."""
@@ -830,10 +922,32 @@ class TestSetupAllApiKeys:
 
     @pytest.mark.asyncio
     async def test_calls_all_provider_setups_async(self):
-        with patch.object(ApiKeysService, "setup_openai_api_key", new_callable=AsyncMock, return_value=True) as m_openai, \
-             patch.object(ApiKeysService, "setup_anthropic_api_key", new_callable=AsyncMock, return_value=True) as m_ant, \
-             patch.object(ApiKeysService, "setup_deepseek_api_key", new_callable=AsyncMock, return_value=True) as m_ds, \
-             patch.object(ApiKeysService, "setup_gemini_api_key", new_callable=AsyncMock, return_value=True) as m_gem:
+        with (
+            patch.object(
+                ApiKeysService,
+                "setup_openai_api_key",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as m_openai,
+            patch.object(
+                ApiKeysService,
+                "setup_anthropic_api_key",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as m_ant,
+            patch.object(
+                ApiKeysService,
+                "setup_deepseek_api_key",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as m_ds,
+            patch.object(
+                ApiKeysService,
+                "setup_gemini_api_key",
+                new_callable=AsyncMock,
+                return_value=True,
+            ) as m_gem,
+        ):
 
             await ApiKeysService.setup_all_api_keys(group_id="grp_1")
 
@@ -846,11 +960,10 @@ class TestSetupAllApiKeys:
     async def test_sync_path_with_sync_session(self):
         """When a sync Session is provided, falls back to sync provider setup."""
         from sqlalchemy.orm import Session
+
         mock_sync_session = MagicMock(spec=Session)
 
-        with patch.object(
-            ApiKeysService, "setup_provider_api_key_sync"
-        ) as mock_sync:
+        with patch.object(ApiKeysService, "setup_provider_api_key_sync") as mock_sync:
             await ApiKeysService.setup_all_api_keys(
                 db=mock_sync_session, group_id="grp_1"
             )
@@ -866,10 +979,20 @@ class TestSetupAllApiKeys:
     @pytest.mark.asyncio
     async def test_async_path_when_db_is_none(self):
         """When db is None (not a sync Session), uses async path."""
-        with patch.object(ApiKeysService, "setup_openai_api_key", new_callable=AsyncMock) as m_openai, \
-             patch.object(ApiKeysService, "setup_anthropic_api_key", new_callable=AsyncMock) as m_ant, \
-             patch.object(ApiKeysService, "setup_deepseek_api_key", new_callable=AsyncMock) as m_ds, \
-             patch.object(ApiKeysService, "setup_gemini_api_key", new_callable=AsyncMock) as m_gem:
+        with (
+            patch.object(
+                ApiKeysService, "setup_openai_api_key", new_callable=AsyncMock
+            ) as m_openai,
+            patch.object(
+                ApiKeysService, "setup_anthropic_api_key", new_callable=AsyncMock
+            ) as m_ant,
+            patch.object(
+                ApiKeysService, "setup_deepseek_api_key", new_callable=AsyncMock
+            ) as m_ds,
+            patch.object(
+                ApiKeysService, "setup_gemini_api_key", new_callable=AsyncMock
+            ) as m_gem,
+        ):
 
             await ApiKeysService.setup_all_api_keys(db=None, group_id="grp_1")
 
@@ -883,10 +1006,20 @@ class TestSetupAllApiKeys:
         """When db is an AsyncSession (not a sync Session), uses async path."""
         async_session = AsyncMock()
 
-        with patch.object(ApiKeysService, "setup_openai_api_key", new_callable=AsyncMock) as m_openai, \
-             patch.object(ApiKeysService, "setup_anthropic_api_key", new_callable=AsyncMock), \
-             patch.object(ApiKeysService, "setup_deepseek_api_key", new_callable=AsyncMock), \
-             patch.object(ApiKeysService, "setup_gemini_api_key", new_callable=AsyncMock):
+        with (
+            patch.object(
+                ApiKeysService, "setup_openai_api_key", new_callable=AsyncMock
+            ) as m_openai,
+            patch.object(
+                ApiKeysService, "setup_anthropic_api_key", new_callable=AsyncMock
+            ),
+            patch.object(
+                ApiKeysService, "setup_deepseek_api_key", new_callable=AsyncMock
+            ),
+            patch.object(
+                ApiKeysService, "setup_gemini_api_key", new_callable=AsyncMock
+            ),
+        ):
 
             await ApiKeysService.setup_all_api_keys(db=async_session, group_id="grp_1")
 
@@ -897,6 +1030,7 @@ class TestSetupAllApiKeys:
 # get_provider_api_key (classmethod)
 # ===========================================================================
 
+
 class TestGetProviderApiKey:
     """Tests for the classmethod get_provider_api_key."""
 
@@ -905,18 +1039,24 @@ class TestGetProviderApiKey:
         fake_key = _make_api_key(encrypted_value="enc_openai")
         factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.request_scoped_session", factory_mock), \
-             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass, \
-             patch("src.services.settings.api_keys.EncryptionUtils") as EU:
+        with (
+            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
+            patch("src.services.settings.api_keys.EncryptionUtils") as EU,
+        ):
             repo_mock = AsyncMock()
             repo_mock.find_by_name = AsyncMock(return_value=fake_key)
             RepoClass.return_value = repo_mock
             EU.decrypt_value.return_value = "sk-plain"
 
-            result = await ApiKeysService.get_provider_api_key("openai", group_id="grp_1")
+            result = await ApiKeysService.get_provider_api_key(
+                "openai", group_id="grp_1"
+            )
 
         assert result == "sk-plain"
-        repo_mock.find_by_name.assert_awaited_once_with("OPENAI_API_KEY", group_id="grp_1")
+        repo_mock.find_by_name.assert_awaited_once_with(
+            "OPENAI_API_KEY", group_id="grp_1"
+        )
 
     @pytest.mark.asyncio
     async def test_raises_when_no_group_id(self):
@@ -927,14 +1067,18 @@ class TestGetProviderApiKey:
     async def test_returns_none_when_key_not_found(self):
         factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.request_scoped_session", factory_mock), \
-             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass, \
-             patch("src.services.settings.api_keys.EncryptionUtils"):
+        with (
+            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
+            patch("src.services.settings.api_keys.EncryptionUtils"),
+        ):
             repo_mock = AsyncMock()
             repo_mock.find_by_name = AsyncMock(return_value=None)
             RepoClass.return_value = repo_mock
 
-            result = await ApiKeysService.get_provider_api_key("openai", group_id="grp_1")
+            result = await ApiKeysService.get_provider_api_key(
+                "openai", group_id="grp_1"
+            )
 
         assert result is None
 
@@ -943,15 +1087,19 @@ class TestGetProviderApiKey:
         fake_key = _make_api_key(encrypted_value="bad")
         factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.request_scoped_session", factory_mock), \
-             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass, \
-             patch("src.services.settings.api_keys.EncryptionUtils") as EU:
+        with (
+            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
+            patch("src.services.settings.api_keys.EncryptionUtils") as EU,
+        ):
             repo_mock = AsyncMock()
             repo_mock.find_by_name = AsyncMock(return_value=fake_key)
             RepoClass.return_value = repo_mock
             EU.decrypt_value.side_effect = Exception("cipher error")
 
-            result = await ApiKeysService.get_provider_api_key("openai", group_id="grp_1")
+            result = await ApiKeysService.get_provider_api_key(
+                "openai", group_id="grp_1"
+            )
 
         assert result is None
 
@@ -961,7 +1109,9 @@ class TestGetProviderApiKey:
         factory_mock = MagicMock(side_effect=Exception("session factory broke"))
 
         with patch("src.db.session.request_scoped_session", factory_mock):
-            result = await ApiKeysService.get_provider_api_key("openai", group_id="grp_1")
+            result = await ApiKeysService.get_provider_api_key(
+                "openai", group_id="grp_1"
+            )
 
         assert result is None
 
@@ -970,21 +1120,26 @@ class TestGetProviderApiKey:
         """Verify provider name is uppercased when building key_name."""
         factory_mock, mock_session = _mock_request_scoped_session()
 
-        with patch("src.db.session.request_scoped_session", factory_mock), \
-             patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass, \
-             patch("src.services.settings.api_keys.EncryptionUtils"):
+        with (
+            patch("src.db.session.request_scoped_session", factory_mock),
+            patch("src.services.settings.api_keys.ApiKeyRepository") as RepoClass,
+            patch("src.services.settings.api_keys.EncryptionUtils"),
+        ):
             repo_mock = AsyncMock()
             repo_mock.find_by_name = AsyncMock(return_value=None)
             RepoClass.return_value = repo_mock
 
             await ApiKeysService.get_provider_api_key("deepseek", group_id="g1")
 
-        repo_mock.find_by_name.assert_awaited_once_with("DEEPSEEK_API_KEY", group_id="g1")
+        repo_mock.find_by_name.assert_awaited_once_with(
+            "DEEPSEEK_API_KEY", group_id="g1"
+        )
 
 
 # ===========================================================================
 # Edge cases / cross-cutting
 # ===========================================================================
+
 
 class TestEdgeCases:
     """Cross-cutting edge case tests."""
@@ -1011,7 +1166,10 @@ class TestEdgeCases:
     async def test_multiple_keys_in_get_all(self):
         """get_all_api_keys handles many keys without issue."""
         service, repo = _build_service(group_id="grp_1")
-        keys = [_make_api_key(id=i, name=f"K{i}", encrypted_value=f"e{i}") for i in range(50)]
+        keys = [
+            _make_api_key(id=i, name=f"K{i}", encrypted_value=f"e{i}")
+            for i in range(50)
+        ]
         repo.find_all = AsyncMock(return_value=keys)
 
         with patch("src.services.settings.api_keys.EncryptionUtils") as EU:
@@ -1085,6 +1243,7 @@ class TestEdgeCases:
 # PAT cache invalidation hooks (PERF-005)
 # ===========================================================================
 
+
 class TestPatCacheInvalidationHooks:
     """Key mutations must drop the get_auth_context PAT cache for the group,
     otherwise a rotated DATABRICKS_TOKEN keeps serving stale auth for a TTL."""
@@ -1095,8 +1254,10 @@ class TestPatCacheInvalidationHooks:
         repo.create = AsyncMock(return_value=_make_api_key())
         data = ApiKeyCreate(name="DATABRICKS_TOKEN", value="dapi-new", description="")
 
-        with patch("src.services.settings.api_keys.EncryptionUtils"), \
-             patch("src.utils.databricks_auth.invalidate_pat_cache") as mock_inv:
+        with (
+            patch("src.services.settings.api_keys.EncryptionUtils"),
+            patch("src.utils.databricks_auth.invalidate_pat_cache") as mock_inv,
+        ):
             await service.create_api_key(data)
 
         mock_inv.assert_called_once_with("grp_pat")
@@ -1108,8 +1269,10 @@ class TestPatCacheInvalidationHooks:
         repo.update = AsyncMock(return_value=_make_api_key())
         data = ApiKeyUpdate(value="dapi-rotated")
 
-        with patch("src.services.settings.api_keys.EncryptionUtils"), \
-             patch("src.utils.databricks_auth.invalidate_pat_cache") as mock_inv:
+        with (
+            patch("src.services.settings.api_keys.EncryptionUtils"),
+            patch("src.utils.databricks_auth.invalidate_pat_cache") as mock_inv,
+        ):
             await service.update_api_key("DATABRICKS_TOKEN", data)
 
         mock_inv.assert_called_once_with("grp_pat")
@@ -1141,8 +1304,13 @@ class TestPatCacheInvalidationHooks:
         repo.create = AsyncMock(return_value=_make_api_key())
         data = ApiKeyCreate(name="DATABRICKS_TOKEN", value="dapi-x", description="")
 
-        with patch("src.services.settings.api_keys.EncryptionUtils"), \
-             patch("src.utils.databricks_auth.invalidate_pat_cache", side_effect=Exception("boom")):
+        with (
+            patch("src.services.settings.api_keys.EncryptionUtils"),
+            patch(
+                "src.utils.databricks_auth.invalidate_pat_cache",
+                side_effect=Exception("boom"),
+            ),
+        ):
             result = await service.create_api_key(data)  # must not raise
 
         assert result is not None

@@ -2,13 +2,15 @@
 Unit tests for the PERFORMS_DESTRUCTIVE_OPERATIONS flag and related functions
 added to tool_capability_manifest in Phase 4.
 """
+
 import logging
-import pytest
 from unittest.mock import patch
 
+import pytest
+
 from src.services.security.tool_capability_manifest import (
-    ToolCapability,
     TOOL_CAPABILITIES,
+    ToolCapability,
     assess_destructive_risk,
     log_destructive_warning,
 )
@@ -38,9 +40,9 @@ class TestDestructiveFlag:
     def test_non_destructive_tools_lack_flag(self):
         for name in ("SerperDevTool", "ScrapeWebsiteTool", "GenieTool", "MCPTool"):
             caps = TOOL_CAPABILITIES.get(name, ToolCapability.NONE)
-            assert not (caps & ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS), (
-                f"{name} should not have PERFORMS_DESTRUCTIVE_OPERATIONS"
-            )
+            assert not (
+                caps & ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS
+            ), f"{name} should not have PERFORMS_DESTRUCTIVE_OPERATIONS"
 
 
 class TestAssessDestructiveRisk:
@@ -63,7 +65,9 @@ class TestAssessDestructiveRisk:
         assert result == []
 
     def test_mixed_returns_only_destructive(self):
-        result = assess_destructive_risk(["SerperDevTool", "DatabricksJobsTool", "MCPTool"])
+        result = assess_destructive_risk(
+            ["SerperDevTool", "DatabricksJobsTool", "MCPTool"]
+        )
         assert result == ["DatabricksJobsTool"]
 
 
@@ -82,7 +86,9 @@ class TestLogDestructiveWarning:
 
     def test_context_appears_in_warning(self, caplog):
         with caplog.at_level(logging.WARNING):
-            log_destructive_warning(["databricks_jobs_tool"], context="crew with 2 tasks")
+            log_destructive_warning(
+                ["databricks_jobs_tool"], context="crew with 2 tasks"
+            )
         assert "crew with 2 tasks" in caplog.text
 
     def test_no_context_produces_valid_log(self, caplog):

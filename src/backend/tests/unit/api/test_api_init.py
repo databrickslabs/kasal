@@ -4,6 +4,7 @@ Unit tests for the API module initialization.
 Verifies that the api_router is properly constructed, all expected
 sub-routers are included, and exports are consistent.
 """
+
 import pytest
 from fastapi import APIRouter
 
@@ -80,9 +81,9 @@ class TestSubRouterImports:
 
         assert hasattr(api_module, router_name), f"{router_name} not found in src.api"
         router_obj = getattr(api_module, router_name)
-        assert isinstance(router_obj, APIRouter), (
-            f"{router_name} is {type(router_obj)}, expected APIRouter"
-        )
+        assert isinstance(
+            router_obj, APIRouter
+        ), f"{router_name} is {type(router_obj)}, expected APIRouter"
 
 
 class TestDunderAll:
@@ -144,9 +145,9 @@ class TestDunderAll:
         from src.api import __all__ as api_all
 
         for name in api_all:
-            assert hasattr(api_module, name), (
-                f"'{name}' listed in __all__ but not found on src.api"
-            )
+            assert hasattr(
+                api_module, name
+            ), f"'{name}' listed in __all__ but not found on src.api"
 
 
 class TestRouterPrefixes:

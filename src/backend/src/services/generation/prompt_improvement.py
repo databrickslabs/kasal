@@ -13,10 +13,10 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
-from src.services.llm.manager import LLMManager
 from src.repositories.log_repository import LLMLogRepository
-from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.catalog.templates import TemplateService
+from src.services.execution.logs.llm_log_service import LLMLogService
+from src.services.llm.manager import LLMManager
 from src.utils.prompt_utils import robust_json_parser
 from src.utils.user_context import GroupContext
 
@@ -39,13 +39,19 @@ class PromptImprovementService:
         self.session = session
         self.log_service = LLMLogService(LLMLogRepository(session))
 
-    async def _log_llm_interaction(self, prompt: str, response: str, model: str,
-                                   status: str = 'success', error_message: Optional[str] = None,
-                                   group_context: Optional[GroupContext] = None):
+    async def _log_llm_interaction(
+        self,
+        prompt: str,
+        response: str,
+        model: str,
+        status: str = "success",
+        error_message: Optional[str] = None,
+        group_context: Optional[GroupContext] = None,
+    ):
         """Log the LLM interaction; never let logging failures break the request."""
         try:
             await self.log_service.create_log(
-                endpoint='improve-prompt',
+                endpoint="improve-prompt",
                 prompt=prompt,
                 response=response,
                 model=model,
@@ -79,7 +85,9 @@ class PromptImprovementService:
             original text, so the caller always gets a complete set back.
         """
         model = model or os.getenv("PROMPT_IMPROVE_MODEL", DEFAULT_IMPROVE_MODEL)
-        system = await TemplateService.get_effective_template_content("improve_prompt", group_context)
+        system = await TemplateService.get_effective_template_content(
+            "improve_prompt", group_context
+        )
         user = json.dumps(
             {"target": target, "fields": fields, "instructions": instructions},
             ensure_ascii=False,
@@ -89,7 +97,8 @@ class PromptImprovementService:
             {"role": "user", "content": user},
         ]
         try:
-            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            from src.utils.telemetry import KasalProduct, get_user_agent_header
+
             content = await LLMManager.completion(
                 messages=messages,
                 model=model,
@@ -102,7 +111,11 @@ class PromptImprovementService:
             if not isinstance(parsed, dict):
                 raise ValueError("Prompt improvement response is not a JSON object")
             improved = {
-                key: parsed[key].strip() if isinstance(parsed.get(key), str) and parsed[key].strip() else original
+                key: (
+                    parsed[key].strip()
+                    if isinstance(parsed.get(key), str) and parsed[key].strip()
+                    else original
+                )
                 for key, original in fields.items()
             }
             await self._log_llm_interaction(
@@ -119,7 +132,7 @@ class PromptImprovementService:
                 prompt=f"System: {system}\nUser: {user}",
                 response="",
                 model=model,
-                status='error',
+                status="error",
                 error_message=str(e),
                 group_context=group_context,
             )

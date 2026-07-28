@@ -8,14 +8,16 @@ This service handles:
 - Search path configuration (SET search_path TO kasal)
 - Special handling for tables with vector columns (documentation_embeddings)
 """
+
 import asyncio
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional, List, Tuple, Generator, AsyncGenerator, Dict, Any
+from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Tuple
+
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.engine import Engine
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.core.base_service import BaseService
 from src.db.base import Base
@@ -23,7 +25,7 @@ from src.db.base import Base
 logger = logging.getLogger(__name__)
 
 # --- SQL injection prevention helpers ---
-_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+_SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _validate_identifier(name: str, kind: str = "identifier") -> str:
@@ -51,11 +53,15 @@ def _quote_pg_role(identifier: str) -> str:
         ValueError: If the identifier does not match expected formats.
     """
     # Email pattern (local dev)
-    _EMAIL_RE = re.compile(r'^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$')
+    _EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
     # UUID pattern (SPN client_id)
-    _UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+    _UUID_RE = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+    )
 
-    if not identifier or not (_EMAIL_RE.match(identifier) or _UUID_RE.match(identifier)):
+    if not identifier or not (
+        _EMAIL_RE.match(identifier) or _UUID_RE.match(identifier)
+    ):
         raise ValueError(f"Invalid PostgreSQL role identifier: {identifier!r}")
     return '"' + identifier.replace('"', '""') + '"'
 
@@ -74,14 +80,18 @@ def _is_not_owner_error(exc: Exception) -> bool:
 
 def _owner_remediation(stmt: str) -> str:
     """Actionable message for an ownership-blocked ALTER."""
-    m = re.search(r'\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([A-Za-z_][\w."]*)', stmt or "", re.IGNORECASE)
+    m = re.search(
+        r'\bALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?([A-Za-z_][\w."]*)',
+        stmt or "",
+        re.IGNORECASE,
+    )
     table = m.group(1) if m else "the table"
     return (
         f"Cannot apply DDL — this role does not own {table} (Postgres 42501 'must be owner'). "
         f"It was created by a previous deploy's service principal (orphaned owner). A Lakebase "
         f"instance owner / superuser must reassign ownership, then re-run the migration:\n"
         f"    REASSIGN OWNED BY <old_owner_role> TO CURRENT_USER;\n"
-        f"  (or per-table:  ALTER TABLE {table} OWNER TO \"<this_app_role>\";)\n"
+        f'  (or per-table:  ALTER TABLE {table} OWNER TO "<this_app_role>";)\n'
         f"Skipped statement: {stmt}"
     )
 
@@ -100,10 +110,7 @@ class LakebaseSchemaService(BaseService):
         pass
 
     async def create_schema_async(
-        self,
-        engine: AsyncEngine,
-        user_email: str,
-        recreate: bool = False
+        self, engine: AsyncEngine, user_email: str, recreate: bool = False
     ) -> None:
         """
         Create kasal schema in Lakebase database (async version).
@@ -123,7 +130,9 @@ class LakebaseSchemaService(BaseService):
             if recreate:
                 try:
                     async with engine.begin() as conn:
-                        await conn.execute(text(f'ALTER SCHEMA kasal OWNER TO {safe_role}'))
+                        await conn.execute(
+                            text(f"ALTER SCHEMA kasal OWNER TO {safe_role}")
+                        )
                 except Exception:
                     pass  # Schema may not exist yet
                 try:
@@ -144,40 +153,45 @@ class LakebaseSchemaService(BaseService):
 
                 # Grant schema permissions
                 try:
-                    await conn.execute(text(f'GRANT ALL ON SCHEMA kasal TO {safe_role}'))
-                    await conn.execute(text(f'GRANT ALL ON SCHEMA public TO {safe_role}'))
+                    await conn.execute(
+                        text(f"GRANT ALL ON SCHEMA kasal TO {safe_role}")
+                    )
+                    await conn.execute(
+                        text(f"GRANT ALL ON SCHEMA public TO {safe_role}")
+                    )
                     logger.info(f"Granted schema permissions to {user_email}")
                 except Exception as grant_error:
                     # Log but don't fail - user might already have permissions
-                    logger.warning(f"Permission grant warning (may be ok): {grant_error}")
+                    logger.warning(
+                        f"Permission grant warning (may be ok): {grant_error}"
+                    )
 
                 # Set default privileges for future objects
                 try:
                     await conn.execute(
                         text(
-                            f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                            f'GRANT ALL ON TABLES TO {safe_role}'
+                            f"ALTER DEFAULT PRIVILEGES IN SCHEMA kasal "
+                            f"GRANT ALL ON TABLES TO {safe_role}"
                         )
                     )
                     await conn.execute(
                         text(
-                            f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                            f'GRANT ALL ON SEQUENCES TO {safe_role}'
+                            f"ALTER DEFAULT PRIVILEGES IN SCHEMA kasal "
+                            f"GRANT ALL ON SEQUENCES TO {safe_role}"
                         )
                     )
                     logger.info(f"Set default privileges for {user_email}")
                 except Exception as privilege_error:
-                    logger.warning(f"Default privilege warning (may be ok): {privilege_error}")
+                    logger.warning(
+                        f"Default privilege warning (may be ok): {privilege_error}"
+                    )
 
         except Exception as e:
             logger.error(f"Error creating schema: {e}")
             raise
 
     def create_schema_sync(
-        self,
-        engine: Engine,
-        user_email: str,
-        recreate: bool = False
+        self, engine: Engine, user_email: str, recreate: bool = False
     ) -> None:
         """
         Create kasal schema in Lakebase database (sync version).
@@ -197,7 +211,7 @@ class LakebaseSchemaService(BaseService):
             if recreate:
                 try:
                     with engine.begin() as conn:
-                        conn.execute(text(f'ALTER SCHEMA kasal OWNER TO {safe_role}'))
+                        conn.execute(text(f"ALTER SCHEMA kasal OWNER TO {safe_role}"))
                 except Exception:
                     pass  # Schema may not exist yet
                 try:
@@ -217,17 +231,17 @@ class LakebaseSchemaService(BaseService):
 
                 # Grant schema permissions
                 try:
-                    conn.execute(text(f'GRANT ALL ON SCHEMA kasal TO {safe_role}'))
+                    conn.execute(text(f"GRANT ALL ON SCHEMA kasal TO {safe_role}"))
                     conn.execute(
                         text(
-                            f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                            f'GRANT ALL ON TABLES TO {safe_role}'
+                            f"ALTER DEFAULT PRIVILEGES IN SCHEMA kasal "
+                            f"GRANT ALL ON TABLES TO {safe_role}"
                         )
                     )
                     conn.execute(
                         text(
-                            f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                            f'GRANT ALL ON SEQUENCES TO {safe_role}'
+                            f"ALTER DEFAULT PRIVILEGES IN SCHEMA kasal "
+                            f"GRANT ALL ON SEQUENCES TO {safe_role}"
                         )
                     )
                     logger.info(f"Granted schema permissions to {user_email}")
@@ -258,14 +272,16 @@ class LakebaseSchemaService(BaseService):
                 logger.info("Set kasal schema as default search path")
 
                 # Tables with vector columns that need special handling
-                tables_to_skip = ['documentation_embeddings', 'knowledge_embeddings']
+                tables_to_skip = ["documentation_embeddings", "knowledge_embeddings"]
 
                 # Get all table objects from metadata
                 for table in Base.metadata.sorted_tables:
                     if table.name in tables_to_skip:
-                        logger.info(f"Skipping table {table.name} (contains vector column)")
+                        logger.info(
+                            f"Skipping table {table.name} (contains vector column)"
+                        )
                         # Create a modified version without vector column
-                        if table.name == 'documentation_embeddings':
+                        if table.name == "documentation_embeddings":
                             # Create table without the embedding column
                             create_sql = """
                             CREATE TABLE IF NOT EXISTS documentation_embeddings (
@@ -282,7 +298,9 @@ class LakebaseSchemaService(BaseService):
                             """
                             await conn.execute(text(create_sql))
                             await self._ensure_doc_embeddings_columns_async(conn)
-                            logger.info("Created documentation_embeddings table (pgvector embedding + scoping columns ensured)")
+                            logger.info(
+                                "Created documentation_embeddings table (pgvector embedding + scoping columns ensured)"
+                            )
                     else:
                         # Create table normally using SQLAlchemy metadata
                         await conn.run_sync(table.create, checkfirst=True)
@@ -307,7 +325,7 @@ class LakebaseSchemaService(BaseService):
             Exception: If table creation fails
         """
         try:
-            tables_to_skip = {'documentation_embeddings', 'knowledge_embeddings'}
+            tables_to_skip = {"documentation_embeddings", "knowledge_embeddings"}
             all_tables = Base.metadata.sorted_tables
             waves, table_map = self._get_dependency_waves(all_tables)
             max_parallel = 10
@@ -332,9 +350,13 @@ class LakebaseSchemaService(BaseService):
                         with ThreadPoolExecutor(max_workers=n_workers) as executor:
                             futures = [
                                 executor.submit(
-                                    self._create_tables_batch_sync, engine, chunk, table_map
+                                    self._create_tables_batch_sync,
+                                    engine,
+                                    chunk,
+                                    table_map,
                                 )
-                                for chunk in chunks if chunk
+                                for chunk in chunks
+                                if chunk
                             ]
                             for future in as_completed(futures):
                                 results = future.result()
@@ -342,13 +364,17 @@ class LakebaseSchemaService(BaseService):
                                     if success:
                                         logger.info(f"Created table {name}")
                                     else:
-                                        logger.error(f"Error creating table {name}: {error}")
+                                        logger.error(
+                                            f"Error creating table {name}: {error}"
+                                        )
 
                 for name in special:
-                    if name == 'documentation_embeddings':
+                    if name == "documentation_embeddings":
                         logger.info(f"Skipping table {name} (contains vector column)")
                         self._create_doc_embeddings_sync(engine)
-                        logger.info("Created documentation_embeddings without vector column")
+                        logger.info(
+                            "Created documentation_embeddings without vector column"
+                        )
 
             logger.info("Created table structure in Lakebase")
 
@@ -357,8 +383,7 @@ class LakebaseSchemaService(BaseService):
             raise
 
     async def create_tables_async_stream(
-        self,
-        engine: AsyncEngine
+        self, engine: AsyncEngine
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Create all tables from SQLAlchemy metadata with streaming progress (async version).
@@ -375,20 +400,23 @@ class LakebaseSchemaService(BaseService):
             async with engine.begin() as conn:
                 # Set kasal as the default schema for this connection
                 await conn.execute(text("SET search_path TO kasal, public"))
-                yield {"type": "success", "message": "Set kasal schema as default search path"}
+                yield {
+                    "type": "success",
+                    "message": "Set kasal schema as default search path",
+                }
 
                 # Tables with vector columns that need special handling
-                tables_to_skip = ['documentation_embeddings', 'knowledge_embeddings']
+                tables_to_skip = ["documentation_embeddings", "knowledge_embeddings"]
 
                 # Get all table objects from metadata
                 for table in Base.metadata.sorted_tables:
                     if table.name in tables_to_skip:
                         yield {
                             "type": "info",
-                            "message": f"Skipping table {table.name} (contains vector column)"
+                            "message": f"Skipping table {table.name} (contains vector column)",
                         }
                         # Create a modified version without vector column
-                        if table.name == 'documentation_embeddings':
+                        if table.name == "documentation_embeddings":
                             create_sql = """
                             CREATE TABLE IF NOT EXISTS documentation_embeddings (
                                 id SERIAL PRIMARY KEY,
@@ -406,17 +434,25 @@ class LakebaseSchemaService(BaseService):
                             await self._ensure_doc_embeddings_columns_async(conn)
                             yield {
                                 "type": "success",
-                                "message": f"Created {table.name} (pgvector embedding + scoping columns ensured)"
+                                "message": f"Created {table.name} (pgvector embedding + scoping columns ensured)",
                             }
                     else:
                         # Create table normally
                         await conn.run_sync(table.create, checkfirst=True)
-                        yield {"type": "success", "message": f"Created table {table.name}"}
+                        yield {
+                            "type": "success",
+                            "message": f"Created table {table.name}",
+                        }
 
-                yield {"type": "success", "message": "Created table structure in Lakebase"}
+                yield {
+                    "type": "success",
+                    "message": "Created table structure in Lakebase",
+                }
 
         except (asyncio.CancelledError, GeneratorExit):
-            logger.warning("Async table creation stream cancelled (client disconnected)")
+            logger.warning(
+                "Async table creation stream cancelled (client disconnected)"
+            )
             return
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
@@ -455,7 +491,8 @@ class LakebaseSchemaService(BaseService):
         while len(assigned) < len(deps):
             # Tables whose dependencies are all in already-assigned waves
             wave = [
-                name for name, d in deps.items()
+                name
+                for name, d in deps.items()
                 if name not in assigned and d.issubset(assigned)
             ]
             if not wave:
@@ -597,7 +634,9 @@ class LakebaseSchemaService(BaseService):
             conn.execute(text(create_sql))
             self._ensure_doc_embeddings_columns_sync(conn)
 
-    def create_tables_sync_stream(self, engine: Engine) -> Generator[Dict[str, Any], None, None]:
+    def create_tables_sync_stream(
+        self, engine: Engine
+    ) -> Generator[Dict[str, Any], None, None]:
         """Create all tables with streaming progress using parallel dependency waves.
 
         Groups tables by FK dependency depth and creates each wave in parallel
@@ -612,7 +651,7 @@ class LakebaseSchemaService(BaseService):
             Dict with event type and progress information
         """
         try:
-            tables_to_skip = {'documentation_embeddings', 'knowledge_embeddings'}
+            tables_to_skip = {"documentation_embeddings", "knowledge_embeddings"}
             all_tables = Base.metadata.sorted_tables
             waves, table_map = self._get_dependency_waves(all_tables)
 
@@ -631,13 +670,21 @@ class LakebaseSchemaService(BaseService):
                 if normal:
                     if len(normal) <= 2:
                         # Small wave — single connection, no threading overhead
-                        results = self._create_tables_batch_sync(engine, normal, table_map)
+                        results = self._create_tables_batch_sync(
+                            engine, normal, table_map
+                        )
                         for name, success, error in results:
                             if success:
                                 created_count += 1
-                                yield {"type": "success", "message": f"Created table {name}"}
+                                yield {
+                                    "type": "success",
+                                    "message": f"Created table {name}",
+                                }
                             else:
-                                yield {"type": "error", "message": f"Error creating table {name}: {error}"}
+                                yield {
+                                    "type": "error",
+                                    "message": f"Error creating table {name}: {error}",
+                                }
                     else:
                         # Split across parallel connections
                         n_workers = min(len(normal), max_parallel)
@@ -648,9 +695,13 @@ class LakebaseSchemaService(BaseService):
                         with ThreadPoolExecutor(max_workers=n_workers) as executor:
                             futures = {
                                 executor.submit(
-                                    self._create_tables_batch_sync, engine, chunk, table_map
+                                    self._create_tables_batch_sync,
+                                    engine,
+                                    chunk,
+                                    table_map,
                                 ): chunk
-                                for chunk in chunks if chunk
+                                for chunk in chunks
+                                if chunk
                             }
                             for future in as_completed(futures):
                                 try:
@@ -658,23 +709,41 @@ class LakebaseSchemaService(BaseService):
                                     for name, success, error in results:
                                         if success:
                                             created_count += 1
-                                            yield {"type": "success", "message": f"Created table {name}"}
+                                            yield {
+                                                "type": "success",
+                                                "message": f"Created table {name}",
+                                            }
                                         else:
-                                            yield {"type": "error", "message": f"Error creating table {name}: {error}"}
+                                            yield {
+                                                "type": "error",
+                                                "message": f"Error creating table {name}: {error}",
+                                            }
                                 except Exception as e:
                                     chunk = futures[future]
                                     for name in chunk:
-                                        yield {"type": "error", "message": f"Error creating table {name}: {e}"}
+                                        yield {
+                                            "type": "error",
+                                            "message": f"Error creating table {name}: {e}",
+                                        }
 
                 # Handle special tables (need custom DDL)
                 for name in special:
-                    yield {"type": "info", "message": f"Skipping table {name} (contains vector column)"}
-                    if name == 'documentation_embeddings':
+                    yield {
+                        "type": "info",
+                        "message": f"Skipping table {name} (contains vector column)",
+                    }
+                    if name == "documentation_embeddings":
                         self._create_doc_embeddings_sync(engine)
                         created_count += 1
-                        yield {"type": "success", "message": f"Created {name} without vector column"}
+                        yield {
+                            "type": "success",
+                            "message": f"Created {name} without vector column",
+                        }
 
-            yield {"type": "success", "message": f"Created {created_count} tables in Lakebase ({len(waves)} waves, parallel)"}
+            yield {
+                "type": "success",
+                "message": f"Created {created_count} tables in Lakebase ({len(waves)} waves, parallel)",
+            }
 
         except Exception as e:
             logger.error(f"Error creating tables: {e}")

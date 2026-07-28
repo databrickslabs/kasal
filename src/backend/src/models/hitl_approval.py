@@ -5,8 +5,18 @@ This module defines the database model for tracking HITL approval requests
 that pause flow execution and wait for human decision.
 """
 
-from datetime import datetime, timezone, timedelta
-from sqlalchemy import Column, Integer, String, JSON, DateTime, ForeignKey, Boolean, Text
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import relationship
 
 from src.db.base import Base
@@ -14,6 +24,7 @@ from src.db.base import Base
 
 class HITLApprovalStatus:
     """Status constants for HITL approvals."""
+
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
@@ -23,14 +34,16 @@ class HITLApprovalStatus:
 
 class HITLTimeoutAction:
     """Actions to take when an HITL approval times out."""
+
     AUTO_REJECT = "auto_reject"
     FAIL = "fail"
 
 
 class HITLRejectionAction:
     """Actions available when an HITL gate is rejected."""
+
     REJECT = "reject"  # Fail the flow
-    RETRY = "retry"    # Retry the previous crew
+    RETRY = "retry"  # Retry the previous crew
 
 
 class HITLApproval(Base):
@@ -110,13 +123,22 @@ class HITLApproval(Base):
 
     # Execution reference
     # CASCADE delete: When execution is deleted, delete all associated HITL approvals
-    execution_id = Column(String, ForeignKey("executionhistory.job_id", ondelete="CASCADE"), nullable=False, index=True)
+    execution_id = Column(
+        String,
+        ForeignKey("executionhistory.job_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     flow_id = Column(String, nullable=False, index=True)
     gate_node_id = Column(String, nullable=False, index=True)
-    crew_sequence = Column(Integer, nullable=False)  # Which crew completed before this gate
+    crew_sequence = Column(
+        Integer, nullable=False
+    )  # Which crew completed before this gate
 
     # Status
-    status = Column(String(50), nullable=False, default=HITLApprovalStatus.PENDING, index=True)
+    status = Column(
+        String(50), nullable=False, default=HITLApprovalStatus.PENDING, index=True
+    )
 
     # Gate configuration
     gate_config = Column(JSON, nullable=False, default=dict)
@@ -150,7 +172,11 @@ class HITLApproval(Base):
     webhook_response = Column(JSON, nullable=True)
 
     # Audit
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
     group_id = Column(String(100), nullable=False, index=True)
 
     # Relationships
@@ -158,7 +184,7 @@ class HITLApproval(Base):
         "ExecutionHistory",
         back_populates="hitl_approvals",
         foreign_keys=[execution_id],
-        primaryjoin="HITLApproval.execution_id == ExecutionHistory.job_id"
+        primaryjoin="HITLApproval.execution_id == ExecutionHistory.job_id",
     )
 
     def __init__(self, **kwargs):
@@ -180,7 +206,9 @@ class HITLApproval(Base):
         if self.expires_at is None and self.gate_config:
             timeout_seconds = self.gate_config.get("timeout_seconds", 3600)
             if timeout_seconds:
-                self.expires_at = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
+                self.expires_at = datetime.now(timezone.utc) + timedelta(
+                    seconds=timeout_seconds
+                )
 
     @property
     def is_expired(self) -> bool:
@@ -259,8 +287,16 @@ class HITLWebhook(Base):
     secret = Column(String(255), nullable=True)
 
     # Audit
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
-    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     def __init__(self, **kwargs):
         super(HITLWebhook, self).__init__(**kwargs)

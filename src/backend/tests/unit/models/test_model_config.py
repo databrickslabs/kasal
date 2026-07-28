@@ -3,13 +3,15 @@ Unit tests for ModelConfig model class.
 
 Tests the SQLAlchemy model attributes, defaults, table name, and column definitions.
 """
-import pytest
+
 from datetime import datetime
 from unittest.mock import MagicMock, patch
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime
 
-from src.models.model_config import ModelConfig
+import pytest
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
+
 from src.db.base import Base
+from src.models.model_config import ModelConfig
 
 
 class TestModelConfigModel:
@@ -88,10 +90,19 @@ class TestModelConfigModel:
     def test_all_expected_columns_present(self):
         """Test that all expected columns are present on the model."""
         expected_columns = [
-            "id", "key", "name", "provider", "temperature",
-            "context_window", "max_output_tokens", "extended_thinking",
-            "enabled", "group_id", "created_by_email",
-            "created_at", "updated_at",
+            "id",
+            "key",
+            "name",
+            "provider",
+            "temperature",
+            "context_window",
+            "max_output_tokens",
+            "extended_thinking",
+            "enabled",
+            "group_id",
+            "created_by_email",
+            "created_at",
+            "updated_at",
         ]
         actual_columns = [c.name for c in ModelConfig.__table__.columns]
         for col_name in expected_columns:
@@ -100,10 +111,19 @@ class TestModelConfigModel:
     def test_no_unexpected_columns(self):
         """Test that there are no unexpected extra columns."""
         expected_columns = {
-            "id", "key", "name", "provider", "temperature",
-            "context_window", "max_output_tokens", "extended_thinking",
-            "enabled", "group_id", "created_by_email",
-            "created_at", "updated_at",
+            "id",
+            "key",
+            "name",
+            "provider",
+            "temperature",
+            "context_window",
+            "max_output_tokens",
+            "extended_thinking",
+            "enabled",
+            "group_id",
+            "created_by_email",
+            "created_at",
+            "updated_at",
         }
         actual_columns = {c.name for c in ModelConfig.__table__.columns}
         assert actual_columns == expected_columns
@@ -123,11 +143,21 @@ class TestModelConfig:
     def test_model_config_columns_exist(self):
         """Test ModelConfig has expected columns."""
         expected_columns = [
-            'id', 'key', 'name', 'provider', 'temperature', 'context_window',
-            'max_output_tokens', 'extended_thinking', 'enabled', 'group_id',
-            'created_by_email', 'created_at', 'updated_at'
+            "id",
+            "key",
+            "name",
+            "provider",
+            "temperature",
+            "context_window",
+            "max_output_tokens",
+            "extended_thinking",
+            "enabled",
+            "group_id",
+            "created_by_email",
+            "created_at",
+            "updated_at",
         ]
-        
+
         for column_name in expected_columns:
             assert hasattr(ModelConfig, column_name)
 
@@ -241,17 +271,14 @@ class TestModelConfig:
     def test_model_config_initialization(self):
         """Test ModelConfig initialization."""
         config = ModelConfig()
-        
+
         assert isinstance(config, ModelConfig)
         assert isinstance(config, Base)
 
     def test_model_config_initialization_with_required_values(self):
         """Test ModelConfig initialization with required values."""
-        config = ModelConfig(
-            key="test-model-key",
-            name="Test Model"
-        )
-        
+        config = ModelConfig(key="test-model-key", name="Test Model")
+
         assert config.key == "test-model-key"
         assert config.name == "Test Model"
 
@@ -267,9 +294,9 @@ class TestModelConfig:
             extended_thinking=True,
             enabled=True,
             group_id="test-group",
-            created_by_email="test@example.com"
+            created_by_email="test@example.com",
         )
-        
+
         assert config.key == "gpt-4"
         assert config.name == "GPT-4"
         assert config.provider == "openai"
@@ -283,10 +310,7 @@ class TestModelConfig:
 
     def test_model_config_default_values(self):
         """Test ModelConfig default values (applied at database level)."""
-        config = ModelConfig(
-            key="test-key",
-            name="Test Model"
-        )
+        config = ModelConfig(key="test-key", name="Test Model")
 
         # These should be None until saved to database (defaults are applied at DB level)
         assert config.extended_thinking is None  # Will be False when saved to DB
@@ -303,12 +327,9 @@ class TestModelConfig:
     def test_model_config_boolean_values(self):
         """Test ModelConfig boolean field handling."""
         config = ModelConfig(
-            key="test-key",
-            name="Test Model",
-            extended_thinking=False,
-            enabled=False
+            key="test-key", name="Test Model", extended_thinking=False, enabled=False
         )
-        
+
         assert config.extended_thinking is False
         assert config.enabled is False
 
@@ -319,9 +340,9 @@ class TestModelConfig:
             name="Test Model",
             temperature=0.0,
             context_window=0,
-            max_output_tokens=0
+            max_output_tokens=0,
         )
-        
+
         assert config.temperature == 0.0
         assert config.context_window == 0
         assert config.max_output_tokens == 0
@@ -329,13 +350,9 @@ class TestModelConfig:
     def test_model_config_string_values(self):
         """Test ModelConfig string field handling."""
         config = ModelConfig(
-            key="",
-            name="",
-            provider="",
-            group_id="",
-            created_by_email=""
+            key="", name="", provider="", group_id="", created_by_email=""
         )
-        
+
         assert config.key == ""
         assert config.name == ""
         assert config.provider == ""
@@ -346,14 +363,14 @@ class TestModelConfig:
         """Test ModelConfig with long string values."""
         long_group_id = "a" * 100  # Maximum length
         long_email = "a" * 255  # Maximum length
-        
+
         config = ModelConfig(
             key="test-key",
             name="Test Model",
             group_id=long_group_id,
-            created_by_email=long_email
+            created_by_email=long_email,
         )
-        
+
         assert config.group_id == long_group_id
         assert config.created_by_email == long_email
 
@@ -361,49 +378,37 @@ class TestModelConfig:
         """Test ModelConfig temperature with various values."""
         # Test different temperature values
         temperatures = [0.0, 0.5, 1.0, 1.5, 2.0]
-        
+
         for temp in temperatures:
-            config = ModelConfig(
-                key="test-key",
-                name="Test Model",
-                temperature=temp
-            )
+            config = ModelConfig(key="test-key", name="Test Model", temperature=temp)
             assert config.temperature == temp
 
     def test_model_config_context_window_values(self):
         """Test ModelConfig context_window with various values."""
         context_windows = [1024, 2048, 4096, 8192, 16384, 32768]
-        
+
         for window in context_windows:
             config = ModelConfig(
-                key="test-key",
-                name="Test Model",
-                context_window=window
+                key="test-key", name="Test Model", context_window=window
             )
             assert config.context_window == window
 
     def test_model_config_max_output_tokens_values(self):
         """Test ModelConfig max_output_tokens with various values."""
         max_tokens = [256, 512, 1024, 2048, 4096]
-        
+
         for tokens in max_tokens:
             config = ModelConfig(
-                key="test-key",
-                name="Test Model",
-                max_output_tokens=tokens
+                key="test-key", name="Test Model", max_output_tokens=tokens
             )
             assert config.max_output_tokens == tokens
 
     def test_model_config_provider_values(self):
         """Test ModelConfig provider with various values."""
         providers = ["openai", "anthropic", "databricks", "azure", "google"]
-        
+
         for provider in providers:
-            config = ModelConfig(
-                key="test-key",
-                name="Test Model",
-                provider=provider
-            )
+            config = ModelConfig(key="test-key", name="Test Model", provider=provider)
             assert config.provider == provider
 
 
@@ -412,39 +417,45 @@ class TestModelConfigTableStructure:
 
     def test_model_config_table_exists(self):
         """Test ModelConfig table exists in metadata."""
-        assert hasattr(ModelConfig, '__table__')
+        assert hasattr(ModelConfig, "__table__")
         assert ModelConfig.__table__.name == "modelconfig"
 
     def test_model_config_primary_key(self):
         """Test ModelConfig primary key."""
         table = ModelConfig.__table__
         primary_key_columns = [col.name for col in table.primary_key.columns]
-        assert primary_key_columns == ['id']
+        assert primary_key_columns == ["id"]
 
     def test_model_config_indexes(self):
         """Test ModelConfig indexes."""
         table = ModelConfig.__table__
         indexed_columns = []
-        
+
         for column in table.columns:
             if column.index:
                 indexed_columns.append(column.name)
-        
-        assert 'group_id' in indexed_columns
+
+        assert "group_id" in indexed_columns
 
     def test_model_config_nullable_columns(self):
         """Test ModelConfig nullable column configuration."""
         table = ModelConfig.__table__
-        
+
         # Non-nullable columns
-        non_nullable = ['id', 'key', 'name']
+        non_nullable = ["id", "key", "name"]
         for col_name in non_nullable:
             column = table.columns[col_name]
             assert not column.nullable, f"Column {col_name} should not be nullable"
-        
+
         # Nullable columns
-        nullable = ['provider', 'temperature', 'context_window', 'max_output_tokens', 
-                   'group_id', 'created_by_email']
+        nullable = [
+            "provider",
+            "temperature",
+            "context_window",
+            "max_output_tokens",
+            "group_id",
+            "created_by_email",
+        ]
         for col_name in nullable:
             column = table.columns[col_name]
             assert column.nullable, f"Column {col_name} should be nullable"
@@ -452,48 +463,50 @@ class TestModelConfigTableStructure:
     def test_model_config_column_defaults(self):
         """Test ModelConfig column default values."""
         table = ModelConfig.__table__
-        
+
         # Columns with defaults
-        extended_thinking_col = table.columns['extended_thinking']
+        extended_thinking_col = table.columns["extended_thinking"]
         assert extended_thinking_col.default is not None
-        
-        enabled_col = table.columns['enabled']
+
+        enabled_col = table.columns["enabled"]
         assert enabled_col.default is not None
-        
-        created_at_col = table.columns['created_at']
+
+        created_at_col = table.columns["created_at"]
         assert created_at_col.default is not None
-        
-        updated_at_col = table.columns['updated_at']
+
+        updated_at_col = table.columns["updated_at"]
         assert updated_at_col.default is not None
         assert updated_at_col.onupdate is not None
 
     def test_model_config_sqlalchemy_attributes(self):
         """Test ModelConfig has required SQLAlchemy attributes."""
-        assert hasattr(ModelConfig, '__mapper__')
-        assert hasattr(ModelConfig, 'metadata')
-        assert hasattr(ModelConfig, '__table__')
-        assert hasattr(ModelConfig, '__tablename__')
+        assert hasattr(ModelConfig, "__mapper__")
+        assert hasattr(ModelConfig, "metadata")
+        assert hasattr(ModelConfig, "__table__")
+        assert hasattr(ModelConfig, "__tablename__")
 
     def test_model_config_column_types(self):
         """Test ModelConfig column types are correct."""
         table = ModelConfig.__table__
-        
+
         type_mapping = {
-            'id': Integer,
-            'key': String,
-            'name': String,
-            'provider': String,
-            'temperature': Float,
-            'context_window': Integer,
-            'max_output_tokens': Integer,
-            'extended_thinking': Boolean,
-            'enabled': Boolean,
-            'group_id': String,
-            'created_by_email': String,
-            'created_at': DateTime,
-            'updated_at': DateTime
+            "id": Integer,
+            "key": String,
+            "name": String,
+            "provider": String,
+            "temperature": Float,
+            "context_window": Integer,
+            "max_output_tokens": Integer,
+            "extended_thinking": Boolean,
+            "enabled": Boolean,
+            "group_id": String,
+            "created_by_email": String,
+            "created_at": DateTime,
+            "updated_at": DateTime,
         }
-        
+
         for col_name, expected_type in type_mapping.items():
             column = table.columns[col_name]
-            assert isinstance(column.type, expected_type), f"Column {col_name} should be {expected_type}"
+            assert isinstance(
+                column.type, expected_type
+            ), f"Column {col_name} should be {expected_type}"

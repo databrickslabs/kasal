@@ -203,7 +203,9 @@ class TestDatabricksAppExporter:
         assert "MEMORY = False" in agent
 
     @pytest.mark.asyncio
-    async def test_hierarchical_reasoning_honored_planning_ignored(self, exporter, crew_data):
+    async def test_hierarchical_reasoning_honored_planning_ignored(
+        self, exporter, crew_data
+    ):
         crew = dict(
             crew_data,
             process="hierarchical",
@@ -1425,9 +1427,7 @@ class TestDatabricksAppControls:
         assert "agent_server/crew_progress.py" in files
         # A CrewAI event-bus listener feeds the progress store.
         crew_progress = files["agent_server/crew_progress.py"]
-        assert (
-            "BaseEventListener" in crew_progress and "event_bus" in crew_progress
-        )
+        assert "BaseEventListener" in crew_progress and "event_bus" in crew_progress
         # The server exposes the poll endpoint the frontend reads.
         assert "/progress/{conversation_id}" in files["agent_server/start_server.py"]
         assert "export async function fetchProgress" in files["frontend/src/api.ts"]
@@ -1465,7 +1465,10 @@ class TestDatabricksAppCitations:
         assert "align-super" in md
         assert "export function linkifyCitations" in md
         # Both markdown surfaces use the shared renderer + linkifier.
-        for path in ("frontend/src/App.tsx", "frontend/src/a2ui/components/primitives.tsx"):
+        for path in (
+            "frontend/src/App.tsx",
+            "frontend/src/a2ui/components/primitives.tsx",
+        ):
             src = files[path]
             assert "linkifyCitations" in src and "components={mdComponents}" in src
 

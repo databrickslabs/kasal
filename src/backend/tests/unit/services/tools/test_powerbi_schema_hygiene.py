@@ -46,9 +46,7 @@ def _powerbi_schema_classes():
         if not (modinfo.name.startswith("powerbi") or modinfo.name.startswith("pbi_")):
             continue
         try:
-            module = importlib.import_module(
-                f"{tools_pkg.__name__}.{modinfo.name}"
-            )
+            module = importlib.import_module(f"{tools_pkg.__name__}.{modinfo.name}")
         except Exception:
             continue  # tools with unimportable optional deps are out of scope
         for _, cls in inspect.getmembers(module, inspect.isclass):

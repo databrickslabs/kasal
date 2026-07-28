@@ -9,19 +9,15 @@ from typing import AsyncGenerator, Generator
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from src.db.base import Base
-from src.main import app
 from src.db.session import get_db
-
+from src.main import app
 
 # Override test database URL
-TEST_DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL",
-    "sqlite+aiosqlite:///:memory:"
-)
+TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 
 @pytest.fixture(scope="session")
@@ -40,15 +36,15 @@ async def test_db_engine():
         echo=False,
         poolclass=NullPool,
     )
-    
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
+
     yield engine
-    
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
-    
+
     await engine.dispose()
 
 
@@ -60,7 +56,7 @@ async def test_db_session(test_db_engine) -> AsyncGenerator[AsyncSession, None]:
         class_=AsyncSession,
         expire_on_commit=False,
     )
-    
+
     async with async_session_maker() as session:
         yield session
 
@@ -68,15 +64,15 @@ async def test_db_session(test_db_engine) -> AsyncGenerator[AsyncSession, None]:
 @pytest_asyncio.fixture(scope="function")
 async def async_client(test_db_session) -> AsyncGenerator[AsyncClient, None]:
     """Create an async HTTP client for testing."""
-    
+
     async def override_get_db():
         yield test_db_session
-    
+
     app.dependency_overrides[get_db] = override_get_db
-    
+
     async with AsyncClient(app=app, base_url="http://test") as client:
         yield client
-    
+
     app.dependency_overrides.clear()
 
 
@@ -122,15 +118,15 @@ def mock_news_result():
                 "title": "Snowflake Announces Major AI Features at Data Summit 2025",
                 "date": "June 15, 2025",
                 "source": "TechCrunch",
-                "summary": "Snowflake unveiled new AI-powered data analysis tools..."
+                "summary": "Snowflake unveiled new AI-powered data analysis tools...",
             },
             {
                 "title": "Data Summit 2025: The Future of Cloud Analytics",
                 "date": "June 16, 2025",
                 "source": "Forbes",
-                "summary": "Industry leaders gather to discuss the convergence of AI and data..."
-            }
-        ]
+                "summary": "Industry leaders gather to discuss the convergence of AI and data...",
+            },
+        ],
     }
 
 
@@ -145,7 +141,7 @@ def sample_traces():
             "event_type": "crew_start",
             "event_source": "Flight Search Crew",
             "event_context": "Starting execution",
-            "output": None
+            "output": None,
         },
         {
             "id": 2,
@@ -154,7 +150,7 @@ def sample_traces():
             "event_type": "agent_start",
             "event_source": "Flight Search Agent",
             "event_context": "Initializing agent",
-            "output": None
+            "output": None,
         },
         {
             "id": 3,
@@ -163,7 +159,7 @@ def sample_traces():
             "event_type": "task_start",
             "event_source": "Search Flights Task",
             "event_context": "Searching flights from Zurich to Montreal",
-            "output": None
+            "output": None,
         },
         {
             "id": 4,
@@ -172,7 +168,7 @@ def sample_traces():
             "event_type": "tool_call",
             "event_source": "web_search",
             "event_context": "Searching for flight information",
-            "output": {"query": "flights Zurich Montreal July 20 2025"}
+            "output": {"query": "flights Zurich Montreal July 20 2025"},
         },
         {
             "id": 5,
@@ -181,7 +177,7 @@ def sample_traces():
             "event_type": "task_end",
             "event_source": "Search Flights Task",
             "event_context": "Task completed successfully",
-            "output": {"status": "success"}
+            "output": {"status": "success"},
         },
         {
             "id": 6,
@@ -190,6 +186,6 @@ def sample_traces():
             "event_type": "crew_end",
             "event_source": "Flight Search Crew",
             "event_context": "Execution completed",
-            "output": None
-        }
+            "output": None,
+        },
     ]

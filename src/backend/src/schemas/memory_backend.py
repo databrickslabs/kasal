@@ -6,11 +6,11 @@ CrewAI 1.10+ uses a single unified ``Memory`` class over one storage, so these
 schemas no longer split memory into short-term / long-term / entity tiers.
 """
 
+import re as _re
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Optional
 
-import re as _re
 from pydantic import BaseModel, Field, field_validator
 
 # SECURITY: memory_table is interpolated into raw Lakebase SQL — restrict to a

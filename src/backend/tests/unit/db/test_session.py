@@ -4,14 +4,15 @@ Unit tests for database session module.
 Tests session factory configuration, engine creation helpers,
 identifier validation, safe_async_session, and get_db.
 """
+
 import os
 import re
 import sqlite3
 import tempfile
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # _validate_identifier tests
@@ -100,7 +101,10 @@ class TestGetIsolationLevel:
 
     def test_postgres_returns_read_committed(self):
         """Test that PostgreSQL URIs return READ COMMITTED."""
-        assert get_isolation_level("postgresql+asyncpg://user" ":pass@host/db") == "READ COMMITTED"
+        assert (
+            get_isolation_level("postgresql+asyncpg://user" ":pass@host/db")
+            == "READ COMMITTED"
+        )
 
     def test_other_returns_read_committed(self):
         """Test that non-sqlite URIs return READ COMMITTED."""
@@ -233,9 +237,7 @@ class TestSQLiteOperations:
             assert os.path.exists(db_path)
 
             conn = sqlite3.connect(db_path)
-            cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             tables = [row[0] for row in cursor.fetchall()]
             conn.close()
 
@@ -289,16 +291,19 @@ class TestModuleLevelConfiguration:
     def test_async_session_factory_exists(self):
         """Test that async_session_factory is defined."""
         from src.db.session import async_session_factory
+
         assert async_session_factory is not None
 
     def test_request_scoped_session_exists(self):
         """Test that request_scoped_session is defined."""
         from src.db.session import request_scoped_session
+
         assert request_scoped_session is not None
 
     def test_engine_exists(self):
         """Test that the engine is defined."""
         from src.db.session import engine
+
         assert engine is not None
 
     def test_sqlite_engine_uses_staticpool(self):
@@ -310,36 +315,42 @@ class TestModuleLevelConfiguration:
         check_same_thread=False keep it safe across threads. (Reverts the
         StaticPool->NullPool switch from 205b5f57.)"""
         from sqlalchemy.pool import StaticPool
+
         from src.config.settings import settings
         from src.db.session import engine, get_sqlite_poolclass
 
         assert get_sqlite_poolclass() is StaticPool
         # When this test environment actually runs on SQLite, the live engine
         # must be using it too.
-        if str(settings.DATABASE_URI).startswith('sqlite'):
+        if str(settings.DATABASE_URI).startswith("sqlite"):
             assert isinstance(engine.pool, StaticPool)
 
     def test_sync_session_factory_exists(self):
         """Test that sync_session_factory is defined."""
         from src.db.session import sync_session_factory
+
         assert sync_session_factory is not None
 
     def test_set_main_event_loop_callable(self):
         """Test that set_main_event_loop is callable."""
         from src.db.session import set_main_event_loop
+
         assert callable(set_main_event_loop)
 
     def test_get_smart_engine_callable(self):
         """Test that get_smart_engine is callable."""
         from src.db.session import get_smart_engine
+
         assert callable(get_smart_engine)
 
     def test_init_db_callable(self):
         """Test that init_db is callable."""
         from src.db.session import init_db
+
         assert callable(init_db)
 
     def test_dispose_engines_callable(self):
         """Test that dispose_engines is callable."""
         from src.db.session import dispose_engines
+
         assert callable(dispose_engines)

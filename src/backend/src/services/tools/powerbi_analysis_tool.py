@@ -14,28 +14,27 @@ Date: 2026
 import asyncio
 import base64
 import contextvars
-import logging
 import json
+import logging
 import re
-from typing import Any, Optional, Type, Dict, List
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from typing import Any, Dict, List, Optional, Type
+
+import httpx
+from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
-from pydantic import BaseModel, Field, PrivateAttr
-import httpx
-
-from src.services.tools.tool_session_provider import ToolSessionProvider
 from src.services.tools.powerbi_analysis_utils import (
-    PowerBIModelFetchMixin,
-    PowerBITmdlParsingMixin,
-    PowerBIDaxGenerationMixin,
     PowerBIDaxFilterMixin,
-    PowerBISemanticContextMixin,
-    PowerBIReportReferenceMixin,
+    PowerBIDaxGenerationMixin,
+    PowerBIModelFetchMixin,
     PowerBIOutputMixin,
+    PowerBIReportReferenceMixin,
+    PowerBISemanticContextMixin,
+    PowerBITmdlParsingMixin,
 )
-
+from src.services.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +73,7 @@ class PowerBIAnalysisSchema(BaseModel):
     # ===== USER QUESTION =====
     user_question: Optional[str] = Field(
         None,
-        description="The business question to answer using Power BI data. This should come from the task description or be pre-configured in tool_configs."
+        description="The business question to answer using Power BI data. This should come from the task description or be pre-configured in tool_configs.",
     )
 
     # NOTE: connection / auth / LLM plumbing (workspace_id, dataset_id,
@@ -88,49 +87,46 @@ class PowerBIAnalysisSchema(BaseModel):
     # ===== CONTEXT ENRICHMENT (Microsoft Copilot-style) =====
     business_mappings: Optional[Dict[str, str]] = Field(
         None,
-        description="[Context] Business terminology mappings - natural language to DAX expressions. Example: {'Complete CGR': \"[Initial_Sizing][description] = 'Complete CGR'\", 'Italian BU': \"[Initial_Sizing][BU] = 'Italy'\"}"
+        description="[Context] Business terminology mappings - natural language to DAX expressions. Example: {'Complete CGR': \"[Initial_Sizing][description] = 'Complete CGR'\", 'Italian BU': \"[Initial_Sizing][BU] = 'Italy'\"}",
     )
     field_synonyms: Optional[Dict[str, List[str]]] = Field(
         None,
-        description="[Context] Field synonyms for natural language understanding. Example: {'num_customers': ['number of customers', 'customer count', 'total customers'], 'BU': ['business unit', 'region']}"
+        description="[Context] Field synonyms for natural language understanding. Example: {'num_customers': ['number of customers', 'customer count', 'total customers'], 'BU': ['business unit', 'region']}",
     )
     active_filters: Optional[Dict[str, Any]] = Field(
         None,
-        description="[Context] Currently active filters/slicers that should be automatically applied. Example: {'BU': 'Italy', 'Week': 1, 'Mandatory_Version': ['Landline', 'Mobile']}"
+        description="[Context] Currently active filters/slicers that should be automatically applied. Example: {'BU': 'Italy', 'Week': 1, 'Mandatory_Version': ['Landline', 'Mobile']}",
     )
     session_id: Optional[str] = Field(
         None,
-        description="[Context] Session ID for tracking conversation history and maintaining context across queries."
+        description="[Context] Session ID for tracking conversation history and maintaining context across queries.",
     )
     visible_tables: Optional[List[str]] = Field(
         None,
-        description="[Context] Tables currently visible/in use (simulates page-level context). Example: ['Initial_Sizing', 'Customer_Details']"
+        description="[Context] Tables currently visible/in use (simulates page-level context). Example: ['Initial_Sizing', 'Customer_Details']",
     )
     conversation_history: Optional[List[Dict[str, str]]] = Field(
         None,
-        description="[Context] Previous questions and answers in this session. Example: [{'question': 'What is total revenue?', 'answer': '1.5M', 'filters_used': {'BU': 'Italy'}}]"
+        description="[Context] Previous questions and answers in this session. Example: [{'question': 'What is total revenue?', 'answer': '1.5M', 'filters_used': {'BU': 'Italy'}}]",
     )
 
     # ===== OPTIONS =====
     include_visual_references: bool = Field(
-        True,
-        description="[Options] Search for visual references after DAX execution."
+        True, description="[Options] Search for visual references after DAX execution."
     )
     skip_system_tables: bool = Field(
-        True,
-        description="[Options] Skip system tables like LocalDateTable."
+        True, description="[Options] Skip system tables like LocalDateTable."
     )
     max_dax_retries: int = Field(
         5,
-        description="[Options] Maximum number of retry attempts if DAX execution fails (1-10)."
+        description="[Options] Maximum number of retry attempts if DAX execution fails (1-10).",
     )
     output_format: str = Field(
-        "markdown",
-        description="[Output] Output format: 'markdown' or 'json'."
+        "markdown", description="[Output] Output format: 'markdown' or 'json'."
     )
     enable_info_columns: bool = Field(
         False,
-        description="[Options] Enable INFO.COLUMNS() metadata enrichment (requires DMV permissions). Default False - most environments don't support this."
+        description="[Options] Enable INFO.COLUMNS() metadata enrichment (requires DMV permissions). Default False - most environments don't support this.",
     )
 
 
@@ -207,16 +203,21 @@ class PowerBIAnalysisTool(
     def __init__(self, **kwargs: Any) -> None:
         """Initialize the Analysis tool."""
         import uuid
+
         instance_id = str(uuid.uuid4())[:8]
 
         logger.info(f"[PowerBIAnalysisTool.__init__] Instance ID: {instance_id}")
-        logger.info(f"[PowerBIAnalysisTool.__init__] Received user_question in kwargs: {kwargs.get('user_question', 'NOT PROVIDED')}")
+        logger.info(
+            f"[PowerBIAnalysisTool.__init__] Received user_question in kwargs: {kwargs.get('user_question', 'NOT PROVIDED')}"
+        )
 
         # Store configuration
         default_config = {
             "workspace_id": kwargs.get("workspace_id"),
             "dataset_id": kwargs.get("dataset_id"),
-            "report_id": kwargs.get("report_id"),  # Optional: for auto-extracting default filters
+            "report_id": kwargs.get(
+                "report_id"
+            ),  # Optional: for auto-extracting default filters
             "tenant_id": kwargs.get("tenant_id"),
             "client_id": kwargs.get("client_id"),
             "client_secret": kwargs.get("client_secret"),
@@ -231,8 +232,12 @@ class PowerBIAnalysisTool(
             "skip_system_tables": kwargs.get("skip_system_tables", True),
             "max_dax_retries": kwargs.get("max_dax_retries", 5),
             "output_format": kwargs.get("output_format", "markdown"),
-            "enable_info_columns": kwargs.get("enable_info_columns", False),  # Disabled by default
-            "user_question": kwargs.get("user_question"),  # Pre-configured question from frontend
+            "enable_info_columns": kwargs.get(
+                "enable_info_columns", False
+            ),  # Disabled by default
+            "user_question": kwargs.get(
+                "user_question"
+            ),  # Pre-configured question from frontend
             # Context enrichment fields (Microsoft Copilot-style)
             "business_mappings": kwargs.get("business_mappings", {}),
             "field_synonyms": kwargs.get("field_synonyms", {}),
@@ -249,7 +254,9 @@ class PowerBIAnalysisTool(
         self._instance_id = instance_id
         self._default_config = default_config
 
-        logger.info(f"[PowerBIAnalysisTool.__init__] Stored in default_config - user_question: {default_config.get('user_question', 'NOT SET')}")
+        logger.info(
+            f"[PowerBIAnalysisTool.__init__] Stored in default_config - user_question: {default_config.get('user_question', 'NOT SET')}"
+        )
 
     def _is_placeholder_value(self, value: Any) -> bool:
         """Check if a value looks like a placeholder/example that should be ignored."""
@@ -259,19 +266,20 @@ class PowerBIAnalysisTool(
         # Common placeholder patterns
         placeholder_patterns = [
             # UUID-like placeholders (12345678-1234-1234-1234-123456789012)
-            r'^[0-9]{8}-[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{12}$',
+            r"^[0-9]{8}-[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{12}$",
             # Explicit placeholder strings
-            r'your_.*_here',
-            r'your-.*-here',
-            r'<.*>',
-            r'\{.*\}',
-            r'placeholder',
-            r'example\.com',
-            r'^https://your-',
-            r'^https://.*-url\.com$',
+            r"your_.*_here",
+            r"your-.*-here",
+            r"<.*>",
+            r"\{.*\}",
+            r"placeholder",
+            r"example\.com",
+            r"^https://your-",
+            r"^https://.*-url\.com$",
         ]
 
         import re
+
         value_lower = value.lower()
         for pattern in placeholder_patterns:
             if re.search(pattern, value_lower):
@@ -282,10 +290,14 @@ class PowerBIAnalysisTool(
     def _run(self, **kwargs: Any) -> str:
         """Execute the Power BI analysis pipeline."""
         try:
-            instance_id = getattr(self, '_instance_id', 'UNKNOWN')
+            instance_id = getattr(self, "_instance_id", "UNKNOWN")
             logger.info(f"[PowerBIAnalysisTool] Instance {instance_id} - _run() called")
-            logger.info(f"[PowerBIAnalysisTool] Default config keys: {list(self._default_config.keys())}")
-            logger.info(f"[PowerBIAnalysisTool] Runtime kwargs keys: {list(kwargs.keys())}")
+            logger.info(
+                f"[PowerBIAnalysisTool] Default config keys: {list(self._default_config.keys())}"
+            )
+            logger.info(
+                f"[PowerBIAnalysisTool] Runtime kwargs keys: {list(kwargs.keys())}"
+            )
 
             # Filter out placeholder/example values from kwargs
             filtered_kwargs = {}
@@ -293,7 +305,9 @@ class PowerBIAnalysisTool(
                 if v is not None and not self._is_placeholder_value(v):
                     filtered_kwargs[k] = v
                 elif self._is_placeholder_value(v):
-                    logger.info(f"[PowerBIAnalysisTool] Ignoring placeholder value for '{k}': {v[:30] if isinstance(v, str) else v}...")
+                    logger.info(
+                        f"[PowerBIAnalysisTool] Ignoring placeholder value for '{k}': {v[:30] if isinstance(v, str) else v}..."
+                    )
 
             # Merge configurations:
             # - For user_question: prefer kwargs (the actual question from the agent)
@@ -302,30 +316,59 @@ class PowerBIAnalysisTool(
             merged_config = {}
 
             # Connection and auth parameters - default config takes precedence
-            config_params = ["workspace_id", "dataset_id", "report_id", "tenant_id", "client_id",
-                           "client_secret", "username", "password", "auth_method",
-                           "access_token", "llm_workspace_url", "llm_token", "llm_model"]
+            config_params = [
+                "workspace_id",
+                "dataset_id",
+                "report_id",
+                "tenant_id",
+                "client_id",
+                "client_secret",
+                "username",
+                "password",
+                "auth_method",
+                "access_token",
+                "llm_workspace_url",
+                "llm_token",
+                "llm_model",
+            ]
             for key in config_params:
                 default_val = self._default_config.get(key)
                 kwarg_val = filtered_kwargs.get(key)
                 # Use default config if available, otherwise use kwargs
-                merged_config[key] = default_val if default_val is not None else kwarg_val
+                merged_config[key] = (
+                    default_val if default_val is not None else kwarg_val
+                )
 
             # User question - prefer default config (pre-configured) over agent's input
             # This ensures the tool_configs question takes precedence
             kwarg_question = filtered_kwargs.get("user_question")
             default_question = self._default_config.get("user_question")
-            merged_config["user_question"] = default_question if default_question is not None else kwarg_question
+            merged_config["user_question"] = (
+                default_question if default_question is not None else kwarg_question
+            )
 
             # Options - prefer kwargs if provided
-            for key in ["include_visual_references", "skip_system_tables", "max_dax_retries", "output_format", "enable_info_columns"]:
+            for key in [
+                "include_visual_references",
+                "skip_system_tables",
+                "max_dax_retries",
+                "output_format",
+                "enable_info_columns",
+            ]:
                 kwarg_val = filtered_kwargs.get(key)
                 default_val = self._default_config.get(key)
                 merged_config[key] = kwarg_val if kwarg_val is not None else default_val
 
             # Context enrichment parameters (Microsoft Copilot-style)
             # These can come as JSON strings from frontend or as dicts
-            context_enrichment_keys = ["business_mappings", "field_synonyms", "active_filters", "session_id", "visible_tables", "conversation_history"]
+            context_enrichment_keys = [
+                "business_mappings",
+                "field_synonyms",
+                "active_filters",
+                "session_id",
+                "visible_tables",
+                "conversation_history",
+            ]
             logger.info("=" * 80)
             logger.info("[CONTEXT ENRICHMENT DEBUG] Raw values before merging:")
             for key in context_enrichment_keys:
@@ -334,20 +377,34 @@ class PowerBIAnalysisTool(
 
                 # Debug: Show raw values
                 logger.info(f"[CONTEXT ENRICHMENT DEBUG]   {key}:")
-                logger.info(f"[CONTEXT ENRICHMENT DEBUG]     - default_config: type={type(default_val).__name__}, value={str(default_val)[:100]}")
-                logger.info(f"[CONTEXT ENRICHMENT DEBUG]     - kwargs: type={type(kwarg_val).__name__}, value={str(kwarg_val)[:100]}")
+                logger.info(
+                    f"[CONTEXT ENRICHMENT DEBUG]     - default_config: type={type(default_val).__name__}, value={str(default_val)[:100]}"
+                )
+                logger.info(
+                    f"[CONTEXT ENRICHMENT DEBUG]     - kwargs: type={type(kwarg_val).__name__}, value={str(kwarg_val)[:100]}"
+                )
 
                 # Use kwarg if it has actual content, else use default config
                 # Check for empty collections ({}, [], "") not just None
-                kwarg_has_value = kwarg_val is not None and kwarg_val not in ({}, [], "")
-                default_has_value = default_val is not None and default_val not in ({}, [], "")
+                kwarg_has_value = kwarg_val is not None and kwarg_val not in (
+                    {},
+                    [],
+                    "",
+                )
+                default_has_value = default_val is not None and default_val not in (
+                    {},
+                    [],
+                    "",
+                )
 
                 if kwarg_has_value:
                     value = kwarg_val
                     logger.info(f"[CONTEXT ENRICHMENT DEBUG]     → Using kwargs value")
                 elif default_has_value:
                     value = default_val
-                    logger.info(f"[CONTEXT ENRICHMENT DEBUG]     → Using default_config value")
+                    logger.info(
+                        f"[CONTEXT ENRICHMENT DEBUG]     → Using default_config value"
+                    )
                 else:
                     # Both empty - use appropriate empty collection
                     if key in ["business_mappings", "field_synonyms", "active_filters"]:
@@ -356,41 +413,65 @@ class PowerBIAnalysisTool(
                         value = []
                     else:  # session_id
                         value = None
-                    logger.info(f"[CONTEXT ENRICHMENT DEBUG]     → Both empty, using {type(value).__name__}")
+                    logger.info(
+                        f"[CONTEXT ENRICHMENT DEBUG]     → Both empty, using {type(value).__name__}"
+                    )
 
                 # Parse JSON strings if needed (for business_mappings, field_synonyms, active_filters)
-                if value and isinstance(value, str) and key in ["business_mappings", "field_synonyms", "active_filters"]:
+                if (
+                    value
+                    and isinstance(value, str)
+                    and key in ["business_mappings", "field_synonyms", "active_filters"]
+                ):
                     try:
                         value = json.loads(value)
-                        logger.info(f"[CONTEXT ENRICHMENT DEBUG]     ✅ Parsed JSON string for '{key}': {len(value)} items")
+                        logger.info(
+                            f"[CONTEXT ENRICHMENT DEBUG]     ✅ Parsed JSON string for '{key}': {len(value)} items"
+                        )
                     except json.JSONDecodeError as e:
-                        logger.warning(f"[CONTEXT ENRICHMENT DEBUG]     ❌ Failed to parse JSON for '{key}': {e}. Using empty dict.")
+                        logger.warning(
+                            f"[CONTEXT ENRICHMENT DEBUG]     ❌ Failed to parse JSON for '{key}': {e}. Using empty dict."
+                        )
                         value = {}
 
                 merged_config[key] = value
             logger.info("=" * 80)
 
-            logger.info(f"[PowerBIAnalysisTool] DEFAULT CONFIG user_question: {self._default_config.get('user_question', 'NOT SET')}")
-            logger.info(f"[PowerBIAnalysisTool] KWARGS user_question: {filtered_kwargs.get('user_question', 'NOT SET')}")
-            logger.info(f"[PowerBIAnalysisTool] MERGED user_question: {merged_config.get('user_question', 'NOT SET')}")
-            logger.info(f"[PowerBIAnalysisTool] Merged config - workspace_id: {merged_config.get('workspace_id')}, "
-                       f"question: {merged_config.get('user_question', '')[:50] if merged_config.get('user_question') else 'None'}...")
+            logger.info(
+                f"[PowerBIAnalysisTool] DEFAULT CONFIG user_question: {self._default_config.get('user_question', 'NOT SET')}"
+            )
+            logger.info(
+                f"[PowerBIAnalysisTool] KWARGS user_question: {filtered_kwargs.get('user_question', 'NOT SET')}"
+            )
+            logger.info(
+                f"[PowerBIAnalysisTool] MERGED user_question: {merged_config.get('user_question', 'NOT SET')}"
+            )
+            logger.info(
+                f"[PowerBIAnalysisTool] Merged config - workspace_id: {merged_config.get('workspace_id')}, "
+                f"question: {merged_config.get('user_question', '')[:50] if merged_config.get('user_question') else 'None'}..."
+            )
 
             # Log context enrichment configuration
             logger.info("=" * 80)
             logger.info("[CONTEXT ENRICHMENT] Configuration:")
-            business_mappings = merged_config.get('business_mappings') or {}
-            field_synonyms = merged_config.get('field_synonyms') or {}
-            active_filters = merged_config.get('active_filters') or {}
-            logger.info(f"[CONTEXT ENRICHMENT]   business_mappings: {len(business_mappings)} terms")
+            business_mappings = merged_config.get("business_mappings") or {}
+            field_synonyms = merged_config.get("field_synonyms") or {}
+            active_filters = merged_config.get("active_filters") or {}
+            logger.info(
+                f"[CONTEXT ENRICHMENT]   business_mappings: {len(business_mappings)} terms"
+            )
             if business_mappings:
                 for term, expr in list(business_mappings.items())[:3]:  # Show first 3
                     logger.info(f"[CONTEXT ENRICHMENT]     - '{term}' → {expr[:50]}...")
-            logger.info(f"[CONTEXT ENRICHMENT]   field_synonyms: {len(field_synonyms)} fields")
+            logger.info(
+                f"[CONTEXT ENRICHMENT]   field_synonyms: {len(field_synonyms)} fields"
+            )
             if field_synonyms:
                 for field, synonyms in list(field_synonyms.items())[:3]:  # Show first 3
                     logger.info(f"[CONTEXT ENRICHMENT]     - '{field}' → {synonyms}")
-            logger.info(f"[CONTEXT ENRICHMENT]   active_filters: {len(active_filters)} filters")
+            logger.info(
+                f"[CONTEXT ENRICHMENT]   active_filters: {len(active_filters)} filters"
+            )
             if active_filters:
                 for key, val in active_filters.items():
                     logger.info(f"[CONTEXT ENRICHMENT]     - '{key}' = {val}")
@@ -411,33 +492,55 @@ class PowerBIAnalysisTool(
             # DEBUG: Log authentication parameters to diagnose Service Account issue
             logger.info("=" * 80)
             logger.info("[AUTH DEBUG] Checking authentication credentials:")
-            logger.info(f"[AUTH DEBUG]   tenant_id: {'✓ SET' if merged_config.get('tenant_id') else '✗ MISSING'}")
-            logger.info(f"[AUTH DEBUG]   client_id: {'✓ SET' if merged_config.get('client_id') else '✗ MISSING'}")
-            logger.info(f"[AUTH DEBUG]   client_secret: {'✓ SET' if merged_config.get('client_secret') else '✗ MISSING'}")
-            logger.info(f"[AUTH DEBUG]   username: {'✓ SET' if merged_config.get('username') else '✗ MISSING'}")
-            logger.info(f"[AUTH DEBUG]   password: {'✓ SET' if merged_config.get('password') else '✗ MISSING'}")
-            logger.info(f"[AUTH DEBUG]   access_token: {'✓ SET' if merged_config.get('access_token') else '✗ MISSING'}")
-            logger.info(f"[AUTH DEBUG]   auth_method: {merged_config.get('auth_method', 'NOT SET')}")
+            logger.info(
+                f"[AUTH DEBUG]   tenant_id: {'✓ SET' if merged_config.get('tenant_id') else '✗ MISSING'}"
+            )
+            logger.info(
+                f"[AUTH DEBUG]   client_id: {'✓ SET' if merged_config.get('client_id') else '✗ MISSING'}"
+            )
+            logger.info(
+                f"[AUTH DEBUG]   client_secret: {'✓ SET' if merged_config.get('client_secret') else '✗ MISSING'}"
+            )
+            logger.info(
+                f"[AUTH DEBUG]   username: {'✓ SET' if merged_config.get('username') else '✗ MISSING'}"
+            )
+            logger.info(
+                f"[AUTH DEBUG]   password: {'✓ SET' if merged_config.get('password') else '✗ MISSING'}"
+            )
+            logger.info(
+                f"[AUTH DEBUG]   access_token: {'✓ SET' if merged_config.get('access_token') else '✗ MISSING'}"
+            )
+            logger.info(
+                f"[AUTH DEBUG]   auth_method: {merged_config.get('auth_method', 'NOT SET')}"
+            )
 
             # Show actual values (masked) to help diagnose
-            if merged_config.get('username'):
-                logger.info(f"[AUTH DEBUG]   username value: {merged_config.get('username')}")
-            if merged_config.get('password'):
-                logger.info(f"[AUTH DEBUG]   password length: {len(merged_config.get('password', ''))}")
+            if merged_config.get("username"):
+                logger.info(
+                    f"[AUTH DEBUG]   username value: {merged_config.get('username')}"
+                )
+            if merged_config.get("password"):
+                logger.info(
+                    f"[AUTH DEBUG]   password length: {len(merged_config.get('password', ''))}"
+                )
             logger.info("=" * 80)
 
             # Validate authentication
-            has_sp_auth = all([
-                merged_config.get("tenant_id"),
-                merged_config.get("client_id"),
-                merged_config.get("client_secret")
-            ])
-            has_sa_auth = all([
-                merged_config.get("tenant_id"),
-                merged_config.get("client_id"),
-                merged_config.get("username"),
-                merged_config.get("password")
-            ])
+            has_sp_auth = all(
+                [
+                    merged_config.get("tenant_id"),
+                    merged_config.get("client_id"),
+                    merged_config.get("client_secret"),
+                ]
+            )
+            has_sa_auth = all(
+                [
+                    merged_config.get("tenant_id"),
+                    merged_config.get("client_id"),
+                    merged_config.get("username"),
+                    merged_config.get("password"),
+                ]
+            )
             has_oauth = bool(merged_config.get("access_token"))
 
             if not has_sp_auth and not has_sa_auth and not has_oauth:
@@ -450,7 +553,9 @@ class PowerBIAnalysisTool(
                 )
 
             # Run async pipeline
-            result = _run_async_in_sync_context(self._execute_analysis_pipeline(merged_config))
+            result = _run_async_in_sync_context(
+                self._execute_analysis_pipeline(merged_config)
+            )
 
             return result
 
@@ -465,27 +570,25 @@ class PowerBIAnalysisTool(
         dataset_id = config["dataset_id"]
         output_format = config.get("output_format", "markdown")
 
-        logger.info(f"Starting analysis pipeline: question='{user_question[:50]}...', workspace={workspace_id}")
+        logger.info(
+            f"Starting analysis pipeline: question='{user_question[:50]}...', workspace={workspace_id}"
+        )
 
         # Initialize results
         results = {
             "user_question": user_question,
             "workspace_id": workspace_id,
             "dataset_id": dataset_id,
-            "model_context": {
-                "measures": [],
-                "relationships": [],
-                "tables": []
-            },
+            "model_context": {"measures": [], "relationships": [], "tables": []},
             "generated_dax": None,
             "dax_execution": {
                 "success": False,
                 "data": [],
                 "row_count": 0,
-                "error": None
+                "error": None,
             },
             "visual_references": [],
-            "errors": []
+            "errors": [],
         }
 
         # Step 1: Get access token
@@ -501,7 +604,13 @@ class PowerBIAnalysisTool(
         # User inputs (business_mappings, field_synonyms, active_filters) are always fresh from config
         cache_hit = False
         cached_metadata = None
-        group_id = config.get("group_id") or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id") or "default"
+        group_id = (
+            config.get("group_id")
+            or (getattr(self, "trace_context", None) or {})
+            .get("group_context", {})
+            .get("primary_group_id")
+            or "default"
+        )
         report_id = config.get("report_id")
 
         # Initialize model_context (will be populated from cache or fresh fetch)
@@ -510,7 +619,7 @@ class PowerBIAnalysisTool(
             "relationships": [],
             "tables": [],
             "columns": [],
-            "sample_data": {}
+            "sample_data": {},
         }
 
         try:
@@ -519,15 +628,19 @@ class PowerBIAnalysisTool(
                     group_id=group_id,
                     dataset_id=dataset_id,
                     workspace_id=workspace_id,
-                    report_id=report_id
+                    report_id=report_id,
                 )
 
             if cached_metadata:
                 cache_hit = True
-                logger.info(f"✨ [CACHE HIT] Using cached metadata for dataset {dataset_id} (date: {date.today()})")
-                logger.info(f"   Cached: {len(cached_metadata.get('measures', []))} measures, "
-                           f"{len(cached_metadata.get('relationships', []))} relationships, "
-                           f"{len(cached_metadata.get('sample_data', {}))} sample columns")
+                logger.info(
+                    f"✨ [CACHE HIT] Using cached metadata for dataset {dataset_id} (date: {date.today()})"
+                )
+                logger.info(
+                    f"   Cached: {len(cached_metadata.get('measures', []))} measures, "
+                    f"{len(cached_metadata.get('relationships', []))} relationships, "
+                    f"{len(cached_metadata.get('sample_data', {}))} sample columns"
+                )
 
                 # Load model context from cache
                 model_context = {
@@ -535,7 +648,7 @@ class PowerBIAnalysisTool(
                     "relationships": cached_metadata.get("relationships", []),
                     "tables": cached_metadata.get("schema", {}).get("tables", []),
                     "columns": cached_metadata.get("schema", {}).get("columns", []),
-                    "sample_data": cached_metadata.get("sample_data", {})
+                    "sample_data": cached_metadata.get("sample_data", {}),
                 }
 
                 # Load default filters from cache (if report_id was provided)
@@ -548,10 +661,14 @@ class PowerBIAnalysisTool(
                             existing_filters = {}
                         merged_filters = {**cached_filters, **existing_filters}
                         config["active_filters"] = merged_filters
-                        logger.info(f"   Loaded {len(cached_filters)} default filters from cache")
+                        logger.info(
+                            f"   Loaded {len(cached_filters)} default filters from cache"
+                        )
 
             else:
-                logger.info(f"⚡ [CACHE MISS] Fetching fresh metadata for dataset {dataset_id}")
+                logger.info(
+                    f"⚡ [CACHE MISS] Fetching fresh metadata for dataset {dataset_id}"
+                )
 
         except Exception as e:
             logger.warning(f"[Cache] Cache check failed, fetching fresh data: {e}")
@@ -563,7 +680,9 @@ class PowerBIAnalysisTool(
                 model_context = await self._extract_model_context(
                     workspace_id, dataset_id, access_token, config
                 )
-                logger.info(f"Model context extracted: {len(model_context['measures'])} measures, {len(model_context['relationships'])} relationships")
+                logger.info(
+                    f"Model context extracted: {len(model_context['measures'])} measures, {len(model_context['relationships'])} relationships"
+                )
 
                 # Step 2b: Enrich model context with metadata (Microsoft Copilot-style)
                 # This adds column descriptions, sample values, and enhanced metadata
@@ -571,9 +690,13 @@ class PowerBIAnalysisTool(
                     model_context = await self._enrich_model_context_with_metadata(
                         model_context, workspace_id, dataset_id, access_token, config
                     )
-                    logger.info("[Context Enrichment] Model context enriched with metadata")
+                    logger.info(
+                        "[Context Enrichment] Model context enriched with metadata"
+                    )
                 except Exception as e:
-                    logger.warning(f"[Context Enrichment] Metadata enrichment failed (continuing with basic context): {e}")
+                    logger.warning(
+                        f"[Context Enrichment] Metadata enrichment failed (continuing with basic context): {e}"
+                    )
 
                 # Step 2c: Auto-extract default filters from report (if report_id provided)
                 # These are report-level filters that apply to all pages
@@ -590,13 +713,22 @@ class PowerBIAnalysisTool(
                                 existing_filters = {}
 
                             # Merge: report-level filters first, then user filters (user filters take precedence)
-                            merged_filters = {**report_level_filters, **existing_filters}
+                            merged_filters = {
+                                **report_level_filters,
+                                **existing_filters,
+                            }
 
                             config["active_filters"] = merged_filters
-                            logger.info(f"[Context Enrichment] Auto-extracted {len(report_level_filters)} report-level filters")
-                            logger.info(f"[Context Enrichment] Total active filters: {len(merged_filters)} (report-level + user-provided)")
+                            logger.info(
+                                f"[Context Enrichment] Auto-extracted {len(report_level_filters)} report-level filters"
+                            )
+                            logger.info(
+                                f"[Context Enrichment] Total active filters: {len(merged_filters)} (report-level + user-provided)"
+                            )
                     except Exception as e:
-                        logger.warning(f"[Context Enrichment] Failed to extract default filters (continuing without): {e}")
+                        logger.warning(
+                            f"[Context Enrichment] Failed to extract default filters (continuing without): {e}"
+                        )
 
                 # Step 2d: Save to cache for next time (same day, same dataset)
                 try:
@@ -607,10 +739,12 @@ class PowerBIAnalysisTool(
                             relationships=model_context.get("relationships", []),
                             schema={
                                 "tables": model_context.get("tables", []),
-                                "columns": model_context.get("columns", [])
+                                "columns": model_context.get("columns", []),
                             },
                             sample_data=model_context.get("sample_data", {}),
-                            default_filters=config.get("active_filters") if report_id else None
+                            default_filters=(
+                                config.get("active_filters") if report_id else None
+                            ),
                         )
 
                         await cache_service.save_metadata(
@@ -618,13 +752,17 @@ class PowerBIAnalysisTool(
                             dataset_id=dataset_id,
                             workspace_id=workspace_id,
                             metadata=cache_metadata,
-                            report_id=report_id
+                            report_id=report_id,
                         )
 
-                        logger.info(f"💾 [CACHE SAVED] Metadata cached for dataset {dataset_id} (date: {date.today()})")
+                        logger.info(
+                            f"💾 [CACHE SAVED] Metadata cached for dataset {dataset_id} (date: {date.today()})"
+                        )
 
                 except Exception as e:
-                    logger.warning(f"[Cache] Failed to save cache (continuing without): {e}")
+                    logger.warning(
+                        f"[Cache] Failed to save cache (continuing without): {e}"
+                    )
 
             except Exception as e:
                 results["errors"].append(f"Model extraction error: {str(e)}")
@@ -648,16 +786,20 @@ class PowerBIAnalysisTool(
                         )
                     else:
                         # Retry with error feedback
-                        logger.info(f"[DAX Generation] Retry attempt {attempt + 1}/{max_retries}")
+                        logger.info(
+                            f"[DAX Generation] Retry attempt {attempt + 1}/{max_retries}"
+                        )
                         generated_dax = await self._generate_dax_with_self_correction(
                             user_question,
                             results["model_context"],
                             config,
-                            dax_attempts
+                            dax_attempts,
                         )
 
                     results["generated_dax"] = generated_dax
-                    logger.info(f"DAX generated (attempt {attempt + 1}): {generated_dax[:100] if generated_dax else 'None'}...")
+                    logger.info(
+                        f"DAX generated (attempt {attempt + 1}): {generated_dax[:100] if generated_dax else 'None'}..."
+                    )
 
                     # Try to execute the generated DAX
                     if generated_dax:
@@ -667,68 +809,91 @@ class PowerBIAnalysisTool(
 
                         # Defensive check: ensure execution_result is a dict
                         if not isinstance(execution_result, dict):
-                            logger.error(f"[DAX EXECUTION] execution_result is not a dict! Type: {type(execution_result)}, Value: {execution_result}")
+                            logger.error(
+                                f"[DAX EXECUTION] execution_result is not a dict! Type: {type(execution_result)}, Value: {execution_result}"
+                            )
                             execution_result = {
                                 "success": False,
                                 "error": f"Invalid execution result type: {type(execution_result).__name__}",
-                                "row_count": 0
+                                "row_count": 0,
                             }
 
                         # Store attempt info
-                        dax_attempts.append({
-                            "attempt": attempt + 1,
-                            "dax": generated_dax,
-                            "success": execution_result.get("success", False),
-                            "error": execution_result.get("error"),
-                            "row_count": execution_result.get("row_count", 0)
-                        })
+                        dax_attempts.append(
+                            {
+                                "attempt": attempt + 1,
+                                "dax": generated_dax,
+                                "success": execution_result.get("success", False),
+                                "error": execution_result.get("error"),
+                                "row_count": execution_result.get("row_count", 0),
+                            }
+                        )
 
                         # If successful, break out of retry loop
                         if execution_result.get("success", False):
                             results["dax_execution"] = execution_result
-                            logger.info(f"✅ DAX execution successful on attempt {attempt + 1}: rows={execution_result.get('row_count', 0)}")
+                            logger.info(
+                                f"✅ DAX execution successful on attempt {attempt + 1}: rows={execution_result.get('row_count', 0)}"
+                            )
                             break
                         else:
                             # Failed - log and retry
-                            logger.warning(f"❌ DAX execution failed on attempt {attempt + 1}: {execution_result.get('error', 'Unknown error')}")
+                            logger.warning(
+                                f"❌ DAX execution failed on attempt {attempt + 1}: {execution_result.get('error', 'Unknown error')}"
+                            )
                             results["dax_execution"] = execution_result
 
                             # If this was the last attempt, keep the error
                             if attempt == max_retries - 1:
-                                results["errors"].append(f"DAX execution failed after {max_retries} attempts: {execution_result.get('error')}")
-                                logger.error(f"DAX execution failed after {max_retries} attempts")
+                                results["errors"].append(
+                                    f"DAX execution failed after {max_retries} attempts: {execution_result.get('error')}"
+                                )
+                                logger.error(
+                                    f"DAX execution failed after {max_retries} attempts"
+                                )
                     else:
                         logger.warning(f"No DAX generated on attempt {attempt + 1}")
                         if attempt == max_retries - 1:
-                            results["errors"].append("Failed to generate valid DAX query")
+                            results["errors"].append(
+                                "Failed to generate valid DAX query"
+                            )
 
                 except Exception as e:
                     error_msg = str(e)
-                    logger.error(f"DAX generation/execution error on attempt {attempt + 1}: {error_msg}")
+                    logger.error(
+                        f"DAX generation/execution error on attempt {attempt + 1}: {error_msg}"
+                    )
 
                     # Store failed attempt
-                    dax_attempts.append({
-                        "attempt": attempt + 1,
-                        "dax": results.get("generated_dax"),
-                        "success": False,
-                        "error": error_msg,
-                        "row_count": 0
-                    })
+                    dax_attempts.append(
+                        {
+                            "attempt": attempt + 1,
+                            "dax": results.get("generated_dax"),
+                            "success": False,
+                            "error": error_msg,
+                            "row_count": 0,
+                        }
+                    )
 
                     # If last attempt, add to errors
                     if attempt == max_retries - 1:
-                        results["errors"].append(f"DAX generation error after {max_retries} attempts: {error_msg}")
+                        results["errors"].append(
+                            f"DAX generation error after {max_retries} attempts: {error_msg}"
+                        )
 
         # Store all attempts for debugging
         results["dax_attempts"] = dax_attempts
 
         # Step 5: Find visual references (optional)
-        if config.get("include_visual_references", True) and results["model_context"]["measures"]:
+        if (
+            config.get("include_visual_references", True)
+            and results["model_context"]["measures"]
+        ):
             try:
                 # Get measures used in the generated DAX
                 used_measures = self._extract_measures_from_dax(
                     results["generated_dax"] or "",
-                    [m["name"] for m in results["model_context"]["measures"]]
+                    [m["name"] for m in results["model_context"]["measures"]],
                 )
                 if used_measures:
                     visual_refs = await self._find_visual_references(
@@ -741,5 +906,3 @@ class PowerBIAnalysisTool(
                 logger.error(f"Visual reference search failed: {e}")
 
         return self._format_output(results, output_format)
-
-

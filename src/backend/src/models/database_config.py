@@ -1,8 +1,10 @@
 """
 Database configuration models for storing Lakebase and other database settings.
 """
-from sqlalchemy import Column, String, JSON, DateTime
+
+from sqlalchemy import JSON, Column, DateTime, String
 from sqlalchemy.sql import func
+
 from src.db.base import Base
 
 

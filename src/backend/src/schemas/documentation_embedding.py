@@ -1,10 +1,12 @@
-from typing import Dict, List, Optional
 from datetime import datetime
+from typing import Dict, List, Optional
+
 from pydantic import BaseModel, ConfigDict
 
 
 class DocumentationEmbeddingBase(BaseModel):
     """Base schema for documentation embeddings."""
+
     source: str
     title: str
     content: str
@@ -21,11 +23,13 @@ class DocumentationEmbeddingBase(BaseModel):
 
 class DocumentationEmbeddingCreate(DocumentationEmbeddingBase):
     """Schema for creating documentation embeddings."""
+
     pass
 
 
 class DocumentationEmbedding(DocumentationEmbeddingBase):
     """Schema for fetching documentation embeddings."""
+
     id: int
     created_at: datetime
     updated_at: datetime
@@ -35,5 +39,6 @@ class DocumentationEmbedding(DocumentationEmbeddingBase):
 
 class DocumentationEmbeddingSearch(BaseModel):
     """Schema for searching documentation embeddings."""
+
     query_embedding: List[float]
     limit: Optional[int] = 5

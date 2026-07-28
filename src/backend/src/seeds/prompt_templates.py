@@ -1,8 +1,10 @@
 """
 Seed the prompt_templates table with default template definitions.
 """
+
 import logging
 from datetime import datetime
+
 from sqlalchemy import select
 
 from src.db.session import async_session_factory
@@ -17,26 +19,28 @@ logger = logging.getLogger(__name__)
 # questions about the org's OWN data/metrics (instead of defaulting to web search),
 # so an Auto-format prompt like "the most effective marketing campaign" produces a
 # Genie crew (and therefore the Genie-space picker) rather than a Perplexity crew.
-GENIE_ROUTING_DIRECTIVE = "\n".join([
-    "",
-    "=== TOOL ROUTING — READ CAREFULLY (GenieTool is available) ===",
-    "GenieTool answers questions from the ORGANIZATION'S OWN structured data (its data",
-    "warehouse) using natural language. It is the DEFAULT tool for any question about",
-    "the organization's data, metrics, or business performance, INCLUDING:",
-    "- marketing campaigns, campaign effectiveness, ROI, CTR, conversions, spend",
-    "- sales, revenue, pipeline, orders; customers, segments, churn, retention",
-    "- products, inventory, operations; any KPI / analytics question",
-    "- any 'top N', 'most/least', 'best', 'highest/lowest', 'trend', or 'by <dimension>' question",
-    "For ALL such questions you MUST assign ONLY GenieTool to the data task, and you",
-    "MUST NOT assign PerplexityTool or ScrapeWebsiteTool.",
-    "Use web-search tools ONLY when the user EXPLICITLY asks for EXTERNAL / public",
-    "information (news, competitor research, market trends, facts not in the org's data).",
-    "EXAMPLES:",
-    "- 'what is the most effective marketing campaign' -> GenieTool (the org's campaign data)",
-    "- 'top customers by revenue this quarter' -> GenieTool",
-    "- 'latest AI news' / 'what are competitors doing' -> PerplexityTool (external)",
-    "When in doubt for a business/metrics question, choose GenieTool.",
-])
+GENIE_ROUTING_DIRECTIVE = "\n".join(
+    [
+        "",
+        "=== TOOL ROUTING — READ CAREFULLY (GenieTool is available) ===",
+        "GenieTool answers questions from the ORGANIZATION'S OWN structured data (its data",
+        "warehouse) using natural language. It is the DEFAULT tool for any question about",
+        "the organization's data, metrics, or business performance, INCLUDING:",
+        "- marketing campaigns, campaign effectiveness, ROI, CTR, conversions, spend",
+        "- sales, revenue, pipeline, orders; customers, segments, churn, retention",
+        "- products, inventory, operations; any KPI / analytics question",
+        "- any 'top N', 'most/least', 'best', 'highest/lowest', 'trend', or 'by <dimension>' question",
+        "For ALL such questions you MUST assign ONLY GenieTool to the data task, and you",
+        "MUST NOT assign PerplexityTool or ScrapeWebsiteTool.",
+        "Use web-search tools ONLY when the user EXPLICITLY asks for EXTERNAL / public",
+        "information (news, competitor research, market trends, facts not in the org's data).",
+        "EXAMPLES:",
+        "- 'what is the most effective marketing campaign' -> GenieTool (the org's campaign data)",
+        "- 'top customers by revenue this quarter' -> GenieTool",
+        "- 'latest AI news' / 'what are competitors doing' -> PerplexityTool (external)",
+        "When in doubt for a business/metrics question, choose GenieTool.",
+    ]
+)
 
 # Define template contents
 GENERATE_AGENT_TEMPLATE = """You are an expert at creating AI agents. From the user's description, generate ONE agent as a single valid JSON object — no markdown, no commentary, double quotes, no trailing commas — with EXACTLY these fields:
@@ -338,73 +342,74 @@ DEFAULT_TEMPLATES = [
         "name": "generate_agent",
         "description": "Template for generating an AI agent based on user description",
         "template": GENERATE_AGENT_TEMPLATE,
-        "is_active": True
+        "is_active": True,
     },
     {
         "name": "generate_connections",
         "description": "Template for generating connections between agents and tasks",
         "template": GENERATE_CONNECTIONS_TEMPLATE,
-        "is_active": True
+        "is_active": True,
     },
     {
         "name": "generate_job_name",
         "description": "Template for generating a job name based on agents and tasks",
         "template": GENERATE_JOB_NAME_TEMPLATE,
-        "is_active": True
+        "is_active": True,
     },
     {
         "name": "generate_task",
         "description": "Template for generating a task configuration",
         "template": GENERATE_TASK_TEMPLATE,
-        "is_active": True
+        "is_active": True,
     },
     {
         "name": "generate_templates",
         "description": "Template for generating system, prompt, and response templates",
         "template": GENERATE_TEMPLATES_TEMPLATE,
-        "is_active": True
+        "is_active": True,
     },
     {
         "name": "generate_crew",
         "description": "Template for generating a complete crew with agents and tasks",
         "template": GENERATE_CREW_TEMPLATE,
-        "is_active": True
+        "is_active": True,
     },
     {
         "name": "generate_crew_plan",
         "description": "Lightweight template for the crew PLAN OUTLINE phase (skeleton only)",
         "template": GENERATE_CREW_PLAN_TEMPLATE,
-        "is_active": True
+        "is_active": True,
     },
     {
         "name": "detect_intent",
         "description": "Template for detecting user intent in natural language messages",
         "template": DETECT_INTENT_TEMPLATE,
-        "is_active": True
+        "is_active": True,
     },
     {
         "name": "improve_prompt",
         "description": "Template for improving agent/task prompt fields with prompt-engineering best practices",
         "template": IMPROVE_PROMPT_TEMPLATE,
-        "is_active": True
+        "is_active": True,
     },
 ]
+
 
 async def seed_async():
     """Seed prompt templates into the database using async session."""
     logger.info("Seeding prompt_templates table (async)...")
-    
+
     # Get existing template names to avoid duplicates (outside the loop to reduce DB queries)
     async with async_session_factory() as session:
         result = await session.execute(select(PromptTemplate.name))
         existing_names = {row[0] for row in result.scalars().all()}
-    
+
     # Insert new templates
     templates_added = 0
     templates_updated = 0
     templates_skipped = 0
     templates_error = 0
-    
+
     # Process each template individually with its own session to avoid transaction problems
     for template_data in DEFAULT_TEMPLATES:
         try:
@@ -413,17 +418,23 @@ async def seed_async():
                 if template_data["name"] not in existing_names:
                     # Check again to be extra sure - this helps with race conditions
                     check_result = await session.execute(
-                        select(PromptTemplate).filter(PromptTemplate.name == template_data["name"])
+                        select(PromptTemplate).filter(
+                            PromptTemplate.name == template_data["name"]
+                        )
                     )
                     existing_template = check_result.scalars().first()
-                    
+
                     if existing_template:
                         # If it exists now (race condition), update it instead
                         existing_template.description = template_data["description"]
                         existing_template.template = template_data["template"]
                         existing_template.is_active = template_data["is_active"]
-                        existing_template.updated_at = datetime.now().replace(tzinfo=None)
-                        logger.debug(f"Updating existing template: {template_data['name']}")
+                        existing_template.updated_at = datetime.now().replace(
+                            tzinfo=None
+                        )
+                        logger.debug(
+                            f"Updating existing template: {template_data['name']}"
+                        )
                         templates_updated += 1
                     else:
                         # Add new template
@@ -433,7 +444,7 @@ async def seed_async():
                             template=template_data["template"],
                             is_active=template_data["is_active"],
                             created_at=datetime.now().replace(tzinfo=None),
-                            updated_at=datetime.now().replace(tzinfo=None)
+                            updated_at=datetime.now().replace(tzinfo=None),
                         )
                         session.add(template)
                         logger.debug(f"Adding new template: {template_data['name']}")
@@ -441,35 +452,48 @@ async def seed_async():
                 else:
                     # Update existing template
                     result = await session.execute(
-                        select(PromptTemplate).filter(PromptTemplate.name == template_data["name"])
+                        select(PromptTemplate).filter(
+                            PromptTemplate.name == template_data["name"]
+                        )
                     )
                     existing_template = result.scalars().first()
-                    
+
                     if existing_template:
                         existing_template.description = template_data["description"]
                         existing_template.template = template_data["template"]
                         existing_template.is_active = template_data["is_active"]
-                        existing_template.updated_at = datetime.now().replace(tzinfo=None)
-                        logger.debug(f"Updating existing template: {template_data['name']}")
+                        existing_template.updated_at = datetime.now().replace(
+                            tzinfo=None
+                        )
+                        logger.debug(
+                            f"Updating existing template: {template_data['name']}"
+                        )
                         templates_updated += 1
-                
+
                 # Commit the session for this template
                 try:
                     await session.commit()
                 except Exception as e:
                     await session.rollback()
                     if "UNIQUE constraint failed" in str(e):
-                        logger.warning(f"Template {template_data['name']} already exists, skipping insert")
+                        logger.warning(
+                            f"Template {template_data['name']} already exists, skipping insert"
+                        )
                         templates_skipped += 1
                     else:
-                        logger.error(f"Failed to commit template {template_data['name']}: {str(e)}")
+                        logger.error(
+                            f"Failed to commit template {template_data['name']}: {str(e)}"
+                        )
                         templates_error += 1
         except Exception as e:
             await session.rollback()
             logger.error(f"Error processing template {template_data['name']}: {str(e)}")
             templates_error += 1
-    
-    logger.info(f"Prompt templates seeding summary: Added {templates_added}, Updated {templates_updated}, Skipped {templates_skipped}, Errors {templates_error}")
+
+    logger.info(
+        f"Prompt templates seeding summary: Added {templates_added}, Updated {templates_updated}, Skipped {templates_skipped}, Errors {templates_error}"
+    )
+
 
 async def seed():
     """Main entry point for seeding prompt templates."""
@@ -480,10 +504,13 @@ async def seed():
     except Exception as e:
         logger.error(f"Error seeding prompt templates: {str(e)}")
         import traceback
+
         logger.error(f"Prompt templates seeding traceback: {traceback.format_exc()}")
         # Don't re-raise - allow other seeds to run
+
 
 # For backwards compatibility or direct command-line usage
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(seed()) 
+
+    asyncio.run(seed())

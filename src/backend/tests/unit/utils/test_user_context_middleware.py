@@ -9,13 +9,14 @@ Covers:
 - Group context extraction failure handling
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.utils.user_context import (
-    UserContextMiddleware,
-    UserContext,
     GroupContext,
+    UserContext,
+    UserContextMiddleware,
 )
 
 
@@ -61,10 +62,17 @@ class TestUserContextMiddlewareCall:
         receive = AsyncMock()
         send = AsyncMock()
 
-        with patch('src.utils.user_context.extract_group_context_from_request',
-                    new_callable=AsyncMock, return_value=None), \
-             patch('src.utils.user_context.extract_user_context_from_request',
-                    return_value={}):
+        with (
+            patch(
+                "src.utils.user_context.extract_group_context_from_request",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "src.utils.user_context.extract_user_context_from_request",
+                return_value={},
+            ),
+        ):
             await middleware(scope, receive, send)
 
         inner_app.assert_awaited_once_with(scope, receive, send)
@@ -88,12 +96,19 @@ class TestUserContextMiddlewareCall:
         receive = AsyncMock()
         send = AsyncMock()
 
-        with patch('src.utils.user_context.extract_group_context_from_request',
-                    new_callable=AsyncMock, return_value=mock_gc) as mock_extract, \
-             patch('src.utils.user_context.extract_user_context_from_request',
-                    return_value={}), \
-             patch.object(UserContext, 'set_group_context') as mock_set_gc, \
-             patch.object(UserContext, 'clear_context'):
+        with (
+            patch(
+                "src.utils.user_context.extract_group_context_from_request",
+                new_callable=AsyncMock,
+                return_value=mock_gc,
+            ) as mock_extract,
+            patch(
+                "src.utils.user_context.extract_user_context_from_request",
+                return_value={},
+            ),
+            patch.object(UserContext, "set_group_context") as mock_set_gc,
+            patch.object(UserContext, "clear_context"),
+        ):
             await middleware(scope, receive, send)
 
         mock_set_gc.assert_called_once_with(mock_gc)
@@ -113,20 +128,29 @@ class TestUserContextMiddlewareCall:
 
         user_ctx = {"access_token": "test-token", "method": "GET", "url": "/test"}
 
-        with patch('src.utils.user_context.extract_group_context_from_request',
-                    new_callable=AsyncMock, return_value=None), \
-             patch('src.utils.user_context.extract_user_context_from_request',
-                    return_value=user_ctx), \
-             patch.object(UserContext, 'set_user_context') as mock_set_uc, \
-             patch.object(UserContext, 'set_user_token') as mock_set_token, \
-             patch.object(UserContext, 'clear_context'):
+        with (
+            patch(
+                "src.utils.user_context.extract_group_context_from_request",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "src.utils.user_context.extract_user_context_from_request",
+                return_value=user_ctx,
+            ),
+            patch.object(UserContext, "set_user_context") as mock_set_uc,
+            patch.object(UserContext, "set_user_token") as mock_set_token,
+            patch.object(UserContext, "clear_context"),
+        ):
             await middleware(scope, receive, send)
 
         mock_set_uc.assert_called_once_with(user_ctx)
         mock_set_token.assert_called_once_with("test-token")
 
     @pytest.mark.asyncio
-    async def test_error_in_inner_app_clears_context_and_reraises_without_reinvoke(self):
+    async def test_error_in_inner_app_clears_context_and_reraises_without_reinvoke(
+        self,
+    ):
         """If the inner app raises, the middleware must clear the context and
         RE-RAISE — never re-invoke the app. The old retry re-sent
         http.response.start on a connection that could already carry a
@@ -139,16 +163,23 @@ class TestUserContextMiddlewareCall:
         receive = AsyncMock()
         send = AsyncMock()
 
-        with patch('src.utils.user_context.extract_group_context_from_request',
-                    new_callable=AsyncMock, return_value=None), \
-             patch('src.utils.user_context.extract_user_context_from_request',
-                    return_value={}), \
-             patch.object(UserContext, 'clear_context') as mock_clear:
+        with (
+            patch(
+                "src.utils.user_context.extract_group_context_from_request",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "src.utils.user_context.extract_user_context_from_request",
+                return_value={},
+            ),
+            patch.object(UserContext, "clear_context") as mock_clear,
+        ):
             with pytest.raises(RuntimeError, match="app error"):
                 await middleware(scope, receive, send)
 
         inner_app.assert_awaited_once()  # NEVER called a second time
-        mock_clear.assert_called()       # context cleared in except + finally
+        mock_clear.assert_called()  # context cleared in except + finally
 
     @pytest.mark.asyncio
     async def test_client_disconnect_reraises_quietly_without_reinvoke(self):
@@ -163,20 +194,25 @@ class TestUserContextMiddlewareCall:
         receive = AsyncMock()
         send = AsyncMock()
 
-        with patch('src.utils.user_context.extract_group_context_from_request',
-                    new_callable=AsyncMock, return_value=None), \
-             patch('src.utils.user_context.extract_user_context_from_request',
-                    return_value={}), \
-             patch.object(UserContext, 'clear_context'), \
-             patch('src.utils.user_context.logger') as mock_logger:
+        with (
+            patch(
+                "src.utils.user_context.extract_group_context_from_request",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "src.utils.user_context.extract_user_context_from_request",
+                return_value={},
+            ),
+            patch.object(UserContext, "clear_context"),
+            patch("src.utils.user_context.logger") as mock_logger,
+        ):
             with pytest.raises(ClientDisconnect):
                 await middleware(scope, receive, send)
 
         inner_app.assert_awaited_once()
         # Aborted clients are routine — logged at debug, not error.
-        assert not any(
-            'middleware' in str(c) for c in mock_logger.error.call_args_list
-        )
+        assert not any("middleware" in str(c) for c in mock_logger.error.call_args_list)
 
     @pytest.mark.asyncio
     async def test_group_context_extraction_greenlet_error(self):
@@ -191,12 +227,18 @@ class TestUserContextMiddlewareCall:
         receive = AsyncMock()
         send = AsyncMock()
 
-        with patch('src.utils.user_context.extract_group_context_from_request',
-                    new_callable=AsyncMock,
-                    side_effect=RuntimeError("greenlet_spawn has not been called")), \
-             patch('src.utils.user_context.extract_user_context_from_request',
-                    return_value={}), \
-             patch.object(UserContext, 'clear_context'):
+        with (
+            patch(
+                "src.utils.user_context.extract_group_context_from_request",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("greenlet_spawn has not been called"),
+            ),
+            patch(
+                "src.utils.user_context.extract_user_context_from_request",
+                return_value={},
+            ),
+            patch.object(UserContext, "clear_context"),
+        ):
             await middleware(scope, receive, send)
 
         # Should still call inner app despite group extraction failure
@@ -215,12 +257,18 @@ class TestUserContextMiddlewareCall:
         receive = AsyncMock()
         send = AsyncMock()
 
-        with patch('src.utils.user_context.extract_group_context_from_request',
-                    new_callable=AsyncMock,
-                    side_effect=ValueError("some error")), \
-             patch('src.utils.user_context.extract_user_context_from_request',
-                    return_value={}), \
-             patch.object(UserContext, 'clear_context'):
+        with (
+            patch(
+                "src.utils.user_context.extract_group_context_from_request",
+                new_callable=AsyncMock,
+                side_effect=ValueError("some error"),
+            ),
+            patch(
+                "src.utils.user_context.extract_user_context_from_request",
+                return_value={},
+            ),
+            patch.object(UserContext, "clear_context"),
+        ):
             await middleware(scope, receive, send)
 
         inner_app.assert_awaited_once()
@@ -235,11 +283,18 @@ class TestUserContextMiddlewareCall:
         receive = AsyncMock()
         send = AsyncMock()
 
-        with patch('src.utils.user_context.extract_group_context_from_request',
-                    new_callable=AsyncMock, return_value=None), \
-             patch('src.utils.user_context.extract_user_context_from_request',
-                    return_value={}), \
-             patch.object(UserContext, 'clear_context') as mock_clear:
+        with (
+            patch(
+                "src.utils.user_context.extract_group_context_from_request",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "src.utils.user_context.extract_user_context_from_request",
+                return_value={},
+            ),
+            patch.object(UserContext, "clear_context") as mock_clear,
+        ):
             await middleware(scope, receive, send)
 
         mock_clear.assert_called()

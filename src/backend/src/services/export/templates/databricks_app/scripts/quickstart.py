@@ -667,7 +667,12 @@ def create_lakebase_instance(profile_name: str, name: str = None) -> dict:
 
     print(f"\nCreating Lakebase autoscaling project '{name}'...")
     try:
-        from databricks.sdk.service.postgres import Branch, BranchSpec, Project, ProjectSpec
+        from databricks.sdk.service.postgres import (
+            Branch,
+            BranchSpec,
+            Project,
+            ProjectSpec,
+        )
 
         project_op = w.postgres.create_project(
             project=Project(spec=ProjectSpec(display_name=name)),

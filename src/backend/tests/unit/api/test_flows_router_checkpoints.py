@@ -2,12 +2,14 @@
 Tests for flow checkpoint endpoints in flows_router.
 Covers lines 301-356 (get_flow_checkpoints) and 389-396 (delete_checkpoint).
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-from src.api.flows_router import get_flow_checkpoints, delete_checkpoint
+import pytest
+
+from src.api.flows_router import delete_checkpoint, get_flow_checkpoints
 from src.utils.user_context import GroupContext
 
 

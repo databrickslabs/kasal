@@ -1,11 +1,12 @@
-import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from typing import Dict, Any, Optional, Union
 import asyncio
+from typing import Any, Dict, Optional, Union
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-# Test ToolFactory class - based on actual code inspection
+import pytest
 
 from src.services.tools.tool_factory import ToolFactory
+
+# Test ToolFactory class - based on actual code inspection
 
 
 class TestToolFactoryInit:
@@ -14,9 +15,9 @@ class TestToolFactoryInit:
     def test_tool_factory_init_basic(self):
         """Test ToolFactory __init__ with basic config"""
         config = {"test": "value"}
-        
+
         factory = ToolFactory(config)
-        
+
         assert factory.config == config
         assert factory.api_keys_service is None
         assert factory.user_token is None
@@ -28,9 +29,9 @@ class TestToolFactoryInit:
         """Test ToolFactory __init__ with api_keys_service"""
         config = {"test": "value"}
         mock_api_keys_service = Mock()
-        
+
         factory = ToolFactory(config, api_keys_service=mock_api_keys_service)
-        
+
         assert factory.config == config
         assert factory.api_keys_service == mock_api_keys_service
         assert factory.user_token is None
@@ -40,9 +41,9 @@ class TestToolFactoryInit:
         """Test ToolFactory __init__ with user_token"""
         config = {"test": "value"}
         user_token = "test-token"
-        
+
         factory = ToolFactory(config, user_token=user_token)
-        
+
         assert factory.config == config
         assert factory.api_keys_service is None
         assert factory.user_token == user_token
@@ -53,9 +54,11 @@ class TestToolFactoryInit:
         config = {"test": "value"}
         mock_api_keys_service = Mock()
         user_token = "test-token"
-        
-        factory = ToolFactory(config, api_keys_service=mock_api_keys_service, user_token=user_token)
-        
+
+        factory = ToolFactory(
+            config, api_keys_service=mock_api_keys_service, user_token=user_token
+        )
+
         assert factory.config == config
         assert factory.api_keys_service == mock_api_keys_service
         assert factory.user_token == user_token
@@ -64,13 +67,18 @@ class TestToolFactoryInit:
     def test_tool_factory_init_tool_implementations_populated(self):
         """Test ToolFactory __init__ populates tool implementations"""
         config = {"test": "value"}
-        
+
         factory = ToolFactory(config)
-        
+
         assert isinstance(factory._tool_implementations, dict)
         assert len(factory._tool_implementations) > 0
         # Check for some expected tools
-        expected_tools = ["PerplexityTool", "Image Generation Tool", "SerperDevTool", "ScrapeWebsiteTool"]
+        expected_tools = [
+            "PerplexityTool",
+            "Image Generation Tool",
+            "SerperDevTool",
+            "ScrapeWebsiteTool",
+        ]
         for tool in expected_tools:
             assert tool in factory._tool_implementations
 
@@ -79,29 +87,31 @@ class TestToolFactoryAsyncMethods:
     """Test ToolFactory async methods"""
 
     @pytest.mark.asyncio
-    @patch.object(ToolFactory, 'initialize')
+    @patch.object(ToolFactory, "initialize")
     async def test_create_class_method(self, mock_initialize):
         """Test ToolFactory.create class method"""
         mock_initialize.return_value = None
         config = {"test": "value"}
-        
+
         factory = await ToolFactory.create(config)
-        
+
         assert isinstance(factory, ToolFactory)
         assert factory.config == config
         mock_initialize.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch.object(ToolFactory, 'initialize')
+    @patch.object(ToolFactory, "initialize")
     async def test_create_class_method_with_params(self, mock_initialize):
         """Test ToolFactory.create class method with all parameters"""
         mock_initialize.return_value = None
         config = {"test": "value"}
         mock_api_keys_service = Mock()
         user_token = "test-token"
-        
-        factory = await ToolFactory.create(config, api_keys_service=mock_api_keys_service, user_token=user_token)
-        
+
+        factory = await ToolFactory.create(
+            config, api_keys_service=mock_api_keys_service, user_token=user_token
+        )
+
         assert isinstance(factory, ToolFactory)
         assert factory.config == config
         assert factory.api_keys_service == mock_api_keys_service
@@ -109,29 +119,29 @@ class TestToolFactoryAsyncMethods:
         mock_initialize.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch.object(ToolFactory, '_load_available_tools_async')
+    @patch.object(ToolFactory, "_load_available_tools_async")
     async def test_initialize_not_initialized(self, mock_load_tools):
         """Test initialize when not already initialized"""
         mock_load_tools.return_value = None
         config = {"test": "value"}
         factory = ToolFactory(config)
-        
+
         await factory.initialize()
-        
+
         assert factory._initialized is True
         mock_load_tools.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch.object(ToolFactory, '_load_available_tools_async')
+    @patch.object(ToolFactory, "_load_available_tools_async")
     async def test_initialize_already_initialized(self, mock_load_tools):
         """Test initialize when already initialized"""
         mock_load_tools.return_value = None
         config = {"test": "value"}
         factory = ToolFactory(config)
         factory._initialized = True
-        
+
         await factory.initialize()
-        
+
         mock_load_tools.assert_not_called()
 
     @pytest.mark.asyncio
@@ -149,7 +159,7 @@ class TestToolFactoryAsyncMethods:
         """Test cleanup_after_crew_execution method"""
         config = {"test": "value"}
         factory = ToolFactory(config)
-        
+
         # Should complete without errors
         await factory.cleanup_after_crew_execution()
 
@@ -174,46 +184,46 @@ class TestToolFactorySyncMethods:
         """Test get_tool_info with non-existent tool"""
         config = {"test": "value"}
         factory = ToolFactory(config)
-        
+
         result = factory.get_tool_info("Non-existent Tool")
-        
+
         assert result is None
 
     def test_get_api_key_sync_method(self):
         """Test _get_api_key synchronous method"""
         config = {"test": "value"}
         factory = ToolFactory(config)
-        
+
         # Should handle the case where no api_keys_service is available
         result = factory._get_api_key("TEST_KEY")
-        
+
         assert result is None
 
     def test_register_tool_implementation(self):
         """Test register_tool_implementation method"""
         config = {"test": "value"}
         factory = ToolFactory(config)
-        
+
         mock_tool_class = Mock()
         tool_name = "CustomTool"
-        
+
         factory.register_tool_implementation(tool_name, mock_tool_class)
-        
+
         assert factory._tool_implementations[tool_name] == mock_tool_class
 
     def test_register_tool_implementations_multiple(self):
         """Test register_tool_implementations with multiple tools"""
         config = {"test": "value"}
         factory = ToolFactory(config)
-        
+
         implementations = {
             "CustomTool1": Mock(),
             "CustomTool2": Mock(),
-            "CustomTool3": Mock()
+            "CustomTool3": Mock(),
         }
-        
+
         factory.register_tool_implementations(implementations)
-        
+
         for tool_name, tool_class in implementations.items():
             assert factory._tool_implementations[tool_name] == tool_class
 
@@ -221,7 +231,7 @@ class TestToolFactorySyncMethods:
         """Test cleanup method"""
         config = {"test": "value"}
         factory = ToolFactory(config)
-        
+
         # Should complete without errors
         factory.cleanup()
 
@@ -229,8 +239,8 @@ class TestToolFactorySyncMethods:
         """Test __del__ method calls cleanup"""
         config = {"test": "value"}
         factory = ToolFactory(config)
-        
-        with patch.object(factory, 'cleanup') as mock_cleanup:
+
+        with patch.object(factory, "cleanup") as mock_cleanup:
             factory.__del__()
             mock_cleanup.assert_called_once()
 
@@ -240,9 +250,9 @@ class TestToolFactorySyncMethods:
         """Test update_tool_config when tool is not found"""
         config = {"test": "value"}
         factory = ToolFactory(config)
-        
+
         config_update = {"new_config": "value"}
-        
+
         result = factory.update_tool_config("Non-existent Tool", config_update)
 
         assert result is False
@@ -260,7 +270,7 @@ class TestToolFactoryToolCreation:
         """Test create_tool when tool is not found"""
         tool_identifier = "non-existent-tool"
 
-        with patch.object(self.factory, 'get_tool_info', return_value=None):
+        with patch.object(self.factory, "get_tool_info", return_value=None):
             result = self.factory.create_tool(tool_identifier)
 
             assert result is None
@@ -285,11 +295,7 @@ class TestToolFactoryRegistration:
 
     def test_register_tool_implementations(self):
         """Test register_tool_implementations with multiple tools"""
-        implementations = {
-            "Tool1": Mock(),
-            "Tool2": Mock(),
-            "Tool3": Mock()
-        }
+        implementations = {"Tool1": Mock(), "Tool2": Mock(), "Tool3": Mock()}
 
         self.factory.register_tool_implementations(implementations)
 
@@ -324,6 +330,7 @@ class TestToolFactoryUtilityMethods:
 
     def test_run_in_new_loop(self):
         """Test _run_in_new_loop utility method"""
+
         async def test_async_func(value):
             return value * 2
 
@@ -339,7 +346,7 @@ class TestToolFactoryUtilityMethods:
 
     def test_del_method(self):
         """Test __del__ method calls cleanup"""
-        with patch.object(self.factory, 'cleanup') as mock_cleanup:
+        with patch.object(self.factory, "cleanup") as mock_cleanup:
             self.factory.__del__()
 
             mock_cleanup.assert_called_once()

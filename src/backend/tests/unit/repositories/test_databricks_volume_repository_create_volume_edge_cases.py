@@ -29,9 +29,11 @@ Targets uncovered lines:
 - Lines 1005-1006: delete: not found
 - Lines 1031-1047: delete: scope error retry PAT
 """
+
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from src.repositories.databricks_volume_repository import DatabricksVolumeRepository
 
@@ -52,11 +54,14 @@ def _make_executor_result(result):
 # create_volume_if_not_exists: error handling paths
 # ---------------------------------------------------------------------------
 
+
 class TestCreateVolumeEdgeCases:
 
     @pytest.mark.asyncio
     @patch.object(DatabricksVolumeRepository, "_get_client_with_group_context")
-    async def test_create_volume_scope_error_returns_marker(self, mock_get_client, repo):
+    async def test_create_volume_scope_error_returns_marker(
+        self, mock_get_client, repo
+    ):
         """Returns _scope_error marker when OBO token is invalid scope."""
         mock_client = MagicMock()
         mock_get_client.return_value = (mock_client, "retry-token")
@@ -66,8 +71,9 @@ class TestCreateVolumeEdgeCases:
                 {"_scope_error": True, "error": "invalid scope"}
             )
             with patch.object(
-                DatabricksVolumeRepository, "_get_client_with_group_context",
-                new_callable=AsyncMock
+                DatabricksVolumeRepository,
+                "_get_client_with_group_context",
+                new_callable=AsyncMock,
             ) as mock_get2:
                 mock_get2.side_effect = [
                     (mock_client, "retry-token"),
@@ -111,6 +117,7 @@ class TestCreateVolumeEdgeCases:
 # upload_file_to_volume: various error paths
 # ---------------------------------------------------------------------------
 
+
 class TestUploadFileEdgeCases:
 
     @pytest.mark.asyncio
@@ -120,7 +127,7 @@ class TestUploadFileEdgeCases:
         """Returns error when volume creation fails with non-permission error."""
         mock_vol.return_value = {
             "success": False,
-            "error": "catalog 'nonexistent' does not exist"
+            "error": "catalog 'nonexistent' does not exist",
         }
         mock_get_client.return_value = (MagicMock(), None)
 
@@ -130,11 +137,13 @@ class TestUploadFileEdgeCases:
     @pytest.mark.asyncio
     @patch.object(DatabricksVolumeRepository, "_get_client_with_group_context")
     @patch.object(DatabricksVolumeRepository, "create_volume_if_not_exists")
-    async def test_upload_volume_permission_error_continues(self, mock_vol, mock_get_client, repo):
+    async def test_upload_volume_permission_error_continues(
+        self, mock_vol, mock_get_client, repo
+    ):
         """Continues upload even when volume check has permission/scope error."""
         mock_vol.return_value = {
             "success": False,
-            "error": "insufficient scope to access volume"
+            "error": "insufficient scope to access volume",
         }
         mock_client = MagicMock()
         mock_get_client.return_value = (mock_client, None)
@@ -143,14 +152,18 @@ class TestUploadFileEdgeCases:
             mock_loop.return_value = _make_executor_result(
                 {"success": True, "path": "/Volumes/cat/sch/vol/f.db"}
             )
-            result = await repo.upload_file_to_volume("cat", "sch", "vol", "f.db", b"data")
+            result = await repo.upload_file_to_volume(
+                "cat", "sch", "vol", "f.db", b"data"
+            )
 
         assert result["success"] is True
 
     @pytest.mark.asyncio
     @patch.object(DatabricksVolumeRepository, "_get_client_with_group_context")
     @patch.object(DatabricksVolumeRepository, "create_volume_if_not_exists")
-    async def test_upload_no_client_returns_error(self, mock_vol, mock_get_client, repo):
+    async def test_upload_no_client_returns_error(
+        self, mock_vol, mock_get_client, repo
+    ):
         """Returns error when client cannot be created."""
         mock_vol.return_value = {"success": True}
         mock_get_client.return_value = (None, None)
@@ -162,7 +175,9 @@ class TestUploadFileEdgeCases:
     @pytest.mark.asyncio
     @patch.object(DatabricksVolumeRepository, "_get_client_with_group_context")
     @patch.object(DatabricksVolumeRepository, "create_volume_if_not_exists")
-    async def test_upload_scope_error_retries_with_pat(self, mock_vol, mock_get_client, repo):
+    async def test_upload_scope_error_retries_with_pat(
+        self, mock_vol, mock_get_client, repo
+    ):
         """Retries with PAT when OBO token has scope error."""
         mock_vol.return_value = {"success": True}
         mock_client = MagicMock()
@@ -181,14 +196,18 @@ class TestUploadFileEdgeCases:
                     {"success": True, "path": "/Volumes/cat/sch/vol/f.db"},
                 ]
             )
-            result = await repo.upload_file_to_volume("cat", "sch", "vol", "f.db", b"data")
+            result = await repo.upload_file_to_volume(
+                "cat", "sch", "vol", "f.db", b"data"
+            )
 
         assert result["success"] is True
 
     @pytest.mark.asyncio
     @patch.object(DatabricksVolumeRepository, "_get_client_with_group_context")
     @patch.object(DatabricksVolumeRepository, "create_volume_if_not_exists")
-    async def test_upload_scope_error_pat_client_fails(self, mock_vol, mock_get_client, repo):
+    async def test_upload_scope_error_pat_client_fails(
+        self, mock_vol, mock_get_client, repo
+    ):
         """Returns error when PAT client creation fails after scope error."""
         mock_vol.return_value = {"success": True}
         mock_client = MagicMock()
@@ -202,7 +221,9 @@ class TestUploadFileEdgeCases:
             mock_loop.return_value.run_in_executor = AsyncMock(
                 return_value={"_scope_error": True, "error": "invalid scope"}
             )
-            result = await repo.upload_file_to_volume("cat", "sch", "vol", "f.db", b"data")
+            result = await repo.upload_file_to_volume(
+                "cat", "sch", "vol", "f.db", b"data"
+            )
 
         assert result["success"] is False
 
@@ -210,7 +231,9 @@ class TestUploadFileEdgeCases:
     @patch.object(DatabricksVolumeRepository, "_get_client_with_group_context")
     @patch.object(DatabricksVolumeRepository, "create_volume_if_not_exists")
     @patch.object(DatabricksVolumeRepository, "_upload_via_rest_api")
-    async def test_upload_rest_api_fallback(self, mock_rest, mock_vol, mock_get_client, repo):
+    async def test_upload_rest_api_fallback(
+        self, mock_rest, mock_vol, mock_get_client, repo
+    ):
         """Falls back to REST API when network zone error occurs."""
         mock_vol.return_value = {"success": True}
         mock_client = MagicMock()
@@ -219,9 +242,14 @@ class TestUploadFileEdgeCases:
 
         with patch("asyncio.get_event_loop") as mock_loop:
             mock_loop.return_value.run_in_executor = AsyncMock(
-                return_value={"_use_rest_api": True, "error": "network zone restriction"}
+                return_value={
+                    "_use_rest_api": True,
+                    "error": "network zone restriction",
+                }
             )
-            result = await repo.upload_file_to_volume("cat", "sch", "vol", "f.db", b"data")
+            result = await repo.upload_file_to_volume(
+                "cat", "sch", "vol", "f.db", b"data"
+            )
 
         assert result["success"] is True
 
@@ -241,6 +269,7 @@ class TestUploadFileEdgeCases:
 # ---------------------------------------------------------------------------
 # download_file_from_volume: error paths
 # ---------------------------------------------------------------------------
+
 
 class TestDownloadFileEdgeCases:
 
@@ -307,6 +336,7 @@ class TestDownloadFileEdgeCases:
 # list_volume_contents: error paths
 # ---------------------------------------------------------------------------
 
+
 class TestListVolumeEdgeCases:
 
     @pytest.mark.asyncio
@@ -371,6 +401,7 @@ class TestListVolumeEdgeCases:
 # create_volume_directory: error paths
 # ---------------------------------------------------------------------------
 
+
 class TestCreateDirectoryEdgeCases:
 
     @pytest.mark.asyncio
@@ -434,6 +465,7 @@ class TestCreateDirectoryEdgeCases:
 # ---------------------------------------------------------------------------
 # delete_volume_file: error paths
 # ---------------------------------------------------------------------------
+
 
 class TestDeleteVolumeFileEdgeCases:
 
@@ -500,6 +532,7 @@ class TestDeleteVolumeFileEdgeCases:
 # Inner executor function tests via synchronous executor mock
 # ---------------------------------------------------------------------------
 
+
 class TestCreateVolumeInnerPaths:
     """Tests for inner _create_volume function paths by running executor synchronously."""
 
@@ -509,7 +542,9 @@ class TestCreateVolumeInnerPaths:
         """Returns specific error when catalog does not exist."""
         mock_client = MagicMock()
         mock_client.volumes.read.side_effect = Exception("not found")
-        mock_client.volumes.create.side_effect = Exception("catalog 'cat' does not exist")
+        mock_client.volumes.create.side_effect = Exception(
+            "catalog 'cat' does not exist"
+        )
         mock_get_client.return_value = (mock_client, None)
 
         real_loop = asyncio.get_event_loop()
@@ -529,7 +564,9 @@ class TestCreateVolumeInnerPaths:
         """Returns specific error when schema does not exist."""
         mock_client = MagicMock()
         mock_client.volumes.read.side_effect = Exception("not found")
-        mock_client.volumes.create.side_effect = Exception("schema 'sch' does not exist")
+        mock_client.volumes.create.side_effect = Exception(
+            "schema 'sch' does not exist"
+        )
         mock_get_client.return_value = (mock_client, None)
 
         real_loop = asyncio.get_event_loop()
@@ -549,7 +586,9 @@ class TestCreateVolumeInnerPaths:
         """Returns _scope_error marker for invalid scope error with retry_token."""
         mock_client = MagicMock()
         mock_client.volumes.read.side_effect = Exception("not found")
-        mock_client.volumes.create.side_effect = Exception("invalid scope: cannot create volume")
+        mock_client.volumes.create.side_effect = Exception(
+            "invalid scope: cannot create volume"
+        )
         mock_client_pat = MagicMock()
         mock_client_pat.volumes.read.side_effect = Exception("not found")
         mock_client_pat.volumes.create.return_value = MagicMock()
@@ -631,7 +670,9 @@ class TestDeleteVolumeInnerPaths:
     async def test_delete_not_found_error(self, mock_get_client, repo):
         """Inner function returns not-found error when file does not exist."""
         mock_client = MagicMock()
-        mock_client.files.delete.side_effect = Exception("not found: file /Volumes/cat/sch/vol/f.db")
+        mock_client.files.delete.side_effect = Exception(
+            "not found: file /Volumes/cat/sch/vol/f.db"
+        )
         mock_get_client.return_value = (mock_client, None)
 
         # Capture real loop before any patching

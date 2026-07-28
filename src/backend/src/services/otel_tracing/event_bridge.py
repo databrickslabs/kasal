@@ -61,14 +61,29 @@ _EVENT_SPAN_MAP = {
     "MemorySaveStartedEvent": ("kasal.memory.save_started", "memory_write_started"),
     "MemorySaveCompletedEvent": ("kasal.memory.save_completed", "memory_write"),
     "MemorySaveFailedEvent": ("kasal.memory.save_failed", "memory_write_failed"),
-    "MemoryQueryStartedEvent": ("kasal.memory.query_started", "memory_retrieval_started"),
+    "MemoryQueryStartedEvent": (
+        "kasal.memory.query_started",
+        "memory_retrieval_started",
+    ),
     "MemoryQueryCompletedEvent": ("kasal.memory.query_completed", "memory_retrieval"),
     "MemoryQueryFailedEvent": ("kasal.memory.query_failed", "memory_retrieval_failed"),
-    "MemoryRetrievalCompletedEvent": ("kasal.memory.retrieval_completed", "memory_retrieval_completed"),
-    "MemoryRetrievalFailedEvent": ("kasal.memory.retrieval_failed", "memory_retrieval_failed"),
+    "MemoryRetrievalCompletedEvent": (
+        "kasal.memory.retrieval_completed",
+        "memory_retrieval_completed",
+    ),
+    "MemoryRetrievalFailedEvent": (
+        "kasal.memory.retrieval_failed",
+        "memory_retrieval_failed",
+    ),
     # Knowledge events — map completed to frontend's knowledge_operation
-    "KnowledgeRetrievalStartedEvent": ("kasal.knowledge.retrieval_started", "knowledge_retrieval_started"),
-    "KnowledgeRetrievalCompletedEvent": ("kasal.knowledge.retrieval_completed", "knowledge_operation"),
+    "KnowledgeRetrievalStartedEvent": (
+        "kasal.knowledge.retrieval_started",
+        "knowledge_retrieval_started",
+    ),
+    "KnowledgeRetrievalCompletedEvent": (
+        "kasal.knowledge.retrieval_completed",
+        "knowledge_operation",
+    ),
     # Reasoning events — map to frontend's agent_reasoning/agent_reasoning_error
     "AgentReasoningStartedEvent": ("kasal.reasoning.started", "reasoning_started"),
     "AgentReasoningCompletedEvent": ("kasal.reasoning.completed", "agent_reasoning"),
@@ -82,13 +97,28 @@ _EVENT_SPAN_MAP = {
     "FlowFinishedEvent": ("kasal.flow.finished", "flow_completed"),
     "FlowCreatedEvent": ("kasal.flow.created", "flow_created"),
     # MCP events
-    "MCPConnectionStartedEvent": ("kasal.mcp.connection_started", "mcp_connection_started"),
-    "MCPConnectionCompletedEvent": ("kasal.mcp.connection_completed", "mcp_connection_completed"),
+    "MCPConnectionStartedEvent": (
+        "kasal.mcp.connection_started",
+        "mcp_connection_started",
+    ),
+    "MCPConnectionCompletedEvent": (
+        "kasal.mcp.connection_completed",
+        "mcp_connection_completed",
+    ),
     "MCPToolExecutionStartedEvent": ("kasal.mcp.tool_started", "mcp_tool_started"),
-    "MCPToolExecutionCompletedEvent": ("kasal.mcp.tool_completed", "mcp_tool_completed"),
+    "MCPToolExecutionCompletedEvent": (
+        "kasal.mcp.tool_completed",
+        "mcp_tool_completed",
+    ),
     # HITL events
-    "HumanFeedbackRequestedEvent": ("kasal.hitl.feedback_requested", "hitl_feedback_requested"),
-    "HumanFeedbackReceivedEvent": ("kasal.hitl.feedback_received", "hitl_feedback_received"),
+    "HumanFeedbackRequestedEvent": (
+        "kasal.hitl.feedback_requested",
+        "hitl_feedback_requested",
+    ),
+    "HumanFeedbackReceivedEvent": (
+        "kasal.hitl.feedback_received",
+        "hitl_feedback_received",
+    ),
     # LLM call events
     "LLMCallStartedEvent": ("kasal.llm.call_started", "llm_call"),
     "LLMCallCompletedEvent": ("kasal.llm.call_completed", "llm_response"),
@@ -211,8 +241,17 @@ def _get_tool_name(event: Any) -> str:
 
 def _get_output(event: Any) -> str:
     """Extract output/result content from an event object."""
-    for attr in ("output", "result", "results", "response", "content",
-                 "message", "reason", "value", "memory_content"):
+    for attr in (
+        "output",
+        "result",
+        "results",
+        "response",
+        "content",
+        "message",
+        "reason",
+        "value",
+        "memory_content",
+    ):
         val = getattr(event, attr, None)
         if val is not None:
             return str(val)
@@ -388,7 +427,6 @@ class OTelEventBridge:
         """
         registered = 0
 
-
         import importlib
 
         missing: list = []
@@ -413,7 +451,9 @@ class OTelEventBridge:
             logger.warning(
                 "[OTel-Bridge][%s] %d event class(es) in _EVENT_CLASSES do not "
                 "resolve and will be ABSENT from every trace: %s",
-                self._job_id, len(missing), ", ".join(missing),
+                self._job_id,
+                len(missing),
+                ", ".join(missing),
             )
         return registered
 
@@ -442,7 +482,9 @@ class OTelEventBridge:
         """Create and immediately end an OTel span for a point-in-time event."""
         logger.info(
             "[OTel-Bridge][%s] _emit_span called: %s / %s",
-            self._job_id, span_name, event_type,
+            self._job_id,
+            span_name,
+            event_type,
         )
         try:
             agent_name = _get_agent_name(event)
@@ -542,6 +584,7 @@ class OTelEventBridge:
             if not is_run_level:
                 try:
                     from src.core.events import set_event_context
+
                     set_event_context(
                         agent_role=agent_name or None,
                         agent_id=getattr(event, "agent_id", None)
@@ -549,8 +592,7 @@ class OTelEventBridge:
                         or getattr(getattr(event, "from_agent", None), "id", None),
                         task_id=getattr(event, "task_id", None)
                         or (
-                            str(getattr(getattr(event, "task", None), "id", ""))
-                            or None
+                            str(getattr(getattr(event, "task", None), "id", "")) or None
                         ),
                         task_name=task_name or None,
                     )
@@ -602,6 +644,7 @@ class OTelEventBridge:
                         if saved:
                             try:
                                 import json as _json
+
                                 saved_content = _safe_str(
                                     _json.dumps(saved, default=str, indent=2),
                                     4000,
@@ -636,7 +679,8 @@ class OTelEventBridge:
                 if not span.is_recording():
                     logger.warning(
                         "[OTel-Bridge][%s] Span not recording for %s (NoOp tracer or not sampled)",
-                        self._job_id, span_name,
+                        self._job_id,
+                        span_name,
                     )
                 # Core attributes picked up by db_exporter extractors
                 span.set_attribute("kasal.event_type", event_type)
@@ -656,7 +700,9 @@ class OTelEventBridge:
                 # Stamp the resolved task_id so the frontend groups this span
                 # under the running task instead of "Unassigned" (getTaskId reads
                 # task_id from the span's metadata before falling back to parent).
-                if (event_type.startswith("memory_") or guardrail_child) and event_task_id:
+                if (
+                    event_type.startswith("memory_") or guardrail_child
+                ) and event_task_id:
                     span.set_attribute("kasal.extra.task_id", str(event_task_id))
                 # Mark a re-attributed guardrail LLM call so it's still
                 # identifiable as guardrail validation within the task.
@@ -679,7 +725,9 @@ class OTelEventBridge:
 
                 # Mark failed events with error status
                 if "failed" in event_type or "error" in event_type:
-                    error_msg = getattr(event, "error", None) or getattr(event, "message", None)
+                    error_msg = getattr(event, "error", None) or getattr(
+                        event, "message", None
+                    )
                     span.set_status(StatusCode.ERROR, _safe_str(error_msg, 500))
 
         except Exception as e:
@@ -753,7 +801,9 @@ class OTelEventBridge:
         except Exception as e:  # pragma: no cover - defensive
             logger.debug(
                 "[OTel-Bridge][%s] MLflow tool-span bridge failed for %s: %s",
-                self._job_id, span_name, e,
+                self._job_id,
+                span_name,
+                e,
             )
 
     def _dag_parent_context(self, event: Any) -> Optional[Any]:
@@ -839,12 +889,18 @@ class OTelEventBridge:
                     if tid:
                         span.set_attribute("kasal.extra.task_id", str(tid))
                 if not task_name:
-                    resolved = getattr(task, "description", None) or getattr(task, "name", None)
+                    resolved = getattr(task, "description", None) or getattr(
+                        task, "name", None
+                    )
                     if resolved:
-                        span.set_attribute("kasal.extra.task_name", _safe_str(resolved, 200))
+                        span.set_attribute(
+                            "kasal.extra.task_name", _safe_str(resolved, 200)
+                        )
                 kasal_task_id = getattr(task, "_kasal_task_id", None)
                 if kasal_task_id:
-                    span.set_attribute("kasal.extra.frontend_task_id", str(kasal_task_id))
+                    span.set_attribute(
+                        "kasal.extra.frontend_task_id", str(kasal_task_id)
+                    )
 
             # ── Agent identification (BaseEvent fields) ──
             agent_role = getattr(event, "agent_role", None)
@@ -906,15 +962,14 @@ class OTelEventBridge:
             span.set_attribute("kasal.extra.retrieval_time_ms", float(retrieval_time))
         memory_content = getattr(event, "memory_content", None)
         if memory_content and str(memory_content).strip():
-            span.set_attribute("kasal.extra.memory_content", _safe_str(memory_content, 8000))
+            span.set_attribute(
+                "kasal.extra.memory_content", _safe_str(memory_content, 8000)
+            )
         else:
             # MemoryRetrievalCompletedEvent always fires, even when recall
             # matched nothing. Surface that explicitly so the trace UI doesn't
             # just render a blank body.
-            if any(
-                hasattr(event, f)
-                for f in ("retrieval_time_ms", "memory_content")
-            ):
+            if any(hasattr(event, f) for f in ("retrieval_time_ms", "memory_content")):
                 span.set_attribute(
                     "kasal.extra.memory_content",
                     "(no memories matched the query)",
@@ -926,11 +981,16 @@ class OTelEventBridge:
         # which window — a threshold far below the model's real window is what
         # turns compaction into a re-query loop.
         for compaction_field in (
-            "tokens_before", "tokens_after", "window", "messages_compacted",
+            "tokens_before",
+            "tokens_after",
+            "window",
+            "messages_compacted",
         ):
             compaction_value = getattr(event, compaction_field, None)
             if compaction_value is not None:
-                span.set_attribute(f"kasal.extra.{compaction_field}", int(compaction_value))
+                span.set_attribute(
+                    f"kasal.extra.{compaction_field}", int(compaction_value)
+                )
         strategy = getattr(event, "strategy", None)
         if strategy:
             span.set_attribute("kasal.extra.strategy", str(strategy))
@@ -976,6 +1036,7 @@ class OTelEventBridge:
         if isinstance(metadata, dict) and metadata:
             try:
                 import json as _json
+
                 span.set_attribute(
                     "kasal.extra.memory_metadata",
                     _safe_str(_json.dumps(metadata, default=str), 2000),
@@ -1057,7 +1118,9 @@ class OTelEventBridge:
         # ── Knowledge fields ──
         retrieved_knowledge = getattr(event, "retrieved_knowledge", None)
         if retrieved_knowledge:
-            span.set_attribute("kasal.extra.retrieved_knowledge", str(retrieved_knowledge))
+            span.set_attribute(
+                "kasal.extra.retrieved_knowledge", str(retrieved_knowledge)
+            )
 
         # ── Reasoning fields ──
         plan = getattr(event, "plan", None)
@@ -1104,10 +1167,14 @@ class OTelEventBridge:
             span.set_attribute("kasal.extra.transport_type", str(transport_type))
         conn_duration = getattr(event, "connection_duration_ms", None)
         if conn_duration is not None:
-            span.set_attribute("kasal.extra.connection_duration_ms", float(conn_duration))
+            span.set_attribute(
+                "kasal.extra.connection_duration_ms", float(conn_duration)
+            )
         exec_duration = getattr(event, "execution_duration_ms", None)
         if exec_duration is not None:
-            span.set_attribute("kasal.extra.execution_duration_ms", float(exec_duration))
+            span.set_attribute(
+                "kasal.extra.execution_duration_ms", float(exec_duration)
+            )
 
         # ── HITL fields ──
         message = getattr(event, "message", None)
@@ -1129,7 +1196,11 @@ class OTelEventBridge:
             # messages can be str or list[dict] — serialize for storage
             if isinstance(messages, list):
                 # Extract last user message as prompt summary
-                user_msgs = [m for m in messages if isinstance(m, dict) and m.get("role") == "user"]
+                user_msgs = [
+                    m
+                    for m in messages
+                    if isinstance(m, dict) and m.get("role") == "user"
+                ]
                 if user_msgs:
                     last_user = user_msgs[-1].get("content", "")
                     span.set_attribute("kasal.extra.prompt", str(last_user))
@@ -1142,7 +1213,10 @@ class OTelEventBridge:
         # tools available to the LLM (tool definitions, not tool usage)
         available_functions = getattr(event, "available_functions", None)
         if available_functions and isinstance(available_functions, dict):
-            span.set_attribute("kasal.extra.available_tools", _safe_str(list(available_functions.keys()), 500))
+            span.set_attribute(
+                "kasal.extra.available_tools",
+                _safe_str(list(available_functions.keys()), 500),
+            )
 
         # ── Error field (all failed events) ──
         error = getattr(event, "error", None)

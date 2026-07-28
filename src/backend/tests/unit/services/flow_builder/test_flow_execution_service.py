@@ -8,13 +8,15 @@ NOTE: This service now uses the consolidated ExecutionHistory model instead of
 the deprecated FlowExecution model. All flow executions are tracked in the
 executionhistory table with execution_type='flow'.
 """
-import pytest
-import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, UTC
 
-from src.services.flow_builder.execution_service import FlowExecutionService
+import uuid
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from src.models.execution_history import ExecutionHistory
+from src.services.flow_builder.execution_service import FlowExecutionService
 
 
 # Mock models
@@ -33,7 +35,7 @@ class MockExecutionHistory:
         execution_type="flow",
         created_at=None,
         updated_at=None,
-        completed_at=None
+        completed_at=None,
     ):
         self.id = id
         self.flow_id = flow_id or uuid.uuid4()
@@ -58,6 +60,7 @@ class MockFlow:
 
 class MockScalarResult:
     """Mock for SQLAlchemy scalar_one_or_none() result."""
+
     def __init__(self, result=None):
         self._result = result
 
@@ -67,6 +70,7 @@ class MockScalarResult:
 
 class MockScalarsResult:
     """Mock for SQLAlchemy scalars().all() result."""
+
     def __init__(self, results=None):
         self._results = results or []
 
@@ -107,7 +111,9 @@ class TestFlowExecutionService:
     # ========== create_execution Tests ==========
 
     @pytest.mark.asyncio
-    async def test_create_execution_success(self, flow_execution_service, mock_session, mock_execution):
+    async def test_create_execution_success(
+        self, flow_execution_service, mock_session, mock_execution
+    ):
         """Test successful flow execution creation."""
         flow_id = uuid.uuid4()
         job_id = "test-job-123"
@@ -115,13 +121,12 @@ class TestFlowExecutionService:
         group_id = "group-123"
 
         # Mock no existing execution
-        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(
+            return_value=None
+        )
 
         result = await flow_execution_service.create_execution(
-            flow_id=flow_id,
-            job_id=job_id,
-            config=config,
-            group_id=group_id
+            flow_id=flow_id, job_id=job_id, config=config, group_id=group_id
         )
 
         # Should add new execution to session
@@ -129,25 +134,27 @@ class TestFlowExecutionService:
         mock_session.commit.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_create_execution_inherits_group_id_from_flow(self, flow_execution_service, mock_session):
+    async def test_create_execution_inherits_group_id_from_flow(
+        self, flow_execution_service, mock_session
+    ):
         """Test that group_id is inherited from parent flow when not provided."""
         flow_id = uuid.uuid4()
         job_id = "test-job-123"
         mock_flow = MockFlow(id=flow_id, group_id="inherited-group")
 
         # Mock no existing execution
-        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(
+            return_value=None
+        )
 
         # Patch where FlowRepository is imported (inside the function)
-        with patch('src.repositories.flow_repository.FlowRepository') as MockFlowRepo:
+        with patch("src.repositories.flow_repository.FlowRepository") as MockFlowRepo:
             mock_flow_repo = MagicMock()
             mock_flow_repo.get = AsyncMock(return_value=mock_flow)
             MockFlowRepo.return_value = mock_flow_repo
 
             await flow_execution_service.create_execution(
-                flow_id=flow_id,
-                job_id=job_id,
-                group_id=None  # Not provided
+                flow_id=flow_id, job_id=job_id, group_id=None  # Not provided
             )
 
             # Should have tried to get parent flow
@@ -155,19 +162,21 @@ class TestFlowExecutionService:
             mock_session.add.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_create_execution_with_string_flow_id(self, flow_execution_service, mock_session):
+    async def test_create_execution_with_string_flow_id(
+        self, flow_execution_service, mock_session
+    ):
         """Test creation with string flow_id (converted to UUID)."""
         flow_id = uuid.uuid4()
         flow_id_str = str(flow_id)
         job_id = "test-job-123"
 
         # Mock no existing execution
-        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(
+            return_value=None
+        )
 
         await flow_execution_service.create_execution(
-            flow_id=flow_id_str,
-            job_id=job_id,
-            group_id="group-123"
+            flow_id=flow_id_str, job_id=job_id, group_id="group-123"
         )
 
         mock_session.add.assert_called_once()
@@ -178,15 +187,15 @@ class TestFlowExecutionService:
         """Test creation with invalid flow_id raises ValueError."""
         with pytest.raises(ValueError, match="Invalid UUID format"):
             await flow_execution_service.create_execution(
-                flow_id="invalid-uuid",
-                job_id="test-job",
-                group_id="group-123"
+                flow_id="invalid-uuid", job_id="test-job", group_id="group-123"
             )
 
     # ========== get_execution Tests ==========
 
     @pytest.mark.asyncio
-    async def test_get_execution_success(self, flow_execution_service, mock_session, mock_execution):
+    async def test_get_execution_success(
+        self, flow_execution_service, mock_session, mock_execution
+    ):
         """Test successful execution retrieval."""
         execution_id = 1
 
@@ -211,7 +220,9 @@ class TestFlowExecutionService:
     # ========== update_execution_status Tests ==========
 
     @pytest.mark.asyncio
-    async def test_update_execution_status_to_completed(self, flow_execution_service, mock_session, mock_execution):
+    async def test_update_execution_status_to_completed(
+        self, flow_execution_service, mock_session, mock_execution
+    ):
         """Test updating execution status to completed."""
         execution_id = 1
         result_data = {"output": "success"}
@@ -219,9 +230,7 @@ class TestFlowExecutionService:
         mock_session.execute.return_value = MockScalarResult(mock_execution)
 
         result = await flow_execution_service.update_execution_status(
-            execution_id=execution_id,
-            status="completed",
-            result=result_data
+            execution_id=execution_id, status="completed", result=result_data
         )
 
         assert result.status == "completed"
@@ -229,7 +238,9 @@ class TestFlowExecutionService:
         mock_session.commit.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_update_execution_status_to_failed(self, flow_execution_service, mock_session, mock_execution):
+    async def test_update_execution_status_to_failed(
+        self, flow_execution_service, mock_session, mock_execution
+    ):
         """Test updating execution status to failed with error."""
         execution_id = 1
         error_msg = "Execution failed"
@@ -237,9 +248,7 @@ class TestFlowExecutionService:
         mock_session.execute.return_value = MockScalarResult(mock_execution)
 
         result = await flow_execution_service.update_execution_status(
-            execution_id=execution_id,
-            status="failed",
-            error=error_msg
+            execution_id=execution_id, status="failed", error=error_msg
         )
 
         assert result.status == "failed"
@@ -248,7 +257,9 @@ class TestFlowExecutionService:
     # ========== update_execution_config Tests ==========
 
     @pytest.mark.asyncio
-    async def test_update_execution_config(self, flow_execution_service, mock_session, mock_execution):
+    async def test_update_execution_config(
+        self, flow_execution_service, mock_session, mock_execution
+    ):
         """Test updating execution config for state persistence."""
         execution_id = 1
         new_config = {"state": "updated", "counter": 5}
@@ -256,8 +267,7 @@ class TestFlowExecutionService:
         mock_session.execute.return_value = MockScalarResult(mock_execution)
 
         result = await flow_execution_service.update_execution_config(
-            execution_id=execution_id,
-            config=new_config
+            execution_id=execution_id, config=new_config
         )
 
         assert result.inputs == new_config
@@ -278,7 +288,9 @@ class TestFlowExecutionService:
     # ========== delete_execution Tests ==========
 
     @pytest.mark.asyncio
-    async def test_delete_execution_success(self, flow_execution_service, mock_session, mock_execution):
+    async def test_delete_execution_success(
+        self, flow_execution_service, mock_session, mock_execution
+    ):
         """Test successful deletion of flow execution."""
         execution_id = 1
 
@@ -291,7 +303,9 @@ class TestFlowExecutionService:
         mock_session.commit.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_delete_execution_not_found(self, flow_execution_service, mock_session):
+    async def test_delete_execution_not_found(
+        self, flow_execution_service, mock_session
+    ):
         """Test deletion when execution not found."""
         execution_id = 999
 
@@ -305,7 +319,9 @@ class TestFlowExecutionService:
     # ========== get_executions_by_flow Tests ==========
 
     @pytest.mark.asyncio
-    async def test_get_executions_by_flow_uuid(self, flow_execution_service, mock_session, mock_execution):
+    async def test_get_executions_by_flow_uuid(
+        self, flow_execution_service, mock_session, mock_execution
+    ):
         """Test getting executions by flow UUID."""
         flow_id = uuid.uuid4()
         mock_executions = [mock_execution, MockExecutionHistory(id=2)]
@@ -319,7 +335,9 @@ class TestFlowExecutionService:
         mock_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_executions_by_flow_string(self, flow_execution_service, mock_session, mock_execution):
+    async def test_get_executions_by_flow_string(
+        self, flow_execution_service, mock_session, mock_execution
+    ):
         """Test getting executions by flow ID string."""
         flow_id = uuid.uuid4()
         flow_id_str = str(flow_id)
@@ -336,7 +354,7 @@ class TestFlowExecutionService:
     def test_service_initialization(self, flow_execution_service, mock_session):
         """Test FlowExecutionService initialization."""
         assert flow_execution_service.session == mock_session
-        assert hasattr(flow_execution_service, 'execution_repo')
+        assert hasattr(flow_execution_service, "execution_repo")
 
     # ========== Multi-Tenancy Tests ==========
 
@@ -348,12 +366,12 @@ class TestFlowExecutionService:
         group_id = "tenant-abc"
 
         # Mock no existing execution
-        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(return_value=None)
+        flow_execution_service.execution_repo.get_execution_by_job_id = AsyncMock(
+            return_value=None
+        )
 
         await flow_execution_service.create_execution(
-            flow_id=flow_id,
-            job_id=job_id,
-            group_id=group_id
+            flow_id=flow_id, job_id=job_id, group_id=group_id
         )
 
         # Should add execution with group_id
@@ -364,7 +382,9 @@ class TestFlowExecutionService:
     # ========== Existing Execution Update Tests ==========
 
     @pytest.mark.asyncio
-    async def test_create_execution_updates_existing(self, flow_execution_service, mock_session, mock_execution):
+    async def test_create_execution_updates_existing(
+        self, flow_execution_service, mock_session, mock_execution
+    ):
         """Test that create_execution updates existing record if job_id exists."""
         flow_id = uuid.uuid4()
         job_id = "existing-job"
@@ -375,9 +395,7 @@ class TestFlowExecutionService:
         )
 
         await flow_execution_service.create_execution(
-            flow_id=flow_id,
-            job_id=job_id,
-            group_id="group-123"
+            flow_id=flow_id, job_id=job_id, group_id="group-123"
         )
 
         # Should NOT add new execution - just update existing

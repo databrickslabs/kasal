@@ -1,23 +1,23 @@
 """Base classes, factory, and core models for converters"""
 
 # Framework classes
-from .converter import BaseConverter, ConversionFormat
-from .factory import ConverterFactory
 from .connectors import (
     BaseInboundConnector,
     ConnectorType,
     InboundConnectorMetadata,
 )
+from .converter import BaseConverter, ConversionFormat
+from .factory import ConverterFactory
 
 # Core data models
 from .models import (
     KPI,
+    DAXMeasure,
     KPIDefinition,
     KPIFilter,
-    Structure,
     QueryFilter,
-    DAXMeasure,
     SQLMeasure,
+    Structure,
     UCMetric,
 )
 

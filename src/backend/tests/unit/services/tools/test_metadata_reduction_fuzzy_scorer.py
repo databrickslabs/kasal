@@ -1,6 +1,7 @@
 """Unit tests for FuzzyScorer in metadata_reduction package."""
 
 import pytest
+
 from src.services.tools.metadata_reduction.fuzzy_scorer import (
     FuzzyScorer,
     _fuzzy_score,
@@ -207,7 +208,11 @@ class TestRankTables:
             {"name": "Sales", "columns": [{"name": "Revenue"}], "measures": []},
             {"name": "Geography", "columns": [{"name": "Country"}], "measures": []},
             {"name": "DateTable", "columns": [{"name": "Date"}], "measures": []},
-            {"name": "Warehouses", "columns": [{"name": "Warehouse ID"}], "measures": []},
+            {
+                "name": "Warehouses",
+                "columns": [{"name": "Warehouse ID"}],
+                "measures": [],
+            },
         ]
 
     def test_returns_sorted_by_score(self):

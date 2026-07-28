@@ -77,13 +77,13 @@ except Exception:
 import asyncio
 import logging
 import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor
-from typing import Dict, Any, Optional
-import pickle
-import traceback
-import signal
 import os
+import pickle
+import signal
+import traceback
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
 
@@ -136,10 +136,10 @@ def run_flow_in_process(
         - CREWAI_VERBOSE: Controls CrewAI output verbosity
     """
     # Import necessary modules at the beginning
+    import logging
     import os
     import sys
     import traceback
-    import logging
 
     # Mark that we're in subprocess mode for logging purposes
     os.environ["FLOW_SUBPROCESS_MODE"] = "true"
@@ -212,8 +212,8 @@ def run_flow_in_process(
     # Configure logging
     from src.services.execution.subprocess_bootstrap import (
         configure_subprocess_logging,
-        suppress_stdout_stderr,
         restore_stdout_stderr,
+        suppress_stdout_stderr,
     )
 
     # Suppress all stdout/stderr output
@@ -360,8 +360,8 @@ def run_flow_in_process(
                     f"[FLOW_SUBPROCESS] Initializing LogWriterTask and event listeners for {execution_id}"
                 )
 
-                from src.services.execution.logs.writer_task import LogWriterTask
                 from src.core.events import event_bus
+                from src.services.execution.logs.writer_task import LogWriterTask
 
                 # Start trace and logs writers
                 await LogWriterTask.ensure_writer_started()
@@ -372,13 +372,14 @@ def run_flow_in_process(
                 # Initialize OTel tracing (always-on, sole trace source)
                 otel_provider = None
                 try:
-                    from src.services.otel_tracing import (
-                        create_kasal_tracer_provider,
-                    )
                     from opentelemetry import trace as _otel_trace
                     from opentelemetry.sdk.trace.export import (
                         BatchSpanProcessor,
                         SimpleSpanProcessor,
+                    )
+
+                    from src.services.otel_tracing import (
+                        create_kasal_tracer_provider,
                     )
 
                     otel_provider = create_kasal_tracer_provider(
@@ -564,6 +565,7 @@ def run_flow_in_process(
                     from opentelemetry.sdk.trace.export import (
                         SimpleSpanProcessor,
                     )
+
                     from src.services.otel_tracing.mlflow_exporter import (
                         KasalMLflowSpanExporter,
                     )
@@ -894,9 +896,7 @@ def run_flow_in_process(
                 # This is essential for llm_request/llm_response traces that are written
                 # asynchronously by the event bus's thread pool
                 try:
-                    from src.core.events import (
-                        event_bus as _cleanup_event_bus,
-                    )
+                    from src.core.events import event_bus as _cleanup_event_bus
 
                     async_logger.info(
                         "[FLOW_SUBPROCESS] Final event bus flush before cleanup..."
@@ -912,7 +912,10 @@ def run_flow_in_process(
                 # Flush remaining token chunks + EOF sentinel so the parent's
                 # relay ends cleanly instead of waiting out its grace period.
                 try:
-                    from src.services.execution.event_pipe import close_active_pipe_writer
+                    from src.services.execution.event_pipe import (
+                        close_active_pipe_writer,
+                    )
+
                     close_active_pipe_writer()
                 except Exception:
                     pass
@@ -1197,8 +1200,8 @@ class ProcessFlowExecutor:
             logging.shutdown()
 
             # Force exit the subprocess
-            import sys
             import os
+            import sys
 
             # Log that we're exiting (might not be written if handlers already closed)
             try:
@@ -1306,8 +1309,8 @@ class ProcessFlowExecutor:
         old_lakebase_instance = os.environ.get("LAKEBASE_INSTANCE_NAME")
         try:
             from src.db.database_router import (
-                is_lakebase_enabled,
                 get_lakebase_config_from_db,
+                is_lakebase_enabled,
             )
 
             lakebase_enabled = await is_lakebase_enabled()
@@ -1954,8 +1957,8 @@ class ProcessFlowExecutor:
 
     async def _write_logs_postgres_async(self, logs_to_write: list, settings):
         """Write logs to PostgreSQL using async with NullPool."""
-        from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy.pool import NullPool
 
         postgres_user = settings.POSTGRES_USER or "postgres"

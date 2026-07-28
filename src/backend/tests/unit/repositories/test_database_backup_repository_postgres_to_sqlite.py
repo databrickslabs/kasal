@@ -18,25 +18,29 @@ Targets uncovered lines:
 - Lines 1157-1220: get_database_info postgres path with lakebase schema
 - Lines 1187-1220: get_database_info memory_backends in postgres
 """
-import os
+
 import json
+import os
 import sqlite3
 import tempfile
+from datetime import date, datetime
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
 import pytest
-from datetime import datetime, date
-from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from src.repositories.database_backup_repository import DatabaseBackupRepository
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def make_repo(session=None, user_token=None):
     if session is None:
         session = AsyncMock()
-    with patch("src.repositories.database_backup_repository.DatabricksVolumeRepository") as mock_vr:
+    with patch(
+        "src.repositories.database_backup_repository.DatabricksVolumeRepository"
+    ) as mock_vr:
         mock_vr.return_value = MagicMock()
         repo = DatabaseBackupRepository(session, user_token)
     repo.volume_repo = MagicMock()
@@ -47,6 +51,7 @@ def make_repo(session=None, user_token=None):
 # ---------------------------------------------------------------------------
 # create_postgres_backup: row value type handling
 # ---------------------------------------------------------------------------
+
 
 class TestCreatePostgresBackupValueTypes:
 
@@ -60,17 +65,24 @@ class TestCreatePostgresBackupValueTypes:
         tables_result.fetchall.return_value = [("agents",)]
 
         columns_result = MagicMock()
-        columns_result.fetchall.return_value = [("id", "integer"), ("active", "boolean")]
+        columns_result.fetchall.return_value = [
+            ("id", "integer"),
+            ("active", "boolean"),
+        ]
 
         data_result = MagicMock()
         data_result.fetchall.return_value = [(1, True), (2, False)]
 
-        session.execute = AsyncMock(side_effect=[tables_result, columns_result, data_result])
+        session.execute = AsyncMock(
+            side_effect=[tables_result, columns_result, data_result]
+        )
         repo.volume_repo.upload_file_to_volume = AsyncMock(
             return_value={"success": True, "path": "/vol/b.sql"}
         )
 
-        result = await repo.create_postgres_backup("cat", "sch", "vol", "b.sql", session=session)
+        result = await repo.create_postgres_backup(
+            "cat", "sch", "vol", "b.sql", session=session
+        )
         assert result["success"] is True
         assert result["total_rows"] == 2
 
@@ -84,18 +96,25 @@ class TestCreatePostgresBackupValueTypes:
         tables_result.fetchall.return_value = [("executions",)]
 
         columns_result = MagicMock()
-        columns_result.fetchall.return_value = [("id", "integer"), ("created_at", "timestamp")]
+        columns_result.fetchall.return_value = [
+            ("id", "integer"),
+            ("created_at", "timestamp"),
+        ]
 
         ts = datetime(2024, 1, 15, 10, 30, 0)
         data_result = MagicMock()
         data_result.fetchall.return_value = [(1, ts)]
 
-        session.execute = AsyncMock(side_effect=[tables_result, columns_result, data_result])
+        session.execute = AsyncMock(
+            side_effect=[tables_result, columns_result, data_result]
+        )
         repo.volume_repo.upload_file_to_volume = AsyncMock(
             return_value={"success": True, "path": "/vol/b.sql"}
         )
 
-        result = await repo.create_postgres_backup("cat", "sch", "vol", "b.sql", session=session)
+        result = await repo.create_postgres_backup(
+            "cat", "sch", "vol", "b.sql", session=session
+        )
         assert result["success"] is True
 
     @pytest.mark.asyncio
@@ -113,12 +132,16 @@ class TestCreatePostgresBackupValueTypes:
         data_result = MagicMock()
         data_result.fetchall.return_value = [(1, {"key": "value"})]
 
-        session.execute = AsyncMock(side_effect=[tables_result, columns_result, data_result])
+        session.execute = AsyncMock(
+            side_effect=[tables_result, columns_result, data_result]
+        )
         repo.volume_repo.upload_file_to_volume = AsyncMock(
             return_value={"success": True, "path": "/vol/b.sql"}
         )
 
-        result = await repo.create_postgres_backup("cat", "sch", "vol", "b.sql", session=session)
+        result = await repo.create_postgres_backup(
+            "cat", "sch", "vol", "b.sql", session=session
+        )
         assert result["success"] is True
 
     @pytest.mark.asyncio
@@ -131,17 +154,24 @@ class TestCreatePostgresBackupValueTypes:
         tables_result.fetchall.return_value = [("tasks",)]
 
         columns_result = MagicMock()
-        columns_result.fetchall.return_value = [("id", "integer"), ("description", "text")]
+        columns_result.fetchall.return_value = [
+            ("id", "integer"),
+            ("description", "text"),
+        ]
 
         data_result = MagicMock()
         data_result.fetchall.return_value = [(1, None)]
 
-        session.execute = AsyncMock(side_effect=[tables_result, columns_result, data_result])
+        session.execute = AsyncMock(
+            side_effect=[tables_result, columns_result, data_result]
+        )
         repo.volume_repo.upload_file_to_volume = AsyncMock(
             return_value={"success": True, "path": "/vol/b.sql"}
         )
 
-        result = await repo.create_postgres_backup("cat", "sch", "vol", "b.sql", session=session)
+        result = await repo.create_postgres_backup(
+            "cat", "sch", "vol", "b.sql", session=session
+        )
         assert result["success"] is True
 
     @pytest.mark.asyncio
@@ -159,18 +189,23 @@ class TestCreatePostgresBackupValueTypes:
         data_result = MagicMock()
         data_result.fetchall.return_value = [(1, 3.14)]
 
-        session.execute = AsyncMock(side_effect=[tables_result, columns_result, data_result])
+        session.execute = AsyncMock(
+            side_effect=[tables_result, columns_result, data_result]
+        )
         repo.volume_repo.upload_file_to_volume = AsyncMock(
             return_value={"success": True, "path": "/vol/b.sql"}
         )
 
-        result = await repo.create_postgres_backup("cat", "sch", "vol", "b.sql", session=session)
+        result = await repo.create_postgres_backup(
+            "cat", "sch", "vol", "b.sql", session=session
+        )
         assert result["success"] is True
 
 
 # ---------------------------------------------------------------------------
 # _create_postgres_to_sqlite_backup
 # ---------------------------------------------------------------------------
+
 
 class TestCreatePostgresToSqliteBackup:
 
@@ -192,7 +227,9 @@ class TestCreatePostgresToSqliteBackup:
         data_result = MagicMock()
         data_result.fetchall.return_value = [(1, "Agent Smith")]
 
-        session.execute = AsyncMock(side_effect=[tables_result, col_result, data_result])
+        session.execute = AsyncMock(
+            side_effect=[tables_result, col_result, data_result]
+        )
 
         repo.volume_repo.upload_file_to_volume = AsyncMock(
             return_value={"success": True, "path": "/vol/backup.db"}
@@ -203,7 +240,7 @@ class TestCreatePostgresToSqliteBackup:
             catalog="cat",
             schema="sch",
             volume_name="vol",
-            backup_filename="backup.db"
+            backup_filename="backup.db",
         )
 
         assert result["success"] is True
@@ -233,14 +270,19 @@ class TestCreatePostgresToSqliteBackup:
             (1, 3.14, True, datetime(2024, 1, 1), {"k": "v"})
         ]
 
-        session.execute = AsyncMock(side_effect=[tables_result, col_result, data_result])
+        session.execute = AsyncMock(
+            side_effect=[tables_result, col_result, data_result]
+        )
         repo.volume_repo.upload_file_to_volume = AsyncMock(
             return_value={"success": True, "path": "/vol/b.db"}
         )
 
         result = await repo._create_postgres_to_sqlite_backup(
-            session=session, catalog="c", schema="s", volume_name="v",
-            backup_filename="b.db"
+            session=session,
+            catalog="c",
+            schema="s",
+            volume_name="v",
+            backup_filename="b.db",
         )
         assert result["success"] is True
 
@@ -259,14 +301,19 @@ class TestCreatePostgresToSqliteBackup:
         data_result = MagicMock()
         data_result.fetchall.return_value = []
 
-        session.execute = AsyncMock(side_effect=[tables_result, col_result, data_result])
+        session.execute = AsyncMock(
+            side_effect=[tables_result, col_result, data_result]
+        )
         repo.volume_repo.upload_file_to_volume = AsyncMock(
             return_value={"success": False, "error": "Volume full"}
         )
 
         result = await repo._create_postgres_to_sqlite_backup(
-            session=session, catalog="c", schema="s", volume_name="v",
-            backup_filename="b.db"
+            session=session,
+            catalog="c",
+            schema="s",
+            volume_name="v",
+            backup_filename="b.db",
         )
         assert result["success"] is False
 
@@ -285,8 +332,11 @@ class TestCreatePostgresToSqliteBackup:
         )
 
         result = await repo._create_postgres_to_sqlite_backup(
-            session=session, catalog="c", schema="s", volume_name="v",
-            backup_filename="b.db"
+            session=session,
+            catalog="c",
+            schema="s",
+            volume_name="v",
+            backup_filename="b.db",
         )
         assert result["success"] is True
 
@@ -298,8 +348,11 @@ class TestCreatePostgresToSqliteBackup:
         session.execute = AsyncMock(side_effect=Exception("DB error"))
 
         result = await repo._create_postgres_to_sqlite_backup(
-            session=session, catalog="c", schema="s", volume_name="v",
-            backup_filename="b.db"
+            session=session,
+            catalog="c",
+            schema="s",
+            volume_name="v",
+            backup_filename="b.db",
         )
         assert result["success"] is False
         assert "DB error" in result["error"]
@@ -314,18 +367,27 @@ class TestCreatePostgresToSqliteBackup:
         tables_result.fetchall.return_value = [("events",)]
 
         col_result = MagicMock()
-        col_result.fetchall.return_value = [("id", "integer", "NO"), ("event_date", "date", "YES")]
+        col_result.fetchall.return_value = [
+            ("id", "integer", "NO"),
+            ("event_date", "date", "YES"),
+        ]
 
         data_result = MagicMock()
         data_result.fetchall.return_value = [(1, date(2024, 6, 15))]
 
-        session.execute = AsyncMock(side_effect=[tables_result, col_result, data_result])
+        session.execute = AsyncMock(
+            side_effect=[tables_result, col_result, data_result]
+        )
         repo.volume_repo.upload_file_to_volume = AsyncMock(
             return_value={"success": True, "path": "/vol/b.db"}
         )
 
         result = await repo._create_postgres_to_sqlite_backup(
-            session=session, catalog="c", schema="s", volume_name="v", backup_filename="b.db"
+            session=session,
+            catalog="c",
+            schema="s",
+            volume_name="v",
+            backup_filename="b.db",
         )
         assert result["success"] is True
 
@@ -339,18 +401,27 @@ class TestCreatePostgresToSqliteBackup:
         tables_result.fetchall.return_value = [("tags",)]
 
         col_result = MagicMock()
-        col_result.fetchall.return_value = [("id", "integer", "NO"), ("items", "jsonb", "YES")]
+        col_result.fetchall.return_value = [
+            ("id", "integer", "NO"),
+            ("items", "jsonb", "YES"),
+        ]
 
         data_result = MagicMock()
         data_result.fetchall.return_value = [(1, ["a", "b", "c"])]
 
-        session.execute = AsyncMock(side_effect=[tables_result, col_result, data_result])
+        session.execute = AsyncMock(
+            side_effect=[tables_result, col_result, data_result]
+        )
         repo.volume_repo.upload_file_to_volume = AsyncMock(
             return_value={"success": True, "path": "/vol/b.db"}
         )
 
         result = await repo._create_postgres_to_sqlite_backup(
-            session=session, catalog="c", schema="s", volume_name="v", backup_filename="b.db"
+            session=session,
+            catalog="c",
+            schema="s",
+            volume_name="v",
+            backup_filename="b.db",
         )
         assert result["success"] is True
 
@@ -364,18 +435,27 @@ class TestCreatePostgresToSqliteBackup:
         tables_result.fetchall.return_value = [("sequences",)]
 
         col_result = MagicMock()
-        col_result.fetchall.return_value = [("id", "serial", "NO"), ("val", "text", "YES")]
+        col_result.fetchall.return_value = [
+            ("id", "serial", "NO"),
+            ("val", "text", "YES"),
+        ]
 
         data_result = MagicMock()
         data_result.fetchall.return_value = [(1, "hello")]
 
-        session.execute = AsyncMock(side_effect=[tables_result, col_result, data_result])
+        session.execute = AsyncMock(
+            side_effect=[tables_result, col_result, data_result]
+        )
         repo.volume_repo.upload_file_to_volume = AsyncMock(
             return_value={"success": True, "path": "/vol/b.db"}
         )
 
         result = await repo._create_postgres_to_sqlite_backup(
-            session=session, catalog="c", schema="s", volume_name="v", backup_filename="b.db"
+            session=session,
+            catalog="c",
+            schema="s",
+            volume_name="v",
+            backup_filename="b.db",
         )
         assert result["success"] is True
 
@@ -389,18 +469,27 @@ class TestCreatePostgresToSqliteBackup:
         tables_result.fetchall.return_value = [("items",)]
 
         col_result = MagicMock()
-        col_result.fetchall.return_value = [("id", "integer", "NO"), ("value", "text", "YES")]
+        col_result.fetchall.return_value = [
+            ("id", "integer", "NO"),
+            ("value", "text", "YES"),
+        ]
 
         data_result = MagicMock()
         data_result.fetchall.return_value = [(1, None)]
 
-        session.execute = AsyncMock(side_effect=[tables_result, col_result, data_result])
+        session.execute = AsyncMock(
+            side_effect=[tables_result, col_result, data_result]
+        )
         repo.volume_repo.upload_file_to_volume = AsyncMock(
             return_value={"success": True, "path": "/vol/b.db"}
         )
 
         result = await repo._create_postgres_to_sqlite_backup(
-            session=session, catalog="c", schema="s", volume_name="v", backup_filename="b.db"
+            session=session,
+            catalog="c",
+            schema="s",
+            volume_name="v",
+            backup_filename="b.db",
         )
         assert result["success"] is True
 
@@ -408,6 +497,7 @@ class TestCreatePostgresToSqliteBackup:
 # ---------------------------------------------------------------------------
 # restore_sqlite_backup: safety backup and table-by-table copy
 # ---------------------------------------------------------------------------
+
 
 class TestRestoreSqliteBackupAdvanced:
 
@@ -445,8 +535,7 @@ class TestRestoreSqliteBackupAdvanced:
             conn.close()
 
             result = await repo.restore_sqlite_backup(
-                "cat", "sch", "vol", "backup.db", target,
-                create_safety_backup=True
+                "cat", "sch", "vol", "backup.db", target, create_safety_backup=True
             )
 
         assert result["success"] is True
@@ -468,8 +557,12 @@ class TestRestoreSqliteBackupAdvanced:
                 is_system_admin INTEGER
             )
         """)
-        bkp_conn.execute("INSERT INTO users VALUES ('new-uuid', 'admin@example.com', 'admin', 1)")
-        bkp_conn.execute("INSERT INTO users VALUES ('user-uuid', 'user@example.com', 'user', 0)")
+        bkp_conn.execute(
+            "INSERT INTO users VALUES ('new-uuid', 'admin@example.com', 'admin', 1)"
+        )
+        bkp_conn.execute(
+            "INSERT INTO users VALUES ('user-uuid', 'user@example.com', 'user', 0)"
+        )
         bkp_conn.commit()
         bkp_conn.close()
 
@@ -503,8 +596,7 @@ class TestRestoreSqliteBackupAdvanced:
             target_conn.close()
 
             result = await repo.restore_sqlite_backup(
-                "cat", "sch", "vol", "backup.db", target,
-                create_safety_backup=False
+                "cat", "sch", "vol", "backup.db", target, create_safety_backup=False
             )
 
         assert result["success"] is True
@@ -545,8 +637,7 @@ class TestRestoreSqliteBackupAdvanced:
             conn.close()
 
             result = await repo.restore_sqlite_backup(
-                "cat", "sch", "vol", "backup.db", target,
-                create_safety_backup=False
+                "cat", "sch", "vol", "backup.db", target, create_safety_backup=False
             )
 
         assert result["success"] is True
@@ -584,8 +675,7 @@ class TestRestoreSqliteBackupAdvanced:
             conn.close()
 
             result = await repo.restore_sqlite_backup(
-                "cat", "sch", "vol", "backup.db", target,
-                create_safety_backup=False
+                "cat", "sch", "vol", "backup.db", target, create_safety_backup=False
             )
 
         assert result["success"] is True
@@ -594,6 +684,7 @@ class TestRestoreSqliteBackupAdvanced:
 # ---------------------------------------------------------------------------
 # restore_postgres_backup: SQL path and JSON path
 # ---------------------------------------------------------------------------
+
 
 class TestRestorePostgresBackup:
 
@@ -689,11 +780,14 @@ class TestRestorePostgresBackup:
                     {"id": 1, "name": "Agent1"},
                     {"id": 2, "name": "Agent2"},
                 ]
-            }
+            },
         }
 
         repo.volume_repo.download_file_from_volume = AsyncMock(
-            return_value={"success": True, "content": json.dumps(backup_data).encode("utf-8")}
+            return_value={
+                "success": True,
+                "content": json.dumps(backup_data).encode("utf-8"),
+            }
         )
 
         session = AsyncMock()
@@ -715,7 +809,10 @@ class TestRestorePostgresBackup:
         backup_data = {"database_type": "sqlite", "tables": {}}
 
         repo.volume_repo.download_file_from_volume = AsyncMock(
-            return_value={"success": True, "content": json.dumps(backup_data).encode("utf-8")}
+            return_value={
+                "success": True,
+                "content": json.dumps(backup_data).encode("utf-8"),
+            }
         )
 
         session = AsyncMock()
@@ -785,6 +882,7 @@ class TestRestorePostgresBackup:
 # list_backups: json backup type and modification_time fallback
 # ---------------------------------------------------------------------------
 
+
 class TestListBackupsAdvanced:
 
     @pytest.mark.asyncio
@@ -799,9 +897,9 @@ class TestListBackupsAdvanced:
                         "name": "kasal_backup_20240101_120000.json",
                         "path": "/p/b.json",
                         "file_size": 512,
-                        "is_directory": False
+                        "is_directory": False,
                     }
-                ]
+                ],
             }
         )
         result = await repo.list_backups("cat", "sch", "vol")
@@ -821,9 +919,9 @@ class TestListBackupsAdvanced:
                         "path": "/p/b.db",
                         "file_size": 100,
                         "is_directory": False,
-                        "modification_time": 1704067200000  # 2024-01-01 in ms
+                        "modification_time": 1704067200000,  # 2024-01-01 in ms
                     }
-                ]
+                ],
             }
         )
         result = await repo.list_backups("cat", "sch", "vol")
@@ -842,10 +940,10 @@ class TestListBackupsAdvanced:
                         "name": "kasal_backup_bad.db",
                         "path": "/p/b.db",
                         "file_size": 100,
-                        "is_directory": False
+                        "is_directory": False,
                         # No modification_time key
                     }
-                ]
+                ],
             }
         )
         result = await repo.list_backups("cat", "sch", "vol")
@@ -856,6 +954,7 @@ class TestListBackupsAdvanced:
 # ---------------------------------------------------------------------------
 # get_database_info: extended paths
 # ---------------------------------------------------------------------------
+
 
 class TestGetDatabaseInfoExtended:
 
@@ -876,8 +975,12 @@ class TestGetDatabaseInfoExtended:
 
             # get_database_info internally does `from src.config.settings import settings`
             # so we must patch the settings object inside that module
-            with patch("src.repositories.database_backup_repository.settings") as mock_outer, \
-                 patch("src.config.settings.settings") as mock_inner_settings:
+            with (
+                patch(
+                    "src.repositories.database_backup_repository.settings"
+                ) as mock_outer,
+                patch("src.config.settings.settings") as mock_inner_settings,
+            ):
                 mock_outer.DATABASE_URI = "sqlite:///app.db"
                 mock_inner_settings.SQLITE_DB_PATH = db_path
 
@@ -893,8 +996,10 @@ class TestGetDatabaseInfoExtended:
         """get_database_info uses './app.db' fallback when SQLITE_DB_PATH is empty."""
         repo = make_repo()
 
-        with patch("src.repositories.database_backup_repository.settings") as mock_outer, \
-             patch("src.config.settings.settings") as mock_inner:
+        with (
+            patch("src.repositories.database_backup_repository.settings") as mock_outer,
+            patch("src.config.settings.settings") as mock_inner,
+        ):
             mock_outer.DATABASE_URI = "sqlite:///app.db"
             mock_inner.SQLITE_DB_PATH = ""
 
@@ -909,8 +1014,10 @@ class TestGetDatabaseInfoExtended:
         """get_database_info converts relative SQLITE_DB_PATH to absolute path."""
         repo = make_repo()
 
-        with patch("src.repositories.database_backup_repository.settings") as mock_outer, \
-             patch("src.config.settings.settings") as mock_inner:
+        with (
+            patch("src.repositories.database_backup_repository.settings") as mock_outer,
+            patch("src.config.settings.settings") as mock_inner,
+        ):
             mock_outer.DATABASE_URI = "sqlite:///app.db"
             mock_inner.SQLITE_DB_PATH = "nonexistent/relative/app.db"
 
@@ -1038,7 +1145,13 @@ class TestGetDatabaseInfoExtended:
         ]
 
         session.execute = AsyncMock(
-            side_effect=[schema_check, tables_result, count_result, size_result, mb_result]
+            side_effect=[
+                schema_check,
+                tables_result,
+                count_result,
+                size_result,
+                mb_result,
+            ]
         )
 
         result = await repo.get_database_info(session=session)
@@ -1052,7 +1165,9 @@ class TestGetDatabaseInfoExtended:
         """get_database_info returns error for unsupported database type."""
         repo = make_repo()
 
-        with patch("src.repositories.database_backup_repository.settings") as mock_settings:
+        with patch(
+            "src.repositories.database_backup_repository.settings"
+        ) as mock_settings:
             mock_settings.DATABASE_URI = "mysql://user:pass@host/db"
             result = await repo.get_database_info(db_path=None, session=None)
 

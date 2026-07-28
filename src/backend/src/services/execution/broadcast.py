@@ -20,7 +20,7 @@ from typing import Dict, Optional, Set
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.sse_manager import sse_manager, SSEEvent
+from src.core.sse_manager import SSEEvent, sse_manager
 from src.db.session import async_session_factory
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
 
@@ -117,7 +117,9 @@ class ExecutionBroadcastService:
                 del self._last_statuses[job_id]
                 if job_id in self._last_completed_at:
                     del self._last_completed_at[job_id]
-                logger.debug(f"[ExecutionBroadcastService] Stopped tracking job {job_id}")
+                logger.debug(
+                    f"[ExecutionBroadcastService] Stopped tracking job {job_id}"
+                )
 
             # Check for status changes
             for job_id in active_jobs:
@@ -140,7 +142,9 @@ class ExecutionBroadcastService:
                 return
 
             current_status = execution.status
-            current_completed_at = execution.completed_at.isoformat() if execution.completed_at else None
+            current_completed_at = (
+                execution.completed_at.isoformat() if execution.completed_at else None
+            )
 
             # Check if status changed or completed_at was set
             last_status = self._last_statuses.get(job_id)
@@ -156,10 +160,13 @@ class ExecutionBroadcastService:
 
                 # Only broadcast if this is not the initial tracking (last_status was None means first poll)
                 if last_status is not None:
-                    logger.info(f"[ExecutionBroadcastService] Status changed for job {job_id}: {last_status} -> {current_status}")
+                    logger.info(
+                        f"[ExecutionBroadcastService] Status changed for job {job_id}: {last_status} -> {current_status}"
+                    )
 
                     # Create event data
                     from datetime import datetime
+
                     event_data = {
                         "job_id": job_id,
                         "status": current_status,
@@ -177,7 +184,7 @@ class ExecutionBroadcastService:
                     event = SSEEvent(
                         data=event_data,
                         event="execution_update",
-                        id=f"{job_id}_status_{current_status}"
+                        id=f"{job_id}_status_{current_status}",
                     )
 
                     sent_count = await sse_manager.broadcast_to_job(job_id, event)
@@ -186,10 +193,14 @@ class ExecutionBroadcastService:
                         f"({current_status}) to {sent_count} clients"
                     )
                 else:
-                    logger.debug(f"[ExecutionBroadcastService] Started tracking job {job_id} with status {current_status}")
+                    logger.debug(
+                        f"[ExecutionBroadcastService] Started tracking job {job_id} with status {current_status}"
+                    )
 
         except Exception as e:
-            logger.error(f"[ExecutionBroadcastService] Error checking status for job {job_id}: {e}")
+            logger.error(
+                f"[ExecutionBroadcastService] Error checking status for job {job_id}: {e}"
+            )
 
 
 # Global instance

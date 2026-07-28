@@ -8,12 +8,20 @@ list_group_users, assign_user_to_group, update_group_user, remove_user_from_grou
 delete_group, get_group_stats, get_total_group_count,
 create_first_admin_group_for_user, get_user_group_membership.
 """
-import pytest
+
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.models.enums import GroupStatus, GroupUserStatus, GroupUserRole, UserRole, UserStatus
+import pytest
+
+from src.models.enums import (
+    GroupStatus,
+    GroupUserRole,
+    GroupUserStatus,
+    UserRole,
+    UserStatus,
+)
 
 
 def make_session():
@@ -32,9 +40,14 @@ def make_group(id="g1", name="Test Group", status=GroupStatus.ACTIVE):
     return g
 
 
-def make_group_user(id="gu1", group_id="g1", user_id="u1",
-                    role=GroupUserRole.OPERATOR, status=GroupUserStatus.ACTIVE,
-                    group=None):
+def make_group_user(
+    id="gu1",
+    group_id="g1",
+    user_id="u1",
+    role=GroupUserRole.OPERATOR,
+    status=GroupUserStatus.ACTIVE,
+    group=None,
+):
     gu = MagicMock()
     gu.id = id
     gu.group_id = group_id
@@ -55,12 +68,13 @@ def make_context(primary_group_id="g1", group_email="user@example.com"):
         primary_group_id=primary_group_id,
         primary_tenant_id=None,
         group_email=group_email,
-        tenant_email=None
+        tenant_email=None,
     )
 
 
 def make_service(session=None):
     from src.services.groups.groups import GroupService
+
     s = session or make_session()
     svc = GroupService(session=s)
     svc.group_repo = AsyncMock()
@@ -72,10 +86,16 @@ def make_service(session=None):
 # ensure_group_exists
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_ensure_group_exists_no_primary_id():
     svc = make_service()
-    ctx = SimpleNamespace(primary_group_id=None, primary_tenant_id=None, group_email=None, tenant_email=None)
+    ctx = SimpleNamespace(
+        primary_group_id=None,
+        primary_tenant_id=None,
+        group_email=None,
+        tenant_email=None,
+    )
     result = await svc.ensure_group_exists(ctx)
     assert result is None
 
@@ -139,7 +159,7 @@ async def test_ensure_group_exists_legacy_tenant_context():
         primary_group_id=None,
         primary_tenant_id="t1",
         group_email=None,
-        tenant_email="t@example.com"
+        tenant_email="t@example.com",
     )
     result = await svc.ensure_group_exists(ctx)
     assert result is not None
@@ -148,6 +168,7 @@ async def test_ensure_group_exists_legacy_tenant_context():
 # ---------------------------------------------------------------------------
 # ensure_group_user_exists
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_ensure_group_user_exists_no_primary_id():
@@ -184,6 +205,7 @@ async def test_ensure_group_user_exists_creates_new():
 # get_user_groups
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_user_groups_filters_active():
     svc = make_service()
@@ -196,7 +218,9 @@ async def test_get_user_groups_filters_active():
     inactive_gu = make_group_user(group=inactive_group, status=GroupUserStatus.ACTIVE)
     inactive_gu_2 = make_group_user(group=active_group, status="INACTIVE")
 
-    svc.group_user_repo.get_groups_by_user = AsyncMock(return_value=[active_gu, inactive_gu, inactive_gu_2])
+    svc.group_user_repo.get_groups_by_user = AsyncMock(
+        return_value=[active_gu, inactive_gu, inactive_gu_2]
+    )
 
     result = await svc.get_user_groups("u1")
     assert len(result) == 1
@@ -207,12 +231,15 @@ async def test_get_user_groups_filters_active():
 # get_user_groups_with_roles
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_user_groups_with_roles():
     svc = make_service()
 
     group = make_group(id="g1")
-    gu = make_group_user(group=group, role=GroupUserRole.ADMIN, status=GroupUserStatus.ACTIVE)
+    gu = make_group_user(
+        group=group, role=GroupUserRole.ADMIN, status=GroupUserStatus.ACTIVE
+    )
     svc.group_user_repo.get_groups_by_user = AsyncMock(return_value=[gu])
 
     result = await svc.get_user_groups_with_roles("u1")
@@ -224,6 +251,7 @@ async def test_get_user_groups_with_roles():
 # ---------------------------------------------------------------------------
 # get_user_group_memberships
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_user_group_memberships_user_not_found():
@@ -263,6 +291,7 @@ async def test_get_user_group_memberships_found():
 # create_group
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_create_group_success():
     svc = make_service()
@@ -270,7 +299,9 @@ async def test_create_group_success():
     svc.group_repo.add = AsyncMock(return_value=created)
 
     with patch("src.models.group.Group.generate_group_id", return_value="my_team"):
-        result = await svc.create_group("My Team", description="A team", created_by_email="admin@example.com")
+        result = await svc.create_group(
+            "My Team", description="A team", created_by_email="admin@example.com"
+        )
 
     assert result.name == "My Team"
 
@@ -279,10 +310,13 @@ async def test_create_group_success():
 # list_groups
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_list_groups():
     svc = make_service()
-    svc.group_repo.list_with_user_counts = AsyncMock(return_value=[{"id": "g1", "user_count": 5}])
+    svc.group_repo.list_with_user_counts = AsyncMock(
+        return_value=[{"id": "g1", "user_count": 5}]
+    )
 
     result = await svc.list_groups(skip=0, limit=10)
     assert len(result) == 1
@@ -291,6 +325,7 @@ async def test_list_groups():
 # ---------------------------------------------------------------------------
 # get_group_by_id
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_group_by_id_found():
@@ -314,6 +349,7 @@ async def test_get_group_by_id_not_found():
 # ---------------------------------------------------------------------------
 # update_group
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_update_group_not_found():
@@ -341,6 +377,7 @@ async def test_update_group_success():
 # get_group_user_count
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_group_user_count():
     session = make_session()
@@ -366,6 +403,7 @@ async def test_get_group_user_count_none():
 # ---------------------------------------------------------------------------
 # list_group_users
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_list_group_users_with_user():
@@ -401,6 +439,7 @@ async def test_list_group_users_without_user():
 # assign_user_to_group
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_assign_user_to_group_existing_user_existing_membership():
     session = make_session()
@@ -418,7 +457,9 @@ async def test_assign_user_to_group_existing_user_existing_membership():
     svc.group_user_repo.get_by_group_and_user = AsyncMock(return_value=existing_gu)
     svc.group_user_repo.update = AsyncMock(return_value=existing_gu)
 
-    result = await svc.assign_user_to_group("g1", "alice@example.com", role=GroupUserRole.ADMIN)
+    result = await svc.assign_user_to_group(
+        "g1", "alice@example.com", role=GroupUserRole.ADMIN
+    )
     assert result["email"] == "alice@example.com"
 
 
@@ -448,7 +489,9 @@ async def test_assign_user_to_group_new_user_new_membership():
     svc.group_user_repo.get_by_group_and_user = AsyncMock(return_value=None)
     svc.group_user_repo.add = AsyncMock(return_value=new_gu)
 
-    result = await svc.assign_user_to_group("g1", "newuser@example.com", role=GroupUserRole.OPERATOR)
+    result = await svc.assign_user_to_group(
+        "g1", "newuser@example.com", role=GroupUserRole.OPERATOR
+    )
 
     assert result is not None
     svc.group_user_repo.add.assert_called_once()
@@ -457,6 +500,7 @@ async def test_assign_user_to_group_new_user_new_membership():
 # ---------------------------------------------------------------------------
 # update_group_user
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_update_group_user_not_found():
@@ -483,6 +527,7 @@ async def test_update_group_user_success():
 # remove_user_from_group
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_remove_user_from_group_not_found():
     svc = make_service()
@@ -504,6 +549,7 @@ async def test_remove_user_from_group_success():
 # ---------------------------------------------------------------------------
 # delete_group
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_delete_group_not_found():
@@ -540,10 +586,13 @@ async def test_delete_group_exception():
 # get_group_stats
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_group_stats():
     svc = make_service()
-    svc.group_repo.get_stats = AsyncMock(return_value={"total_groups": 5, "total_users": 20})
+    svc.group_repo.get_stats = AsyncMock(
+        return_value={"total_groups": 5, "total_users": 20}
+    )
 
     result = await svc.get_group_stats()
     assert result["total_groups"] == 5
@@ -552,6 +601,7 @@ async def test_get_group_stats():
 # ---------------------------------------------------------------------------
 # get_total_group_count
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_total_group_count():
@@ -574,6 +624,7 @@ async def test_get_total_group_count_missing_key():
 # ---------------------------------------------------------------------------
 # create_first_admin_group_for_user
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_create_first_admin_group_for_user():
@@ -615,6 +666,7 @@ async def test_create_first_admin_group_no_at_sign():
 # get_user_group_membership
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_user_group_membership_found():
     svc = make_service()
@@ -638,6 +690,8 @@ async def test_get_user_group_membership_not_found():
 # TenantService alias
 # ---------------------------------------------------------------------------
 
+
 def test_tenant_service_alias():
-    from src.services.groups.groups import TenantService, GroupService
+    from src.services.groups.groups import GroupService, TenantService
+
     assert TenantService is GroupService

@@ -5,17 +5,17 @@ from fastapi import HTTPException
 
 from src.repositories.powerbi_context_config_repository import (
     PowerBIBusinessMappingRepository,
-    PowerBIFieldSynonymRepository
+    PowerBIFieldSynonymRepository,
 )
 from src.schemas.powerbi_context_config import (
     PowerBIBusinessMappingCreate,
-    PowerBIBusinessMappingUpdate,
     PowerBIBusinessMappingResponse,
-    PowerBIFieldSynonymCreate,
-    PowerBIFieldSynonymUpdate,
-    PowerBIFieldSynonymResponse,
+    PowerBIBusinessMappingUpdate,
     PowerBIContextConfigBulkResponse,
-    PowerBIContextConfigDict
+    PowerBIContextConfigDict,
+    PowerBIFieldSynonymCreate,
+    PowerBIFieldSynonymResponse,
+    PowerBIFieldSynonymUpdate,
 )
 
 # Set up logger
@@ -41,9 +41,7 @@ class PowerBIContextConfigService:
     # ===== Business Mappings Operations =====
 
     async def create_business_mapping(
-        self,
-        semantic_model_id: str,
-        mapping_data: PowerBIBusinessMappingCreate
+        self, semantic_model_id: str, mapping_data: PowerBIBusinessMappingCreate
     ) -> PowerBIBusinessMappingResponse:
         """
         Create a new business terminology mapping.
@@ -63,26 +61,28 @@ class PowerBIContextConfigService:
             existing = await self.business_mapping_repo.get_by_term(
                 group_id=self.group_id,
                 semantic_model_id=semantic_model_id,
-                natural_term=mapping_data.natural_term
+                natural_term=mapping_data.natural_term,
             )
             if existing:
                 raise HTTPException(
                     status_code=409,
-                    detail=f"Business mapping for term '{mapping_data.natural_term}' already exists"
+                    detail=f"Business mapping for term '{mapping_data.natural_term}' already exists",
                 )
 
             # Create mapping
             db_data = {
                 "group_id": self.group_id,
                 "semantic_model_id": semantic_model_id,
-                **mapping_data.model_dump()
+                **mapping_data.model_dump(),
             }
             # Remove duplicate semantic_model_id from model_dump
             db_data.pop("semantic_model_id", None)
             db_data["semantic_model_id"] = semantic_model_id
 
             mapping = await self.business_mapping_repo.create(db_data)
-            logger.info(f"Created business mapping: {mapping.natural_term} for model {semantic_model_id}")
+            logger.info(
+                f"Created business mapping: {mapping.natural_term} for model {semantic_model_id}"
+            )
 
             return PowerBIBusinessMappingResponse.model_validate(mapping)
 
@@ -90,12 +90,12 @@ class PowerBIContextConfigService:
             raise
         except Exception as e:
             logger.error(f"Error creating business mapping: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Failed to create business mapping: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to create business mapping: {str(e)}"
+            )
 
     async def update_business_mapping(
-        self,
-        mapping_id: int,
-        mapping_data: PowerBIBusinessMappingUpdate
+        self, mapping_id: int, mapping_data: PowerBIBusinessMappingUpdate
     ) -> PowerBIBusinessMappingResponse:
         """
         Update an existing business mapping.
@@ -114,14 +114,18 @@ class PowerBIContextConfigService:
             # Verify mapping exists and belongs to group
             existing = await self.business_mapping_repo.get(mapping_id)
             if not existing or existing.group_id != self.group_id:
-                raise HTTPException(status_code=404, detail="Business mapping not found")
+                raise HTTPException(
+                    status_code=404, detail="Business mapping not found"
+                )
 
             # Update mapping
             update_dict = mapping_data.model_dump(exclude_unset=True)
             updated = await self.business_mapping_repo.update(mapping_id, update_dict)
 
             if not updated:
-                raise HTTPException(status_code=404, detail="Business mapping not found")
+                raise HTTPException(
+                    status_code=404, detail="Business mapping not found"
+                )
 
             logger.info(f"Updated business mapping ID {mapping_id}")
             return PowerBIBusinessMappingResponse.model_validate(updated)
@@ -130,7 +134,9 @@ class PowerBIContextConfigService:
             raise
         except Exception as e:
             logger.error(f"Error updating business mapping: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Failed to update business mapping: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to update business mapping: {str(e)}"
+            )
 
     async def delete_business_mapping(self, mapping_id: int) -> bool:
         """
@@ -149,12 +155,16 @@ class PowerBIContextConfigService:
             # Verify mapping exists and belongs to group
             existing = await self.business_mapping_repo.get(mapping_id)
             if not existing or existing.group_id != self.group_id:
-                raise HTTPException(status_code=404, detail="Business mapping not found")
+                raise HTTPException(
+                    status_code=404, detail="Business mapping not found"
+                )
 
             # Delete mapping
             deleted = await self.business_mapping_repo.delete(mapping_id)
             if not deleted:
-                raise HTTPException(status_code=404, detail="Business mapping not found")
+                raise HTTPException(
+                    status_code=404, detail="Business mapping not found"
+                )
 
             logger.info(f"Deleted business mapping ID {mapping_id}")
             return True
@@ -163,11 +173,12 @@ class PowerBIContextConfigService:
             raise
         except Exception as e:
             logger.error(f"Error deleting business mapping: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Failed to delete business mapping: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to delete business mapping: {str(e)}"
+            )
 
     async def get_business_mappings(
-        self,
-        semantic_model_id: str
+        self, semantic_model_id: str
     ) -> List[PowerBIBusinessMappingResponse]:
         """
         Get all business mappings for a semantic model.
@@ -180,21 +191,21 @@ class PowerBIContextConfigService:
         """
         try:
             mappings = await self.business_mapping_repo.get_by_model(
-                group_id=self.group_id,
-                semantic_model_id=semantic_model_id
+                group_id=self.group_id, semantic_model_id=semantic_model_id
             )
             return [PowerBIBusinessMappingResponse.model_validate(m) for m in mappings]
 
         except Exception as e:
             logger.error(f"Error retrieving business mappings: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Failed to retrieve business mappings: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to retrieve business mappings: {str(e)}",
+            )
 
     # ===== Field Synonyms Operations =====
 
     async def create_field_synonym(
-        self,
-        semantic_model_id: str,
-        synonym_data: PowerBIFieldSynonymCreate
+        self, semantic_model_id: str, synonym_data: PowerBIFieldSynonymCreate
     ) -> PowerBIFieldSynonymResponse:
         """
         Create a new field synonym.
@@ -214,26 +225,28 @@ class PowerBIContextConfigService:
             existing = await self.field_synonym_repo.get_by_field(
                 group_id=self.group_id,
                 semantic_model_id=semantic_model_id,
-                field_name=synonym_data.field_name
+                field_name=synonym_data.field_name,
             )
             if existing:
                 raise HTTPException(
                     status_code=409,
-                    detail=f"Field synonym for field '{synonym_data.field_name}' already exists"
+                    detail=f"Field synonym for field '{synonym_data.field_name}' already exists",
                 )
 
             # Create synonym
             db_data = {
                 "group_id": self.group_id,
                 "semantic_model_id": semantic_model_id,
-                **synonym_data.model_dump()
+                **synonym_data.model_dump(),
             }
             # Remove duplicate semantic_model_id from model_dump
             db_data.pop("semantic_model_id", None)
             db_data["semantic_model_id"] = semantic_model_id
 
             synonym = await self.field_synonym_repo.create(db_data)
-            logger.info(f"Created field synonym: {synonym.field_name} for model {semantic_model_id}")
+            logger.info(
+                f"Created field synonym: {synonym.field_name} for model {semantic_model_id}"
+            )
 
             return PowerBIFieldSynonymResponse.model_validate(synonym)
 
@@ -241,12 +254,12 @@ class PowerBIContextConfigService:
             raise
         except Exception as e:
             logger.error(f"Error creating field synonym: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Failed to create field synonym: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to create field synonym: {str(e)}"
+            )
 
     async def update_field_synonym(
-        self,
-        synonym_id: int,
-        synonym_data: PowerBIFieldSynonymUpdate
+        self, synonym_id: int, synonym_data: PowerBIFieldSynonymUpdate
     ) -> PowerBIFieldSynonymResponse:
         """
         Update an existing field synonym.
@@ -281,7 +294,9 @@ class PowerBIContextConfigService:
             raise
         except Exception as e:
             logger.error(f"Error updating field synonym: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Failed to update field synonym: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to update field synonym: {str(e)}"
+            )
 
     async def delete_field_synonym(self, synonym_id: int) -> bool:
         """
@@ -314,11 +329,12 @@ class PowerBIContextConfigService:
             raise
         except Exception as e:
             logger.error(f"Error deleting field synonym: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Failed to delete field synonym: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to delete field synonym: {str(e)}"
+            )
 
     async def get_field_synonyms(
-        self,
-        semantic_model_id: str
+        self, semantic_model_id: str
     ) -> List[PowerBIFieldSynonymResponse]:
         """
         Get all field synonyms for a semantic model.
@@ -331,20 +347,20 @@ class PowerBIContextConfigService:
         """
         try:
             synonyms = await self.field_synonym_repo.get_by_model(
-                group_id=self.group_id,
-                semantic_model_id=semantic_model_id
+                group_id=self.group_id, semantic_model_id=semantic_model_id
             )
             return [PowerBIFieldSynonymResponse.model_validate(s) for s in synonyms]
 
         except Exception as e:
             logger.error(f"Error retrieving field synonyms: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Failed to retrieve field synonyms: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to retrieve field synonyms: {str(e)}"
+            )
 
     # ===== Bulk Operations =====
 
     async def get_all_context_config(
-        self,
-        semantic_model_id: str
+        self, semantic_model_id: str
     ) -> PowerBIContextConfigBulkResponse:
         """
         Get all context configuration (mappings and synonyms) for a semantic model.
@@ -360,17 +376,18 @@ class PowerBIContextConfigService:
             synonyms = await self.get_field_synonyms(semantic_model_id)
 
             return PowerBIContextConfigBulkResponse(
-                business_mappings=mappings,
-                field_synonyms=synonyms
+                business_mappings=mappings, field_synonyms=synonyms
             )
 
         except Exception as e:
             logger.error(f"Error retrieving context configuration: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Failed to retrieve context configuration: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to retrieve context configuration: {str(e)}",
+            )
 
     async def get_context_config_dict(
-        self,
-        semantic_model_id: str
+        self, semantic_model_id: str
     ) -> PowerBIContextConfigDict:
         """
         Get context configuration in dictionary format (for tool integration).
@@ -383,19 +400,22 @@ class PowerBIContextConfigService:
         """
         try:
             mappings_dict = await self.business_mapping_repo.get_as_dict(
-                group_id=self.group_id,
-                semantic_model_id=semantic_model_id
+                group_id=self.group_id, semantic_model_id=semantic_model_id
             )
             synonyms_dict = await self.field_synonym_repo.get_as_dict(
-                group_id=self.group_id,
-                semantic_model_id=semantic_model_id
+                group_id=self.group_id, semantic_model_id=semantic_model_id
             )
 
             return PowerBIContextConfigDict(
                 business_mappings=mappings_dict if mappings_dict else None,
-                field_synonyms=synonyms_dict if synonyms_dict else None
+                field_synonyms=synonyms_dict if synonyms_dict else None,
             )
 
         except Exception as e:
-            logger.error(f"Error retrieving context configuration dict: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Failed to retrieve context configuration: {str(e)}")
+            logger.error(
+                f"Error retrieving context configuration dict: {e}", exc_info=True
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to retrieve context configuration: {str(e)}",
+            )

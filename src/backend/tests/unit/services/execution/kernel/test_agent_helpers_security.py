@@ -13,19 +13,21 @@ Test coverage:
 5. allow_code_execution is always hardcoded to False (orthogonal security control)
 6. Preamble is present even when additional optional parameters are configured
 """
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
 
 from src.services.agent_builder.agent_adapter import (
-    create_agent,
     _build_security_preamble,
+    create_agent,
     inject_security_preamble,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def base_agent_config():
@@ -53,11 +55,11 @@ def mock_tools():
 def _patch_create_agent_deps():
     """Return a context manager stack that mocks all external deps of create_agent."""
     return (
-        patch('src.services.execution.kernel.agent_builder.Agent'),
-        patch('src.services.llm.manager.LLMManager'),
-        patch('src.db.session.request_scoped_session'),
-        patch('src.services.mcp.service.MCPService'),
-        patch('src.services.tools.mcp_integration.MCPIntegration'),
+        patch("src.services.execution.kernel.agent_builder.Agent"),
+        patch("src.services.llm.manager.LLMManager"),
+        patch("src.db.session.request_scoped_session"),
+        patch("src.services.mcp.service.MCPService"),
+        patch("src.services.tools.mcp_integration.MCPIntegration"),
     )
 
 
@@ -66,11 +68,13 @@ async def _run_create_agent(agent_config, mock_config, mock_tools, agent_class_m
     mock_llm = MagicMock()
     mock_llm.model = "gpt-4o"
 
-    with patch('src.services.execution.kernel.agent_builder.Agent') as mock_agent_class, \
-         patch('src.services.llm.manager.LLMManager') as mock_llm_manager, \
-         patch('src.db.session.request_scoped_session') as mock_session_factory, \
-         patch('src.services.mcp.service.MCPService'), \
-         patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp:
+    with (
+        patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_class,
+        patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+        patch("src.db.session.request_scoped_session") as mock_session_factory,
+        patch("src.services.mcp.service.MCPService"),
+        patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+    ):
 
         mock_agent_instance = MagicMock()
         mock_agent_class.return_value = mock_agent_instance
@@ -98,6 +102,7 @@ async def _run_create_agent(agent_config, mock_config, mock_tools, agent_class_m
 # Tests for _build_security_preamble()
 # ---------------------------------------------------------------------------
 
+
 class TestBuildSecurityPreamble:
     """Unit tests for the _build_security_preamble helper function."""
 
@@ -116,7 +121,10 @@ class TestBuildSecurityPreamble:
 
     def test_contains_prompt_injection_keyword(self):
         preamble = _build_security_preamble()
-        assert "prompt-injection" in preamble.lower() or "prompt injection" in preamble.lower()
+        assert (
+            "prompt-injection" in preamble.lower()
+            or "prompt injection" in preamble.lower()
+        )
 
     def test_contains_instruction_hierarchy_concept(self):
         """Preamble must declare that system instructions are highest priority."""
@@ -139,6 +147,7 @@ class TestBuildSecurityPreamble:
 # system prompt) or into `system_template` when one is configured.
 # ---------------------------------------------------------------------------
 
+
 class TestCreateAgentSecurityPreamble:
     """Test suite verifying security preamble is injected into agent prompts."""
 
@@ -150,7 +159,9 @@ class TestCreateAgentSecurityPreamble:
         installed CrewAI Agent — otherwise Pydantic silently drops it."""
         from src.services.execution.runtime import Agent as RealAgent
 
-        kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
+        kwargs = await _run_create_agent(
+            base_agent_config, mock_config, mock_tools, None
+        )
         unknown = set(kwargs) - set(RealAgent.model_fields)
         assert not unknown, f"kwargs silently dropped by CrewAI Agent: {unknown}"
 
@@ -160,7 +171,9 @@ class TestCreateAgentSecurityPreamble:
     ):
         """Without a custom template, the preamble is prepended to backstory —
         which CrewAI's default system prompt embeds via {backstory}."""
-        kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
+        kwargs = await _run_create_agent(
+            base_agent_config, mock_config, mock_tools, None
+        )
 
         assert "system_prompt" not in kwargs  # the silently-dropped kwarg is gone
         assert "SECURITY INSTRUCTION" in kwargs["backstory"]
@@ -169,9 +182,13 @@ class TestCreateAgentSecurityPreamble:
     async def test_preamble_comes_before_original_backstory(
         self, base_agent_config, mock_config, mock_tools
     ):
-        kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
+        kwargs = await _run_create_agent(
+            base_agent_config, mock_config, mock_tools, None
+        )
         backstory = kwargs["backstory"]
-        assert backstory.index("SECURITY INSTRUCTION") < backstory.index("expert data analyst")
+        assert backstory.index("SECURITY INSTRUCTION") < backstory.index(
+            "expert data analyst"
+        )
 
     @pytest.mark.asyncio
     async def test_system_template_gets_preamble_with_custom_template(
@@ -184,7 +201,9 @@ class TestCreateAgentSecurityPreamble:
 
         assert "system_template" in kwargs
         template = kwargs["system_template"]
-        assert template.index("SECURITY INSTRUCTION") < template.index("You are a custom assistant.")
+        assert template.index("SECURITY INSTRUCTION") < template.index(
+            "You are a custom assistant."
+        )
 
     @pytest.mark.asyncio
     async def test_lone_system_template_gets_passthrough_prompt_template(
@@ -216,7 +235,9 @@ class TestCreateAgentSecurityPreamble:
     async def test_role_and_goal_kwargs_preserved(
         self, base_agent_config, mock_config, mock_tools
     ):
-        kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
+        kwargs = await _run_create_agent(
+            base_agent_config, mock_config, mock_tools, None
+        )
         assert kwargs["role"] == "Data Analyst"
         assert "Analyse business data" in kwargs["goal"]
 
@@ -229,8 +250,14 @@ class TestCreateAgentSecurityPreamble:
         from src.services.execution.runtime import Agent as RealAgent
         from src.services.execution.runtime.executor import build_messages
 
-        kwargs = await _run_create_agent(base_agent_config, mock_config, mock_tools, None)
-        kwargs = {**kwargs, "tools": [], "llm": "gpt-4o"}  # real Agent needs serializable llm
+        kwargs = await _run_create_agent(
+            base_agent_config, mock_config, mock_tools, None
+        )
+        kwargs = {
+            **kwargs,
+            "tools": [],
+            "llm": "gpt-4o",
+        }  # real Agent needs serializable llm
         agent = RealAgent(**kwargs)
         messages = build_messages(agent, "dummy task prompt")
         rendered = messages[0]["content"]  # system message
@@ -263,14 +290,20 @@ class TestInjectSecurityPreambleShared:
         kwargs = {"system_template": "MY TEMPLATE", "backstory": "bs"}
         injected_into = inject_security_preamble(kwargs)
         assert injected_into == "system_template"
-        assert kwargs["system_template"] == _build_security_preamble() + "\n\n" + "MY TEMPLATE"
+        assert (
+            kwargs["system_template"]
+            == _build_security_preamble() + "\n\n" + "MY TEMPLATE"
+        )
         assert kwargs["backstory"] == "bs"  # untouched
 
     def test_injects_into_backstory_when_no_system_template(self):
         kwargs = {"backstory": "original backstory"}
         injected_into = inject_security_preamble(kwargs)
         assert injected_into == "backstory"
-        assert kwargs["backstory"] == _build_security_preamble() + "\n\n" + "original backstory"
+        assert (
+            kwargs["backstory"]
+            == _build_security_preamble() + "\n\n" + "original backstory"
+        )
 
     def test_backstory_none_is_handled(self):
         kwargs = {}

@@ -2,12 +2,14 @@
 Coverage-focused tests for crew_executor.py
 Targets uncovered lines: run_crew, request_stop edge cases, metrics, shutdown.
 """
+
 import asyncio
 import threading
-import pytest
-from datetime import datetime, timedelta
-from unittest.mock import MagicMock, Mock, patch, AsyncMock
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 import src.services.execution.thread_executor as crew_executor_module
 
@@ -15,6 +17,7 @@ import src.services.execution.thread_executor as crew_executor_module
 def _fresh_executor(max_workers=3):
     """Bypass singleton to get a fresh instance."""
     from src.services.execution.thread_executor import CrewExecutor
+
     ex = object.__new__(CrewExecutor)
     ex._initialized = False
     ex.__init__(max_workers=max_workers)
@@ -34,6 +37,7 @@ def executor():
 # ---------------------------------------------------------------------------
 # run_crew - success path
 # ---------------------------------------------------------------------------
+
 
 class TestRunCrewSuccess:
     @pytest.mark.asyncio
@@ -183,6 +187,7 @@ class TestRunCrewSuccess:
 # request_stop
 # ---------------------------------------------------------------------------
 
+
 class TestRequestStop:
     def test_stop_running_execution_with_future(self, executor):
         mock_future = MagicMock()
@@ -257,6 +262,7 @@ class TestRequestStop:
 # get_metrics
 # ---------------------------------------------------------------------------
 
+
 class TestGetMetrics:
     def test_no_average_when_no_completions(self, executor):
         metrics = executor.get_metrics()
@@ -278,6 +284,7 @@ class TestGetMetrics:
 # ---------------------------------------------------------------------------
 # get_active_executions
 # ---------------------------------------------------------------------------
+
 
 class TestGetActiveExecutions:
     def test_returns_only_running(self, executor):
@@ -306,6 +313,7 @@ class TestGetActiveExecutions:
 # shutdown
 # ---------------------------------------------------------------------------
 
+
 class TestShutdown:
     def test_shutdown_stops_all_events(self, executor):
         ev1 = threading.Event()
@@ -326,6 +334,7 @@ class TestShutdown:
 # context manager
 # ---------------------------------------------------------------------------
 
+
 class TestContextManager:
     def test_enter_returns_self(self, executor):
         result = executor.__enter__()
@@ -341,6 +350,7 @@ class TestContextManager:
 # ---------------------------------------------------------------------------
 # Old completed executions cleanup (> 100)
 # ---------------------------------------------------------------------------
+
 
 class TestCleanupOldExecutions:
     @pytest.mark.asyncio
@@ -366,8 +376,10 @@ class TestCleanupOldExecutions:
 
         # Should have cleaned up some old executions
         completed = [
-            k for k, v in executor._active_executions.items()
-            if v.get("status") in ["COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "STOPPED"]
+            k
+            for k, v in executor._active_executions.items()
+            if v.get("status")
+            in ["COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "STOPPED"]
         ]
         assert len(completed) <= 100
 
@@ -375,6 +387,7 @@ class TestCleanupOldExecutions:
 # ---------------------------------------------------------------------------
 # run_crew_with_executor helper function
 # ---------------------------------------------------------------------------
+
 
 class TestRunCrewWithExecutor:
     @pytest.mark.asyncio

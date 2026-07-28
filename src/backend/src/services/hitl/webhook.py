@@ -5,29 +5,32 @@ This module provides functionality for sending webhook notifications
 when HITL events occur (gate reached, approved, rejected, timeout).
 """
 
-import logging
 import hashlib
 import hmac
 import json
+import logging
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 import httpx
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.hitl_approval import HITLApproval, HITLWebhook
-from src.repositories.hitl_repository import HITLApprovalRepository, HITLWebhookRepository
-from src.utils.url_security import assert_safe_outbound_url, UnsafeUrlError
+from src.repositories.hitl_repository import (
+    HITLApprovalRepository,
+    HITLWebhookRepository,
+)
 from src.schemas.hitl import (
+    HITLApprovalStatusEnum,
     HITLWebhookCreate,
-    HITLWebhookUpdate,
-    HITLWebhookResponse,
+    HITLWebhookEventEnum,
     HITLWebhookListResponse,
     HITLWebhookPayload,
-    HITLWebhookEventEnum,
-    HITLApprovalStatusEnum
+    HITLWebhookResponse,
+    HITLWebhookUpdate,
 )
+from src.utils.url_security import UnsafeUrlError, assert_safe_outbound_url
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +40,13 @@ WEBHOOK_TIMEOUT_SECONDS = 30
 
 class HITLWebhookServiceError(Exception):
     """Base exception for webhook service errors."""
+
     pass
 
 
 class HITLWebhookNotFoundError(HITLWebhookServiceError):
     """Raised when a webhook is not found."""
+
     pass
 
 
@@ -52,7 +57,7 @@ class HITLWebhookService:
         self,
         session: AsyncSession,
         webhook_repository: Optional[HITLWebhookRepository] = None,
-        approval_repository: Optional[HITLApprovalRepository] = None
+        approval_repository: Optional[HITLApprovalRepository] = None,
     ):
         """
         Initialize the service with session and repositories.
@@ -71,9 +76,7 @@ class HITLWebhookService:
     # =========================================================================
 
     async def create_webhook(
-        self,
-        webhook_data: HITLWebhookCreate,
-        group_id: str
+        self, webhook_data: HITLWebhookCreate, group_id: str
     ) -> HITLWebhookResponse:
         """
         Create a new HITL webhook.
@@ -94,12 +97,14 @@ class HITLWebhookService:
                 enabled=webhook_data.enabled,
                 events=[e.value for e in webhook_data.events],
                 headers=webhook_data.headers,
-                secret=webhook_data.secret
+                secret=webhook_data.secret,
             )
 
             created_webhook = await self.webhook_repo.create(webhook)
 
-            logger.info(f"Created HITL webhook {created_webhook.id} for group {group_id}")
+            logger.info(
+                f"Created HITL webhook {created_webhook.id} for group {group_id}"
+            )
 
             return HITLWebhookResponse(
                 id=created_webhook.id,
@@ -111,18 +116,14 @@ class HITLWebhookService:
                 events=[HITLWebhookEventEnum(e) for e in created_webhook.events],
                 headers=created_webhook.headers,
                 created_at=created_webhook.created_at,
-                updated_at=created_webhook.updated_at
+                updated_at=created_webhook.updated_at,
             )
 
         except SQLAlchemyError as e:
             logger.error(f"Database error creating webhook: {str(e)}")
             raise HITLWebhookServiceError(f"Failed to create webhook: {str(e)}")
 
-    async def get_webhook(
-        self,
-        webhook_id: int,
-        group_id: str
-    ) -> HITLWebhookResponse:
+    async def get_webhook(self, webhook_id: int, group_id: str) -> HITLWebhookResponse:
         """
         Get a webhook by ID.
 
@@ -150,13 +151,10 @@ class HITLWebhookService:
             events=[HITLWebhookEventEnum(e) for e in webhook.events],
             headers=webhook.headers,
             created_at=webhook.created_at,
-            updated_at=webhook.updated_at
+            updated_at=webhook.updated_at,
         )
 
-    async def list_webhooks(
-        self,
-        group_id: str
-    ) -> HITLWebhookListResponse:
+    async def list_webhooks(self, group_id: str) -> HITLWebhookListResponse:
         """
         List all webhooks for a group.
 
@@ -179,21 +177,15 @@ class HITLWebhookService:
                 events=[HITLWebhookEventEnum(e) for e in w.events],
                 headers=w.headers,
                 created_at=w.created_at,
-                updated_at=w.updated_at
+                updated_at=w.updated_at,
             )
             for w in webhooks
         ]
 
-        return HITLWebhookListResponse(
-            items=items,
-            total=len(items)
-        )
+        return HITLWebhookListResponse(items=items, total=len(items))
 
     async def update_webhook(
-        self,
-        webhook_id: int,
-        webhook_data: HITLWebhookUpdate,
-        group_id: str
+        self, webhook_id: int, webhook_data: HITLWebhookUpdate, group_id: str
     ) -> HITLWebhookResponse:
         """
         Update a webhook.
@@ -233,11 +225,7 @@ class HITLWebhookService:
         # Return updated webhook
         return await self.get_webhook(webhook_id, group_id)
 
-    async def delete_webhook(
-        self,
-        webhook_id: int,
-        group_id: str
-    ) -> bool:
+    async def delete_webhook(self, webhook_id: int, group_id: str) -> bool:
         """
         Delete a webhook.
 
@@ -263,9 +251,7 @@ class HITLWebhookService:
     # =========================================================================
 
     async def send_gate_reached_notification(
-        self,
-        approval: HITLApproval,
-        approval_url: Optional[str] = None
+        self, approval: HITLApproval, approval_url: Optional[str] = None
     ) -> bool:
         """
         Send webhook notification when a gate is reached.
@@ -280,13 +266,10 @@ class HITLWebhookService:
         return await self._send_notification(
             approval=approval,
             event=HITLWebhookEventEnum.GATE_REACHED,
-            approval_url=approval_url
+            approval_url=approval_url,
         )
 
-    async def send_gate_approved_notification(
-        self,
-        approval: HITLApproval
-    ) -> bool:
+    async def send_gate_approved_notification(self, approval: HITLApproval) -> bool:
         """
         Send webhook notification when a gate is approved.
 
@@ -297,14 +280,10 @@ class HITLWebhookService:
             True if at least one webhook was sent successfully
         """
         return await self._send_notification(
-            approval=approval,
-            event=HITLWebhookEventEnum.GATE_APPROVED
+            approval=approval, event=HITLWebhookEventEnum.GATE_APPROVED
         )
 
-    async def send_gate_rejected_notification(
-        self,
-        approval: HITLApproval
-    ) -> bool:
+    async def send_gate_rejected_notification(self, approval: HITLApproval) -> bool:
         """
         Send webhook notification when a gate is rejected.
 
@@ -315,14 +294,10 @@ class HITLWebhookService:
             True if at least one webhook was sent successfully
         """
         return await self._send_notification(
-            approval=approval,
-            event=HITLWebhookEventEnum.GATE_REJECTED
+            approval=approval, event=HITLWebhookEventEnum.GATE_REJECTED
         )
 
-    async def send_gate_timeout_notification(
-        self,
-        approval: HITLApproval
-    ) -> bool:
+    async def send_gate_timeout_notification(self, approval: HITLApproval) -> bool:
         """
         Send webhook notification when a gate times out.
 
@@ -333,8 +308,7 @@ class HITLWebhookService:
             True if at least one webhook was sent successfully
         """
         return await self._send_notification(
-            approval=approval,
-            event=HITLWebhookEventEnum.GATE_TIMEOUT
+            approval=approval, event=HITLWebhookEventEnum.GATE_TIMEOUT
         )
 
     # =========================================================================
@@ -345,7 +319,7 @@ class HITLWebhookService:
         self,
         approval: HITLApproval,
         event: HITLWebhookEventEnum,
-        approval_url: Optional[str] = None
+        approval_url: Optional[str] = None,
     ) -> bool:
         """
         Send webhook notification for an event.
@@ -363,11 +337,13 @@ class HITLWebhookService:
             webhooks = await self.webhook_repo.get_for_event(
                 group_id=approval.group_id,
                 event=event.value,
-                flow_id=approval.flow_id  # Filter to flow-specific or global webhooks
+                flow_id=approval.flow_id,  # Filter to flow-specific or global webhooks
             )
 
             if not webhooks:
-                logger.debug(f"No webhooks configured for event {event.value} on flow {approval.flow_id}")
+                logger.debug(
+                    f"No webhooks configured for event {event.value} on flow {approval.flow_id}"
+                )
                 return True  # No webhooks is not an error
 
             # Build payload
@@ -384,8 +360,7 @@ class HITLWebhookService:
                         # Mark webhook sent for gate_reached event
                         if event == HITLWebhookEventEnum.GATE_REACHED:
                             await self.approval_repo.mark_webhook_sent(
-                                approval_id=approval.id,
-                                response=response
+                                approval_id=approval.id, response=response
                             )
 
                 except Exception as e:
@@ -408,7 +383,7 @@ class HITLWebhookService:
         self,
         approval: HITLApproval,
         event: HITLWebhookEventEnum,
-        approval_url: Optional[str] = None
+        approval_url: Optional[str] = None,
     ) -> HITLWebhookPayload:
         """Build webhook payload from approval."""
         # Truncate output preview
@@ -430,17 +405,16 @@ class HITLWebhookService:
             previous_crew_output_preview=output_preview,
             status=(
                 HITLApprovalStatusEnum(approval.status)
-                if approval.status != "pending" else None
+                if approval.status != "pending"
+                else None
             ),
             responded_by=approval.responded_by,
             approval_url=approval_url,
-            expires_at=approval.expires_at
+            expires_at=approval.expires_at,
         )
 
     async def _send_webhook(
-        self,
-        webhook: HITLWebhook,
-        payload: HITLWebhookPayload
+        self, webhook: HITLWebhook, payload: HITLWebhookPayload
     ) -> Optional[Dict[str, Any]]:
         """
         Send HTTP request to webhook URL.
@@ -460,7 +434,7 @@ class HITLWebhookService:
             # Build headers
             headers = {
                 "Content-Type": "application/json",
-                "User-Agent": "Kasal-HITL-Webhook/1.0"
+                "User-Agent": "Kasal-HITL-Webhook/1.0",
             }
 
             # Add custom headers
@@ -491,19 +465,14 @@ class HITLWebhookService:
                 timeout=WEBHOOK_TIMEOUT_SECONDS, follow_redirects=False
             ) as client:
                 response = await client.post(
-                    webhook.url,
-                    content=payload_json,
-                    headers=headers
+                    webhook.url, content=payload_json, headers=headers
                 )
 
                 if response.is_success:
                     logger.info(
                         f"Webhook {webhook.id} sent successfully to {webhook.url}"
                     )
-                    return {
-                        "status_code": response.status_code,
-                        "success": True
-                    }
+                    return {"status_code": response.status_code, "success": True}
                 else:
                     logger.warning(
                         f"Webhook {webhook.id} returned status {response.status_code}"
@@ -514,7 +483,7 @@ class HITLWebhookService:
                     return {
                         "status_code": response.status_code,
                         "success": False,
-                        "error": f"Webhook endpoint returned status {response.status_code}"
+                        "error": f"Webhook endpoint returned status {response.status_code}",
                     }
 
         except httpx.TimeoutException:
@@ -539,7 +508,5 @@ class HITLWebhookService:
             Hex-encoded signature
         """
         return hmac.new(
-            secret.encode("utf-8"),
-            payload.encode("utf-8"),
-            hashlib.sha256
+            secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
         ).hexdigest()

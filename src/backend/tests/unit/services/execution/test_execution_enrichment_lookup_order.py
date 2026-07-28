@@ -4,9 +4,10 @@ virtually always hits). The old name-first order was a guaranteed miss —
 find_by_name is exact-equality and YAML configs carry no 'name' — doubling
 sequential DB round trips for every agent and task on every execution."""
 
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.execution.kasal_service import KasalExecutionService
 
@@ -20,7 +21,8 @@ async def test_agent_and_task_lookup_is_id_first():
         agents_yaml={
             f"agent_{agent_uuid}": {
                 "role": "Data Analyst with a long role sentence",
-                "goal": "g", "backstory": "b",
+                "goal": "g",
+                "backstory": "b",
             }
         },
         tasks_yaml={
@@ -29,7 +31,9 @@ async def test_agent_and_task_lookup_is_id_first():
                 "expected_output": "out",
             }
         },
-        agents=None, tasks=None, inputs=None,
+        agents=None,
+        tasks=None,
+        inputs=None,
     )
 
     db_agent = SimpleNamespace(tool_configs={"some_tool": {"k": "v"}})
@@ -52,13 +56,31 @@ async def test_agent_and_task_lookup_is_id_first():
     mock_engine._init_task = MagicMock()
     mock_engine._init_task.done.return_value = True
     # Stop right after enrichment: the engine's run_execution is the next step.
-    mock_engine.run_execution = AsyncMock(side_effect=RuntimeError("stop-after-enrichment"))
+    mock_engine.run_execution = AsyncMock(
+        side_effect=RuntimeError("stop-after-enrichment")
+    )
 
-    with patch("src.services.execution.kasal_service.request_scoped_session", return_value=session_cm), \
-         patch("src.services.execution.kasal_service.AgentService", return_value=agent_service), \
-         patch("src.services.execution.kasal_service.TaskService", return_value=task_service), \
-         patch.object(KasalExecutionService, "_prepare_engine", new_callable=AsyncMock,
-                      return_value=mock_engine, create=True):
+    with (
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=session_cm,
+        ),
+        patch(
+            "src.services.execution.kasal_service.AgentService",
+            return_value=agent_service,
+        ),
+        patch(
+            "src.services.execution.kasal_service.TaskService",
+            return_value=task_service,
+        ),
+        patch.object(
+            KasalExecutionService,
+            "_prepare_engine",
+            new_callable=AsyncMock,
+            return_value=mock_engine,
+            create=True,
+        ),
+    ):
         try:
             await service.prepare_and_run_crew(
                 execution_id="e1", config=config, group_context=None

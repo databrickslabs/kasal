@@ -3,34 +3,34 @@ Test suite for GenieRepository
 """
 
 import asyncio
-import time
-
-import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock, PropertyMock
-import httpx
 import json
+import time
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
+
+import httpx
+import pytest
 
 from src.repositories.genie_repository import GenieRepository
 from src.schemas.genie import (
     GenieAuthConfig,
+    GenieExecutionRequest,
+    GenieExecutionResponse,
+    GenieGetMessageStatusRequest,
+    GenieGetQueryResultRequest,
+    GenieMessageStatus,
+    GenieQueryResult,
+    GenieQueryStatus,
+    GenieSendMessageRequest,
+    GenieSendMessageResponse,
     GenieSpace,
     GenieSpacesResponse,
     GenieStartConversationRequest,
     GenieStartConversationResponse,
-    GenieSendMessageRequest,
-    GenieSendMessageResponse,
-    GenieGetMessageStatusRequest,
-    GenieMessageStatus,
-    GenieGetQueryResultRequest,
-    GenieQueryResult,
-    GenieExecutionRequest,
-    GenieExecutionResponse,
-    GenieQueryStatus
 )
 
 # Patch target for get_auth_context - the local imports inside methods
 # re-import from this module, so patching it here affects all call sites.
-AUTH_PATCH = 'src.utils.databricks_auth.get_auth_context'
+AUTH_PATCH = "src.utils.databricks_auth.get_auth_context"
 
 
 @pytest.fixture(autouse=True)
@@ -38,6 +38,7 @@ def _clear_spaces_cache():
     """The full-spaces list is cached per host in a MODULE-LEVEL dict; clear it
     between tests so each test's mocked HTTP responses are actually fetched."""
     import src.repositories.genie_repository as _gr
+
     _gr._SPACES_CACHE.clear()
     _gr._SPACES_LOCKS.clear()
     yield
@@ -48,6 +49,7 @@ def _clear_spaces_cache():
 def _make_auth_mock():
     """Helper to create a standard mock auth context."""
     from src.utils.databricks_auth import AuthContext
+
     mock_auth_ctx = Mock(spec=AuthContext)
     mock_auth_ctx.token = "test-token"
     mock_auth_ctx.workspace_url = "https://test-workspace.cloud.databricks.com"
@@ -74,7 +76,7 @@ class TestGenieRepository:
         return GenieAuthConfig(
             host="https://test-workspace.cloud.databricks.com",
             pat_token="test-token",
-            user_token="test-user-token"
+            user_token="test-user-token",
         )
 
     @pytest.fixture
@@ -112,7 +114,7 @@ class TestGenieRepository:
         expected_headers = {
             "Authorization": "Bearer test-token",
             "X-Databricks-Genie-User-Token": "test-user-token",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         assert headers == expected_headers
@@ -121,9 +123,7 @@ class TestGenieRepository:
         """Test header building without authentication"""
         headers = repository_no_auth._build_headers()
 
-        expected_headers = {
-            "Content-Type": "application/json"
-        }
+        expected_headers = {"Content-Type": "application/json"}
 
         assert headers == expected_headers
 
@@ -131,7 +131,7 @@ class TestGenieRepository:
         """Test header building with partial auth (only token)"""
         auth_config = GenieAuthConfig(
             host="https://test-workspace.cloud.databricks.com",
-            pat_token="test-token"
+            pat_token="test-token",
             # user_token is None
         )
         repository = GenieRepository(auth_config)
@@ -139,7 +139,7 @@ class TestGenieRepository:
 
         expected_headers = {
             "Authorization": "Bearer test-token",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         assert headers == expected_headers
@@ -148,8 +148,7 @@ class TestGenieRepository:
     async def test_make_url_host_with_trailing_slash(self):
         """Test _make_url strips trailing slash from host."""
         auth_config = GenieAuthConfig(
-            host="https://test-workspace.cloud.databricks.com/",
-            pat_token="test-token"
+            host="https://test-workspace.cloud.databricks.com/", pat_token="test-token"
         )
         repository = GenieRepository(auth_config)
         url = await repository._make_url("/api/2.0/genie/spaces")
@@ -163,11 +162,19 @@ class TestGenieRepository:
 
         mock_spaces_data = {
             "spaces": [
-                {"id": "space1", "name": "Test Space 1", "description": "Description 1"},
-                {"id": "space2", "name": "Test Space 2", "description": "Description 2"}
+                {
+                    "id": "space1",
+                    "name": "Test Space 1",
+                    "description": "Description 1",
+                },
+                {
+                    "id": "space2",
+                    "name": "Test Space 2",
+                    "description": "Description 2",
+                },
             ],
             "next_page_token": "next-token",
-            "total_fetched": 2
+            "total_fetched": 2,
         }
 
         mock_response = _make_http_response(json_data=mock_spaces_data)
@@ -209,19 +216,21 @@ class TestGenieRepository:
 
         mock_spaces_data = {
             "spaces": [
-                {"id": "space1", "name": "Development Space", "description": "Dev space"}
+                {
+                    "id": "space1",
+                    "name": "Development Space",
+                    "description": "Dev space",
+                }
             ],
             "next_page_token": None,
-            "total_fetched": 1
+            "total_fetched": 1,
         }
 
         mock_response = _make_http_response(json_data=mock_spaces_data)
         repository._client.get = AsyncMock(return_value=mock_response)
 
         result = await repository.get_spaces(
-            search_query="development",
-            page_size=50,
-            enabled_only=True
+            search_query="development", page_size=50, enabled_only=True
         )
 
         assert len(result.spaces) == 1
@@ -243,7 +252,7 @@ class TestGenieRepository:
             search_query="test query",
             page_token="token123",
             page_size=25,
-            enabled_only=False
+            enabled_only=False,
         )
 
         repository._client.get.assert_called_once()
@@ -253,17 +262,13 @@ class TestGenieRepository:
     async def test_start_conversation_success(self, mock_auth, repository):
         """Test successful start_conversation call"""
         mock_auth.return_value = _make_auth_mock()
-        mock_response_data = {
-            "conversation_id": "conv-123",
-            "message_id": "msg-456"
-        }
+        mock_response_data = {"conversation_id": "conv-123", "message_id": "msg-456"}
 
         mock_response = _make_http_response(json_data=mock_response_data)
         repository._client.post = AsyncMock(return_value=mock_response)
 
         request = GenieStartConversationRequest(
-            space_id="space1",
-            initial_message="Hello, what data do we have?"
+            space_id="space1", initial_message="Hello, what data do we have?"
         )
 
         result = await repository.start_conversation(request)
@@ -279,11 +284,7 @@ class TestGenieRepository:
         """Test successful send_message call"""
         mock_auth.return_value = _make_auth_mock()
 
-        mock_response_data = {
-            "id": "msg-789",
-            "status": "RUNNING",
-            "content": None
-        }
+        mock_response_data = {"id": "msg-789", "status": "RUNNING", "content": None}
 
         mock_response = _make_http_response(json_data=mock_response_data)
         repository._client.post = AsyncMock(return_value=mock_response)
@@ -291,7 +292,7 @@ class TestGenieRepository:
         request = GenieSendMessageRequest(
             space_id="space1",
             conversation_id="conv-123",
-            message="Can you show me more details?"
+            message="Can you show me more details?",
         )
 
         result = await repository.send_message(request)
@@ -307,18 +308,13 @@ class TestGenieRepository:
         """Test successful get_message_status call"""
         mock_auth.return_value = _make_auth_mock()
 
-        mock_response_data = {
-            "status": "COMPLETED",
-            "result": {"data": "test_data"}
-        }
+        mock_response_data = {"status": "COMPLETED", "result": {"data": "test_data"}}
 
         mock_response = _make_http_response(json_data=mock_response_data)
         repository._client.get = AsyncMock(return_value=mock_response)
 
         request = GenieGetMessageStatusRequest(
-            space_id="space1",
-            conversation_id="conv-123",
-            message_id="msg-456"
+            space_id="space1", conversation_id="conv-123", message_id="msg-456"
         )
 
         result = await repository.get_message_status(request)
@@ -328,7 +324,10 @@ class TestGenieRepository:
 
         repository._client.get.assert_called_once()
         call_args = repository._client.get.call_args
-        assert "/api/2.0/genie/spaces/space1/conversations/conv-123/messages/msg-456" in call_args[0][0]
+        assert (
+            "/api/2.0/genie/spaces/space1/conversations/conv-123/messages/msg-456"
+            in call_args[0][0]
+        )
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio
@@ -341,20 +340,18 @@ class TestGenieRepository:
             "status": "SUCCESS",
             "data": [
                 {"col1": "value1", "col2": "value2"},
-                {"col1": "value3", "col2": "value4"}
+                {"col1": "value3", "col2": "value4"},
             ],
             "columns": ["col1", "col2"],
             "sql_query": "SELECT * FROM test_table",
-            "execution_time": 1.5
+            "execution_time": 1.5,
         }
 
         mock_response = _make_http_response(json_data=mock_response_data)
         repository._client.get = AsyncMock(return_value=mock_response)
 
         request = GenieGetQueryResultRequest(
-            space_id="space1",
-            conversation_id="conv-123",
-            message_id="msg-456"
+            space_id="space1", conversation_id="conv-123", message_id="msg-456"
         )
 
         result = await repository.get_query_result(request)
@@ -370,7 +367,10 @@ class TestGenieRepository:
 
         repository._client.get.assert_called_once()
         call_args = repository._client.get.call_args
-        assert "/api/2.0/genie/spaces/space1/conversations/conv-123/messages/msg-456/query-result" in call_args[0][0]
+        assert (
+            "/api/2.0/genie/spaces/space1/conversations/conv-123/messages/msg-456/query-result"
+            in call_args[0][0]
+        )
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio
@@ -381,28 +381,28 @@ class TestGenieRepository:
         mock_send_response = GenieSendMessageResponse(
             conversation_id="conv-123",
             message_id="msg-789",
-            status=GenieMessageStatus.RUNNING
+            status=GenieMessageStatus.RUNNING,
         )
         repository.send_message = AsyncMock(return_value=mock_send_response)
 
-        repository.get_message_status = AsyncMock(return_value=GenieMessageStatus.COMPLETED)
+        repository.get_message_status = AsyncMock(
+            return_value=GenieMessageStatus.COMPLETED
+        )
 
         mock_query_result = GenieQueryResult(
             status=GenieQueryStatus.SUCCESS,
-            data=[
-                {"user_id": 1, "name": "Alice"},
-                {"user_id": 2, "name": "Bob"}
-            ],
+            data=[{"user_id": 1, "name": "Alice"}, {"user_id": 2, "name": "Bob"}],
             columns=["user_id", "name"],
-            sql="SELECT * FROM users LIMIT 10"
+            sql="SELECT * FROM users LIMIT 10",
         )
         repository.get_query_result = AsyncMock(return_value=mock_query_result)
 
-        repository._extract_response_text = Mock(return_value="Query executed successfully")
+        repository._extract_response_text = Mock(
+            return_value="Query executed successfully"
+        )
 
         request = GenieExecutionRequest(
-            space_id="space1",
-            question="SELECT * FROM users LIMIT 10"
+            space_id="space1", question="SELECT * FROM users LIMIT 10"
         )
 
         result = await repository.execute_query(request)
@@ -465,9 +465,18 @@ class TestGenieRepository:
         search_url = await repository._make_url("/api/2.0/genie/spaces/search")
         conversations_url = await repository._make_url("/api/2.0/genie/conversations")
 
-        assert spaces_url == "https://test-workspace.cloud.databricks.com/api/2.0/genie/spaces"
-        assert search_url == "https://test-workspace.cloud.databricks.com/api/2.0/genie/spaces/search"
-        assert conversations_url == "https://test-workspace.cloud.databricks.com/api/2.0/genie/conversations"
+        assert (
+            spaces_url
+            == "https://test-workspace.cloud.databricks.com/api/2.0/genie/spaces"
+        )
+        assert (
+            search_url
+            == "https://test-workspace.cloud.databricks.com/api/2.0/genie/spaces/search"
+        )
+        assert (
+            conversations_url
+            == "https://test-workspace.cloud.databricks.com/api/2.0/genie/conversations"
+        )
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio
@@ -487,12 +496,16 @@ class TestGenieRepository:
         """Test that auth config is properly stored and not modified"""
         repository = GenieRepository(auth_config)
 
-        assert repository.auth_config.host == "https://test-workspace.cloud.databricks.com"
+        assert (
+            repository.auth_config.host == "https://test-workspace.cloud.databricks.com"
+        )
         assert repository.auth_config.pat_token == "test-token"
         assert repository.auth_config.user_token == "test-user-token"
 
     @pytest.mark.asyncio
-    async def test_repository_without_auth_raises_appropriate_error(self, repository_no_auth):
+    async def test_repository_without_auth_raises_appropriate_error(
+        self, repository_no_auth
+    ):
         """Test that repository without auth configuration handles errors appropriately"""
         result = await repository_no_auth.get_spaces()
         assert result.spaces == []
@@ -504,9 +517,7 @@ class TestGenieRepository:
         """Test handling of malformed response structure"""
         mock_auth.return_value = _make_auth_mock()
 
-        mock_spaces_data = {
-            "spaces": [{"id": "space1"}]
-        }
+        mock_spaces_data = {"spaces": [{"id": "space1"}]}
         mock_response = _make_http_response(json_data=mock_spaces_data)
         repository._client.get = AsyncMock(return_value=mock_response)
         repository._client.post = AsyncMock(return_value=mock_response)
@@ -554,8 +565,7 @@ class TestGenieRepository:
         repository._client.post = AsyncMock(return_value=mock_response)
 
         request = GenieStartConversationRequest(
-            space_id="space1",
-            initial_message="Hello"
+            space_id="space1", initial_message="Hello"
         )
 
         result = await repository.start_conversation(request)
@@ -574,9 +584,7 @@ class TestGenieRepository:
         repository._client.post = AsyncMock(return_value=mock_response)
 
         request = GenieSendMessageRequest(
-            space_id="space1",
-            conversation_id="conv-123",
-            message="Test message"
+            space_id="space1", conversation_id="conv-123", message="Test message"
         )
 
         result = await repository.send_message(request)
@@ -595,8 +603,7 @@ class TestGenieRepository:
         repository._client.post = AsyncMock(return_value=mock_response)
 
         request = GenieExecutionRequest(
-            space_id="space1",
-            question="SELECT * FROM users"
+            space_id="space1", question="SELECT * FROM users"
         )
 
         result = await repository.execute_query(request)
@@ -613,26 +620,20 @@ class TestGenieRepositoryCleanup:
     @pytest.mark.asyncio
     async def test_aclose_closes_client(self):
         """Test that aclose properly closes the HTTP client."""
-        repo = GenieRepository(
-            auth_config=GenieAuthConfig(host="test.databricks.com")
-        )
+        repo = GenieRepository(auth_config=GenieAuthConfig(host="test.databricks.com"))
         await repo.aclose()
         assert repo._client.is_closed
 
     @pytest.mark.asyncio
     async def test_aclose_with_no_client(self):
         """Test that aclose handles None client without raising."""
-        repo = GenieRepository(
-            auth_config=GenieAuthConfig(host="test.databricks.com")
-        )
+        repo = GenieRepository(auth_config=GenieAuthConfig(host="test.databricks.com"))
         repo._client = None
         await repo.aclose()  # Should not raise
 
     def test_del_with_running_loop(self):
         """Test __del__ schedules client close when event loop is running."""
-        repo = GenieRepository(
-            auth_config=GenieAuthConfig(host="test.databricks.com")
-        )
+        repo = GenieRepository(auth_config=GenieAuthConfig(host="test.databricks.com"))
         mock_loop = MagicMock()
         with patch("asyncio.get_running_loop", return_value=mock_loop):
             repo.__del__()
@@ -640,17 +641,13 @@ class TestGenieRepositoryCleanup:
 
     def test_del_without_running_loop(self):
         """Test __del__ catches RuntimeError when no event loop is running."""
-        repo = GenieRepository(
-            auth_config=GenieAuthConfig(host="test.databricks.com")
-        )
+        repo = GenieRepository(auth_config=GenieAuthConfig(host="test.databricks.com"))
         with patch("asyncio.get_running_loop", side_effect=RuntimeError):
             repo.__del__()  # Should not raise
 
     def test_del_with_closed_client(self):
         """Test __del__ does not schedule close when client is already closed."""
-        repo = GenieRepository(
-            auth_config=GenieAuthConfig(host="test.databricks.com")
-        )
+        repo = GenieRepository(auth_config=GenieAuthConfig(host="test.databricks.com"))
         repo._client = MagicMock(is_closed=True)
         with patch("asyncio.get_running_loop") as mock_get_loop:
             repo.__del__()
@@ -713,7 +710,9 @@ class TestGetHost:
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio
-    async def test_get_host_auth_context_none_falls_to_sdk(self, mock_get_auth, repo_no_host_config):
+    async def test_get_host_auth_context_none_falls_to_sdk(
+        self, mock_get_auth, repo_no_host_config
+    ):
         """Test _get_host falls to SDK Config when auth context has no workspace_url (covers lines 108-116)."""
         mock_auth = Mock()
         mock_auth.workspace_url = None
@@ -722,48 +721,86 @@ class TestGetHost:
         mock_sdk_config = Mock()
         mock_sdk_config.host = "https://sdk-host.databricks.com"
 
-        with patch.dict('sys.modules', {'databricks': Mock(), 'databricks.sdk': Mock(), 'databricks.sdk.config': Mock()}):
-            with patch('databricks.sdk.config.Config', return_value=mock_sdk_config):
+        with patch.dict(
+            "sys.modules",
+            {
+                "databricks": Mock(),
+                "databricks.sdk": Mock(),
+                "databricks.sdk.config": Mock(),
+            },
+        ):
+            with patch("databricks.sdk.config.Config", return_value=mock_sdk_config):
                 result = await repo_no_host_config._get_host()
                 assert result == "sdk-host.databricks.com"
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio
-    async def test_get_host_sdk_config_fails_falls_to_databricks_auth(self, mock_get_auth, repo_no_host_config):
+    async def test_get_host_sdk_config_fails_falls_to_databricks_auth(
+        self, mock_get_auth, repo_no_host_config
+    ):
         """Test _get_host falls to databricks_auth when SDK fails (covers lines 115-126)."""
         mock_auth = Mock()
         mock_auth.workspace_url = None
         mock_get_auth.return_value = mock_auth
 
         # Make SDK Config raise an exception
-        with patch.dict('sys.modules', {'databricks': Mock(), 'databricks.sdk': Mock(), 'databricks.sdk.config': Mock()}):
-            with patch('databricks.sdk.config.Config', side_effect=Exception("SDK not available")):
+        with patch.dict(
+            "sys.modules",
+            {
+                "databricks": Mock(),
+                "databricks.sdk": Mock(),
+                "databricks.sdk.config": Mock(),
+            },
+        ):
+            with patch(
+                "databricks.sdk.config.Config",
+                side_effect=Exception("SDK not available"),
+            ):
                 # Mock _databricks_auth
                 mock_db_auth = Mock()
                 mock_db_auth._load_config = AsyncMock()
-                mock_db_auth.get_workspace_host.return_value = "https://dbauth-host.databricks.com/"
+                mock_db_auth.get_workspace_host.return_value = (
+                    "https://dbauth-host.databricks.com/"
+                )
 
-                with patch('src.utils.databricks_auth._databricks_auth', mock_db_auth):
+                with patch("src.utils.databricks_auth._databricks_auth", mock_db_auth):
                     result = await repo_no_host_config._get_host()
                     assert result == "dbauth-host.databricks.com"
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio
-    async def test_get_host_all_fallbacks_fail_uses_default(self, mock_get_auth, repo_no_host_config):
+    async def test_get_host_all_fallbacks_fail_uses_default(
+        self, mock_get_auth, repo_no_host_config
+    ):
         """Test _get_host uses default when all fallbacks fail (covers lines 128-136)."""
         mock_get_auth.return_value = None
 
-        with patch.dict('sys.modules', {'databricks': Mock(), 'databricks.sdk': Mock(), 'databricks.sdk.config': Mock()}):
-            with patch('databricks.sdk.config.Config', side_effect=Exception("SDK fail")):
-                with patch('src.utils.databricks_auth._databricks_auth') as mock_db_auth:
-                    mock_db_auth._load_config = AsyncMock(side_effect=Exception("db auth fail"))
+        with patch.dict(
+            "sys.modules",
+            {
+                "databricks": Mock(),
+                "databricks.sdk": Mock(),
+                "databricks.sdk.config": Mock(),
+            },
+        ):
+            with patch(
+                "databricks.sdk.config.Config", side_effect=Exception("SDK fail")
+            ):
+                with patch(
+                    "src.utils.databricks_auth._databricks_auth"
+                ) as mock_db_auth:
+                    mock_db_auth._load_config = AsyncMock(
+                        side_effect=Exception("db auth fail")
+                    )
 
                     result = await repo_no_host_config._get_host()
                     assert result == "your-workspace.cloud.databricks.com"
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio
-    async def test_get_host_normalizes_https_prefix(self, mock_get_auth, repo_no_host_config):
+    async def test_get_host_normalizes_https_prefix(
+        self, mock_get_auth, repo_no_host_config
+    ):
         """Test _get_host strips https:// prefix (covers lines 133-134)."""
         mock_auth = Mock()
         mock_auth.workspace_url = "https://stripped-host.databricks.com"
@@ -775,7 +812,9 @@ class TestGetHost:
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio
-    async def test_get_host_normalizes_trailing_slash(self, mock_get_auth, repo_no_host_config):
+    async def test_get_host_normalizes_trailing_slash(
+        self, mock_get_auth, repo_no_host_config
+    ):
         """Test _get_host strips trailing slash (covers lines 135-136)."""
         mock_auth = Mock()
         mock_auth.workspace_url = "https://slash-host.databricks.com/"
@@ -793,24 +832,21 @@ class TestGetAuthHeaders:
     def repo_with_obo(self):
         """Repository configured for OBO."""
         config = GenieAuthConfig(
-            host="test.databricks.com",
-            use_obo=True,
-            user_token="user-obo-token"
+            host="test.databricks.com", use_obo=True, user_token="user-obo-token"
         )
         return GenieRepository(config)
 
     @pytest.fixture
     def repo_no_obo(self):
         """Repository without OBO."""
-        config = GenieAuthConfig(
-            host="test.databricks.com",
-            use_obo=False
-        )
+        config = GenieAuthConfig(host="test.databricks.com", use_obo=False)
         return GenieRepository(config)
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio
-    async def test_get_auth_headers_with_obo_user_token(self, mock_get_auth, repo_with_obo):
+    async def test_get_auth_headers_with_obo_user_token(
+        self, mock_get_auth, repo_with_obo
+    ):
         """Test _get_auth_headers passes user token for OBO (covers lines 153-155, 158)."""
         mock_auth_ctx = _make_auth_mock()
         mock_get_auth.return_value = mock_auth_ctx
@@ -875,8 +911,7 @@ class TestGetSpacesAdvanced:
     @pytest.fixture
     def repo(self):
         config = GenieAuthConfig(
-            host="https://test.databricks.com",
-            pat_token="test-token"
+            host="https://test.databricks.com", pat_token="test-token"
         )
         return GenieRepository(config)
 
@@ -902,7 +937,7 @@ class TestGetSpacesAdvanced:
 
         list_data = [
             {"id": "s1", "name": "Space 1", "description": "Desc 1"},
-            {"id": "s2", "name": "Space 2", "description": "Desc 2"}
+            {"id": "s2", "name": "Space 2", "description": "Desc 2"},
         ]
         mock_response = _make_http_response(json_data=list_data)
         repo._client.get = AsyncMock(return_value=mock_response)
@@ -921,11 +956,11 @@ class TestGetSpacesAdvanced:
 
         page1_data = {
             "spaces": [{"id": "s1", "name": "Space 1"}],
-            "next_page_token": "page2-token"
+            "next_page_token": "page2-token",
         }
         page2_data = {
             "spaces": [{"id": "s2", "name": "Space 2"}],
-            "next_page_token": None
+            "next_page_token": None,
         }
 
         mock_resp1 = _make_http_response(json_data=page1_data)
@@ -951,7 +986,7 @@ class TestGetSpacesAdvanced:
             "spaces": [
                 {"id": "s1", "name": "Space 1"},
                 {"id": "s2", "name": "Space 2"},
-                {"id": "s3", "name": "Space 3"}
+                {"id": "s3", "name": "Space 3"},
             ]
         }
         mock_response = _make_http_response(json_data=mock_data)
@@ -966,13 +1001,15 @@ class TestGetSpacesAdvanced:
 
     @patch(AUTH_PATCH)
     @pytest.mark.asyncio
-    async def test_get_spaces_search_with_fetch_all_returns_none_token(self, mock_get_auth, repo):
+    async def test_get_spaces_search_with_fetch_all_returns_none_token(
+        self, mock_get_auth, repo
+    ):
         """Test get_spaces with fetch_all returns None token (covers line 325)."""
         mock_get_auth.return_value = _make_auth_mock()
 
         mock_data = {
             "spaces": [{"id": "s1", "name": "Test Space"}],
-            "next_page_token": None
+            "next_page_token": None,
         }
         mock_response = _make_http_response(json_data=mock_data)
         repo._client.get = AsyncMock(return_value=mock_response)
@@ -992,16 +1029,13 @@ class TestGetSpacesAdvanced:
         for i in range(5):
             data = {
                 "spaces": [{"id": f"s{i}", "name": f"Space {i}"}],
-                "next_page_token": f"token-{i+1}" if i < 4 else None
+                "next_page_token": f"token-{i+1}" if i < 4 else None,
             }
             pages.append(_make_http_response(json_data=data))
 
         repo._client.get = AsyncMock(side_effect=pages)
 
-        result = await repo.get_spaces(
-            search_query="Space",
-            enabled_only=False
-        )
+        result = await repo.get_spaces(search_query="Space", enabled_only=False)
 
         # Should fetch all 5 pages (no artificial cap)
         assert repo._client.get.call_count == 5
@@ -1018,8 +1052,12 @@ class TestGetSpacesAdvanced:
 
         mock_data = {
             "spaces": [
-                {"id": "s1", "name": "Alpha", "description": "Contains the keyword special"},
-                {"id": "s2", "name": "Beta", "description": "Nothing here"}
+                {
+                    "id": "s1",
+                    "name": "Alpha",
+                    "description": "Contains the keyword special",
+                },
+                {"id": "s2", "name": "Beta", "description": "Nothing here"},
             ]
         }
         mock_response = _make_http_response(json_data=mock_data)
@@ -1052,7 +1090,7 @@ class TestGetSpaceDetails:
             "type": "data",
             "enabled": True,
             "owner": "user@example.com",
-            "workspace_id": "ws-123"
+            "workspace_id": "ws-123",
         }
         mock_response = _make_http_response(json_data=space_data)
         repo._client.get = AsyncMock(return_value=mock_response)
@@ -1106,8 +1144,7 @@ class TestStartConversationAdvanced:
         mock_get_auth.return_value = None
 
         request = GenieStartConversationRequest(
-            space_id="space1",
-            initial_message="Hello"
+            space_id="space1", initial_message="Hello"
         )
 
         result = await repo.start_conversation(request)
@@ -1119,16 +1156,13 @@ class TestStartConversationAdvanced:
         """Test start_conversation includes title in payload (covers line 408)."""
         mock_get_auth.return_value = _make_auth_mock()
 
-        mock_response = _make_http_response(json_data={
-            "conversation_id": "conv-999",
-            "message_id": "msg-001"
-        })
+        mock_response = _make_http_response(
+            json_data={"conversation_id": "conv-999", "message_id": "msg-001"}
+        )
         repo._client.post = AsyncMock(return_value=mock_response)
 
         request = GenieStartConversationRequest(
-            space_id="space1",
-            initial_message="Hello",
-            title="My Conversation Title"
+            space_id="space1", initial_message="Hello", title="My Conversation Title"
         )
 
         result = await repo.start_conversation(request)
@@ -1156,9 +1190,7 @@ class TestSendMessageAdvanced:
         mock_get_auth.return_value = None
 
         request = GenieSendMessageRequest(
-            space_id="space1",
-            conversation_id="conv-123",
-            message="Hello"
+            space_id="space1", conversation_id="conv-123", message="Hello"
         )
 
         result = await repo.send_message(request)
@@ -1171,16 +1203,12 @@ class TestSendMessageAdvanced:
         mock_get_auth.return_value = _make_auth_mock()
 
         mock_start_resp = GenieStartConversationResponse(
-            conversation_id="new-conv-id",
-            message_id="new-msg-id",
-            space_id="space1"
+            conversation_id="new-conv-id", message_id="new-msg-id", space_id="space1"
         )
         repo.start_conversation = AsyncMock(return_value=mock_start_resp)
 
         request = GenieSendMessageRequest(
-            space_id="space1",
-            conversation_id=None,
-            message="Start a new conversation"
+            space_id="space1", conversation_id=None, message="Start a new conversation"
         )
 
         result = await repo.send_message(request)
@@ -1199,9 +1227,7 @@ class TestSendMessageAdvanced:
         repo.start_conversation = AsyncMock(return_value=None)
 
         request = GenieSendMessageRequest(
-            space_id="space1",
-            conversation_id=None,
-            message="Hello"
+            space_id="space1", conversation_id=None, message="Hello"
         )
 
         result = await repo.send_message(request)
@@ -1213,11 +1239,9 @@ class TestSendMessageAdvanced:
         """Test send_message includes attachments in payload (covers line 470)."""
         mock_get_auth.return_value = _make_auth_mock()
 
-        mock_response = _make_http_response(json_data={
-            "id": "msg-attach",
-            "status": "RUNNING",
-            "content": None
-        })
+        mock_response = _make_http_response(
+            json_data={"id": "msg-attach", "status": "RUNNING", "content": None}
+        )
         repo._client.post = AsyncMock(return_value=mock_response)
 
         attachments = [{"type": "file", "url": "https://example.com/file.csv"}]
@@ -1225,7 +1249,7 @@ class TestSendMessageAdvanced:
             space_id="space1",
             conversation_id="conv-existing",
             message="Here is data",
-            attachments=attachments
+            attachments=attachments,
         )
 
         result = await repo.send_message(request)
@@ -1251,9 +1275,7 @@ class TestGetMessageStatusAdvanced:
         mock_get_auth.return_value = None
 
         request = GenieGetMessageStatusRequest(
-            space_id="space1",
-            conversation_id="conv-1",
-            message_id="msg-1"
+            space_id="space1", conversation_id="conv-1", message_id="msg-1"
         )
 
         result = await repo.get_message_status(request)
@@ -1270,9 +1292,7 @@ class TestGetMessageStatusAdvanced:
         repo._client.get = AsyncMock(return_value=mock_response)
 
         request = GenieGetMessageStatusRequest(
-            space_id="space1",
-            conversation_id="conv-1",
-            message_id="msg-1"
+            space_id="space1", conversation_id="conv-1", message_id="msg-1"
         )
 
         result = await repo.get_message_status(request)
@@ -1294,9 +1314,7 @@ class TestGetQueryResultAdvanced:
         mock_get_auth.return_value = None
 
         request = GenieGetQueryResultRequest(
-            space_id="space1",
-            conversation_id="conv-1",
-            message_id="msg-1"
+            space_id="space1", conversation_id="conv-1", message_id="msg-1"
         )
 
         result = await repo.get_query_result(request)
@@ -1312,9 +1330,7 @@ class TestGetQueryResultAdvanced:
         repo._client.get = AsyncMock(return_value=mock_response)
 
         request = GenieGetQueryResultRequest(
-            space_id="space1",
-            conversation_id="conv-1",
-            message_id="msg-1"
+            space_id="space1", conversation_id="conv-1", message_id="msg-1"
         )
 
         result = await repo.get_query_result(request)
@@ -1330,7 +1346,7 @@ class TestGetQueryResultAdvanced:
         mock_data = {
             "query_id": "q1",
             "status": "SUCCESS",
-            "result": {"summary": "10 rows found"}
+            "result": {"summary": "10 rows found"},
         }
         mock_response = _make_http_response(json_data=mock_data)
         repo._client.get = AsyncMock(return_value=mock_response)
@@ -1348,11 +1364,7 @@ class TestGetQueryResultAdvanced:
         """Test get_query_result parses execution_time (covers lines 574-575)."""
         mock_get_auth.return_value = _make_auth_mock()
 
-        mock_data = {
-            "query_id": "q2",
-            "status": "SUCCESS",
-            "execution_time": 3.14
-        }
+        mock_data = {"query_id": "q2", "status": "SUCCESS", "execution_time": 3.14}
         mock_response = _make_http_response(json_data=mock_data)
         repo._client.get = AsyncMock(return_value=mock_response)
 
@@ -1396,21 +1408,17 @@ class TestExecuteQueryAdvanced:
         mock_send_resp = GenieSendMessageResponse(
             conversation_id="conv-1",
             message_id="msg-1",
-            status=GenieMessageStatus.RUNNING
+            status=GenieMessageStatus.RUNNING,
         )
         repo.send_message = AsyncMock(return_value=mock_send_resp)
         repo.get_message_status = AsyncMock(return_value=GenieMessageStatus.COMPLETED)
 
         failed_result = GenieQueryResult(
-            status=GenieQueryStatus.FAILED,
-            error="SQL syntax error"
+            status=GenieQueryStatus.FAILED, error="SQL syntax error"
         )
         repo.get_query_result = AsyncMock(return_value=failed_result)
 
-        request = GenieExecutionRequest(
-            space_id="space1",
-            question="bad query"
-        )
+        request = GenieExecutionRequest(space_id="space1", question="bad query")
 
         result = await repo.execute_query(request)
 
@@ -1425,20 +1433,17 @@ class TestExecuteQueryAdvanced:
         mock_send_resp = GenieSendMessageResponse(
             conversation_id="conv-1",
             message_id="msg-1",
-            status=GenieMessageStatus.RUNNING
+            status=GenieMessageStatus.RUNNING,
         )
         repo.send_message = AsyncMock(return_value=mock_send_resp)
 
         repo.get_message_status = AsyncMock(return_value=GenieMessageStatus.FAILED)
 
         request = GenieExecutionRequest(
-            space_id="space1",
-            question="Hello",
-            max_retries=3,
-            timeout=10
+            space_id="space1", question="Hello", max_retries=3, timeout=10
         )
 
-        with patch('asyncio.sleep', new_callable=AsyncMock):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
             result = await repo.execute_query(request)
 
         assert result.status == GenieQueryStatus.FAILED
@@ -1450,22 +1455,19 @@ class TestExecuteQueryAdvanced:
         mock_send_resp = GenieSendMessageResponse(
             conversation_id="conv-1",
             message_id="msg-1",
-            status=GenieMessageStatus.RUNNING
+            status=GenieMessageStatus.RUNNING,
         )
         repo.send_message = AsyncMock(return_value=mock_send_resp)
         repo.get_message_status = AsyncMock(return_value=GenieMessageStatus.RUNNING)
 
         request = GenieExecutionRequest(
-            space_id="space1",
-            question="slow query",
-            timeout=1,
-            max_retries=3
+            space_id="space1", question="slow query", timeout=1, max_retries=3
         )
 
         # Simulate time progression: start=0, first check=0.5 (in loop), second check=2.0 (exceeds timeout)
         time_values = iter([0.0, 0.5, 2.0])
-        with patch('time.time', side_effect=time_values):
-            with patch('asyncio.sleep', new_callable=AsyncMock):
+        with patch("time.time", side_effect=time_values):
+            with patch("asyncio.sleep", new_callable=AsyncMock):
                 result = await repo.execute_query(request)
 
         assert result.status == GenieQueryStatus.FAILED
@@ -1477,9 +1479,7 @@ class TestExecuteQueryAdvanced:
         repo.send_message = AsyncMock(side_effect=Exception("Network failure"))
 
         request = GenieExecutionRequest(
-            space_id="space1",
-            question="Hello",
-            conversation_id="conv-existing"
+            space_id="space1", question="Hello", conversation_id="conv-existing"
         )
 
         result = await repo.execute_query(request)
@@ -1493,10 +1493,7 @@ class TestExecuteQueryAdvanced:
         """Test execute_query exception with no conversation_id defaults to empty string."""
         repo.send_message = AsyncMock(side_effect=Exception("Oops"))
 
-        request = GenieExecutionRequest(
-            space_id="space1",
-            question="Hello"
-        )
+        request = GenieExecutionRequest(space_id="space1", question="Hello")
 
         result = await repo.execute_query(request)
 
@@ -1521,8 +1518,7 @@ class TestExtractResponseText:
     def test_extract_string_result(self, repo):
         """Test _extract_response_text with string result (covers lines 704-706)."""
         qr = GenieQueryResult(
-            status=GenieQueryStatus.SUCCESS,
-            result="Here are the results"
+            status=GenieQueryStatus.SUCCESS, result="Here are the results"
         )
         result = repo._extract_response_text(qr)
         assert "Here are the results" in result
@@ -1530,8 +1526,7 @@ class TestExtractResponseText:
     def test_extract_dict_result(self, repo):
         """Test _extract_response_text with dict result (covers lines 707-708)."""
         qr = GenieQueryResult(
-            status=GenieQueryStatus.SUCCESS,
-            result={"key": "value", "count": 42}
+            status=GenieQueryStatus.SUCCESS, result={"key": "value", "count": 42}
         )
         result = repo._extract_response_text(qr)
         assert "key" in result
@@ -1540,8 +1535,7 @@ class TestExtractResponseText:
     def test_extract_with_sql(self, repo):
         """Test _extract_response_text includes SQL query (covers lines 711-712)."""
         qr = GenieQueryResult(
-            status=GenieQueryStatus.SUCCESS,
-            sql="SELECT * FROM users"
+            status=GenieQueryStatus.SUCCESS, sql="SELECT * FROM users"
         )
         result = repo._extract_response_text(qr)
         assert "SQL Query:" in result
@@ -1554,10 +1548,10 @@ class TestExtractResponseText:
             data=[
                 {"name": "Alice", "age": 30},
                 {"name": "Bob", "age": 25},
-                {"name": "Charlie", "age": 35}
+                {"name": "Charlie", "age": 35},
             ],
             columns=["name", "age"],
-            row_count=3
+            row_count=3,
         )
         result = repo._extract_response_text(qr)
         assert "Results: 3 rows" in result
@@ -1571,13 +1565,9 @@ class TestExtractResponseText:
             status=GenieQueryStatus.SUCCESS,
             result="Summary: 3 users found",
             sql="SELECT * FROM users LIMIT 3",
-            data=[
-                {"name": "Alice"},
-                {"name": "Bob"},
-                {"name": "Charlie"}
-            ],
+            data=[{"name": "Alice"}, {"name": "Bob"}, {"name": "Charlie"}],
             columns=["name"],
-            row_count=3
+            row_count=3,
         )
         result = repo._extract_response_text(qr)
         assert "Summary: 3 users found" in result
@@ -1589,10 +1579,7 @@ class TestExtractResponseText:
         """Test _extract_response_text previews only first 5 rows (covers line 719)."""
         rows = [{"id": i} for i in range(10)]
         qr = GenieQueryResult(
-            status=GenieQueryStatus.SUCCESS,
-            data=rows,
-            columns=["id"],
-            row_count=10
+            status=GenieQueryStatus.SUCCESS, data=rows, columns=["id"], row_count=10
         )
         result = repo._extract_response_text(qr)
         assert "Results: 10 rows" in result
@@ -1603,9 +1590,7 @@ class TestExtractResponseText:
     def test_extract_data_without_columns(self, repo):
         """Test _extract_response_text with data but no columns does not show Results section."""
         qr = GenieQueryResult(
-            status=GenieQueryStatus.SUCCESS,
-            data=[{"a": 1}],
-            row_count=1
+            status=GenieQueryStatus.SUCCESS, data=[{"a": 1}], row_count=1
         )
         result = repo._extract_response_text(qr)
         assert "Results:" not in result
@@ -1614,10 +1599,7 @@ class TestExtractResponseText:
     def test_extract_empty_data_with_columns(self, repo):
         """Test _extract_response_text with empty data list and columns."""
         qr = GenieQueryResult(
-            status=GenieQueryStatus.SUCCESS,
-            data=[],
-            columns=["col1"],
-            row_count=0
+            status=GenieQueryStatus.SUCCESS, data=[], columns=["col1"], row_count=0
         )
         result = repo._extract_response_text(qr)
         assert result == "No response content found"

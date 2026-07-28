@@ -7,12 +7,14 @@ get_execution_by_job_id, get_checkpoints_for_flow, expire_checkpoint,
 set_checkpoint_active, mark_checkpoint_resumed, update_result,
 get_execution_groups_with_counts.
 """
-import pytest
+
 import uuid
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from sqlalchemy.exc import SQLAlchemyError
-from datetime import datetime
 
 
 def make_run(job_id=None, **kwargs):
@@ -42,25 +44,25 @@ def make_log(id=1, execution_id="exec-1", content="log content", timestamp=None)
         id=id,
         execution_id=execution_id,
         content=content,
-        timestamp=timestamp or datetime.utcnow()
+        timestamp=timestamp or datetime.utcnow(),
     )
 
 
 def make_service(session=None, history_repo=None, logs_repo=None):
     from src.services.execution.history import ExecutionHistoryService
+
     s = session or AsyncMock()
     h = history_repo or AsyncMock()
     l = logs_repo or AsyncMock()
     return ExecutionHistoryService(
-        session=s,
-        execution_history_repository=h,
-        execution_logs_repository=l
+        session=s, execution_history_repository=h, execution_logs_repository=l
     )
 
 
 # ---------------------------------------------------------------------------
 # _mask_inputs_sensitive_data
 # ---------------------------------------------------------------------------
+
 
 def test_mask_inputs_sensitive_data_empty():
     svc = make_service()
@@ -72,17 +74,14 @@ def test_mask_inputs_sensitive_data_with_agents():
     svc = make_service()
     inputs = {
         "agents_yaml": {
-            "agent1": {
-                "role": "researcher",
-                "tool_configs": {"api_key": "secret123"}
-            }
+            "agent1": {"role": "researcher", "tool_configs": {"api_key": "secret123"}}
         },
         "tasks_yaml": {
             "task1": {
                 "description": "do stuff",
-                "tool_configs": {"password": "mysecret"}
+                "tool_configs": {"password": "mysecret"},
             }
-        }
+        },
     }
     result = svc._mask_inputs_sensitive_data(inputs)
     # Should return a copy with masked fields
@@ -93,7 +92,7 @@ def test_mask_inputs_no_tool_configs():
     svc = make_service()
     inputs = {
         "agents_yaml": {"agent1": {"role": "researcher"}},
-        "tasks_yaml": {"task1": {"description": "work"}}
+        "tasks_yaml": {"task1": {"description": "work"}},
     }
     result = svc._mask_inputs_sensitive_data(inputs)
     assert "agents_yaml" in result
@@ -102,6 +101,7 @@ def test_mask_inputs_no_tool_configs():
 # ---------------------------------------------------------------------------
 # get_execution_by_id
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_execution_by_id_not_found():
@@ -129,7 +129,7 @@ async def test_get_execution_by_id_with_inputs_yaml():
     run = make_run()
     run.inputs = {
         "agents_yaml": {"agent1": {"role": "r"}},
-        "tasks_yaml": {"task1": {"description": "d"}}
+        "tasks_yaml": {"task1": {"description": "d"}},
     }
     run.__dict__["inputs"] = run.inputs
     svc.history_repo.get_execution_by_id = AsyncMock(return_value=run)
@@ -141,7 +141,9 @@ async def test_get_execution_by_id_with_inputs_yaml():
 @pytest.mark.asyncio
 async def test_get_execution_by_id_db_error():
     svc = make_service()
-    svc.history_repo.get_execution_by_id = AsyncMock(side_effect=SQLAlchemyError("db err"))
+    svc.history_repo.get_execution_by_id = AsyncMock(
+        side_effect=SQLAlchemyError("db err")
+    )
     with pytest.raises(SQLAlchemyError):
         await svc.get_execution_by_id(1)
 
@@ -149,7 +151,9 @@ async def test_get_execution_by_id_db_error():
 @pytest.mark.asyncio
 async def test_get_execution_by_id_generic_error():
     svc = make_service()
-    svc.history_repo.get_execution_by_id = AsyncMock(side_effect=RuntimeError("generic"))
+    svc.history_repo.get_execution_by_id = AsyncMock(
+        side_effect=RuntimeError("generic")
+    )
     with pytest.raises(RuntimeError):
         await svc.get_execution_by_id(1)
 
@@ -166,6 +170,7 @@ async def test_get_execution_by_id_with_tenant_ids():
 # ---------------------------------------------------------------------------
 # check_execution_exists
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_check_execution_exists_true():
@@ -184,7 +189,9 @@ async def test_check_execution_exists_false():
 @pytest.mark.asyncio
 async def test_check_execution_exists_db_error():
     svc = make_service()
-    svc.history_repo.check_execution_exists = AsyncMock(side_effect=SQLAlchemyError("err"))
+    svc.history_repo.check_execution_exists = AsyncMock(
+        side_effect=SQLAlchemyError("err")
+    )
     with pytest.raises(SQLAlchemyError):
         await svc.check_execution_exists(1)
 
@@ -200,6 +207,7 @@ async def test_check_execution_exists_generic_error():
 # ---------------------------------------------------------------------------
 # get_execution_outputs
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_execution_outputs_no_tenant():
@@ -239,7 +247,9 @@ async def test_get_execution_outputs_with_tenant_found():
 @pytest.mark.asyncio
 async def test_get_execution_outputs_db_error():
     svc = make_service()
-    svc.logs_repo.get_logs_by_execution_id = AsyncMock(side_effect=SQLAlchemyError("err"))
+    svc.logs_repo.get_logs_by_execution_id = AsyncMock(
+        side_effect=SQLAlchemyError("err")
+    )
     with pytest.raises(SQLAlchemyError):
         await svc.get_execution_outputs("exec-1")
 
@@ -255,6 +265,7 @@ async def test_get_execution_outputs_generic_error():
 # ---------------------------------------------------------------------------
 # get_debug_outputs
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_debug_outputs_not_found():
@@ -292,7 +303,9 @@ async def test_get_debug_outputs_empty_content():
 @pytest.mark.asyncio
 async def test_get_debug_outputs_db_error():
     svc = make_service()
-    svc.history_repo.get_execution_by_job_id = AsyncMock(side_effect=SQLAlchemyError("err"))
+    svc.history_repo.get_execution_by_job_id = AsyncMock(
+        side_effect=SQLAlchemyError("err")
+    )
     with pytest.raises(SQLAlchemyError):
         await svc.get_debug_outputs("exec-1")
 
@@ -301,8 +314,9 @@ async def test_get_debug_outputs_db_error():
 # Helpers for patching local imports in execution_history_service
 # ---------------------------------------------------------------------------
 
-import sys
 import contextlib
+import sys
+
 
 @contextlib.contextmanager
 def patch_deletion_services(mock_trace_svc, mock_logs_svc):
@@ -310,8 +324,8 @@ def patch_deletion_services(mock_trace_svc, mock_logs_svc):
     Patch ExecutionTraceService and ExecutionLogsService used inside
     the execution_history_service methods via local imports.
     """
-    import src.services.trace.service as trace_mod
     import src.services.execution.logs.writer as logs_mod
+    import src.services.trace.service as trace_mod
 
     original_trace = trace_mod.ExecutionTraceService
     original_logs = logs_mod.ExecutionLogsService
@@ -329,6 +343,7 @@ def patch_deletion_services(mock_trace_svc, mock_logs_svc):
 # delete_execution
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_delete_execution_not_found():
     svc = make_service()
@@ -339,15 +354,15 @@ async def test_delete_execution_not_found():
 
 @pytest.mark.asyncio
 async def test_delete_execution_success():
-    from src.services.execution.service import ExecutionService
     import src.services.execution.kasal_service as crewai_mod
+    from src.services.execution.service import ExecutionService
 
     svc = make_service()
     run = make_run(job_id="job-123")
     svc.history_repo.get_execution_by_id = AsyncMock(return_value=run)
-    svc.history_repo.delete_execution = AsyncMock(return_value={
-        "task_status_count": 0, "error_trace_count": 0
-    })
+    svc.history_repo.delete_execution = AsyncMock(
+        return_value={"task_status_count": 0, "error_trace_count": 0}
+    )
 
     mock_trace_repo = AsyncMock()
     mock_trace_repo.delete_by_job_id = AsyncMock(return_value=0)
@@ -369,15 +384,15 @@ async def test_delete_execution_success():
 
 @pytest.mark.asyncio
 async def test_delete_execution_with_job_in_memory():
-    from src.services.execution.service import ExecutionService
     import src.services.execution.kasal_service as crewai_mod
+    from src.services.execution.service import ExecutionService
 
     svc = make_service()
     run = make_run(job_id="job-mem")
     svc.history_repo.get_execution_by_id = AsyncMock(return_value=run)
-    svc.history_repo.delete_execution = AsyncMock(return_value={
-        "task_status_count": 1, "error_trace_count": 0
-    })
+    svc.history_repo.delete_execution = AsyncMock(
+        return_value={"task_status_count": 1, "error_trace_count": 0}
+    )
 
     mock_trace_repo = AsyncMock()
     mock_trace_repo.delete_by_job_id = AsyncMock(return_value=1)
@@ -409,6 +424,7 @@ async def test_delete_execution_db_error():
 # delete_execution_by_job_id
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_delete_execution_by_job_id_not_found():
     svc = make_service()
@@ -419,15 +435,15 @@ async def test_delete_execution_by_job_id_not_found():
 
 @pytest.mark.asyncio
 async def test_delete_execution_by_job_id_success():
-    from src.services.execution.service import ExecutionService
     import src.services.execution.kasal_service as crewai_mod
+    from src.services.execution.service import ExecutionService
 
     svc = make_service()
     run = make_run(job_id="job-xyz", id=42)
     svc.history_repo.get_execution_by_job_id = AsyncMock(return_value=run)
-    svc.history_repo.delete_execution_by_job_id = AsyncMock(return_value={
-        "task_status_count": 0, "error_trace_count": 0
-    })
+    svc.history_repo.delete_execution_by_job_id = AsyncMock(
+        return_value={"task_status_count": 0, "error_trace_count": 0}
+    )
 
     mock_trace_repo = AsyncMock()
     mock_trace_repo.delete_by_job_id = AsyncMock(return_value=0)
@@ -448,15 +464,15 @@ async def test_delete_execution_by_job_id_success():
 
 @pytest.mark.asyncio
 async def test_delete_execution_by_job_id_with_memory_cleanup():
-    from src.services.execution.service import ExecutionService
     import src.services.execution.kasal_service as crewai_mod
+    from src.services.execution.service import ExecutionService
 
     svc = make_service()
     run = make_run(job_id="job-abc", id=10)
     svc.history_repo.get_execution_by_job_id = AsyncMock(return_value=run)
-    svc.history_repo.delete_execution_by_job_id = AsyncMock(return_value={
-        "task_status_count": 0, "error_trace_count": 0
-    })
+    svc.history_repo.delete_execution_by_job_id = AsyncMock(
+        return_value={"task_status_count": 0, "error_trace_count": 0}
+    )
 
     mock_trace_repo = AsyncMock()
     mock_trace_repo.delete_by_job_id = AsyncMock(return_value=0)
@@ -479,6 +495,7 @@ async def test_delete_execution_by_job_id_with_memory_cleanup():
 # ---------------------------------------------------------------------------
 # get_execution_by_job_id
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_execution_by_job_id_not_found():
@@ -505,7 +522,7 @@ async def test_get_execution_by_job_id_with_yaml_inputs():
     run = make_run()
     run.inputs = {
         "agents_yaml": {"agent1": {"role": "r"}},
-        "tasks_yaml": {"t1": {"description": "d"}}
+        "tasks_yaml": {"t1": {"description": "d"}},
     }
     run.__dict__["inputs"] = run.inputs
     svc.history_repo.get_execution_by_job_id = AsyncMock(return_value=run)
@@ -516,7 +533,9 @@ async def test_get_execution_by_job_id_with_yaml_inputs():
 @pytest.mark.asyncio
 async def test_get_execution_by_job_id_db_error():
     svc = make_service()
-    svc.history_repo.get_execution_by_job_id = AsyncMock(side_effect=SQLAlchemyError("err"))
+    svc.history_repo.get_execution_by_job_id = AsyncMock(
+        side_effect=SQLAlchemyError("err")
+    )
     with pytest.raises(SQLAlchemyError):
         await svc.get_execution_by_job_id("job-1")
 
@@ -524,7 +543,9 @@ async def test_get_execution_by_job_id_db_error():
 @pytest.mark.asyncio
 async def test_get_execution_by_job_id_generic_error():
     svc = make_service()
-    svc.history_repo.get_execution_by_job_id = AsyncMock(side_effect=RuntimeError("err"))
+    svc.history_repo.get_execution_by_job_id = AsyncMock(
+        side_effect=RuntimeError("err")
+    )
     with pytest.raises(RuntimeError):
         await svc.get_execution_by_job_id("job-1")
 
@@ -532,6 +553,7 @@ async def test_get_execution_by_job_id_generic_error():
 # ---------------------------------------------------------------------------
 # get_checkpoints_for_flow
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_checkpoints_for_flow_success():
@@ -545,7 +567,9 @@ async def test_get_checkpoints_for_flow_success():
 @pytest.mark.asyncio
 async def test_get_checkpoints_for_flow_db_error():
     svc = make_service()
-    svc.history_repo.get_checkpoints_for_flow = AsyncMock(side_effect=SQLAlchemyError("err"))
+    svc.history_repo.get_checkpoints_for_flow = AsyncMock(
+        side_effect=SQLAlchemyError("err")
+    )
     with pytest.raises(SQLAlchemyError):
         await svc.get_checkpoints_for_flow(flow_id="flow-123")
 
@@ -553,7 +577,9 @@ async def test_get_checkpoints_for_flow_db_error():
 @pytest.mark.asyncio
 async def test_get_checkpoints_for_flow_generic_error():
     svc = make_service()
-    svc.history_repo.get_checkpoints_for_flow = AsyncMock(side_effect=RuntimeError("err"))
+    svc.history_repo.get_checkpoints_for_flow = AsyncMock(
+        side_effect=RuntimeError("err")
+    )
     with pytest.raises(RuntimeError):
         await svc.get_checkpoints_for_flow(flow_id="flow-123")
 
@@ -561,6 +587,7 @@ async def test_get_checkpoints_for_flow_generic_error():
 # ---------------------------------------------------------------------------
 # expire_checkpoint
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_expire_checkpoint_success():
@@ -573,7 +600,9 @@ async def test_expire_checkpoint_success():
 @pytest.mark.asyncio
 async def test_expire_checkpoint_db_error():
     svc = make_service()
-    svc.history_repo.update_checkpoint_status = AsyncMock(side_effect=SQLAlchemyError("err"))
+    svc.history_repo.update_checkpoint_status = AsyncMock(
+        side_effect=SQLAlchemyError("err")
+    )
     with pytest.raises(SQLAlchemyError):
         await svc.expire_checkpoint(1)
 
@@ -581,7 +610,9 @@ async def test_expire_checkpoint_db_error():
 @pytest.mark.asyncio
 async def test_expire_checkpoint_generic_error():
     svc = make_service()
-    svc.history_repo.update_checkpoint_status = AsyncMock(side_effect=RuntimeError("err"))
+    svc.history_repo.update_checkpoint_status = AsyncMock(
+        side_effect=RuntimeError("err")
+    )
     with pytest.raises(RuntimeError):
         await svc.expire_checkpoint(1)
 
@@ -589,6 +620,7 @@ async def test_expire_checkpoint_generic_error():
 # ---------------------------------------------------------------------------
 # set_checkpoint_active
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_set_checkpoint_active_success():
@@ -624,6 +656,7 @@ async def test_set_checkpoint_active_generic_error():
 # mark_checkpoint_resumed
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_mark_checkpoint_resumed_success():
     svc = make_service()
@@ -635,7 +668,9 @@ async def test_mark_checkpoint_resumed_success():
 @pytest.mark.asyncio
 async def test_mark_checkpoint_resumed_db_error():
     svc = make_service()
-    svc.history_repo.update_checkpoint_status = AsyncMock(side_effect=SQLAlchemyError("err"))
+    svc.history_repo.update_checkpoint_status = AsyncMock(
+        side_effect=SQLAlchemyError("err")
+    )
     with pytest.raises(SQLAlchemyError):
         await svc.mark_checkpoint_resumed(1, new_execution_id=2)
 
@@ -643,7 +678,9 @@ async def test_mark_checkpoint_resumed_db_error():
 @pytest.mark.asyncio
 async def test_mark_checkpoint_resumed_generic_error():
     svc = make_service()
-    svc.history_repo.update_checkpoint_status = AsyncMock(side_effect=RuntimeError("err"))
+    svc.history_repo.update_checkpoint_status = AsyncMock(
+        side_effect=RuntimeError("err")
+    )
     with pytest.raises(RuntimeError):
         await svc.mark_checkpoint_resumed(1, new_execution_id=2)
 
@@ -651,6 +688,7 @@ async def test_mark_checkpoint_resumed_generic_error():
 # ---------------------------------------------------------------------------
 # update_result
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_update_result_success():
@@ -681,7 +719,9 @@ async def test_update_result_with_group_ids():
 @pytest.mark.asyncio
 async def test_update_result_db_error():
     svc = make_service()
-    svc.history_repo.update_execution_result = AsyncMock(side_effect=SQLAlchemyError("err"))
+    svc.history_repo.update_execution_result = AsyncMock(
+        side_effect=SQLAlchemyError("err")
+    )
     with pytest.raises(SQLAlchemyError):
         await svc.update_result("job-1", {})
 
@@ -689,7 +729,9 @@ async def test_update_result_db_error():
 @pytest.mark.asyncio
 async def test_update_result_generic_error():
     svc = make_service()
-    svc.history_repo.update_execution_result = AsyncMock(side_effect=RuntimeError("err"))
+    svc.history_repo.update_execution_result = AsyncMock(
+        side_effect=RuntimeError("err")
+    )
     with pytest.raises(RuntimeError):
         await svc.update_result("job-1", {})
 
@@ -698,12 +740,15 @@ async def test_update_result_generic_error():
 # get_execution_groups_with_counts
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_execution_groups_with_counts_success():
     session = AsyncMock()
     svc = make_service(session=session)
 
-    svc.history_repo.count_by_group = AsyncMock(return_value=[("group-1", 5), ("group-2", 3)])
+    svc.history_repo.count_by_group = AsyncMock(
+        return_value=[("group-1", 5), ("group-2", 3)]
+    )
 
     result = await svc.get_execution_groups_with_counts()
     assert len(result) == 2
@@ -723,10 +768,11 @@ async def test_get_execution_groups_with_counts_error():
 # delete_all_executions
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_delete_all_executions_no_group():
-    from src.services.execution.service import ExecutionService
     import src.services.execution.kasal_service as crewai_mod
+    from src.services.execution.service import ExecutionService
 
     session = AsyncMock()
     svc = make_service(session=session)
@@ -740,9 +786,9 @@ async def test_delete_all_executions_no_group():
     mock_logs_svc.delete_all_logs = AsyncMock(return_value=10)
     mock_logs_svc.delete_by_execution_id = AsyncMock(return_value=0)
 
-    svc.history_repo.delete_all_executions = AsyncMock(return_value={
-        "run_count": 3, "task_status_count": 0, "error_trace_count": 0
-    })
+    svc.history_repo.delete_all_executions = AsyncMock(
+        return_value={"run_count": 3, "task_status_count": 0, "error_trace_count": 0}
+    )
 
     ExecutionService.executions["test-no-group"] = {}
     crewai_mod.executions["test-no-group-2"] = {}
@@ -774,13 +820,15 @@ async def test_delete_all_executions_with_group_no_jobs():
 
 @pytest.mark.asyncio
 async def test_delete_all_executions_with_group_and_jobs():
-    from src.services.execution.service import ExecutionService
     import src.services.execution.kasal_service as crewai_mod
+    from src.services.execution.service import ExecutionService
 
     session = AsyncMock()
     svc = make_service(session=session)
 
-    svc.history_repo.get_job_ids_for_groups = AsyncMock(return_value=["job-g1", "job-g2"])
+    svc.history_repo.get_job_ids_for_groups = AsyncMock(
+        return_value=["job-g1", "job-g2"]
+    )
 
     mock_trace_repo = AsyncMock()
     mock_trace_repo.delete_by_job_id = AsyncMock(return_value=1)
@@ -790,9 +838,9 @@ async def test_delete_all_executions_with_group_and_jobs():
     mock_logs_svc = AsyncMock()
     mock_logs_svc.delete_by_execution_id = AsyncMock(return_value=2)
 
-    svc.history_repo.delete_all_executions = AsyncMock(return_value={
-        "run_count": 2, "task_status_count": 0, "error_trace_count": 0
-    })
+    svc.history_repo.delete_all_executions = AsyncMock(
+        return_value={"run_count": 2, "task_status_count": 0, "error_trace_count": 0}
+    )
 
     ExecutionService.executions["job-g1"] = {}
     crewai_mod.executions["job-g2"] = {}
@@ -819,10 +867,13 @@ async def test_delete_all_executions_db_error():
 # get_execution_history - error path
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_execution_history_db_error():
     svc = make_service()
-    svc.history_repo.get_execution_history = AsyncMock(side_effect=SQLAlchemyError("err"))
+    svc.history_repo.get_execution_history = AsyncMock(
+        side_effect=SQLAlchemyError("err")
+    )
     with pytest.raises(SQLAlchemyError):
         await svc.get_execution_history()
 

@@ -22,10 +22,10 @@ import hashlib
 from collections import OrderedDict
 from typing import Any, Dict
 
-from src.services.guardrails.base_guardrail import BaseGuardrail
-from src.services.guardrails.guardrail_model import DEFAULT_GUARDRAIL_MODEL
-from src.services.guardrails.core.llm_injection_guardrail import _run_completion
 from src.core.logger import LoggerManager
+from src.services.guardrails.base_guardrail import BaseGuardrail
+from src.services.guardrails.core.llm_injection_guardrail import _run_completion
+from src.services.guardrails.guardrail_model import DEFAULT_GUARDRAIL_MODEL
 
 logger = LoggerManager.get_instance().guardrails
 
@@ -49,7 +49,7 @@ def _extract_text(output: Any) -> str:
         return ""
     if isinstance(output, str):
         return output
-    if hasattr(output, "raw"):          # crewai.TaskOutput
+    if hasattr(output, "raw"):  # crewai.TaskOutput
         return output.raw or ""
     if isinstance(output, dict):
         return str(output.get("output", output.get("result", "")))
@@ -81,9 +81,11 @@ class SelfReflectionGuardrail(BaseGuardrail):
         model: str = config.get("llm_model") or DEFAULT_GUARDRAIL_MODEL
         # Strip provider prefix — LLMManager adds it from DB config
         if model.startswith("databricks/"):
-            model = model[len("databricks/"):]
+            model = model[len("databricks/") :]
         self._model_name = model
-        self._task_description: str = config.get("task_description") or _DEFAULT_TASK_DESCRIPTION
+        self._task_description: str = (
+            config.get("task_description") or _DEFAULT_TASK_DESCRIPTION
+        )
         self._cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
         self._cache_max = int(config.get("cache_size", _DEFAULT_CACHE_SIZE))
 
@@ -142,6 +144,7 @@ class SelfReflectionGuardrail(BaseGuardrail):
 
         except Exception as exc:
             logger.warning(
-                "[SECURITY] SelfReflectionGuardrail: LLM call failed (fail-open): %s", exc
+                "[SECURITY] SelfReflectionGuardrail: LLM call failed (fail-open): %s",
+                exc,
             )
             return {"valid": True, "feedback": ""}

@@ -9,9 +9,8 @@ from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 
-from src.core.exceptions import NotFoundError
-
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import NotFoundError
 from src.core.logger import LoggerManager
 from src.schemas.execution_trace import (
     DeleteTraceResponse,
@@ -132,11 +131,17 @@ async def get_traces_by_job_id(
         ExecutionTraceResponseByJobId with traces for the execution
     """
     result = await service.get_traces_by_job_id(
-        group_context=group_context, job_id=job_id, limit=limit, offset=offset,
-        since_id=since_id, preview_chars=preview_chars,
+        group_context=group_context,
+        job_id=job_id,
+        limit=limit,
+        offset=offset,
+        since_id=since_id,
+        preview_chars=preview_chars,
     )
     if not result:
-        raise NotFoundError(f"Execution with job_id {job_id} not found or access denied")
+        raise NotFoundError(
+            f"Execution with job_id {job_id} not found or access denied"
+        )
     return result
 
 
@@ -164,7 +169,9 @@ async def get_current_crew_node_states(
         event_types=["task_started", "task_completed", "task_failed", "crew_completed"],
     )
     if state_traces is None:
-        raise NotFoundError(f"Execution with job_id {job_id} not found or access denied")
+        raise NotFoundError(
+            f"Execution with job_id {job_id} not found or access denied"
+        )
 
     crew_states = {}
 
@@ -179,7 +186,12 @@ async def get_current_crew_node_states(
         event_type_upper = trace.event_type.upper() if trace.event_type else ""
 
         # Check for crew-related events from flow execution
-        if event_type_upper in ["TASK_STARTED", "TASK_COMPLETED", "TASK_FAILED", "CREW_COMPLETED"]:
+        if event_type_upper in [
+            "TASK_STARTED",
+            "TASK_COMPLETED",
+            "TASK_FAILED",
+            "CREW_COMPLETED",
+        ]:
             # Extract crew name from metadata if available
             crew_name = None
             if trace.trace_metadata and isinstance(trace.trace_metadata, dict):
@@ -280,7 +292,9 @@ async def get_current_task_states(
         event_types=["task_started", "task_completed", "task_failed"],
     )
     if state_traces is None:
-        raise NotFoundError(f"Execution with job_id {job_id} not found or access denied")
+        raise NotFoundError(
+            f"Execution with job_id {job_id} not found or access denied"
+        )
 
     task_states = {}
     task_name_to_id = {}  # Track the proper task ID for each task name
@@ -328,9 +342,11 @@ async def get_current_task_states(
                     ):
                         task_states[task_id] = {
                             "status": "running",
-                            "started_at": trace.created_at.isoformat()
-                            if trace.created_at
-                            else None,
+                            "started_at": (
+                                trace.created_at.isoformat()
+                                if trace.created_at
+                                else None
+                            ),
                             "task_name": trace.event_context,
                         }
                 elif event_type_upper == "TASK_COMPLETED":
@@ -343,9 +359,11 @@ async def get_current_task_states(
                     else:
                         task_states[task_id] = {
                             "status": "completed",
-                            "completed_at": trace.created_at.isoformat()
-                            if trace.created_at
-                            else None,
+                            "completed_at": (
+                                trace.created_at.isoformat()
+                                if trace.created_at
+                                else None
+                            ),
                             "task_name": trace.event_context,
                         }
                 elif event_type_upper == "TASK_FAILED":
@@ -358,9 +376,11 @@ async def get_current_task_states(
                     else:
                         task_states[task_id] = {
                             "status": "failed",
-                            "failed_at": trace.created_at.isoformat()
-                            if trace.created_at
-                            else None,
+                            "failed_at": (
+                                trace.created_at.isoformat()
+                                if trace.created_at
+                                else None
+                            ),
                             "task_name": trace.event_context,
                         }
 

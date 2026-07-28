@@ -5,8 +5,9 @@ Covers the broadened `except Exception` handler that returns an empty
 GroupContext instead of crashing with 500 when group resolution fails.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi import Request
 
 from src.core.dependencies import get_group_context
@@ -18,13 +19,13 @@ def _make_request(state_attrs=None):
     request = MagicMock(spec=Request)
     request.state = MagicMock()
     # Ensure no cached group context
-    if hasattr(request.state, '_group_context_cache'):
+    if hasattr(request.state, "_group_context_cache"):
         del request.state._group_context_cache
     else:
         request.state._group_context_cache = None
         type(request.state).__dict__  # force attribute existence check
     # Use a fresh SimpleNamespace-like state
-    request.state = type('State', (), {})()
+    request.state = type("State", (), {})()
     return request
 
 
@@ -37,7 +38,8 @@ class TestGetGroupContextExceptionHandling:
         request = _make_request()
 
         with patch.object(
-            GroupContext, 'from_email',
+            GroupContext,
+            "from_email",
             new_callable=AsyncMock,
             side_effect=RuntimeError("Database connection lost"),
         ):
@@ -64,9 +66,12 @@ class TestGetGroupContextExceptionHandling:
         request = _make_request()
 
         with patch.object(
-            GroupContext, 'from_email',
+            GroupContext,
+            "from_email",
             new_callable=AsyncMock,
-            side_effect=ValueError("Access denied: User does not have access to group X"),
+            side_effect=ValueError(
+                "Access denied: User does not have access to group X"
+            ),
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_group_context(
@@ -113,7 +118,8 @@ class TestGetGroupContextExceptionHandling:
         )
 
         with patch.object(
-            GroupContext, 'from_email',
+            GroupContext,
+            "from_email",
             new_callable=AsyncMock,
             return_value=mock_context,
         ):
@@ -130,7 +136,7 @@ class TestGetGroupContextExceptionHandling:
 
         assert result is mock_context
         # Check it was cached on request.state
-        assert hasattr(request.state, '_group_context_cache')
+        assert hasattr(request.state, "_group_context_cache")
 
     @pytest.mark.asyncio
     async def test_cache_hit_returns_cached_context(self):

@@ -1,14 +1,14 @@
 """Unit tests for PBIVisualUCMVMapperTool (Tool 94)."""
+
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.services.tools.pbi_visual_ucmv_mapper_tool import (
-    PBIVisualUCMVMapperTool,
     PBIVisualUCMVMapperSchema,
+    PBIVisualUCMVMapperTool,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared test data
@@ -30,93 +30,99 @@ SAMPLE_YAML = (
     "    expr: COUNT(order_id)\n"
 )
 
-SAMPLE_REPORT_REFERENCES = json.dumps({
-    "reports": [
+SAMPLE_REPORT_REFERENCES = json.dumps(
+    {
+        "reports": [
+            {
+                "report_name": "Sales Report",
+                "pages": [
+                    {
+                        "page_name": "Page1",
+                        "page_display_name": "Sales Overview",
+                        "visuals": [
+                            {
+                                "visual_id": "v001",
+                                "visual_type": "barChart",
+                                "measures": ["Revenue", "Cost"],
+                                "tables": ["Sales"],
+                            },
+                            {
+                                "visual_id": "v002",
+                                "visual_type": "tableEx",
+                                "measures": ["Revenue"],
+                                "tables": ["Sales"],
+                            },
+                        ],
+                    },
+                    {
+                        "page_name": "Page2",
+                        "page_display_name": "KPIs",
+                        "visuals": [
+                            {
+                                "visual_id": "v003",
+                                "visual_type": "card",
+                                "measures": ["Total Revenue"],
+                                "tables": [],
+                            },
+                        ],
+                    },
+                ],
+            }
+        ]
+    }
+)
+
+SAMPLE_UCMV_OUTPUT = json.dumps(
+    {
+        "yaml": {
+            "fact_sales": SAMPLE_YAML,
+        },
+        "sql": {
+            "fact_sales": "CREATE METRIC VIEW ...",
+        },
+        "deployment_results": {
+            "fact_sales": {
+                "status": "deployed",
+                "view_name": "main.metrics.fact_sales",
+            }
+        },
+    }
+)
+
+SAMPLE_LLM_RESPONSE = json.dumps(
+    [
         {
-            "report_name": "Sales Report",
-            "pages": [
-                {
-                    "page_name": "Page1",
-                    "page_display_name": "Sales Overview",
-                    "visuals": [
-                        {
-                            "visual_id": "v001",
-                            "visual_type": "barChart",
-                            "measures": ["Revenue", "Cost"],
-                            "tables": ["Sales"],
-                        },
-                        {
-                            "visual_id": "v002",
-                            "visual_type": "tableEx",
-                            "measures": ["Revenue"],
-                            "tables": ["Sales"],
-                        },
-                    ],
-                },
-                {
-                    "page_name": "Page2",
-                    "page_display_name": "KPIs",
-                    "visuals": [
-                        {
-                            "visual_id": "v003",
-                            "visual_type": "card",
-                            "measures": ["Total Revenue"],
-                            "tables": [],
-                        },
-                    ],
-                },
-            ],
-        }
+            "visual_id": "v001",
+            "page_name": "Sales Overview",
+            "visual_type": "barChart",
+            "chart_title": "Revenue by Region",
+            "ucmv_view": "main.metrics.fact_sales",
+            "dimensions": ["region"],
+            "measures": ["total_revenue"],
+            "sql": "SELECT region, MEASURE(total_revenue) FROM main.metrics.fact_sales GROUP BY region",
+        },
+        {
+            "visual_id": "v002",
+            "page_name": "Sales Overview",
+            "visual_type": "tableEx",
+            "chart_title": "Sales Table",
+            "ucmv_view": "main.metrics.fact_sales",
+            "dimensions": ["region", "product"],
+            "measures": ["total_revenue"],
+            "sql": "SELECT region, product, MEASURE(total_revenue) FROM main.metrics.fact_sales GROUP BY region, product",
+        },
+        {
+            "visual_id": "v003",
+            "page_name": "KPIs",
+            "visual_type": "card",
+            "chart_title": "Total Revenue KPI",
+            "ucmv_view": "main.metrics.fact_sales",
+            "dimensions": [],
+            "measures": ["total_revenue"],
+            "sql": "SELECT MEASURE(total_revenue) FROM main.metrics.fact_sales",
+        },
     ]
-})
-
-SAMPLE_UCMV_OUTPUT = json.dumps({
-    "yaml": {
-        "fact_sales": SAMPLE_YAML,
-    },
-    "sql": {
-        "fact_sales": "CREATE METRIC VIEW ...",
-    },
-    "deployment_results": {
-        "fact_sales": {
-            "status": "deployed",
-            "view_name": "main.metrics.fact_sales",
-        }
-    },
-})
-
-SAMPLE_LLM_RESPONSE = json.dumps([
-    {
-        "visual_id": "v001",
-        "page_name": "Sales Overview",
-        "visual_type": "barChart",
-        "chart_title": "Revenue by Region",
-        "ucmv_view": "main.metrics.fact_sales",
-        "dimensions": ["region"],
-        "measures": ["total_revenue"],
-        "sql": "SELECT region, MEASURE(total_revenue) FROM main.metrics.fact_sales GROUP BY region",
-    },
-    {
-        "visual_id": "v002",
-        "page_name": "Sales Overview",
-        "visual_type": "tableEx",
-        "chart_title": "Sales Table",
-        "ucmv_view": "main.metrics.fact_sales",
-        "dimensions": ["region", "product"],
-        "measures": ["total_revenue"],
-        "sql": "SELECT region, product, MEASURE(total_revenue) FROM main.metrics.fact_sales GROUP BY region, product",
-    },
-    {
-        "visual_id": "v003",
-        "page_name": "KPIs",
-        "visual_type": "card",
-        "chart_title": "Total Revenue KPI",
-        "ucmv_view": "main.metrics.fact_sales",
-        "dimensions": [],
-        "measures": ["total_revenue"],
-        "sql": "SELECT MEASURE(total_revenue) FROM main.metrics.fact_sales",
-    },
-])
+)
 
 
 def _mock_auth(workspace_url="https://test.azuredatabricks.net"):
@@ -129,6 +135,7 @@ def _mock_auth(workspace_url="https://test.azuredatabricks.net"):
 # ---------------------------------------------------------------------------
 # Schema tests
 # ---------------------------------------------------------------------------
+
 
 class TestPBIVisualUCMVMapperSchema:
     def test_all_fields_optional(self):
@@ -153,6 +160,7 @@ class TestPBIVisualUCMVMapperSchema:
 # ---------------------------------------------------------------------------
 # Tool initialization
 # ---------------------------------------------------------------------------
+
 
 class TestToolInit:
     def test_tool_name(self):
@@ -181,6 +189,7 @@ class TestToolInit:
 # Error cases
 # ---------------------------------------------------------------------------
 
+
 class TestErrorCases:
     def test_no_report_references_returns_error(self):
         """No report_references_json → error."""
@@ -207,13 +216,18 @@ class TestErrorCases:
         """No injected ucmv_output but a prior UCMV run in the DB → uses it."""
         tool = PBIVisualUCMVMapperTool()
         db_ucmv = json.loads(SAMPLE_UCMV_OUTPUT)
-        with patch(
-            "src.services.tools.metric_view_validator_tool"
-            ".MetricViewValidatorTool._fetch_latest_ucmv_from_db",
-            return_value=db_ucmv,
-        ), patch.object(tool, "_authenticate", return_value=_mock_auth()), \
-             patch("src.services.llm.manager.LLMManager.completion",
-                   AsyncMock(return_value=SAMPLE_LLM_RESPONSE)):
+        with (
+            patch(
+                "src.services.tools.metric_view_validator_tool"
+                ".MetricViewValidatorTool._fetch_latest_ucmv_from_db",
+                return_value=db_ucmv,
+            ),
+            patch.object(tool, "_authenticate", return_value=_mock_auth()),
+            patch(
+                "src.services.llm.manager.LLMManager.completion",
+                AsyncMock(return_value=SAMPLE_LLM_RESPONSE),
+            ),
+        ):
             result = tool._run(report_references_json=SAMPLE_REPORT_REFERENCES)
         data = json.loads(result)
         assert "error" not in data
@@ -245,6 +259,7 @@ class TestErrorCases:
 # ---------------------------------------------------------------------------
 # Report references parsing
 # ---------------------------------------------------------------------------
+
 
 class TestReportReferencesParsing:
     def test_extracts_visuals_from_report_references(self):
@@ -283,6 +298,7 @@ class TestReportReferencesParsing:
 # UCMV summaries building
 # ---------------------------------------------------------------------------
 
+
 class TestUcmvSummaries:
     def test_extracts_ucmv_views_from_deployment_results(self):
         """ucmv_output with deployment_results → view names extracted."""
@@ -308,10 +324,12 @@ class TestUcmvSummaries:
 
     def test_fallback_view_name_without_deployment_results(self):
         """Without deployment_results, view name is constructed from catalog.schema.safe_key."""
-        ucmv_no_dep = json.dumps({
-            "yaml": {"fact_sales": SAMPLE_YAML},
-            "sql": {},
-        })
+        ucmv_no_dep = json.dumps(
+            {
+                "yaml": {"fact_sales": SAMPLE_YAML},
+                "sql": {},
+            }
+        )
         tool = PBIVisualUCMVMapperTool()
         ucmv_data = tool._parse_ucmv_output(ucmv_no_dep)
         summaries = tool._build_ucmv_summaries(ucmv_data, "mycat", "mysch")
@@ -322,17 +340,23 @@ class TestUcmvSummaries:
 # LLM integration
 # ---------------------------------------------------------------------------
 
+
 class TestLLMIntegration:
     def test_llm_called_for_mapping(self):
         """Mock LLMManager, verify it's called with visual + UCMV summaries."""
         from unittest.mock import AsyncMock
+
         tool = PBIVisualUCMVMapperTool()
         auth = _mock_auth()
 
         mock_completion = AsyncMock(return_value=SAMPLE_LLM_RESPONSE)
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.services.llm.manager.LLMManager.completion", mock_completion) as mock_llm:
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch(
+                "src.services.llm.manager.LLMManager.completion", mock_completion
+            ) as mock_llm,
+        ):
             tool._run(
                 report_references_json=SAMPLE_REPORT_REFERENCES,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
@@ -345,11 +369,17 @@ class TestLLMIntegration:
     def test_llm_response_parsed_correctly(self):
         """Mock LLM returns JSON array → visual_mappings populated."""
         from unittest.mock import AsyncMock
+
         tool = PBIVisualUCMVMapperTool()
         auth = _mock_auth()
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.services.llm.manager.LLMManager.completion", AsyncMock(return_value=SAMPLE_LLM_RESPONSE)):
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch(
+                "src.services.llm.manager.LLMManager.completion",
+                AsyncMock(return_value=SAMPLE_LLM_RESPONSE),
+            ),
+        ):
             result = tool._run(
                 report_references_json=SAMPLE_REPORT_REFERENCES,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
@@ -366,9 +396,13 @@ class TestLLMIntegration:
         tool = PBIVisualUCMVMapperTool()
         auth = _mock_auth()
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.services.llm.manager.LLMManager.completion",
-                   AsyncMock(side_effect=RuntimeError("LLM unavailable"))):
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch(
+                "src.services.llm.manager.LLMManager.completion",
+                AsyncMock(side_effect=RuntimeError("LLM unavailable")),
+            ),
+        ):
             result = tool._run(
                 report_references_json=SAMPLE_REPORT_REFERENCES,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
@@ -385,7 +419,9 @@ class TestLLMIntegration:
         """Authentication fails → fallback_mapping used, no crash."""
         tool = PBIVisualUCMVMapperTool()
 
-        with patch.object(tool, "_authenticate", side_effect=RuntimeError("Auth failed")):
+        with patch.object(
+            tool, "_authenticate", side_effect=RuntimeError("Auth failed")
+        ):
             result = tool._run(
                 report_references_json=SAMPLE_REPORT_REFERENCES,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
@@ -401,10 +437,13 @@ class TestLLMIntegration:
 # Output structure
 # ---------------------------------------------------------------------------
 
+
 class TestOutputStructure:
     def _run_with_fallback(self, tool):
         """Run with auth failure to get fallback output."""
-        with patch.object(tool, "_authenticate", side_effect=RuntimeError("Auth failed")):
+        with patch.object(
+            tool, "_authenticate", side_effect=RuntimeError("Auth failed")
+        ):
             result = tool._run(
                 report_references_json=SAMPLE_REPORT_REFERENCES,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
@@ -445,19 +484,35 @@ class TestOutputStructure:
         assert "mapped" in data["summary"]
         assert "unmapped" in data["summary"]
         # mapped + unmapped == total
-        assert data["summary"]["mapped"] + data["summary"]["unmapped"] == data["summary"]["total_visuals"]
+        assert (
+            data["summary"]["mapped"] + data["summary"]["unmapped"]
+            == data["summary"]["total_visuals"]
+        )
 
 
 # ---------------------------------------------------------------------------
 # Fallback mapping
 # ---------------------------------------------------------------------------
 
+
 class TestFallbackMapping:
     def test_fallback_creates_mappings_for_all_visuals(self):
         tool = PBIVisualUCMVMapperTool()
         visuals = [
-            {"visual_id": "v1", "page_name": "P1", "visual_type": "barChart", "measures": [], "tables": []},
-            {"visual_id": "v2", "page_name": "P1", "visual_type": "card", "measures": [], "tables": []},
+            {
+                "visual_id": "v1",
+                "page_name": "P1",
+                "visual_type": "barChart",
+                "measures": [],
+                "tables": [],
+            },
+            {
+                "visual_id": "v2",
+                "page_name": "P1",
+                "visual_type": "card",
+                "measures": [],
+                "tables": [],
+            },
         ]
         ucmv_data = tool._parse_ucmv_output(SAMPLE_UCMV_OUTPUT)
         ucmv_summaries = tool._build_ucmv_summaries(ucmv_data, "main", "metrics")
@@ -468,7 +523,13 @@ class TestFallbackMapping:
         """card type → SQL without GROUP BY."""
         tool = PBIVisualUCMVMapperTool()
         visuals = [
-            {"visual_id": "v1", "page_name": "P1", "visual_type": "card", "measures": [], "tables": []},
+            {
+                "visual_id": "v1",
+                "page_name": "P1",
+                "visual_type": "card",
+                "measures": [],
+                "tables": [],
+            },
         ]
         ucmv_data = tool._parse_ucmv_output(SAMPLE_UCMV_OUTPUT)
         ucmv_summaries = tool._build_ucmv_summaries(ucmv_data, "main", "metrics")
@@ -480,7 +541,13 @@ class TestFallbackMapping:
         """barChart → SQL with GROUP BY when dims available."""
         tool = PBIVisualUCMVMapperTool()
         visuals = [
-            {"visual_id": "v1", "page_name": "P1", "visual_type": "barChart", "measures": [], "tables": []},
+            {
+                "visual_id": "v1",
+                "page_name": "P1",
+                "visual_type": "barChart",
+                "measures": [],
+                "tables": [],
+            },
         ]
         ucmv_data = tool._parse_ucmv_output(SAMPLE_UCMV_OUTPUT)
         ucmv_summaries = tool._build_ucmv_summaries(ucmv_data, "main", "metrics")
@@ -494,6 +561,7 @@ class TestFallbackMapping:
 # ---------------------------------------------------------------------------
 # Parse LLM response
 # ---------------------------------------------------------------------------
+
 
 class TestParseLLMResponse:
     def test_parse_valid_json_array(self):
@@ -526,18 +594,29 @@ class TestLlmSqlSafetyGate:
 
     def test_safe_select_helper(self):
         from src.services.tools.pbi_visual_ucmv_mapper_tool import _is_safe_select_sql
+
         assert _is_safe_select_sql("SELECT a, MEASURE(m) FROM v GROUP BY a") is True
         assert _is_safe_select_sql("WITH t AS (SELECT 1) SELECT * FROM t") is True
         assert _is_safe_select_sql("SELECT * FROM v; DROP TABLE x") is False
         assert _is_safe_select_sql("DROP TABLE x") is False
         assert _is_safe_select_sql("SELECT * FROM v $$ evil") is False
-        assert _is_safe_select_sql("SELECT * FROM v UNION SELECT * FROM information_schema.tables") is False
+        assert (
+            _is_safe_select_sql(
+                "SELECT * FROM v UNION SELECT * FROM information_schema.tables"
+            )
+            is False
+        )
 
     def test_parse_response_nulls_unsafe_sql(self):
-        from src.services.tools.pbi_visual_ucmv_mapper_tool import PBIVisualUCMVMapperTool
+        from src.services.tools.pbi_visual_ucmv_mapper_tool import (
+            PBIVisualUCMVMapperTool,
+        )
+
         tool = PBIVisualUCMVMapperTool()
-        payload = ('[{"visual_id": "v1", "sql": "SELECT a FROM view"}, '
-                   '{"visual_id": "v2", "sql": "SELECT * FROM v; DROP TABLE x"}]')
+        payload = (
+            '[{"visual_id": "v1", "sql": "SELECT a FROM view"}, '
+            '{"visual_id": "v2", "sql": "SELECT * FROM v; DROP TABLE x"}]'
+        )
         result = tool._parse_llm_response(payload)
-        assert result[0]["sql"] == "SELECT a FROM view"   # safe → kept
-        assert result[1]["sql"] is None                    # unsafe → dropped
+        assert result[0]["sql"] == "SELECT a FROM view"  # safe → kept
+        assert result[1]["sql"] is None  # unsafe → dropped

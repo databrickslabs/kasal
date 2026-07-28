@@ -5,9 +5,10 @@ Uses a real in-memory SQLite engine so the JSON columns, indexes and query
 helpers are exercised end-to-end (the artifacts are the point of the feature —
 mocking the session would test nothing meaningful).
 """
+
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.models.powerbi_extraction import PowerBIExtraction
 from src.repositories.powerbi_extraction_repository import PowerBIExtractionRepository
@@ -31,13 +32,27 @@ def _payload(**over):
         workspace_id="ws-1",
         dataset_id="ds-1",
         report_id="rep-1",
-        relationships=[{
-            "from_table": "FactSales", "from_column": "DateKey",
-            "from_cardinality": "Many", "to_table": "DimDate",
-            "to_column": "DateKey", "to_cardinality": "One", "is_active": True,
-        }],
-        measures=[{"measure_name": "Total", "expression": "SUM(F[x])", "table_name": "FactSales"}],
-        admin_tables={"FactSales": {"columns": [], "mquery_expression": "let ...", "measures": []}},
+        relationships=[
+            {
+                "from_table": "FactSales",
+                "from_column": "DateKey",
+                "from_cardinality": "Many",
+                "to_table": "DimDate",
+                "to_column": "DateKey",
+                "to_cardinality": "One",
+                "is_active": True,
+            }
+        ],
+        measures=[
+            {
+                "measure_name": "Total",
+                "expression": "SUM(F[x])",
+                "table_name": "FactSales",
+            }
+        ],
+        admin_tables={
+            "FactSales": {"columns": [], "mquery_expression": "let ...", "measures": []}
+        },
         report_definition={"visuals": []},
         proposed_config={"catalog": "main"},
         warnings=[],
@@ -127,16 +142,27 @@ class TestToolPersistenceHook:
         import src.services.tools.tool_session_provider as tsp
 
         class _Boom:
-            async def __aenter__(self): raise RuntimeError("db down")
-            async def __aexit__(self, *a): return False
+            async def __aenter__(self):
+                raise RuntimeError("db down")
+
+            async def __aexit__(self, *a):
+                return False
 
         monkeypatch.setattr(
-            tsp.ToolSessionProvider, "powerbi_extraction_repo",
+            tsp.ToolSessionProvider,
+            "powerbi_extraction_repo",
             staticmethod(lambda: _Boom()),
         )
 
         # Should complete without raising.
         await tool._save_powerbi_extraction(
-            relationships=[], measures=[], admin_tables={}, report_def=None,
-            config={}, warnings=[], workspace_id="ws", dataset_id="ds", report_id=None,
+            relationships=[],
+            measures=[],
+            admin_tables={},
+            report_def=None,
+            config={},
+            warnings=[],
+            workspace_id="ws",
+            dataset_id="ds",
+            report_id=None,
         )

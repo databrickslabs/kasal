@@ -4,14 +4,16 @@ Unit tests for logging configuration.
 Tests the functionality of the logging configuration module including
 environment-specific setups and logger creation.
 """
-import pytest
+
 import logging
 import os
 import tempfile
-from unittest.mock import patch, MagicMock
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
-from src.config.logging import get_logging_config, setup_logging, get_logger
+import pytest
+
+from src.config.logging import get_logger, get_logging_config, setup_logging
 
 
 class TestLoggingConfig:
@@ -66,9 +68,11 @@ class TestLoggingConfig:
             # Mock the LoggerManager instance
             mock_instance = MagicMock()
             mock_instance._log_dir = None  # Not initialized
+
             # After initialize is called, set the log dir
             def set_log_dir(*args):
                 mock_instance._log_dir = "/custom/log/dir"
+
             mock_instance.initialize.side_effect = set_log_dir
             mock_logger_manager.get_instance.return_value = mock_instance
 
@@ -84,9 +88,11 @@ class TestLoggingConfig:
             # Mock the LoggerManager instance
             mock_instance = MagicMock()
             mock_instance._log_dir = None  # Not initialized
+
             # After initialize is called, set the default log dir
             def set_default_log_dir(*args):
                 mock_instance._log_dir = "/default/log/dir"
+
             mock_instance.initialize.side_effect = set_default_log_dir
             mock_logger_manager.get_instance.return_value = mock_instance
 
@@ -110,6 +116,7 @@ class TestLoggingConfig:
             assert console_handler["class"] == "logging.StreamHandler"
             # Check that stream is stdout (comparing object not string)
             import sys
+
             assert console_handler["stream"] == sys.stdout
 
             # File handler
@@ -177,7 +184,9 @@ class TestLoggingConfig:
     @patch("logging.config.dictConfig")
     @patch("src.config.logging.get_logging_config")
     @patch("logging.getLogger")
-    def test_setup_logging_logs_configuration(self, mock_get_logger, mock_get_config, mock_dict_config):
+    def test_setup_logging_logs_configuration(
+        self, mock_get_logger, mock_get_config, mock_dict_config
+    ):
         """Test that setup_logging logs the configuration."""
         mock_config = {"version": 1, "handlers": {}}
         mock_get_config.return_value = mock_config
@@ -186,7 +195,9 @@ class TestLoggingConfig:
 
         setup_logging("production")
 
-        mock_logger.info.assert_called_once_with("Logging configured for production environment")
+        mock_logger.info.assert_called_once_with(
+            "Logging configured for production environment"
+        )
 
     def test_get_logger(self):
         """Test the get_logger function."""
@@ -209,7 +220,8 @@ class TestLoggingConfig:
         # Check that some deprecation warnings are filtered
         httpx_filtered = any(
             f[2] == "httpx" and f[1] == DeprecationWarning
-            for f in filters if len(f) >= 3 and f[2] is not None
+            for f in filters
+            if len(f) >= 3 and f[2] is not None
         )
 
         # At least one filter should be in place
@@ -217,8 +229,9 @@ class TestLoggingConfig:
 
     def test_log_filename_generation(self):
         """Test that log filenames are generated correctly."""
-        from src.config.logging import log_filename, error_log_filename
         from datetime import datetime
+
+        from src.config.logging import error_log_filename, log_filename
 
         current_date = datetime.now().strftime("%Y-%m-%d")
         expected_log = f"backend.{current_date}.log"
@@ -229,7 +242,7 @@ class TestLoggingConfig:
 
     def test_verbose_and_simple_formats(self):
         """Test that log formats are defined correctly."""
-        from src.config.logging import VERBOSE_FORMAT, SIMPLE_FORMAT
+        from src.config.logging import SIMPLE_FORMAT, VERBOSE_FORMAT
 
         # Check that formats contain expected components
         assert "%(asctime)s" in VERBOSE_FORMAT
@@ -263,22 +276,34 @@ class TestExecutionLogsDatabaseHandlerInit:
 
     def test_init_db_with_database_url_env_var(self):
         """Test that DATABASE_URL environment variable is used directly when set."""
-        from src.services.execution.subprocess_bootstrap import ExecutionLogsDatabaseHandler
+        from src.services.execution.subprocess_bootstrap import (
+            ExecutionLogsDatabaseHandler,
+        )
 
-        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://testuser" ":testpass@testhost:5432/testdb"}):
+        with patch.dict(
+            os.environ,
+            {"DATABASE_URL": "postgresql://testuser" ":testpass@testhost:5432/testdb"},
+        ):
             with patch("src.core.logger.get_logger", return_value=MagicMock()):
                 handler = ExecutionLogsDatabaseHandler(execution_id="test-exec-id")
 
                 # DATABASE_URL should be used as-is
-                assert handler._db_url == "postgresql://testuser" ":testpass@testhost:5432/testdb"
+                assert (
+                    handler._db_url == "postgresql://testuser"
+                    ":testpass@testhost:5432/testdb"
+                )
 
     def test_init_db_strips_asyncpg_from_settings_database_uri(self):
         """Test that +asyncpg is stripped from settings.DATABASE_URI when DATABASE_URL is not set."""
-        from src.services.execution.subprocess_bootstrap import ExecutionLogsDatabaseHandler
+        from src.services.execution.subprocess_bootstrap import (
+            ExecutionLogsDatabaseHandler,
+        )
 
         # Create a mock settings object with postgresql+asyncpg URI
         mock_settings = MagicMock()
-        mock_settings.DATABASE_URI = "postgresql+asyncpg://user" ":pass@localhost:5432/testdb"
+        mock_settings.DATABASE_URI = (
+            "postgresql+asyncpg://user" ":pass@localhost:5432/testdb"
+        )
 
         with patch.dict(os.environ, {}, clear=True):  # Clear DATABASE_URL
             with patch("src.config.settings.settings", mock_settings):
@@ -286,12 +311,17 @@ class TestExecutionLogsDatabaseHandlerInit:
                     handler = ExecutionLogsDatabaseHandler(execution_id="test-exec-id")
 
                     # +asyncpg should be stripped
-                    assert handler._db_url == "postgresql://user" ":pass@localhost:5432/testdb"
+                    assert (
+                        handler._db_url == "postgresql://user"
+                        ":pass@localhost:5432/testdb"
+                    )
                     assert "+asyncpg" not in handler._db_url
 
     def test_init_db_strips_aiosqlite_from_settings_database_uri(self):
         """Test that +aiosqlite is stripped from settings.DATABASE_URI when DATABASE_URL is not set."""
-        from src.services.execution.subprocess_bootstrap import ExecutionLogsDatabaseHandler
+        from src.services.execution.subprocess_bootstrap import (
+            ExecutionLogsDatabaseHandler,
+        )
 
         # Create a mock settings object with sqlite+aiosqlite URI
         mock_settings = MagicMock()
@@ -308,7 +338,9 @@ class TestExecutionLogsDatabaseHandlerInit:
 
     def test_init_db_handles_both_async_drivers(self):
         """Test that both +asyncpg and +aiosqlite are handled in replacement logic."""
-        from src.services.execution.subprocess_bootstrap import ExecutionLogsDatabaseHandler
+        from src.services.execution.subprocess_bootstrap import (
+            ExecutionLogsDatabaseHandler,
+        )
 
         # Test various URI formats
         test_cases = [
@@ -325,19 +357,26 @@ class TestExecutionLogsDatabaseHandlerInit:
             with patch.dict(os.environ, {}, clear=True):
                 with patch("src.config.settings.settings", mock_settings):
                     with patch("src.core.logger.get_logger", return_value=MagicMock()):
-                        handler = ExecutionLogsDatabaseHandler(execution_id="test-exec-id")
+                        handler = ExecutionLogsDatabaseHandler(
+                            execution_id="test-exec-id"
+                        )
 
-                        assert handler._db_url == expected_uri, f"Failed for {input_uri}"
+                        assert (
+                            handler._db_url == expected_uri
+                        ), f"Failed for {input_uri}"
 
     def test_init_db_falls_back_to_sqlite_on_import_error(self):
         """Test that when settings import fails, it falls back to SQLite."""
-        from src.services.execution.subprocess_bootstrap import ExecutionLogsDatabaseHandler
         import importlib
+
+        from src.services.execution.subprocess_bootstrap import (
+            ExecutionLogsDatabaseHandler,
+        )
 
         with patch.dict(os.environ, {}, clear=True):  # Clear DATABASE_URL
             # Make 'from src.config.settings import settings' raise ImportError
             # by temporarily removing the module from sys.modules
-            with patch.dict('sys.modules', {'src.config.settings': None}):
+            with patch.dict("sys.modules", {"src.config.settings": None}):
                 with patch("src.core.logger.get_logger", return_value=MagicMock()):
                     handler = ExecutionLogsDatabaseHandler(execution_id="test-exec-id")
 
@@ -348,10 +387,14 @@ class TestExecutionLogsDatabaseHandlerInit:
 
     def test_init_db_preserves_database_url_env_over_settings(self):
         """Test that DATABASE_URL environment variable takes precedence over settings.DATABASE_URI."""
-        from src.services.execution.subprocess_bootstrap import ExecutionLogsDatabaseHandler
+        from src.services.execution.subprocess_bootstrap import (
+            ExecutionLogsDatabaseHandler,
+        )
 
         # Set DATABASE_URL env var - this takes precedence, settings never consulted
-        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://env" ":pass@envhost:5432/envdb"}):
+        with patch.dict(
+            os.environ, {"DATABASE_URL": "postgresql://env" ":pass@envhost:5432/envdb"}
+        ):
             with patch("src.core.logger.get_logger", return_value=MagicMock()):
                 handler = ExecutionLogsDatabaseHandler(execution_id="test-exec-id")
 
@@ -360,18 +403,19 @@ class TestExecutionLogsDatabaseHandlerInit:
 
     def test_init_db_with_group_context_dict(self):
         """Test initialization with group context as dict."""
-        from src.services.execution.subprocess_bootstrap import ExecutionLogsDatabaseHandler
+        from src.services.execution.subprocess_bootstrap import (
+            ExecutionLogsDatabaseHandler,
+        )
 
         group_context = {
             "primary_group_id": "test-group-id",
-            "group_email": "test@example.com"
+            "group_email": "test@example.com",
         }
 
         with patch.dict(os.environ, {"DATABASE_URL": "sqlite:///test.db"}):
             with patch("src.core.logger.get_logger", return_value=MagicMock()):
                 handler = ExecutionLogsDatabaseHandler(
-                    execution_id="test-exec-id",
-                    group_context=group_context
+                    execution_id="test-exec-id", group_context=group_context
                 )
 
                 # Verify handler was initialized
@@ -381,7 +425,9 @@ class TestExecutionLogsDatabaseHandlerInit:
 
     def test_init_db_with_group_context_object(self):
         """Test initialization with group context as object."""
-        from src.services.execution.subprocess_bootstrap import ExecutionLogsDatabaseHandler
+        from src.services.execution.subprocess_bootstrap import (
+            ExecutionLogsDatabaseHandler,
+        )
 
         # Create a mock group context object
         mock_group_context = MagicMock()
@@ -391,8 +437,7 @@ class TestExecutionLogsDatabaseHandlerInit:
         with patch.dict(os.environ, {"DATABASE_URL": "sqlite:///test.db"}):
             with patch("src.core.logger.get_logger", return_value=MagicMock()):
                 handler = ExecutionLogsDatabaseHandler(
-                    execution_id="test-exec-id",
-                    group_context=mock_group_context
+                    execution_id="test-exec-id", group_context=mock_group_context
                 )
 
                 # Verify handler was initialized

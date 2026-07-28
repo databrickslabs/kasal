@@ -20,10 +20,10 @@ from typing import Dict, Optional, Set
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.sse_manager import sse_manager, SSEEvent
+from src.core.sse_manager import SSEEvent, sse_manager
 from src.db.session import async_session_factory
-from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
+from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.services.execution.event_pipe import suppresses_poller_broadcast
 
 logger = logging.getLogger(__name__)
@@ -160,7 +160,9 @@ class TraceBroadcastService:
                     # Query for the current max trace ID for this job
                     max_id = await trace_repo.get_max_id_for_job(job_id)
                     self._last_trace_ids[job_id] = max_id
-                    logger.info(f"[TraceBroadcastService] Started tracking job {job_id} from trace_id={max_id}")
+                    logger.info(
+                        f"[TraceBroadcastService] Started tracking job {job_id} from trace_id={max_id}"
+                    )
 
             # Clean up jobs that are no longer active
             tracked_jobs = set(self._last_trace_ids.keys())
@@ -190,7 +192,9 @@ class TraceBroadcastService:
             traces = await trace_repo.get_after_id(job_id, last_id, limit=50)
 
             if traces:
-                logger.info(f"[TraceBroadcastService] Found {len(traces)} new traces for job {job_id}")
+                logger.info(
+                    f"[TraceBroadcastService] Found {len(traces)} new traces for job {job_id}"
+                )
 
                 for trace in traces:
                     # Update last seen ID
@@ -220,16 +224,16 @@ class TraceBroadcastService:
                         "event_type": trace.event_type,
                         "output": trace.output,
                         "trace_metadata": trace.trace_metadata,
-                        "created_at": trace.created_at.isoformat() if trace.created_at else None,
+                        "created_at": (
+                            trace.created_at.isoformat() if trace.created_at else None
+                        ),
                         "group_id": trace.group_id,
                         "group_email": trace.group_email,
                     }
 
                     # Broadcast via SSE
                     event = SSEEvent(
-                        data=trace_data,
-                        event="trace",
-                        id=f"{job_id}_trace_{trace.id}"
+                        data=trace_data, event="trace", id=f"{job_id}_trace_{trace.id}"
                     )
 
                     sent_count = await sse_manager.broadcast_to_job(job_id, event)
@@ -239,7 +243,9 @@ class TraceBroadcastService:
                     )
 
         except Exception as e:
-            logger.error(f"[TraceBroadcastService] Error querying traces for job {job_id}: {e}")
+            logger.error(
+                f"[TraceBroadcastService] Error querying traces for job {job_id}: {e}"
+            )
 
 
 # Global instance

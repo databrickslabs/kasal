@@ -8,24 +8,25 @@ with mocked HTTP calls to avoid real network dependencies.
 """
 
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from src.services.converters.formats.mquery.llm_converter import MQueryLLMConverter
 from src.services.converters.formats.mquery.models import (
-    ExpressionType,
+    CalculatedColumnResult,
     ColumnDataType,
+    ExpressionType,
     MQueryExpression,
-    TableColumn,
     PowerBITable,
     StorageMode,
-    CalculatedColumnResult,
+    TableColumn,
 )
-from src.services.converters.formats.mquery.llm_converter import MQueryLLMConverter
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def converter_no_llm():
@@ -67,6 +68,7 @@ def calc_column():
 # _call_llm tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_call_llm_no_credentials_returns_error(converter_no_llm):
     """_call_llm returns error dict when credentials are not configured."""
@@ -78,7 +80,9 @@ async def test_call_llm_no_credentials_returns_error(converter_no_llm):
 @pytest.mark.asyncio
 async def test_call_llm_success(converter_with_llm):
     """_call_llm returns content when LLMManager.completion() succeeds."""
-    with patch("src.services.llm.manager.LLMManager.completion", new_callable=AsyncMock) as mock_completion:
+    with patch(
+        "src.services.llm.manager.LLMManager.completion", new_callable=AsyncMock
+    ) as mock_completion:
         mock_completion.return_value = '{"success": true, "databricks_sql": "SELECT 1"}'
         result = await converter_with_llm._call_llm("user prompt", "system prompt")
 
@@ -89,7 +93,9 @@ async def test_call_llm_success(converter_with_llm):
 @pytest.mark.asyncio
 async def test_call_llm_http_error_returns_error_dict(converter_with_llm):
     """_call_llm returns error dict when LLMManager.completion() raises."""
-    with patch("src.services.llm.manager.LLMManager.completion", new_callable=AsyncMock) as mock_completion:
+    with patch(
+        "src.services.llm.manager.LLMManager.completion", new_callable=AsyncMock
+    ) as mock_completion:
         mock_completion.side_effect = Exception("connection refused")
         result = await converter_with_llm._call_llm("prompt", "sys")
 
@@ -101,9 +107,16 @@ async def test_call_llm_http_error_returns_error_dict(converter_with_llm):
 # _parse_llm_response tests
 # ---------------------------------------------------------------------------
 
+
 def test_parse_llm_response_valid_json(converter_no_llm):
     """_parse_llm_response correctly parses valid JSON."""
-    payload = json.dumps({"success": True, "databricks_sql": "SELECT 1", "create_view_sql": "CREATE VIEW v AS SELECT 1"})
+    payload = json.dumps(
+        {
+            "success": True,
+            "databricks_sql": "SELECT 1",
+            "create_view_sql": "CREATE VIEW v AS SELECT 1",
+        }
+    )
     result = converter_no_llm._parse_llm_response(payload)
     assert result["success"] is True
     assert result["databricks_sql"] == "SELECT 1"
@@ -134,6 +147,7 @@ def test_parse_llm_response_invalid_json_returns_error(converter_no_llm):
 # _rule_based_conversion tests
 # ---------------------------------------------------------------------------
 
+
 def test_rule_based_conversion_returns_failure(converter_no_llm, simple_expression):
     """_rule_based_conversion always returns success=False with guidance message."""
     result = converter_no_llm._rule_based_conversion(
@@ -151,8 +165,11 @@ def test_rule_based_conversion_returns_failure(converter_no_llm, simple_expressi
 # convert_expression tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
-async def test_convert_expression_no_llm_falls_back_to_rule_based(converter_no_llm, simple_expression):
+async def test_convert_expression_no_llm_falls_back_to_rule_based(
+    converter_no_llm, simple_expression
+):
     """convert_expression uses rule-based when LLM is not configured."""
     result = await converter_no_llm.convert_expression(
         table_name="Orders",
@@ -166,17 +183,25 @@ async def test_convert_expression_no_llm_falls_back_to_rule_based(converter_no_l
 @pytest.mark.asyncio
 async def test_convert_expression_llm_success(converter_with_llm, simple_expression):
     """convert_expression returns success result from LLM."""
-    llm_content = json.dumps({
-        "success": True,
-        "databricks_sql": "SELECT * FROM orders",
-        "create_view_sql": "CREATE OR REPLACE VIEW main.default.orders AS SELECT * FROM orders",
-        "parameters": [],
-        "transformations": [],
-        "explanation": "Direct SQL passthrough",
-        "notes": None,
-    })
+    llm_content = json.dumps(
+        {
+            "success": True,
+            "databricks_sql": "SELECT * FROM orders",
+            "create_view_sql": "CREATE OR REPLACE VIEW main.default.orders AS SELECT * FROM orders",
+            "parameters": [],
+            "transformations": [],
+            "explanation": "Direct SQL passthrough",
+            "notes": None,
+        }
+    )
 
-    with patch.object(converter_with_llm, "_call_llm", new=AsyncMock(return_value={"content": llm_content, "usage": {"total_tokens": 50}})):
+    with patch.object(
+        converter_with_llm,
+        "_call_llm",
+        new=AsyncMock(
+            return_value={"content": llm_content, "usage": {"total_tokens": 50}}
+        ),
+    ):
         result = await converter_with_llm.convert_expression(
             table_name="Orders",
             expression=simple_expression,
@@ -191,11 +216,17 @@ async def test_convert_expression_llm_success(converter_with_llm, simple_express
 
 
 @pytest.mark.asyncio
-async def test_convert_expression_llm_returns_error_in_json(converter_with_llm, simple_expression):
+async def test_convert_expression_llm_returns_error_in_json(
+    converter_with_llm, simple_expression
+):
     """convert_expression handles LLM returning success=false in JSON."""
     llm_content = json.dumps({"success": False, "error": "Cannot parse expression"})
 
-    with patch.object(converter_with_llm, "_call_llm", new=AsyncMock(return_value={"content": llm_content, "usage": {}})):
+    with patch.object(
+        converter_with_llm,
+        "_call_llm",
+        new=AsyncMock(return_value={"content": llm_content, "usage": {}}),
+    ):
         result = await converter_with_llm.convert_expression(
             table_name="T",
             expression=simple_expression,
@@ -207,9 +238,15 @@ async def test_convert_expression_llm_returns_error_in_json(converter_with_llm, 
 
 
 @pytest.mark.asyncio
-async def test_convert_expression_llm_call_fails_falls_back(converter_with_llm, simple_expression):
+async def test_convert_expression_llm_call_fails_falls_back(
+    converter_with_llm, simple_expression
+):
     """When LLM call returns no content, falls back to rule-based conversion."""
-    with patch.object(converter_with_llm, "_call_llm", new=AsyncMock(return_value={"content": None, "error": "timeout"})):
+    with patch.object(
+        converter_with_llm,
+        "_call_llm",
+        new=AsyncMock(return_value={"content": None, "error": "timeout"}),
+    ):
         result = await converter_with_llm.convert_expression(
             table_name="T",
             expression=simple_expression,
@@ -222,6 +259,7 @@ async def test_convert_expression_llm_call_fails_falls_back(converter_with_llm, 
 # ---------------------------------------------------------------------------
 # _dax_to_sql_basic tests
 # ---------------------------------------------------------------------------
+
 
 def test_dax_to_sql_basic_removes_table_reference(converter_no_llm):
     """Table name prefix is stripped from column references."""
@@ -243,6 +281,7 @@ def test_dax_to_sql_basic_if_to_case(converter_no_llm):
 # _convert_switch_to_case tests
 # ---------------------------------------------------------------------------
 
+
 def test_convert_switch_to_case_basic(converter_no_llm):
     """SWITCH(TRUE(), ...) args are correctly mapped to CASE WHEN."""
     args_str = "`status` = 1, 'Active', `status` = 2, 'Inactive', 'Unknown'"
@@ -258,11 +297,18 @@ def test_convert_switch_to_case_basic(converter_no_llm):
 # _enhance_sql_with_calculated_columns tests
 # ---------------------------------------------------------------------------
 
+
 def test_enhance_sql_with_calculated_columns_inserts_before_from(converter_no_llm):
     """Calculated columns are inserted before the FROM clause."""
     base_sql = "SELECT id, name FROM orders"
     calc_cols = [
-        CalculatedColumnResult(column_name="TaxAmt", original_dax="[Amt]*0.1", sql_expression="`Amt` * 0.1", data_type="Double", success=True)
+        CalculatedColumnResult(
+            column_name="TaxAmt",
+            original_dax="[Amt]*0.1",
+            sql_expression="`Amt` * 0.1",
+            data_type="Double",
+            success=True,
+        )
     ]
     result = converter_no_llm._enhance_sql_with_calculated_columns(base_sql, calc_cols)
     from_pos = result.find("FROM")
@@ -274,7 +320,9 @@ def test_enhance_sql_with_no_successful_columns_returns_unchanged(converter_no_l
     """SQL is unchanged when no calculated columns were successfully converted."""
     base_sql = "SELECT id FROM t"
     calc_cols = [
-        CalculatedColumnResult(column_name="BadCol", original_dax="", data_type="String", success=False)
+        CalculatedColumnResult(
+            column_name="BadCol", original_dax="", data_type="String", success=False
+        )
     ]
     result = converter_no_llm._enhance_sql_with_calculated_columns(base_sql, calc_cols)
     assert result == base_sql
@@ -290,8 +338,11 @@ def test_enhance_sql_empty_sql_returns_unchanged(converter_no_llm):
 # convert_calculated_columns tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
-async def test_convert_calculated_columns_no_llm_uses_rules(converter_no_llm, calc_column):
+async def test_convert_calculated_columns_no_llm_uses_rules(
+    converter_no_llm, calc_column
+):
     """Calculated column conversion falls back to rules when LLM unavailable."""
     results = await converter_no_llm.convert_calculated_columns(
         table_name="Sales",
@@ -306,7 +357,12 @@ async def test_convert_calculated_columns_no_llm_uses_rules(converter_no_llm, ca
 @pytest.mark.asyncio
 async def test_convert_calculated_columns_empty_expression_skipped(converter_no_llm):
     """Columns without an expression are skipped."""
-    col = TableColumn(name="NoExpr", data_type=ColumnDataType.STRING, column_type="Calculated", expression=None)
+    col = TableColumn(
+        name="NoExpr",
+        data_type=ColumnDataType.STRING,
+        column_type="Calculated",
+        expression=None,
+    )
     results = await converter_no_llm.convert_calculated_columns(
         table_name="T",
         calculated_columns=[col],
@@ -318,11 +374,18 @@ async def test_convert_calculated_columns_empty_expression_skipped(converter_no_
 # convert_table tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_convert_table_processes_all_expressions(converter_no_llm):
     """convert_table processes all source expressions in a table."""
-    expr1 = MQueryExpression(raw_expression='Sql.Database("srv", "db")', expression_type=ExpressionType.SQL_DATABASE)
-    expr2 = MQueryExpression(raw_expression='Sql.Database("srv2", "db2")', expression_type=ExpressionType.SQL_DATABASE)
+    expr1 = MQueryExpression(
+        raw_expression='Sql.Database("srv", "db")',
+        expression_type=ExpressionType.SQL_DATABASE,
+    )
+    expr2 = MQueryExpression(
+        raw_expression='Sql.Database("srv2", "db2")',
+        expression_type=ExpressionType.SQL_DATABASE,
+    )
     table = PowerBITable(
         name="Sales",
         is_hidden=False,

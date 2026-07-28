@@ -13,18 +13,20 @@ Targets the last remaining uncovered lines:
   842-891 prepare_and_run exception/error path
   900-908 error path: event bus flush, otel shutdown, trace queue
 """
+
 import asyncio
 import logging
 import os
-import sys
 import signal
-import pytest
-from unittest.mock import AsyncMock, MagicMock, Mock, patch, call
+import sys
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Module-level functions (lines 56-61)
 # ---------------------------------------------------------------------------
+
 
 class TestModuleLevelFunctions:
 
@@ -33,18 +35,21 @@ class TestModuleLevelFunctions:
         # The module patches builtins.input at import time
         # Verify the patched behavior
         import builtins
+
         result = builtins.input("test prompt")
         assert result == "n"
 
     def test_noinput_global_without_prompt_returns_n(self):
         """_kasal_noinput_global without prompt still returns 'n'."""
         import builtins
+
         result = builtins.input()
         assert result == "n"
 
     def test_noinput_global_with_none_prompt(self):
         """_kasal_noinput_global with None prompt doesn't raise."""
         import builtins
+
         result = builtins.input(None)
         assert result == "n"
 
@@ -52,6 +57,7 @@ class TestModuleLevelFunctions:
 # ---------------------------------------------------------------------------
 # signal_handler (lines 218-248) — called directly
 # ---------------------------------------------------------------------------
+
 
 class TestSignalHandlerInSubprocess:
     """
@@ -85,23 +91,35 @@ class TestSignalHandlerInSubprocess:
             if signum == signal.SIGTERM:
                 captured_handler[0] = handler
 
-        with patch("signal.signal", side_effect=fake_signal), \
-             patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   return_value=MagicMock(info=MagicMock(), error=MagicMock())), \
-             patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                   return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-             patch("psutil.Process", return_value=mock_parent), \
-             patch("psutil.wait_procs", return_value=([], [])):
+        with (
+            patch("signal.signal", side_effect=fake_signal),
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=MagicMock(info=MagicMock(), error=MagicMock()),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
+            patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+            patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
+            patch("psutil.Process", return_value=mock_parent),
+            patch("psutil.wait_procs", return_value=([], [])),
+        ):
             # Run briefly to register the handler
             run_crew_in_process("exec-signal", {"agents": [], "tasks": []})
 
         # Invoke the captured handler if we got it
         if captured_handler[0] is not None:
-            with patch("sys.exit") as mock_exit, \
-                 patch("psutil.Process", return_value=mock_parent), \
-                 patch("psutil.wait_procs", return_value=([], [])):
+            with (
+                patch("sys.exit") as mock_exit,
+                patch("psutil.Process", return_value=mock_parent),
+                patch("psutil.wait_procs", return_value=([], [])),
+            ):
                 try:
                     captured_handler[0](signal.SIGTERM, None)
                 except SystemExit:
@@ -113,6 +131,7 @@ class TestSignalHandlerInSubprocess:
 # CrewAI patching (lines 302-303, 332-333)
 # ---------------------------------------------------------------------------
 
+
 class TestCrewAIPatchingWarnings:
 
     def test_llm_context_window_sizes_import_warning(self):
@@ -121,15 +140,29 @@ class TestCrewAIPatchingWarnings:
 
         config = {"agents": [], "tasks": [], "group_id": "grp-1"}
 
-        with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   return_value=MagicMock(info=MagicMock(), error=MagicMock(), warning=MagicMock())), \
-             patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                   return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-             patch("src.core.llm.transport.LLM_CONTEXT_WINDOW_SIZES",
-                   side_effect=ImportError("no crewai.llm")), \
-             patch("psutil.Process") as mock_psutil:
+        with (
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=MagicMock(
+                    info=MagicMock(), error=MagicMock(), warning=MagicMock()
+                ),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
+            patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+            patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
+            patch(
+                "src.core.llm.transport.LLM_CONTEXT_WINDOW_SIZES",
+                side_effect=ImportError("no crewai.llm"),
+            ),
+            patch("psutil.Process") as mock_psutil,
+        ):
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-llm-warn", config)
 
@@ -142,16 +175,29 @@ class TestCrewAIPatchingWarnings:
 
         config = {"agents": [], "tasks": [], "group_id": "grp-1"}
 
-        with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   return_value=MagicMock(info=MagicMock(), error=MagicMock(), warning=MagicMock())), \
-             patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                   return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-             patch("psutil.Process") as mock_psutil:
+        with (
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=MagicMock(
+                    info=MagicMock(), error=MagicMock(), warning=MagicMock()
+                ),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
+            patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+            patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
+            patch("psutil.Process") as mock_psutil,
+        ):
             mock_psutil.return_value.children.return_value = []
             # Force the context_window_exceeding_exception import to fail
             import sys as _sys
+
             original = _sys.modules.get("src.core.llm.transport")
             _sys.modules["src.core.llm.transport"] = None
             try:
@@ -169,6 +215,7 @@ class TestCrewAIPatchingWarnings:
 # Error paths in prepare_and_run() (lines 842-891)
 # ---------------------------------------------------------------------------
 
+
 class TestPrepareAndRunErrorPaths:
 
     def test_crew_preparation_failure_is_handled(self):
@@ -177,13 +224,25 @@ class TestPrepareAndRunErrorPaths:
 
         config = {"agents": [{"role": "test"}], "tasks": [], "group_id": "grp-1"}
 
-        with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   return_value=MagicMock(info=MagicMock(), error=MagicMock(), warning=MagicMock())), \
-             patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                   return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-             patch("psutil.Process") as mock_psutil:
+        with (
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=MagicMock(
+                    info=MagicMock(), error=MagicMock(), warning=MagicMock()
+                ),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
+            patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+            patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
+            patch("psutil.Process") as mock_psutil,
+        ):
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-prep-fail", config)
 
@@ -197,17 +256,30 @@ class TestPrepareAndRunErrorPaths:
         config = {"agents": [], "tasks": [], "group_id": "grp-1"}
 
         shutdown_called = [False]
+
         def mock_shutdown():
             shutdown_called[0] = True
 
-        with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   return_value=MagicMock(info=MagicMock(), error=MagicMock(), warning=MagicMock())), \
-             patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                   return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-             patch("psutil.Process") as mock_psutil, \
-             patch("src.services.otel_tracing.shutdown_provider", mock_shutdown):
+        with (
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=MagicMock(
+                    info=MagicMock(), error=MagicMock(), warning=MagicMock()
+                ),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
+            patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+            patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
+            patch("psutil.Process") as mock_psutil,
+            patch("src.services.otel_tracing.shutdown_provider", mock_shutdown),
+        ):
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-otel-shutdown", config)
 
@@ -223,13 +295,25 @@ class TestPrepareAndRunErrorPaths:
         mock_event_bus = MagicMock()
         mock_event_bus.flush = MagicMock(side_effect=lambda timeout: True)
 
-        with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   return_value=MagicMock(info=MagicMock(), error=MagicMock(), warning=MagicMock())), \
-             patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                   return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-             patch("psutil.Process") as mock_psutil:
+        with (
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=MagicMock(
+                    info=MagicMock(), error=MagicMock(), warning=MagicMock()
+                ),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
+            patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+            patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
+            patch("psutil.Process") as mock_psutil,
+        ):
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-bus-flush", config)
 
@@ -241,13 +325,25 @@ class TestPrepareAndRunErrorPaths:
 
         config = {"agents": [], "tasks": [], "group_id": "grp-1"}
 
-        with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   return_value=MagicMock(info=MagicMock(), error=MagicMock(), warning=MagicMock())), \
-             patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                   return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-             patch("psutil.Process") as mock_psutil:
+        with (
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=MagicMock(
+                    info=MagicMock(), error=MagicMock(), warning=MagicMock()
+                ),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
+            patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+            patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
+            patch("psutil.Process") as mock_psutil,
+        ):
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-tb", config)
 
@@ -258,6 +354,7 @@ class TestPrepareAndRunErrorPaths:
 # ---------------------------------------------------------------------------
 # Additional coverage: stdout capture path (line 1425-1430)
 # ---------------------------------------------------------------------------
+
 
 class TestStdoutCapturePath:
 
@@ -271,13 +368,21 @@ class TestStdoutCapturePath:
         mock_captured = MagicMock()
         mock_captured.getvalue.return_value = "line1\nline2\nline3\n"
 
-        with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   return_value=MagicMock(info=MagicMock(), error=MagicMock(), warning=MagicMock())), \
-             patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                   return_value=(sys.stdout, sys.stderr, mock_captured)), \
-             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-             patch("psutil.Process") as mock_psutil:
+        with (
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=MagicMock(
+                    info=MagicMock(), error=MagicMock(), warning=MagicMock()
+                ),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(sys.stdout, sys.stderr, mock_captured),
+            ),
+            patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+            patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
+            patch("psutil.Process") as mock_psutil,
+        ):
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-stdout", config)
 

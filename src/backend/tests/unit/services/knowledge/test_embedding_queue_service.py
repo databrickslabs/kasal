@@ -5,13 +5,14 @@ Tests the functionality of the embedding queue service including
 background queue processing, batch insertion, retry logic, and
 lifecycle management (start/stop).
 """
+
 import asyncio
-import pytest
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
+import pytest
 
 from src.services.knowledge.embedding_queue import EmbeddingQueueService
-
 
 # ---------------------------------------------------------------------------
 # Patch path constants
@@ -20,9 +21,7 @@ from src.services.knowledge.embedding_queue import EmbeddingQueueService
 # DocumentationEmbeddingRepository locally (inside the method), so patching
 # must target the *source* module, not the service module namespace.
 _SESSION_FACTORY = "src.db.session.async_session_factory"
-_DOC_EMBEDDING_REPO = (
-    "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository"
-)
+_DOC_EMBEDDING_REPO = "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository"
 _LOGGER = "src.services.knowledge.embedding_queue.logger"
 
 
@@ -48,6 +47,7 @@ def _mock_async_session_ctx(mock_session):
 # ===================================================================
 # start()
 # ===================================================================
+
 
 class TestEmbeddingQueueServiceStart:
     """Test cases for the start() lifecycle method."""
@@ -100,6 +100,7 @@ class TestEmbeddingQueueServiceStart:
 # stop()
 # ===================================================================
 
+
 class TestEmbeddingQueueServiceStop:
     """Test cases for the stop() lifecycle method."""
 
@@ -108,7 +109,10 @@ class TestEmbeddingQueueServiceStop:
         """stop() should set _running=False and await the background task."""
         svc = _make_service()
 
-        with patch.object(svc, "_process_queue", new_callable=AsyncMock) as mock_process:
+        with patch.object(
+            svc, "_process_queue", new_callable=AsyncMock
+        ) as mock_process:
+
             async def loop_until_stopped():
                 while svc._running:
                     await asyncio.sleep(0.01)
@@ -137,6 +141,7 @@ class TestEmbeddingQueueServiceStop:
 # ===================================================================
 # add_embedding()
 # ===================================================================
+
 
 class TestEmbeddingQueueServiceAddEmbedding:
     """Test cases for the add_embedding() method."""
@@ -212,6 +217,7 @@ class TestEmbeddingQueueServiceAddEmbedding:
 # _flush_queue()
 # ===================================================================
 
+
 class TestEmbeddingQueueServiceFlushQueue:
     """Test cases for the _flush_queue() internal method."""
 
@@ -222,9 +228,30 @@ class TestEmbeddingQueueServiceFlushQueue:
         svc._batch_insert = AsyncMock()
 
         items = [
-            {"source": "s1", "title": "t1", "content": "c1", "embedding": [0.1], "doc_metadata": {}, "created_at": datetime.utcnow()},
-            {"source": "s2", "title": "t2", "content": "c2", "embedding": [0.2], "doc_metadata": {}, "created_at": datetime.utcnow()},
-            {"source": "s3", "title": "t3", "content": "c3", "embedding": [0.3], "doc_metadata": {}, "created_at": datetime.utcnow()},
+            {
+                "source": "s1",
+                "title": "t1",
+                "content": "c1",
+                "embedding": [0.1],
+                "doc_metadata": {},
+                "created_at": datetime.utcnow(),
+            },
+            {
+                "source": "s2",
+                "title": "t2",
+                "content": "c2",
+                "embedding": [0.2],
+                "doc_metadata": {},
+                "created_at": datetime.utcnow(),
+            },
+            {
+                "source": "s3",
+                "title": "t3",
+                "content": "c3",
+                "embedding": [0.3],
+                "doc_metadata": {},
+                "created_at": datetime.utcnow(),
+            },
         ]
         svc.queue = list(items)
 
@@ -257,6 +284,7 @@ class TestEmbeddingQueueServiceFlushQueue:
 # _batch_insert()
 # ===================================================================
 
+
 class TestEmbeddingQueueServiceBatchInsert:
     """Test cases for the _batch_insert() method."""
 
@@ -265,8 +293,22 @@ class TestEmbeddingQueueServiceBatchInsert:
         """_batch_insert() should bulk-insert via the repository and commit."""
         svc = _make_service()
         batch = [
-            {"source": "s1", "title": "t1", "content": "c1", "embedding": [0.1], "doc_metadata": {}, "created_at": datetime.utcnow()},
-            {"source": "s2", "title": "t2", "content": "c2", "embedding": [0.2], "doc_metadata": {}, "created_at": datetime.utcnow()},
+            {
+                "source": "s1",
+                "title": "t1",
+                "content": "c1",
+                "embedding": [0.1],
+                "doc_metadata": {},
+                "created_at": datetime.utcnow(),
+            },
+            {
+                "source": "s2",
+                "title": "t2",
+                "content": "c2",
+                "embedding": [0.2],
+                "doc_metadata": {},
+                "created_at": datetime.utcnow(),
+            },
         ]
 
         mock_session = AsyncMock()
@@ -274,8 +316,10 @@ class TestEmbeddingQueueServiceBatchInsert:
         mock_repo = MagicMock()
         mock_repo.bulk_insert_raw = AsyncMock()
 
-        with patch(_SESSION_FACTORY, return_value=mock_session_ctx), \
-             patch(_DOC_EMBEDDING_REPO, return_value=mock_repo) as mock_repo_cls:
+        with (
+            patch(_SESSION_FACTORY, return_value=mock_session_ctx),
+            patch(_DOC_EMBEDDING_REPO, return_value=mock_repo) as mock_repo_cls,
+        ):
             await svc._batch_insert(batch)
 
             mock_repo_cls.assert_called_once_with(mock_session)
@@ -289,17 +333,35 @@ class TestEmbeddingQueueServiceBatchInsert:
         svc._insert_with_retry = AsyncMock()
 
         batch = [
-            {"source": "s1", "title": "t1", "content": "c1", "embedding": [0.1], "doc_metadata": {}, "created_at": datetime.utcnow()},
-            {"source": "s2", "title": "t2", "content": "c2", "embedding": [0.2], "doc_metadata": {}, "created_at": datetime.utcnow()},
+            {
+                "source": "s1",
+                "title": "t1",
+                "content": "c1",
+                "embedding": [0.1],
+                "doc_metadata": {},
+                "created_at": datetime.utcnow(),
+            },
+            {
+                "source": "s2",
+                "title": "t2",
+                "content": "c2",
+                "embedding": [0.2],
+                "doc_metadata": {},
+                "created_at": datetime.utcnow(),
+            },
         ]
 
         mock_session = AsyncMock()
         mock_session_ctx = _mock_async_session_ctx(mock_session)
         mock_repo = MagicMock()
-        mock_repo.bulk_insert_raw = AsyncMock(side_effect=Exception("Bulk insert failed"))
+        mock_repo.bulk_insert_raw = AsyncMock(
+            side_effect=Exception("Bulk insert failed")
+        )
 
-        with patch(_SESSION_FACTORY, return_value=mock_session_ctx), \
-             patch(_DOC_EMBEDDING_REPO, return_value=mock_repo):
+        with (
+            patch(_SESSION_FACTORY, return_value=mock_session_ctx),
+            patch(_DOC_EMBEDDING_REPO, return_value=mock_repo),
+        ):
             await svc._batch_insert(batch)
 
             assert svc._insert_with_retry.await_count == 2
@@ -311,6 +373,7 @@ class TestEmbeddingQueueServiceBatchInsert:
 # _insert_with_retry()
 # ===================================================================
 
+
 class TestEmbeddingQueueServiceInsertWithRetry:
     """Test cases for the _insert_with_retry() method."""
 
@@ -318,15 +381,24 @@ class TestEmbeddingQueueServiceInsertWithRetry:
     async def test_insert_with_retry_succeeds_on_first_attempt(self):
         """_insert_with_retry() should insert successfully on the first try."""
         svc = _make_service()
-        item = {"source": "s", "title": "t", "content": "c", "embedding": [0.1], "doc_metadata": {}, "created_at": datetime.utcnow()}
+        item = {
+            "source": "s",
+            "title": "t",
+            "content": "c",
+            "embedding": [0.1],
+            "doc_metadata": {},
+            "created_at": datetime.utcnow(),
+        }
 
         mock_session = AsyncMock()
         mock_session_ctx = _mock_async_session_ctx(mock_session)
         mock_repo = MagicMock()
         mock_repo.insert_raw = AsyncMock()
 
-        with patch(_SESSION_FACTORY, return_value=mock_session_ctx), \
-             patch(_DOC_EMBEDDING_REPO, return_value=mock_repo) as mock_repo_cls:
+        with (
+            patch(_SESSION_FACTORY, return_value=mock_session_ctx),
+            patch(_DOC_EMBEDDING_REPO, return_value=mock_repo) as mock_repo_cls,
+        ):
             await svc._insert_with_retry(item)
 
             mock_repo_cls.assert_called_once_with(mock_session)
@@ -337,7 +409,14 @@ class TestEmbeddingQueueServiceInsertWithRetry:
     async def test_insert_with_retry_retries_on_failure_with_backoff(self):
         """_insert_with_retry() should retry with exponential backoff on failures."""
         svc = _make_service()
-        item = {"source": "s", "title": "t", "content": "c", "embedding": [0.1], "doc_metadata": {}, "created_at": datetime.utcnow()}
+        item = {
+            "source": "s",
+            "title": "t",
+            "content": "c",
+            "embedding": [0.1],
+            "doc_metadata": {},
+            "created_at": datetime.utcnow(),
+        }
 
         # Fail twice, succeed on the third attempt
         mock_session_success = AsyncMock()
@@ -356,9 +435,11 @@ class TestEmbeddingQueueServiceInsertWithRetry:
         mock_repo = MagicMock()
         mock_repo.insert_raw = AsyncMock()
 
-        with patch(_SESSION_FACTORY, side_effect=session_factory_side_effect), \
-             patch(_DOC_EMBEDDING_REPO, return_value=mock_repo), \
-             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with (
+            patch(_SESSION_FACTORY, side_effect=session_factory_side_effect),
+            patch(_DOC_EMBEDDING_REPO, return_value=mock_repo),
+            patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        ):
             await svc._insert_with_retry(item, max_retries=3)
 
             # Exponential backoff: 2^0=1s, 2^1=2s
@@ -373,7 +454,14 @@ class TestEmbeddingQueueServiceInsertWithRetry:
     async def test_insert_with_retry_exhausts_all_retries(self):
         """_insert_with_retry() should log error after exhausting all retries."""
         svc = _make_service()
-        item = {"source": "s", "title": "t", "content": "c", "embedding": [0.1], "doc_metadata": {}, "created_at": datetime.utcnow()}
+        item = {
+            "source": "s",
+            "title": "t",
+            "content": "c",
+            "embedding": [0.1],
+            "doc_metadata": {},
+            "created_at": datetime.utcnow(),
+        }
 
         mock_session = AsyncMock()
         mock_session.commit.side_effect = Exception("Persistent DB error")
@@ -381,10 +469,12 @@ class TestEmbeddingQueueServiceInsertWithRetry:
         mock_repo = MagicMock()
         mock_repo.insert_raw = AsyncMock()
 
-        with patch(_SESSION_FACTORY, return_value=mock_session_ctx), \
-             patch(_DOC_EMBEDDING_REPO, return_value=mock_repo) as mock_repo_cls, \
-             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep, \
-             patch(_LOGGER) as mock_logger:
+        with (
+            patch(_SESSION_FACTORY, return_value=mock_session_ctx),
+            patch(_DOC_EMBEDDING_REPO, return_value=mock_repo) as mock_repo_cls,
+            patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch(_LOGGER) as mock_logger,
+        ):
             await svc._insert_with_retry(item, max_retries=3)
 
             # 3 attempts total
@@ -398,6 +488,7 @@ class TestEmbeddingQueueServiceInsertWithRetry:
 # ===================================================================
 # _process_queue()
 # ===================================================================
+
 
 class TestEmbeddingQueueServiceProcessQueue:
     """Test cases for the _process_queue() background loop."""
@@ -453,6 +544,7 @@ class TestEmbeddingQueueServiceProcessQueue:
 # ===================================================================
 # _handle_task_error()
 # ===================================================================
+
 
 class TestEmbeddingQueueServiceHandleTaskError:
     """Test cases for the _handle_task_error() callback."""

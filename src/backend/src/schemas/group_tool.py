@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, Any, Optional, List, ClassVar
+from typing import Any, ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -7,7 +7,9 @@ from pydantic import BaseModel, Field
 class GroupToolBase(BaseModel):
     tool_id: int = Field(..., description="ID of the global tool")
     enabled: bool = Field(default=False, description="Enabled for this group")
-    config: Dict[str, Any] = Field(default_factory=dict, description="Group-scoped configuration")
+    config: Dict[str, Any] = Field(
+        default_factory=dict, description="Group-scoped configuration"
+    )
 
 
 class GroupToolCreate(GroupToolBase):
@@ -32,4 +34,3 @@ class GroupToolResponse(GroupToolBase):
 class GroupToolListResponse(BaseModel):
     items: List[GroupToolResponse] = Field(...)
     count: int = Field(...)
-

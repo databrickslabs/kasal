@@ -16,18 +16,19 @@ so every session shares one connection and committed writes are visible), becaus
 the FK constraint and the commit semantics are only exercised against a real driver.
 ``get_isolated_db_session`` is patched to hand back a session on the same engine.
 """
+
 from contextlib import asynccontextmanager
 from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import event, text
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from src.db.base import Base
 import src.models  # noqa: F401  registers all ORM models on Base.metadata
+from src.db.base import Base
 from src.models.agent import Agent
 from src.models.task import Task
 from src.services.catalog.agents import AgentService
@@ -67,13 +68,26 @@ async def session_factory():
 
 
 def _make_agent(agent_id, group_id="g1"):
-    return Agent(id=agent_id, name=f"a-{agent_id}", role="r", goal="g",
-                 group_id=group_id, tools=[])
+    return Agent(
+        id=agent_id,
+        name=f"a-{agent_id}",
+        role="r",
+        goal="g",
+        group_id=group_id,
+        tools=[],
+    )
 
 
 def _make_task(task_id, agent_id, group_id="g1"):
-    return Task(id=task_id, name=f"t-{task_id}", description="d",
-                expected_output="o", agent_id=agent_id, group_id=group_id, tools=[])
+    return Task(
+        id=task_id,
+        name=f"t-{task_id}",
+        description="d",
+        expected_output="o",
+        agent_id=agent_id,
+        group_id=group_id,
+        tools=[],
+    )
 
 
 class _Ctx:
@@ -144,10 +158,12 @@ async def test_delete_all_for_group_deletes_assigned_tasks(session_factory):
         await svc.delete_all_for_group(_Ctx(["g1"]))
 
     async with session_factory() as s:
-        agents = (await s.execute(
-            text("SELECT id FROM agents ORDER BY id"))).scalars().all()
-        tasks = (await s.execute(
-            text("SELECT id FROM tasks ORDER BY id"))).scalars().all()
+        agents = (
+            (await s.execute(text("SELECT id FROM agents ORDER BY id"))).scalars().all()
+        )
+        tasks = (
+            (await s.execute(text("SELECT id FROM tasks ORDER BY id"))).scalars().all()
+        )
         assert agents == ["agent-3"]
         assert tasks == ["task-3"]
 
@@ -167,7 +183,8 @@ async def test_delete_all_deletes_all_agents_and_assigned_tasks(session_factory)
 
     async with session_factory() as s:
         agents = (await s.execute(text("SELECT COUNT(*) FROM agents"))).scalar()
-        tasks = (await s.execute(
-            text("SELECT id FROM tasks ORDER BY id"))).scalars().all()
+        tasks = (
+            (await s.execute(text("SELECT id FROM tasks ORDER BY id"))).scalars().all()
+        )
         assert agents == 0
         assert tasks == ["task-2"]

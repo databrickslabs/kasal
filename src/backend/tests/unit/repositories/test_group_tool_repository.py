@@ -3,16 +3,18 @@ Unit tests for GroupToolRepository.
 
 Tests all CRUD methods, find operations, update operations, and error cases.
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.repositories.group_tool_repository import GroupToolRepository
-from src.models.group_tool import GroupTool
+import pytest
 
+from src.models.group_tool import GroupTool
+from src.repositories.group_tool_repository import GroupToolRepository
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_session():
     """Return a mock AsyncSession with the helpers we need."""
@@ -42,6 +44,7 @@ def make_scalars_result(items):
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def session():
     return make_session()
@@ -67,6 +70,7 @@ def sample_group_tool():
 # __init__
 # ---------------------------------------------------------------------------
 
+
 class TestInit:
     def test_stores_session(self, session):
         repo = GroupToolRepository(session)
@@ -76,6 +80,7 @@ class TestInit:
 # ---------------------------------------------------------------------------
 # get_by_id
 # ---------------------------------------------------------------------------
+
 
 class TestGetById:
     @pytest.mark.asyncio
@@ -102,6 +107,7 @@ class TestGetById:
 # find_by_tool_and_group
 # ---------------------------------------------------------------------------
 
+
 class TestFindByToolAndGroup:
     @pytest.mark.asyncio
     async def test_returns_mapping_when_found(self, repo, session, sample_group_tool):
@@ -125,6 +131,7 @@ class TestFindByToolAndGroup:
 # ---------------------------------------------------------------------------
 # list_for_group
 # ---------------------------------------------------------------------------
+
 
 class TestListForGroup:
     @pytest.mark.asyncio
@@ -151,6 +158,7 @@ class TestListForGroup:
 # list_enabled_for_group
 # ---------------------------------------------------------------------------
 
+
 class TestListEnabledForGroup:
     @pytest.mark.asyncio
     async def test_returns_enabled_mappings(self, repo, session, sample_group_tool):
@@ -175,12 +183,16 @@ class TestListEnabledForGroup:
 # create
 # ---------------------------------------------------------------------------
 
+
 class TestCreate:
     @pytest.mark.asyncio
     async def test_creates_and_returns_mapping(self, repo, session, sample_group_tool):
         session.refresh = AsyncMock()
         # Make add/flush set up the returned object
-        with patch("src.repositories.group_tool_repository.GroupTool", return_value=sample_group_tool):
+        with patch(
+            "src.repositories.group_tool_repository.GroupTool",
+            return_value=sample_group_tool,
+        ):
             result = await repo.create({"tool_id": 10, "group_id": "g"})
         assert result is sample_group_tool
         session.add.assert_called_once_with(sample_group_tool)
@@ -197,7 +209,9 @@ class TestCreate:
             gt = MagicMock(spec=GroupTool)
             return gt
 
-        with patch("src.repositories.group_tool_repository.GroupTool", side_effect=fake_init):
+        with patch(
+            "src.repositories.group_tool_repository.GroupTool", side_effect=fake_init
+        ):
             await repo.create({"tool_id": 5, "group_id": "grp", "enabled": True})
 
         assert captured["tool_id"] == 5
@@ -209,11 +223,14 @@ class TestCreate:
 # upsert
 # ---------------------------------------------------------------------------
 
+
 class TestUpsert:
     @pytest.mark.asyncio
     async def test_returns_existing_when_found(self, repo, session, sample_group_tool):
         """When the mapping already exists, upsert returns it without creating."""
-        with patch.object(repo, "find_by_tool_and_group", new_callable=AsyncMock) as mock_find:
+        with patch.object(
+            repo, "find_by_tool_and_group", new_callable=AsyncMock
+        ) as mock_find:
             mock_find.return_value = sample_group_tool
             result = await repo.upsert(10, "group-abc")
         assert result is sample_group_tool
@@ -221,8 +238,12 @@ class TestUpsert:
     @pytest.mark.asyncio
     async def test_creates_when_not_found(self, repo, session, sample_group_tool):
         """When mapping does not exist, upsert creates it."""
-        with patch.object(repo, "find_by_tool_and_group", new_callable=AsyncMock) as mock_find, \
-             patch.object(repo, "create", new_callable=AsyncMock) as mock_create:
+        with (
+            patch.object(
+                repo, "find_by_tool_and_group", new_callable=AsyncMock
+            ) as mock_find,
+            patch.object(repo, "create", new_callable=AsyncMock) as mock_create,
+        ):
             mock_find.return_value = None
             mock_create.return_value = sample_group_tool
             result = await repo.upsert(10, "group-abc")
@@ -238,8 +259,12 @@ class TestUpsert:
             captured.update(payload)
             return sample_group_tool
 
-        with patch.object(repo, "find_by_tool_and_group", new_callable=AsyncMock) as mock_find, \
-             patch.object(repo, "create", side_effect=fake_create):
+        with (
+            patch.object(
+                repo, "find_by_tool_and_group", new_callable=AsyncMock
+            ) as mock_find,
+            patch.object(repo, "create", side_effect=fake_create),
+        ):
             mock_find.return_value = None
             await repo.upsert(7, "g", defaults={"enabled": True, "config": {"k": "v"}})
 
@@ -252,20 +277,27 @@ class TestUpsert:
 # update_config
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateConfig:
     @pytest.mark.asyncio
     async def test_returns_none_when_not_found(self, repo, session):
-        with patch.object(repo, "find_by_tool_and_group", new_callable=AsyncMock) as mock_find:
+        with patch.object(
+            repo, "find_by_tool_and_group", new_callable=AsyncMock
+        ) as mock_find:
             mock_find.return_value = None
             result = await repo.update_config(99, "ghost", {"k": "v"})
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_executes_update_and_returns_mapping(self, repo, session, sample_group_tool):
+    async def test_executes_update_and_returns_mapping(
+        self, repo, session, sample_group_tool
+    ):
         session.execute.return_value = MagicMock()
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
-        with patch.object(repo, "find_by_tool_and_group", new_callable=AsyncMock) as mock_find:
+        with patch.object(
+            repo, "find_by_tool_and_group", new_callable=AsyncMock
+        ) as mock_find:
             mock_find.return_value = sample_group_tool
             result = await repo.update_config(10, "group-abc", {"new_key": "new_val"})
         assert result is sample_group_tool
@@ -278,10 +310,13 @@ class TestUpdateConfig:
 # set_enabled
 # ---------------------------------------------------------------------------
 
+
 class TestSetEnabled:
     @pytest.mark.asyncio
     async def test_returns_none_when_not_found(self, repo, session):
-        with patch.object(repo, "find_by_tool_and_group", new_callable=AsyncMock) as mock_find:
+        with patch.object(
+            repo, "find_by_tool_and_group", new_callable=AsyncMock
+        ) as mock_find:
             mock_find.return_value = None
             result = await repo.set_enabled(99, "ghost", True)
         assert result is None
@@ -291,7 +326,9 @@ class TestSetEnabled:
         session.execute.return_value = MagicMock()
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
-        with patch.object(repo, "find_by_tool_and_group", new_callable=AsyncMock) as mock_find:
+        with patch.object(
+            repo, "find_by_tool_and_group", new_callable=AsyncMock
+        ) as mock_find:
             mock_find.return_value = sample_group_tool
             result = await repo.set_enabled(10, "group-abc", False)
         assert result is sample_group_tool
@@ -302,7 +339,9 @@ class TestSetEnabled:
         session.execute.return_value = MagicMock()
         session.flush = AsyncMock()
         session.refresh = AsyncMock()
-        with patch.object(repo, "find_by_tool_and_group", new_callable=AsyncMock) as mock_find:
+        with patch.object(
+            repo, "find_by_tool_and_group", new_callable=AsyncMock
+        ) as mock_find:
             mock_find.return_value = sample_group_tool
             result = await repo.set_enabled(10, "group-abc", True)
         assert result is sample_group_tool
@@ -311,6 +350,7 @@ class TestSetEnabled:
 # ---------------------------------------------------------------------------
 # delete_mapping
 # ---------------------------------------------------------------------------
+
 
 class TestDeleteMapping:
     @pytest.mark.asyncio

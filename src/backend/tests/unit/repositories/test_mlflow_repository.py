@@ -1,4 +1,5 @@
 """Unit tests for MLflowRepository – covers all methods including auto-create."""
+
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -6,10 +7,10 @@ import pytest
 
 from src.repositories.mlflow_repository import MLflowRepository
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_repo():
     """Build an MLflowRepository with mocked collaborators."""
@@ -53,7 +54,9 @@ class TestSetEnabled:
         repo.dbx_repo.create_config.return_value = created
         repo._base_repo.update.return_value = created
 
-        with patch.dict(os.environ, {"DATABRICKS_HOST": "https://my-ws.cloud.databricks.com"}):
+        with patch.dict(
+            os.environ, {"DATABRICKS_HOST": "https://my-ws.cloud.databricks.com"}
+        ):
             result = await repo.set_enabled(True, group_id="g2")
 
         repo.dbx_repo.create_config.assert_awaited_once()
@@ -110,7 +113,9 @@ class TestSetEvaluationEnabled:
             result = await repo.set_evaluation_enabled(True, group_id="g4")
 
         repo.dbx_repo.create_config.assert_awaited_once()
-        repo._base_repo.update.assert_awaited_once_with(88, {"evaluation_enabled": True})
+        repo._base_repo.update.assert_awaited_once_with(
+            88, {"evaluation_enabled": True}
+        )
         assert result is True
 
 
@@ -133,7 +138,9 @@ class TestReadMethods:
     @pytest.mark.asyncio
     async def test_is_evaluation_enabled_true(self):
         repo = _make_repo()
-        repo.dbx_repo.get_active_config.return_value = _fake_config(evaluation_enabled=True)
+        repo.dbx_repo.get_active_config.return_value = _fake_config(
+            evaluation_enabled=True
+        )
         assert await repo.is_evaluation_enabled(group_id="g") is True
 
     @pytest.mark.asyncio
@@ -153,7 +160,10 @@ class TestGetEvaluationJudgeModel:
         cfg = _fake_config()
         cfg.evaluation_judge_model = "databricks-claude-sonnet-4"
         repo.dbx_repo.get_active_config.return_value = cfg
-        assert await repo.get_evaluation_judge_model(group_id="g") == "databricks-claude-sonnet-4"
+        assert (
+            await repo.get_evaluation_judge_model(group_id="g")
+            == "databricks-claude-sonnet-4"
+        )
 
     @pytest.mark.asyncio
     async def test_returns_none_for_blank(self):

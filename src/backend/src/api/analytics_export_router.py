@@ -22,17 +22,18 @@ Each download returns a ZIP archive containing human-readable YAML files:
 The YAML files are designed so that customers can build their own deployment
 engine on top of them without needing to understand the raw Databricks API JSON.
 """
+
 import io
 import logging
 import zipfile
 from typing import List, Optional
 
-from fastapi import APIRouter, Request, Query
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from src.core.exceptions import NotFoundError
 from src.core.dependencies import GroupContextDep
+from src.core.exceptions import NotFoundError
 from src.schemas.analytics_export import DashboardSummary
 from src.services.databricks.analytics.export import AnalyticsExportService
 from src.utils.databricks_auth import extract_user_token_from_request
@@ -60,6 +61,7 @@ def _make_zip(folder_name: str, files: list) -> bytes:
 # ─────────────────────────────────────────────────────────────────────────────
 # Genie Space export
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.get(
     "/genie-spaces/{space_id}/download",
@@ -111,6 +113,7 @@ async def download_genie_space_export(
 
 class GenieSpaceExportBody(BaseModel):
     """Request body for POST download — carries the serialized_space from the tool output."""
+
     serialized_space: Optional[str] = None
 
 
@@ -182,21 +185,24 @@ async def preview_genie_space_export(
     except ValueError as exc:
         raise NotFoundError(str(exc))
 
-    return JSONResponse({
-        "space_id": result["space_id"],
-        "space_name": result["space_name"],
-        "folder_name": result["folder_name"],
-        "file_count": len(result["files"]),
-        "files": [
-            {"path": f"{result['folder_name']}/{f.path}", "content": f.content}
-            for f in result["files"]
-        ],
-    })
+    return JSONResponse(
+        {
+            "space_id": result["space_id"],
+            "space_name": result["space_name"],
+            "folder_name": result["folder_name"],
+            "file_count": len(result["files"]),
+            "files": [
+                {"path": f"{result['folder_name']}/{f.path}", "content": f.content}
+                for f in result["files"]
+            ],
+        }
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Lakeview Dashboard export
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.get(
     "/dashboards",
@@ -304,13 +310,15 @@ async def preview_dashboard_export(
     except ValueError as exc:
         raise NotFoundError(str(exc))
 
-    return JSONResponse({
-        "dashboard_id": result["dashboard_id"],
-        "dashboard_name": result["dashboard_name"],
-        "folder_name": result["folder_name"],
-        "file_count": len(result["files"]),
-        "files": [
-            {"path": f"{result['folder_name']}/{f.path}", "content": f.content}
-            for f in result["files"]
-        ],
-    })
+    return JSONResponse(
+        {
+            "dashboard_id": result["dashboard_id"],
+            "dashboard_name": result["dashboard_name"],
+            "folder_name": result["folder_name"],
+            "file_count": len(result["files"]),
+            "files": [
+                {"path": f"{result['folder_name']}/{f.path}", "content": f.content}
+                for f in result["files"]
+            ],
+        }
+    )

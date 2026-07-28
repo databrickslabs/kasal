@@ -13,12 +13,12 @@ Date: 2025
 """
 
 import logging
-from typing import Any, Optional, Type, Dict, List
-
-from src.services.tools.base import BaseTool
-from pydantic import BaseModel, Field, PrivateAttr
+from typing import Any, Dict, List, Optional, Type
 
 import httpx
+from pydantic import BaseModel, Field, PrivateAttr
+
+from src.services.tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -34,21 +34,20 @@ class PowerBIRelationshipsSchema(BaseModel):
     # ===== UNITY CATALOG TARGET CONFIGURATION =====
     target_catalog: str = Field(
         "main",
-        description="[Target] Unity Catalog catalog name for FK statements (default: 'main'). Supports {placeholder} for dynamic mode."
+        description="[Target] Unity Catalog catalog name for FK statements (default: 'main'). Supports {placeholder} for dynamic mode.",
     )
     target_schema: str = Field(
         "default",
-        description="[Target] Unity Catalog schema name for FK statements (default: 'default'). Supports {placeholder} for dynamic mode."
+        description="[Target] Unity Catalog schema name for FK statements (default: 'default'). Supports {placeholder} for dynamic mode.",
     )
 
     # ===== OUTPUT OPTIONS =====
     include_inactive: bool = Field(
-        False,
-        description="[Output] Include inactive relationships (default: False)"
+        False, description="[Output] Include inactive relationships (default: False)"
     )
     skip_system_tables: bool = Field(
         True,
-        description="[Output] Skip system tables like LocalDateTable (default: True)"
+        description="[Output] Skip system tables like LocalDateTable (default: True)",
     )
 
 
@@ -102,11 +101,16 @@ class PowerBIRelationshipsTool(BaseTool):
     def __init__(self, **kwargs: Any) -> None:
         """Initialize the Power BI Relationships tool."""
         import uuid
+
         instance_id = str(uuid.uuid4())[:8]
 
         logger.info(f"[PowerBIRelationshipsTool.__init__] Instance ID: {instance_id}")
-        logger.info(f"[PowerBIRelationshipsTool.__init__] Received kwargs keys: {list(kwargs.keys())}")
-        logger.info(f"[PowerBIRelationshipsTool.__init__] workspace_id: {kwargs.get('workspace_id', 'NOT PROVIDED')}")
+        logger.info(
+            f"[PowerBIRelationshipsTool.__init__] Received kwargs keys: {list(kwargs.keys())}"
+        )
+        logger.info(
+            f"[PowerBIRelationshipsTool.__init__] workspace_id: {kwargs.get('workspace_id', 'NOT PROVIDED')}"
+        )
 
         # Extract execution_inputs if provided (for dynamic parameter resolution)
         execution_inputs = kwargs.get("execution_inputs", {})
@@ -136,19 +140,26 @@ class PowerBIRelationshipsTool(BaseTool):
 
         # DYNAMIC PARAMETER RESOLUTION: If execution_inputs provided, resolve placeholders during init
         if execution_inputs:
-            logger.info(f"[PowerBIRelationshipsTool.__init__] Instance {instance_id} - Resolving parameters from execution_inputs: {list(execution_inputs.keys())}")
+            logger.info(
+                f"[PowerBIRelationshipsTool.__init__] Instance {instance_id} - Resolving parameters from execution_inputs: {list(execution_inputs.keys())}"
+            )
             resolved_config = {}
             for key, value in default_config.items():
-                if isinstance(value, str) and '{' in value:
+                if isinstance(value, str) and "{" in value:
                     import re
-                    placeholders = re.findall(r'\{(\w+)\}', value)
+
+                    placeholders = re.findall(r"\{(\w+)\}", value)
                     if placeholders:
                         resolved_value = value
                         for placeholder in placeholders:
                             if placeholder in execution_inputs:
                                 replacement = str(execution_inputs[placeholder])
-                                resolved_value = resolved_value.replace(f'{{{placeholder}}}', replacement)
-                                logger.info(f"[INIT RESOLUTION] Resolved {key}: {{{placeholder}}} → {replacement}")
+                                resolved_value = resolved_value.replace(
+                                    f"{{{placeholder}}}", replacement
+                                )
+                                logger.info(
+                                    f"[INIT RESOLUTION] Resolved {key}: {{{placeholder}}} → {replacement}"
+                                )
                         resolved_config[key] = resolved_value
                     else:
                         resolved_config[key] = value
@@ -164,7 +175,9 @@ class PowerBIRelationshipsTool(BaseTool):
         self._instance_id = instance_id
         self._default_config = default_config
 
-        logger.info(f"[PowerBIRelationshipsTool.__init__] Instance {instance_id} initialized with config keys: {list(default_config.keys())}")
+        logger.info(
+            f"[PowerBIRelationshipsTool.__init__] Instance {instance_id} initialized with config keys: {list(default_config.keys())}"
+        )
 
     def _resolve_parameter(self, value: Any, execution_inputs: Dict[str, Any]) -> Any:
         """
@@ -181,7 +194,8 @@ class PowerBIRelationshipsTool(BaseTool):
             return value
 
         import re
-        placeholders = re.findall(r'\{(\w+)\}', value)
+
+        placeholders = re.findall(r"\{(\w+)\}", value)
 
         if not placeholders:
             return value
@@ -190,10 +204,16 @@ class PowerBIRelationshipsTool(BaseTool):
         for placeholder in placeholders:
             if placeholder in execution_inputs:
                 replacement = str(execution_inputs[placeholder])
-                resolved_value = resolved_value.replace(f'{{{placeholder}}}', replacement)
-                logger.info(f"[PARAM RESOLUTION] Resolved {{{placeholder}}} → {replacement}")
+                resolved_value = resolved_value.replace(
+                    f"{{{placeholder}}}", replacement
+                )
+                logger.info(
+                    f"[PARAM RESOLUTION] Resolved {{{placeholder}}} → {replacement}"
+                )
             else:
-                logger.warning(f"[PARAM RESOLUTION] Placeholder {{{placeholder}}} not found in execution_inputs")
+                logger.warning(
+                    f"[PARAM RESOLUTION] Placeholder {{{placeholder}}} not found in execution_inputs"
+                )
 
         return resolved_value
 
@@ -205,22 +225,38 @@ class PowerBIRelationshipsTool(BaseTool):
             Formatted output with relationships and FK statements
         """
         try:
-            instance_id = getattr(self, '_instance_id', 'UNKNOWN')
+            instance_id = getattr(self, "_instance_id", "UNKNOWN")
             logger.info("=" * 80)
             logger.info(f"🔧 TOOL EXECUTION: PowerBIRelationshipsTool._run() STARTED")
             logger.info("=" * 80)
-            logger.info(f"[PowerBIRelationshipsTool] Instance {instance_id} - _run() called")
-            logger.info(f"[PowerBIRelationshipsTool] Instance {instance_id} - Received kwargs: {list(kwargs.keys())}")
+            logger.info(
+                f"[PowerBIRelationshipsTool] Instance {instance_id} - _run() called"
+            )
+            logger.info(
+                f"[PowerBIRelationshipsTool] Instance {instance_id} - Received kwargs: {list(kwargs.keys())}"
+            )
             # DEBUG: Log actual values for auth fields
-            logger.info(f"[PowerBIRelationshipsTool] DEBUG - workspace_id value: {kwargs.get('workspace_id')}")
-            logger.info(f"[PowerBIRelationshipsTool] DEBUG - tenant_id value: {kwargs.get('tenant_id')}")
-            logger.info(f"[PowerBIRelationshipsTool] DEBUG - client_id value: {kwargs.get('client_id')}")
-            logger.info(f"[PowerBIRelationshipsTool] DEBUG - username value: {kwargs.get('username')}")
-            logger.info(f"[PowerBIRelationshipsTool] DEBUG - auth_method value: {kwargs.get('auth_method')}")
+            logger.info(
+                f"[PowerBIRelationshipsTool] DEBUG - workspace_id value: {kwargs.get('workspace_id')}"
+            )
+            logger.info(
+                f"[PowerBIRelationshipsTool] DEBUG - tenant_id value: {kwargs.get('tenant_id')}"
+            )
+            logger.info(
+                f"[PowerBIRelationshipsTool] DEBUG - client_id value: {kwargs.get('client_id')}"
+            )
+            logger.info(
+                f"[PowerBIRelationshipsTool] DEBUG - username value: {kwargs.get('username')}"
+            )
+            logger.info(
+                f"[PowerBIRelationshipsTool] DEBUG - auth_method value: {kwargs.get('auth_method')}"
+            )
 
             # Extract execution_inputs if provided
-            execution_inputs = kwargs.pop('execution_inputs', {})
-            logger.info(f"[PowerBIRelationshipsTool] Instance {instance_id} - Execution inputs: {list(execution_inputs.keys())}")
+            execution_inputs = kwargs.pop("execution_inputs", {})
+            logger.info(
+                f"[PowerBIRelationshipsTool] Instance {instance_id} - Execution inputs: {list(execution_inputs.keys())}"
+            )
 
             # Merge agent-provided kwargs with pre-configured defaults
             # Filter out None values and placeholder-like strings
@@ -229,52 +265,94 @@ class PowerBIRelationshipsTool(BaseTool):
                 if not isinstance(value, str):
                     return False
                 placeholder_patterns = [
-                    "your_", "your-", "<your", "[your",
-                    "placeholder", "example_", "example-",
-                    "xxx", "yyy", "zzz",
-                    "insert_", "enter_", "put_",
-                    "replace_", "fill_in",
+                    "your_",
+                    "your-",
+                    "<your",
+                    "[your",
+                    "placeholder",
+                    "example_",
+                    "example-",
+                    "xxx",
+                    "yyy",
+                    "zzz",
+                    "insert_",
+                    "enter_",
+                    "put_",
+                    "replace_",
+                    "fill_in",
                 ]
                 value_lower = value.lower()
                 return any(pattern in value_lower for pattern in placeholder_patterns)
 
             filtered_kwargs = {
-                k: v for k, v in kwargs.items()
+                k: v
+                for k, v in kwargs.items()
                 if v is not None and not is_placeholder(v)
             }
-            logger.info(f"[PowerBIRelationshipsTool] Instance {instance_id} - Filtered kwargs: {list(filtered_kwargs.keys())}")
+            logger.info(
+                f"[PowerBIRelationshipsTool] Instance {instance_id} - Filtered kwargs: {list(filtered_kwargs.keys())}"
+            )
 
             # CRITICAL: Merge strategy for deterministic authentication
             # - CREDENTIALS: Use pre-configured values (prevent agent placeholder overrides)
             # - AUTH_METHOD: Use UI selection (deterministic, not auto-detected)
             # - OTHER: Agent can override
-            credential_fields = ['workspace_id', 'dataset_id', 'tenant_id', 'client_id', 'client_secret', 'username', 'password', 'access_token']
-            selection_fields = ['auth_method']  # User selection - must be deterministic
+            credential_fields = [
+                "workspace_id",
+                "dataset_id",
+                "tenant_id",
+                "client_id",
+                "client_secret",
+                "username",
+                "password",
+                "access_token",
+            ]
+            selection_fields = ["auth_method"]  # User selection - must be deterministic
 
             merged_kwargs = {}
-            for key in set(list(self._default_config.keys()) + list(filtered_kwargs.keys())):
+            for key in set(
+                list(self._default_config.keys()) + list(filtered_kwargs.keys())
+            ):
                 if key in credential_fields:
                     # Credentials: use pre-configured value (protected from agent)
-                    merged_kwargs[key] = self._default_config.get(key, filtered_kwargs.get(key))
+                    merged_kwargs[key] = self._default_config.get(
+                        key, filtered_kwargs.get(key)
+                    )
                 elif key in selection_fields:
                     # User selections: UI value takes precedence for deterministic behavior
-                    merged_kwargs[key] = self._default_config.get(key, filtered_kwargs.get(key))
+                    merged_kwargs[key] = self._default_config.get(
+                        key, filtered_kwargs.get(key)
+                    )
                 else:
                     # Other fields: agent can override (filtered_kwargs takes precedence)
-                    merged_kwargs[key] = filtered_kwargs.get(key, self._default_config.get(key))
+                    merged_kwargs[key] = filtered_kwargs.get(
+                        key, self._default_config.get(key)
+                    )
 
             # DEBUG: Log merged auth values
-            logger.info(f"[PowerBIRelationshipsTool] DEBUG MERGED - tenant_id: {merged_kwargs.get('tenant_id')}")
-            logger.info(f"[PowerBIRelationshipsTool] DEBUG MERGED - client_id: {merged_kwargs.get('client_id')}")
-            logger.info(f"[PowerBIRelationshipsTool] DEBUG MERGED - username: {merged_kwargs.get('username')}")
-            logger.info(f"[PowerBIRelationshipsTool] DEBUG MERGED - auth_method: {merged_kwargs.get('auth_method')}")
+            logger.info(
+                f"[PowerBIRelationshipsTool] DEBUG MERGED - tenant_id: {merged_kwargs.get('tenant_id')}"
+            )
+            logger.info(
+                f"[PowerBIRelationshipsTool] DEBUG MERGED - client_id: {merged_kwargs.get('client_id')}"
+            )
+            logger.info(
+                f"[PowerBIRelationshipsTool] DEBUG MERGED - username: {merged_kwargs.get('username')}"
+            )
+            logger.info(
+                f"[PowerBIRelationshipsTool] DEBUG MERGED - auth_method: {merged_kwargs.get('auth_method')}"
+            )
 
             # DYNAMIC PARAMETER RESOLUTION
             if execution_inputs:
-                logger.info(f"[PARAM RESOLUTION] Resolving parameters with execution_inputs")
+                logger.info(
+                    f"[PARAM RESOLUTION] Resolving parameters with execution_inputs"
+                )
                 resolved_kwargs = {}
                 for key, value in merged_kwargs.items():
-                    resolved_kwargs[key] = self._resolve_parameter(value, execution_inputs)
+                    resolved_kwargs[key] = self._resolve_parameter(
+                        value, execution_inputs
+                    )
                 merged_kwargs = resolved_kwargs
 
             # Extract parameters
@@ -300,22 +378,27 @@ class PowerBIRelationshipsTool(BaseTool):
 
             # Validate authentication using shared utility
             from src.services.tools.powerbi_auth_utils import validate_auth_config
+
             is_valid, error_msg = validate_auth_config(auth_config)
             if not is_valid:
                 return f"Error: {error_msg}"
 
-            logger.info(f"[PowerBIRelationshipsTool] Extracting relationships from dataset {dataset_id}")
+            logger.info(
+                f"[PowerBIRelationshipsTool] Extracting relationships from dataset {dataset_id}"
+            )
 
             # Run async extraction
-            result = self._run_sync(self._extract_relationships(
-                workspace_id=workspace_id,
-                dataset_id=dataset_id,
-                auth_config=auth_config,
-                target_catalog=merged_kwargs.get("target_catalog", "main"),
-                target_schema=merged_kwargs.get("target_schema", "default"),
-                include_inactive=merged_kwargs.get("include_inactive", False),
-                skip_system_tables=merged_kwargs.get("skip_system_tables", True),
-            ))
+            result = self._run_sync(
+                self._extract_relationships(
+                    workspace_id=workspace_id,
+                    dataset_id=dataset_id,
+                    auth_config=auth_config,
+                    target_catalog=merged_kwargs.get("target_catalog", "main"),
+                    target_schema=merged_kwargs.get("target_schema", "default"),
+                    include_inactive=merged_kwargs.get("include_inactive", False),
+                    skip_system_tables=merged_kwargs.get("skip_system_tables", True),
+                )
+            )
 
             return result
 
@@ -326,6 +409,7 @@ class PowerBIRelationshipsTool(BaseTool):
     def _run_sync(self, coro):
         """Run async coroutine from sync context (ContextVars preserved)."""
         from src.services.tools.async_bridge import run_async_with_context
+
         return run_async_with_context(coro)
 
     async def _extract_relationships(
@@ -341,7 +425,10 @@ class PowerBIRelationshipsTool(BaseTool):
         """Extract relationships and format output."""
 
         # Get access token using shared auth utility
-        from src.services.tools.powerbi_auth_utils import get_powerbi_access_token_from_config
+        from src.services.tools.powerbi_auth_utils import (
+            get_powerbi_access_token_from_config,
+        )
+
         token = await get_powerbi_access_token_from_config(auth_config)
 
         # Execute INFO.VIEW.RELATIONSHIPS() query
@@ -395,12 +482,12 @@ class PowerBIRelationshipsTool(BaseTool):
 
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         payload = {
             "queries": [{"query": "EVALUATE INFO.VIEW.RELATIONSHIPS()"}],
-            "serializerSettings": {"includeNulls": True}
+            "serializerSettings": {"includeNulls": True},
         }
 
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -442,19 +529,21 @@ class PowerBIRelationshipsTool(BaseTool):
             from_card = row.get("[FromCardinality]", "")
             to_card = row.get("[ToCardinality]", "")
 
-            relationships.append({
-                "id": rel_id,
-                "name": row.get("[Name]", ""),
-                "from_table": from_table,
-                "from_column": row.get("[FromColumn]", ""),
-                "from_cardinality": from_card,
-                "to_table": to_table,
-                "to_column": row.get("[ToColumn]", ""),
-                "to_cardinality": to_card,
-                "is_active": is_active,
-                "cross_filtering": row.get("[CrossFilteringBehavior]", ""),
-                "security_filtering": row.get("[SecurityFilteringBehavior]", ""),
-            })
+            relationships.append(
+                {
+                    "id": rel_id,
+                    "name": row.get("[Name]", ""),
+                    "from_table": from_table,
+                    "from_column": row.get("[FromColumn]", ""),
+                    "from_cardinality": from_card,
+                    "to_table": to_table,
+                    "to_column": row.get("[ToColumn]", ""),
+                    "to_cardinality": to_card,
+                    "is_active": is_active,
+                    "cross_filtering": row.get("[CrossFilteringBehavior]", ""),
+                    "security_filtering": row.get("[SecurityFilteringBehavior]", ""),
+                }
+            )
 
         logger.info(f"Extracted {len(relationships)} relationship(s)")
         return relationships
@@ -599,7 +688,9 @@ class PowerBIRelationshipsTool(BaseTool):
             active_str = "ACTIVE" if rel["is_active"] else "INACTIVE"
 
             output.append(f"### {rel['name']}")
-            output.append(f"- **From**: {rel['from_table']}.{rel['from_column']} ({from_card})")
+            output.append(
+                f"- **From**: {rel['from_table']}.{rel['from_column']} ({from_card})"
+            )
             output.append(f"- **To**: {rel['to_table']}.{rel['to_column']} ({to_card})")
             output.append(f"- **Cross-filtering**: {rel['cross_filtering']}")
             output.append(f"- **Status**: {active_str}\n")

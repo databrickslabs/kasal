@@ -5,16 +5,17 @@ Tests the main conversion pipeline flow from inbound connectors
 to outbound converters.
 """
 
-import pytest
-from unittest.mock import Mock, MagicMock, patch, call
-from typing import Dict, Any
+from typing import Any, Dict
+from unittest.mock import MagicMock, Mock, call, patch
 
+import pytest
+
+from src.services.converters.base.connectors import ConnectorType
+from src.services.converters.base.models import KPI, KPIDefinition
 from src.services.converters.pipeline import (
     ConversionPipeline,
     OutboundFormat,
 )
-from src.services.converters.base.connectors import ConnectorType
-from src.services.converters.base.models import KPIDefinition, KPI
 
 
 class TestConversionPipeline:
@@ -35,14 +36,14 @@ class TestConversionPipeline:
                 KPI(
                     description="Total sales amount",
                     formula="SUM(Sales[Amount])",
-                    technical_name="Total_Sales"
+                    technical_name="Total_Sales",
                 ),
                 KPI(
                     description="Total cost amount",
                     formula="SUM(Cost[Amount])",
-                    technical_name="Total_Cost"
+                    technical_name="Total_Cost",
                 ),
-            ]
+            ],
         )
 
     @pytest.fixture
@@ -67,20 +68,19 @@ class TestConversionPipeline:
 
     # ========== Inbound Connector Creation Tests ==========
 
-    @patch('src.services.converters.pipeline.PowerBIConnector')
+    @patch("src.services.converters.pipeline.PowerBIConnector")
     def test_create_powerbi_connector(self, mock_connector_class, pipeline):
         """Test creating PowerBI connector"""
         # Arrange
         connection_params = {
             "semantic_model_id": "test-model-123",
             "group_id": "test-workspace-456",
-            "access_token": "test-token"
+            "access_token": "test-token",
         }
 
         # Act
         result = pipeline.create_inbound_connector(
-            ConnectorType.POWERBI,
-            connection_params
+            ConnectorType.POWERBI, connection_params
         )
 
         # Assert
@@ -98,7 +98,7 @@ class TestConversionPipeline:
 
     # ========== Full Pipeline Execution Tests ==========
 
-    @patch('src.services.converters.pipeline.PowerBIConnector')
+    @patch("src.services.converters.pipeline.PowerBIConnector")
     def test_execute_pipeline_success_powerbi_to_dax(
         self, mock_connector_class, pipeline, sample_definition, sample_metadata
     ):
@@ -114,10 +114,10 @@ class TestConversionPipeline:
         inbound_params = {
             "semantic_model_id": "model-123",
             "group_id": "workspace-456",
-            "access_token": "token-789"
+            "access_token": "token-789",
         }
 
-        with patch.object(pipeline, '_convert_to_dax') as mock_convert:
+        with patch.object(pipeline, "_convert_to_dax") as mock_convert:
             mock_convert.return_value = [
                 {"name": "Total Sales", "expression": "SUM(...)", "description": "Test"}
             ]
@@ -127,7 +127,7 @@ class TestConversionPipeline:
                 inbound_type=ConnectorType.POWERBI,
                 inbound_params=inbound_params,
                 outbound_format=OutboundFormat.DAX,
-                extract_params={"include_hidden": True}
+                extract_params={"include_hidden": True},
             )
 
         # Assert
@@ -142,7 +142,7 @@ class TestConversionPipeline:
         call_kwargs = mock_connector.extract_to_definition.call_args[1]
         assert call_kwargs["include_hidden"] is True
 
-    @patch('src.services.converters.pipeline.PowerBIConnector')
+    @patch("src.services.converters.pipeline.PowerBIConnector")
     def test_execute_pipeline_failure_connector_error(
         self, mock_connector_class, pipeline
     ):
@@ -154,7 +154,7 @@ class TestConversionPipeline:
         result = pipeline.execute(
             inbound_type=ConnectorType.POWERBI,
             inbound_params={},
-            outbound_format=OutboundFormat.DAX
+            outbound_format=OutboundFormat.DAX,
         )
 
         # Assert
@@ -163,14 +163,16 @@ class TestConversionPipeline:
         assert "Connection failed" in result["errors"][0]
         assert result["measure_count"] == 0
 
-    @patch('src.services.converters.pipeline.PowerBIConnector')
+    @patch("src.services.converters.pipeline.PowerBIConnector")
     def test_execute_pipeline_failure_extraction_error(
         self, mock_connector_class, pipeline
     ):
         """Test pipeline handles extraction errors gracefully"""
         # Arrange
         mock_connector = MagicMock()
-        mock_connector.extract_to_definition.side_effect = Exception("Extraction failed")
+        mock_connector.extract_to_definition.side_effect = Exception(
+            "Extraction failed"
+        )
         mock_connector.__enter__.return_value = mock_connector
         mock_connector.__exit__.return_value = None
         mock_connector_class.return_value = mock_connector
@@ -179,7 +181,7 @@ class TestConversionPipeline:
         result = pipeline.execute(
             inbound_type=ConnectorType.POWERBI,
             inbound_params={},
-            outbound_format=OutboundFormat.DAX
+            outbound_format=OutboundFormat.DAX,
         )
 
         # Assert
@@ -189,10 +191,12 @@ class TestConversionPipeline:
 
     # ========== Format Conversion Path Detection Tests ==========
 
-    def test_convert_to_format_detects_transpilation_path_powerbi_to_sql(self, pipeline, sample_definition):
+    def test_convert_to_format_detects_transpilation_path_powerbi_to_sql(
+        self, pipeline, sample_definition
+    ):
         """Test pipeline detects transpilation path for PowerBI → SQL"""
         # Arrange
-        with patch.object(pipeline, '_convert_to_sql') as mock_convert_sql:
+        with patch.object(pipeline, "_convert_to_sql") as mock_convert_sql:
             mock_convert_sql.return_value = []
 
             # Act
@@ -200,7 +204,7 @@ class TestConversionPipeline:
                 sample_definition,
                 OutboundFormat.SQL,
                 {},
-                inbound_type=ConnectorType.POWERBI
+                inbound_type=ConnectorType.POWERBI,
             )
 
             # Assert
@@ -209,10 +213,12 @@ class TestConversionPipeline:
             call_kwargs = mock_convert_sql.call_args[1]
             assert call_kwargs["use_transpilation"] is True
 
-    def test_convert_to_format_detects_generation_path_non_powerbi_to_sql(self, pipeline, sample_definition):
+    def test_convert_to_format_detects_generation_path_non_powerbi_to_sql(
+        self, pipeline, sample_definition
+    ):
         """Test pipeline detects generation path for non-PowerBI → SQL"""
         # Arrange
-        with patch.object(pipeline, '_convert_to_sql') as mock_convert_sql:
+        with patch.object(pipeline, "_convert_to_sql") as mock_convert_sql:
             mock_convert_sql.return_value = []
 
             # Act
@@ -220,7 +226,7 @@ class TestConversionPipeline:
                 sample_definition,
                 OutboundFormat.SQL,
                 {},
-                inbound_type=None  # Non-PowerBI source
+                inbound_type=None,  # Non-PowerBI source
             )
 
             # Assert
@@ -229,7 +235,9 @@ class TestConversionPipeline:
             call_kwargs = mock_convert_sql.call_args[1]
             assert call_kwargs["use_transpilation"] is False
 
-    def test_convert_to_format_unsupported_format_raises_error(self, pipeline, sample_definition):
+    def test_convert_to_format_unsupported_format_raises_error(
+        self, pipeline, sample_definition
+    ):
         """Test unsupported format raises ValueError"""
         # Arrange
         # Create an enum with an invalid value for testing
@@ -245,8 +253,10 @@ class TestConversionPipeline:
 
     # ========== DAX Conversion Tests ==========
 
-    @patch('src.services.converters.pipeline.SmartDAXGenerator')
-    def test_convert_to_dax_success(self, mock_generator_class, pipeline, sample_definition):
+    @patch("src.services.converters.pipeline.SmartDAXGenerator")
+    def test_convert_to_dax_success(
+        self, mock_generator_class, pipeline, sample_definition
+    ):
         """Test successful conversion to DAX format"""
         # Arrange
         mock_generator = Mock()
@@ -269,12 +279,16 @@ class TestConversionPipeline:
         assert result[0]["description"] == "Total sales amount"
         assert result[0]["table"] == "Sales"
 
-    @patch('src.services.converters.pipeline.SmartDAXGenerator')
-    def test_convert_to_dax_handles_generation_error(self, mock_generator_class, pipeline, sample_definition):
+    @patch("src.services.converters.pipeline.SmartDAXGenerator")
+    def test_convert_to_dax_handles_generation_error(
+        self, mock_generator_class, pipeline, sample_definition
+    ):
         """Test DAX conversion handles generator errors"""
         # Arrange
         mock_generator = Mock()
-        mock_generator.generate_all_measures.side_effect = Exception("DAX generation failed")
+        mock_generator.generate_all_measures.side_effect = Exception(
+            "DAX generation failed"
+        )
         mock_generator_class.return_value = mock_generator
 
         # Act & Assert
@@ -283,8 +297,10 @@ class TestConversionPipeline:
 
     # ========== SQL Conversion Tests ==========
 
-    @patch('src.services.converters.pipeline.SQLGenerator')
-    def test_convert_to_sql_generation_path(self, mock_generator_class, pipeline, sample_definition):
+    @patch("src.services.converters.pipeline.SQLGenerator")
+    def test_convert_to_sql_generation_path(
+        self, mock_generator_class, pipeline, sample_definition
+    ):
         """Test SQL conversion using generation path (non-PowerBI source)"""
         # Arrange
         mock_generator = Mock()
@@ -292,22 +308,24 @@ class TestConversionPipeline:
         # Mock the result object returned by generate_sql_from_kbi_definition
         mock_result = Mock()
         mock_result.sql_queries = ["SELECT SUM(amount) as total_sales"]
-        mock_result.to_output_string.return_value = "-- Generated SQL\nSELECT SUM(amount) as total_sales;"
+        mock_result.to_output_string.return_value = (
+            "-- Generated SQL\nSELECT SUM(amount) as total_sales;"
+        )
 
         mock_generator.generate_sql_from_kbi_definition.return_value = mock_result
         mock_generator_class.return_value = mock_generator
 
         # Act
         result = pipeline._convert_to_sql(
-            sample_definition,
-            {"dialect": "databricks"},
-            use_transpilation=False
+            sample_definition, {"dialect": "databricks"}, use_transpilation=False
         )
 
         # Assert
         assert isinstance(result, str)
         assert "SELECT" in result
-        mock_generator.generate_sql_from_kbi_definition.assert_called_once_with(sample_definition)
+        mock_generator.generate_sql_from_kbi_definition.assert_called_once_with(
+            sample_definition
+        )
 
     def test_convert_to_sql_transpilation_path(self, pipeline, sample_definition):
         """Test SQL conversion using transpilation path (PowerBI source)"""
@@ -320,16 +338,12 @@ class TestConversionPipeline:
             "sql_transpiled": "SUM(cost_table.amount)"
         }
 
-        with patch.object(pipeline, '_format_transpiled_sql') as mock_format:
-            mock_format.return_value = [
-                {"name": "Total Sales", "sql": "SUM(...)"}
-            ]
+        with patch.object(pipeline, "_format_transpiled_sql") as mock_format:
+            mock_format.return_value = [{"name": "Total Sales", "sql": "SUM(...)"}]
 
             # Act
             result = pipeline._convert_to_sql(
-                sample_definition,
-                {},
-                use_transpilation=True
+                sample_definition, {}, use_transpilation=True
             )
 
             # Assert
@@ -337,8 +351,8 @@ class TestConversionPipeline:
 
     # ========== UC Metrics Conversion Tests ==========
 
-    @patch('src.services.converters.pipeline.SmartUCMetricsGenerator')
-    @patch('src.services.converters.pipeline.UCMetricsGenerator')
+    @patch("src.services.converters.pipeline.SmartUCMetricsGenerator")
+    @patch("src.services.converters.pipeline.UCMetricsGenerator")
     def test_convert_to_uc_metrics_generation_path(
         self, mock_basic_gen_class, mock_generator_class, pipeline, sample_definition
     ):
@@ -354,24 +368,28 @@ class TestConversionPipeline:
                 {
                     "name": "total_sales",
                     "expr": "SUM(`amount`)",
-                    "comment": "Total sales"
+                    "comment": "Total sales",
                 }
-            ]
+            ],
         }
 
-        mock_generator.generate_consolidated_uc_metrics.return_value = consolidated_metrics
+        mock_generator.generate_consolidated_uc_metrics.return_value = (
+            consolidated_metrics
+        )
         mock_generator_class.return_value = mock_generator
 
         # Mock the basic generator's format method
         mock_basic_gen = Mock()
-        mock_basic_gen.format_consolidated_uc_metrics_yaml.return_value = "version: '0.1'\nmeasures:\n  - name: total_sales"
+        mock_basic_gen.format_consolidated_uc_metrics_yaml.return_value = (
+            "version: '0.1'\nmeasures:\n  - name: total_sales"
+        )
         mock_basic_gen_class.return_value = mock_basic_gen
 
         # Act
         result = pipeline._convert_to_uc_metrics(
             sample_definition,
             {"catalog": "main", "schema": "default"},
-            use_transpilation=False
+            use_transpilation=False,
         )
 
         # Assert
@@ -384,12 +402,10 @@ class TestConversionPipeline:
     def test_execute_uses_default_parameters(self, pipeline):
         """Test pipeline uses sensible defaults for optional parameters"""
         # Arrange
-        with patch.object(pipeline, 'create_inbound_connector') as mock_create:
+        with patch.object(pipeline, "create_inbound_connector") as mock_create:
             mock_connector = MagicMock()
             mock_connector.extract_to_definition.return_value = KPIDefinition(
-                description="Test",
-                technical_name="test",
-                kpis=[]
+                description="Test", technical_name="test", kpis=[]
             )
             from dataclasses import dataclass
 
@@ -402,14 +418,14 @@ class TestConversionPipeline:
             mock_connector.__exit__.return_value = None
             mock_create.return_value = mock_connector
 
-            with patch.object(pipeline, '_convert_to_dax') as mock_convert:
+            with patch.object(pipeline, "_convert_to_dax") as mock_convert:
                 mock_convert.return_value = []
 
                 # Act
                 result = pipeline.execute(
                     inbound_type=ConnectorType.POWERBI,
                     inbound_params={},
-                    outbound_format=OutboundFormat.DAX
+                    outbound_format=OutboundFormat.DAX,
                     # No extract_params, outbound_params, or definition_name provided
                 )
 
@@ -421,7 +437,7 @@ class TestConversionPipeline:
 
     # ========== Metadata Extraction Tests ==========
 
-    @patch('src.services.converters.pipeline.PowerBIConnector')
+    @patch("src.services.converters.pipeline.PowerBIConnector")
     def test_execute_includes_connector_metadata(
         self, mock_connector_class, pipeline, sample_definition
     ):
@@ -444,14 +460,14 @@ class TestConversionPipeline:
         mock_connector.__exit__.return_value = None
         mock_connector_class.return_value = mock_connector
 
-        with patch.object(pipeline, '_convert_to_dax') as mock_convert:
+        with patch.object(pipeline, "_convert_to_dax") as mock_convert:
             mock_convert.return_value = []
 
             # Act
             result = pipeline.execute(
                 inbound_type=ConnectorType.POWERBI,
                 inbound_params={},
-                outbound_format=OutboundFormat.DAX
+                outbound_format=OutboundFormat.DAX,
             )
 
         # Assert
@@ -461,7 +477,7 @@ class TestConversionPipeline:
 
     # ========== Error Handling Tests ==========
 
-    @patch('src.services.converters.pipeline.PowerBIConnector')
+    @patch("src.services.converters.pipeline.PowerBIConnector")
     def test_execute_logs_errors_and_returns_partial_result(
         self, mock_connector_class, pipeline
     ):
@@ -473,7 +489,7 @@ class TestConversionPipeline:
         result = pipeline.execute(
             inbound_type=ConnectorType.POWERBI,
             inbound_params={},
-            outbound_format=OutboundFormat.DAX
+            outbound_format=OutboundFormat.DAX,
         )
 
         # Assert

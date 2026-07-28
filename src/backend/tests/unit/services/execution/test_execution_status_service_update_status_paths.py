@@ -1,5 +1,6 @@
-import pytest
 from types import SimpleNamespace
+
+import pytest
 
 from src.services.execution.status import ExecutionStatusService as Svc
 
@@ -18,17 +19,22 @@ async def test_update_status_not_found_returns_false(monkeypatch):
     class FakeRepo:
         def __init__(self, session):
             self.session = session
+
         async def get_execution_by_job_id(self, job_id: str):
             return None
 
     async def fake_exec(op):
         # Execute the provided operation with a fake session
-        return await op(SimpleNamespace(
-            flush=lambda: None, commit=lambda: None, rollback=lambda: None
-        ))
+        return await op(
+            SimpleNamespace(
+                flush=lambda: None, commit=lambda: None, rollback=lambda: None
+            )
+        )
 
     monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
-    monkeypatch.setattr(module, "execute_db_operation_with_fresh_engine", fake_exec, raising=True)
+    monkeypatch.setattr(
+        module, "execute_db_operation_with_fresh_engine", fake_exec, raising=True
+    )
 
     ok = await Svc.update_status(job_id="jid", status="RUNNING", message="m")
     assert ok is False
@@ -46,8 +52,10 @@ async def test_update_status_success_with_result_and_terminal_status(monkeypatch
     class FakeRepo:
         def __init__(self, session):
             self.session = session
+
         async def get_execution_by_job_id(self, job_id: str):
             return Record(id=42)
+
         async def update_execution(self, execution_id: int, data: dict):
             # capture call
             updated_calls["args"] = (execution_id, data)
@@ -56,8 +64,10 @@ async def test_update_status_success_with_result_and_terminal_status(monkeypatch
     class FakeSession(SimpleNamespace):
         async def flush(self):
             return None
+
         async def commit(self):
             return None
+
         async def rollback(self):
             return None
 
@@ -65,9 +75,13 @@ async def test_update_status_success_with_result_and_terminal_status(monkeypatch
         return await op(FakeSession())
 
     monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
-    monkeypatch.setattr(module, "execute_db_operation_with_fresh_engine", fake_exec, raising=True)
+    monkeypatch.setattr(
+        module, "execute_db_operation_with_fresh_engine", fake_exec, raising=True
+    )
 
-    ok = await Svc.update_status(job_id="jid", status="COMPLETED", message="done", result={"x": 1})
+    ok = await Svc.update_status(
+        job_id="jid", status="COMPLETED", message="done", result={"x": 1}
+    )
     assert ok is True
     # Verify we passed the integer id and included result and completed_at
     eid, data = updated_calls["args"]
@@ -88,16 +102,20 @@ async def test_update_mlflow_trace_id_paths(monkeypatch):
     class FakeRepo:
         def __init__(self, session):
             self.session = session
+
         async def get_execution_by_job_id(self, job_id: str):
             return Record(id=7)
+
         async def update_execution(self, execution_id: int, data: dict):
             return True
 
     class FakeSession(SimpleNamespace):
         async def flush(self):
             return None
+
         async def commit(self):
             return None
+
         async def rollback(self):
             return None
 
@@ -105,7 +123,9 @@ async def test_update_mlflow_trace_id_paths(monkeypatch):
         return await op(FakeSession())
 
     monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
-    monkeypatch.setattr(module, "execute_db_operation_with_fresh_engine", fake_exec, raising=True)
+    monkeypatch.setattr(
+        module, "execute_db_operation_with_fresh_engine", fake_exec, raising=True
+    )
 
     # Invalid args
     assert await Svc.update_mlflow_trace_id(job_id=None, trace_id="t1") is False
@@ -126,8 +146,10 @@ async def test_update_run_name_paths(monkeypatch):
     class FakeRepo:
         def __init__(self, session):
             self.session = session
+
         async def get_execution_by_job_id(self, job_id: str):
             return SimpleNamespace(id=11)
+
         async def update_execution(self, execution_id: int, data: dict):
             captured["args"] = (execution_id, data)
             return True
@@ -135,8 +157,10 @@ async def test_update_run_name_paths(monkeypatch):
     class FakeSession(SimpleNamespace):
         async def flush(self):
             return None
+
         async def commit(self):
             return None
+
         async def rollback(self):
             return None
 
@@ -175,8 +199,10 @@ async def test_update_mlflow_evaluation_run_id_paths(monkeypatch):
     class FakeRepo:
         def __init__(self, session):
             self.session = session
+
         async def get_execution_by_job_id(self, job_id: str):
             return Record(id=9)
+
         async def update_execution(self, execution_id: int, data: dict):
             return True
 
@@ -186,7 +212,9 @@ async def test_update_mlflow_evaluation_run_id_paths(monkeypatch):
 
     monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
 
-    ok = await Svc.update_mlflow_evaluation_run_id(FakeSession(), job_id="j1", evaluation_run_id="er1")
+    ok = await Svc.update_mlflow_evaluation_run_id(
+        FakeSession(), job_id="j1", evaluation_run_id="er1"
+    )
     assert ok is True
 
 
@@ -241,6 +269,7 @@ async def test_broadcast_execution_created_builds_correct_event(monkeypatch):
 async def test_broadcast_execution_created_handles_datetime_created_at(monkeypatch):
     """Test created_at as datetime object is converted via isoformat()."""
     from datetime import datetime as dt
+
     from src.services.execution import status as module
 
     captured = {}
@@ -307,12 +336,12 @@ async def test_broadcast_execution_created_swallows_sse_errors(monkeypatch):
     await Svc._broadcast_execution_created(execution_data)
 
 
-
 # ---------------------------------------------------------------------------
 # only_if_changed short-circuit (PERF-043): the RUNNING write at execution
 # start is a no-op for API-created records (born RUNNING) but must still
 # transition scheduler-created records (born "pending").
 # ---------------------------------------------------------------------------
+
 
 def _make_repo_and_session(current_status: str):
     calls = {}
@@ -323,17 +352,23 @@ def _make_repo_and_session(current_status: str):
     class FakeRepo:
         def __init__(self, session):
             self.session = session
+
         async def get_execution_by_job_id(self, job_id: str):
             return Record(id=42, status=current_status, group_id="g1")
+
         async def update_execution(self, execution_id: int, data: dict):
             calls["args"] = (execution_id, data)
-            return Record(id=42, status=data["status"], group_id="g1", completed_at=None)
+            return Record(
+                id=42, status=data["status"], group_id="g1", completed_at=None
+            )
 
     class FakeSession(SimpleNamespace):
         async def flush(self):
             calls.setdefault("flushed", True)
+
         async def commit(self):
             calls.setdefault("committed", True)
+
         async def rollback(self):
             calls.setdefault("rolled_back", True)
 
@@ -343,28 +378,36 @@ def _make_repo_and_session(current_status: str):
 @pytest.mark.asyncio
 async def test_only_if_changed_skips_write_when_status_already_matches(monkeypatch):
     from src.services.execution import status as module
+
     FakeRepo, session, calls = _make_repo_and_session(current_status="RUNNING")
     monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
 
     ok = await Svc.update_status(
-        job_id="jid", status="RUNNING", message="m",
-        session=session, only_if_changed=True,
+        job_id="jid",
+        status="RUNNING",
+        message="m",
+        session=session,
+        only_if_changed=True,
     )
 
     assert ok is True
-    assert "args" not in calls       # no UPDATE issued
+    assert "args" not in calls  # no UPDATE issued
     assert "committed" not in calls  # no commit issued
 
 
 @pytest.mark.asyncio
 async def test_only_if_changed_is_case_insensitive(monkeypatch):
     from src.services.execution import status as module
+
     FakeRepo, session, calls = _make_repo_and_session(current_status="running")
     monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
 
     ok = await Svc.update_status(
-        job_id="jid", status="RUNNING", message="m",
-        session=session, only_if_changed=True,
+        job_id="jid",
+        status="RUNNING",
+        message="m",
+        session=session,
+        only_if_changed=True,
     )
 
     assert ok is True
@@ -374,12 +417,16 @@ async def test_only_if_changed_is_case_insensitive(monkeypatch):
 @pytest.mark.asyncio
 async def test_only_if_changed_still_writes_on_real_transition(monkeypatch):
     from src.services.execution import status as module
+
     FakeRepo, session, calls = _make_repo_and_session(current_status="pending")
     monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
 
     ok = await Svc.update_status(
-        job_id="jid", status="RUNNING", message="m",
-        session=session, only_if_changed=True,
+        job_id="jid",
+        status="RUNNING",
+        message="m",
+        session=session,
+        only_if_changed=True,
     )
 
     assert ok is True
@@ -392,10 +439,13 @@ async def test_only_if_changed_still_writes_on_real_transition(monkeypatch):
 @pytest.mark.asyncio
 async def test_default_behavior_still_writes_even_when_status_matches(monkeypatch):
     from src.services.execution import status as module
+
     FakeRepo, session, calls = _make_repo_and_session(current_status="RUNNING")
     monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
 
-    ok = await Svc.update_status(job_id="jid", status="RUNNING", message="m", session=session)
+    ok = await Svc.update_status(
+        job_id="jid", status="RUNNING", message="m", session=session
+    )
 
     assert ok is True
     assert "args" in calls  # default (only_if_changed=False) keeps writing

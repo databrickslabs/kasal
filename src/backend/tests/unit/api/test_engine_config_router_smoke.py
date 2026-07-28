@@ -1,47 +1,55 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.core.exceptions import NotFoundError
+import pytest
 
 from src.api.engine_config_router import (
-    get_engine_configs,
+    create_engine_config,
     get_enabled_engine_configs,
     get_engine_config,
-    create_engine_config,
+    get_engine_configs,
+    get_kasal_flow_enabled,
+    get_otel_app_telemetry_enabled,
+    set_kasal_flow_enabled,
+    set_otel_app_telemetry_enabled,
     toggle_engine_config,
     update_config_value,
-    get_kasal_flow_enabled,
-    set_kasal_flow_enabled,
-    get_otel_app_telemetry_enabled,
-    set_otel_app_telemetry_enabled,
 )
-from src.schemas.engine_config import EngineConfigCreate, EngineConfigToggleUpdate, EngineConfigValueUpdate, KasalFlowConfigUpdate, OtelAppTelemetryConfigUpdate
+from src.core.exceptions import NotFoundError
+from src.schemas.engine_config import (
+    EngineConfigCreate,
+    EngineConfigToggleUpdate,
+    EngineConfigValueUpdate,
+    KasalFlowConfigUpdate,
+    OtelAppTelemetryConfigUpdate,
+)
 
 
 class Ctx:
-    def __init__(self, user_role=None, primary_group_id='g1', is_system_admin=False):
+    def __init__(self, user_role=None, primary_group_id="g1", is_system_admin=False):
         self.user_role = user_role
         self.primary_group_id = primary_group_id
         # Add current_user attribute for system admin checks
-        self.current_user = type('obj', (object,), {'is_system_admin': is_system_admin})()
+        self.current_user = type(
+            "obj", (object,), {"is_system_admin": is_system_admin}
+        )()
 
 
 @pytest.mark.asyncio
 async def test_list_endpoints():
     service = AsyncMock()
     group_ctx = Ctx()
-    with patch('src.api.engine_config_router.EngineConfigService') as svc_cls:
+    with patch("src.api.engine_config_router.EngineConfigService") as svc_cls:
         svc = AsyncMock()
         item = {
-            'engine_name': 'kasal',
-            'engine_type': 'workflow',
-            'config_key': 'flow_enabled',
-            'config_value': 'true',
-            'enabled': True,
-            'description': None,
-            'id': 1,
-            'created_at': __import__('datetime').datetime.utcnow(),
-            'updated_at': __import__('datetime').datetime.utcnow(),
+            "engine_name": "kasal",
+            "engine_type": "workflow",
+            "config_key": "flow_enabled",
+            "config_value": "true",
+            "enabled": True,
+            "description": None,
+            "id": 1,
+            "created_at": __import__("datetime").datetime.utcnow(),
+            "updated_at": __import__("datetime").datetime.utcnow(),
         }
         svc.find_all = AsyncMock(return_value=[item])
         svc.find_enabled_configs = AsyncMock(return_value=[item])
@@ -57,43 +65,65 @@ async def test_get_engine_config_found_and_not_found():
     service = AsyncMock()
     group_ctx = Ctx()
     svc = AsyncMock()
-    svc.find_by_engine_name = AsyncMock(return_value={'engine_name': 'e1'})
+    svc.find_by_engine_name = AsyncMock(return_value={"engine_name": "e1"})
     # Found path
-    out = await get_engine_config('e1', service=svc, group_context=group_ctx)
-    assert out['engine_name'] == 'e1'
+    out = await get_engine_config("e1", service=svc, group_context=group_ctx)
+    assert out["engine_name"] == "e1"
     # Not found path
     svc.find_by_engine_name = AsyncMock(return_value=None)
     with pytest.raises(NotFoundError) as ei:
-        await get_engine_config('e2', service=svc, group_context=group_ctx)
+        await get_engine_config("e2", service=svc, group_context=group_ctx)
     assert ei.value.status_code == 404
 
 
 @pytest.mark.asyncio
 async def test_create_toggle_update_value_permission_and_404s(monkeypatch):
-    group_ctx = Ctx(user_role='admin')
+    group_ctx = Ctx(user_role="admin")
 
     svc = AsyncMock()
     # Create
     created_item = {
-        'engine_name': 'e', 'engine_type': 'llm', 'config_key': 'k', 'config_value': 'v', 'enabled': True,
-        'description': None, 'id': 1,
-        'created_at': __import__('datetime').datetime.utcnow(),
-        'updated_at': __import__('datetime').datetime.utcnow(),
+        "engine_name": "e",
+        "engine_type": "llm",
+        "config_key": "k",
+        "config_value": "v",
+        "enabled": True,
+        "description": None,
+        "id": 1,
+        "created_at": __import__("datetime").datetime.utcnow(),
+        "updated_at": __import__("datetime").datetime.utcnow(),
     }
     svc.create_engine_config = AsyncMock(return_value=created_item)
-    created = await create_engine_config(EngineConfigCreate(engine_name='e', engine_type='llm', config_key='k', config_value='v'), service=svc, group_context=group_ctx)
-    assert created['engine_name'] == 'e'
+    created = await create_engine_config(
+        EngineConfigCreate(
+            engine_name="e", engine_type="llm", config_key="k", config_value="v"
+        ),
+        service=svc,
+        group_context=group_ctx,
+    )
+    assert created["engine_name"] == "e"
 
     # Toggle 404
     svc.toggle_engine_enabled = AsyncMock(return_value=None)
     with pytest.raises(NotFoundError) as ei:
-        await toggle_engine_config('e', EngineConfigToggleUpdate(enabled=True), service=svc, group_context=group_ctx)
+        await toggle_engine_config(
+            "e",
+            EngineConfigToggleUpdate(enabled=True),
+            service=svc,
+            group_context=group_ctx,
+        )
     assert ei.value.status_code == 404
 
     # Update value 404
     svc.update_config_value = AsyncMock(return_value=None)
     with pytest.raises(NotFoundError) as ei2:
-        await update_config_value('e', 'k', EngineConfigValueUpdate(config_value='x'), service=svc, group_context=group_ctx)
+        await update_config_value(
+            "e",
+            "k",
+            EngineConfigValueUpdate(config_value="x"),
+            service=svc,
+            group_context=group_ctx,
+        )
     assert ei2.value.status_code == 404
 
 
@@ -104,11 +134,13 @@ async def test_crewai_toggles():
     svc = AsyncMock()
     svc.get_kasal_flow_enabled = AsyncMock(return_value=True)
     resp = await get_kasal_flow_enabled(service=svc, group_context=group_ctx)
-    assert resp['flow_enabled'] is True
+    assert resp["flow_enabled"] is True
 
     svc.set_kasal_flow_enabled = AsyncMock(return_value=True)
-    out = await set_kasal_flow_enabled(KasalFlowConfigUpdate(flow_enabled=False), service=svc, group_context=group_ctx)
-    assert out['success'] is True
+    out = await set_kasal_flow_enabled(
+        KasalFlowConfigUpdate(flow_enabled=False), service=svc, group_context=group_ctx
+    )
+    assert out["success"] is True
 
 
 @pytest.mark.asyncio
@@ -118,13 +150,14 @@ async def test_otel_app_telemetry_get_as_admin():
     svc.get_otel_app_telemetry_enabled = AsyncMock(return_value=True)
     svc.get_otel_app_telemetry_log_level = AsyncMock(return_value="WARNING")
     resp = await get_otel_app_telemetry_enabled(service=svc, group_context=group_ctx)
-    assert resp['otel_app_telemetry_enabled'] is True
-    assert resp['otel_app_telemetry_log_level'] == "WARNING"
+    assert resp["otel_app_telemetry_enabled"] is True
+    assert resp["otel_app_telemetry_log_level"] == "WARNING"
 
 
 @pytest.mark.asyncio
 async def test_otel_app_telemetry_get_forbidden():
     from src.core.exceptions import ForbiddenError
+
     group_ctx = Ctx(is_system_admin=False)
     svc = AsyncMock()
     with pytest.raises(ForbiddenError):
@@ -136,14 +169,16 @@ async def test_otel_app_telemetry_set_enabled_as_admin():
     group_ctx = Ctx(is_system_admin=True)
     svc = AsyncMock()
     svc.set_otel_app_telemetry_enabled = AsyncMock(return_value=True)
-    with patch('src.core.logger.LoggerManager') as mock_lm:
+    with patch("src.core.logger.LoggerManager") as mock_lm:
         mock_instance = MagicMock()
         mock_lm.get_instance.return_value = mock_instance
         out = await set_otel_app_telemetry_enabled(
-            OtelAppTelemetryConfigUpdate(enabled=True), service=svc, group_context=group_ctx
+            OtelAppTelemetryConfigUpdate(enabled=True),
+            service=svc,
+            group_context=group_ctx,
         )
-    assert out['success'] is True
-    assert out['otel_app_telemetry_enabled'] is True
+    assert out["success"] is True
+    assert out["otel_app_telemetry_enabled"] is True
     mock_instance.enable_otel_app_telemetry.assert_called_once_with(enabled=True)
 
 
@@ -152,52 +187,62 @@ async def test_otel_app_telemetry_set_log_level_as_admin():
     group_ctx = Ctx(is_system_admin=True)
     svc = AsyncMock()
     svc.set_otel_app_telemetry_log_level = AsyncMock(return_value=True)
-    with patch('src.core.logger.LoggerManager') as mock_lm:
+    with patch("src.core.logger.LoggerManager") as mock_lm:
         mock_instance = MagicMock()
         mock_lm.get_instance.return_value = mock_instance
         out = await set_otel_app_telemetry_enabled(
-            OtelAppTelemetryConfigUpdate(log_level="WARNING"), service=svc, group_context=group_ctx
+            OtelAppTelemetryConfigUpdate(log_level="WARNING"),
+            service=svc,
+            group_context=group_ctx,
         )
-    assert out['success'] is True
-    assert out['otel_app_telemetry_log_level'] == "WARNING"
+    assert out["success"] is True
+    assert out["otel_app_telemetry_log_level"] == "WARNING"
     mock_instance.set_otel_log_level.assert_called_once_with("WARNING")
 
 
 @pytest.mark.asyncio
 async def test_otel_app_telemetry_set_enabled_failure():
     from src.core.exceptions import KasalError
+
     group_ctx = Ctx(is_system_admin=True)
     svc = AsyncMock()
     svc.set_otel_app_telemetry_enabled = AsyncMock(return_value=False)
-    with patch('src.core.logger.LoggerManager') as mock_lm:
+    with patch("src.core.logger.LoggerManager") as mock_lm:
         mock_lm.get_instance.return_value = MagicMock()
         with pytest.raises(KasalError):
             await set_otel_app_telemetry_enabled(
-                OtelAppTelemetryConfigUpdate(enabled=True), service=svc, group_context=group_ctx
+                OtelAppTelemetryConfigUpdate(enabled=True),
+                service=svc,
+                group_context=group_ctx,
             )
 
 
 @pytest.mark.asyncio
 async def test_otel_app_telemetry_set_log_level_failure():
     from src.core.exceptions import KasalError
+
     group_ctx = Ctx(is_system_admin=True)
     svc = AsyncMock()
     svc.set_otel_app_telemetry_log_level = AsyncMock(return_value=False)
-    with patch('src.core.logger.LoggerManager') as mock_lm:
+    with patch("src.core.logger.LoggerManager") as mock_lm:
         mock_lm.get_instance.return_value = MagicMock()
         with pytest.raises(KasalError):
             await set_otel_app_telemetry_enabled(
-                OtelAppTelemetryConfigUpdate(log_level="ERROR"), service=svc, group_context=group_ctx
+                OtelAppTelemetryConfigUpdate(log_level="ERROR"),
+                service=svc,
+                group_context=group_ctx,
             )
 
 
 @pytest.mark.asyncio
 async def test_otel_app_telemetry_set_forbidden():
     from src.core.exceptions import ForbiddenError
+
     group_ctx = Ctx(is_system_admin=False)
     svc = AsyncMock()
     with pytest.raises(ForbiddenError):
         await set_otel_app_telemetry_enabled(
-            OtelAppTelemetryConfigUpdate(enabled=False), service=svc, group_context=group_ctx
+            OtelAppTelemetryConfigUpdate(enabled=False),
+            service=svc,
+            group_context=group_ctx,
         )
-

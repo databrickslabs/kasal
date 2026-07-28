@@ -6,9 +6,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query, status
 from pydantic import ValidationError
 
-from src.core.exceptions import ForbiddenError, NotFoundError, UnprocessableEntityError
-
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import ForbiddenError, NotFoundError, UnprocessableEntityError
 from src.core.permissions import check_role_in_context
 from src.schemas.crew import CrewCreate, CrewResponse, CrewUpdate
 from src.schemas.crew_feedback import (
@@ -99,10 +98,16 @@ async def crew_feedback_summary(
     NOTE: registered BEFORE /{crew_id} — a literal segment would otherwise be
     parsed (and rejected) as a UUID path param.
     """
-    return [CrewFeedbackSummaryEntry(**row) for row in await service.summary(group_context)]
+    return [
+        CrewFeedbackSummaryEntry(**row) for row in await service.summary(group_context)
+    ]
 
 
-@router.post("/{crew_id}/feedback", response_model=CrewFeedbackResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{crew_id}/feedback",
+    response_model=CrewFeedbackResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def add_crew_feedback(
     crew_id: Annotated[UUID, Path(title="The ID of the crew")],
     request: CrewFeedbackCreateRequest,
@@ -164,7 +169,10 @@ async def create_crew(
     crew_in: CrewCreate,
     service: Annotated[CrewService, Depends(get_crew_service)],
     group_context: GroupContextDep,
-    overwrite: bool = Query(False, description="Replace an existing crew of the same name instead of failing with 409."),
+    overwrite: bool = Query(
+        False,
+        description="Replace an existing crew of the same name instead of failing with 409.",
+    ),
 ):
     """
     Create a new crew for the current group.
@@ -185,7 +193,9 @@ async def create_crew(
 
     try:
         # Use the group-aware create method
-        crew = await service.create_with_group(crew_in, group_context, overwrite=overwrite)
+        crew = await service.create_with_group(
+            crew_in, group_context, overwrite=overwrite
+        )
 
         # Format the response
         return _crew_to_response(crew)

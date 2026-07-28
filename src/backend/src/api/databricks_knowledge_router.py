@@ -1,16 +1,16 @@
 """
 Databricks Knowledge Source API Router
 """
+
 import json
 import logging
 from typing import Annotated, Any, Dict, List
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-
-from src.core.exceptions import BadRequestError
 from fastapi.responses import JSONResponse
 
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import BadRequestError
 from src.services.knowledge.databricks_service import DatabricksKnowledgeService
 
 logger = logging.getLogger(__name__)
@@ -113,9 +113,11 @@ async def upload_knowledge_file(
         result = await service.upload_knowledge_file(
             file=file,
             execution_id=execution_id,
-            group_id=group_context.group_ids[0]
-            if group_context and group_context.group_ids
-            else "default",
+            group_id=(
+                group_context.group_ids[0]
+                if group_context and group_context.group_ids
+                else "default"
+            ),
             volume_config=config,
             agent_ids=parsed_agent_ids,  # Pass agent IDs for access control
             user_token=user_token,  # Pass user token for OBO
@@ -160,9 +162,11 @@ async def browse_volume_files(
     # Browse volume files
     files = await service.browse_volume_files(
         volume_path=volume_path,
-        group_id=group_context.group_ids[0]
-        if group_context and group_context.group_ids
-        else "default",
+        group_id=(
+            group_context.group_ids[0]
+            if group_context and group_context.group_ids
+            else "default"
+        ),
         user_token=user_token,  # Pass user token for OBO
     )
 
@@ -190,9 +194,11 @@ async def list_knowledge_files(
     # List files
     files = await service.list_knowledge_files(
         execution_id=execution_id,
-        group_id=group_context.group_ids[0]
-        if group_context and group_context.group_ids
-        else "default",
+        group_id=(
+            group_context.group_ids[0]
+            if group_context and group_context.group_ids
+            else "default"
+        ),
     )
 
     return files
@@ -221,9 +227,11 @@ async def delete_knowledge_file(
     # Delete file
     result = await service.delete_knowledge_file(
         execution_id=execution_id,
-        group_id=group_context.group_ids[0]
-        if group_context and group_context.group_ids
-        else "default",
+        group_id=(
+            group_context.group_ids[0]
+            if group_context and group_context.group_ids
+            else "default"
+        ),
         filename=filename,
     )
 

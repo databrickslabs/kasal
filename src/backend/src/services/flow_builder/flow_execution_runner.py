@@ -3,15 +3,17 @@
 This module provides functionality for running CrewAI flows and handling
 the flow execution lifecycle, similar to execution_runner.py for crews.
 """
-import logging
+
 import asyncio
+import logging
+import os
 import traceback
 from typing import Any, Dict, Optional
-import os
-from src.services.flow_builder.process_executor import process_flow_executor
-from src.models.execution_status import ExecutionStatus
-from src.utils.user_context import GroupContext
+
 from src.core.logger import LoggerManager
+from src.models.execution_status import ExecutionStatus
+from src.services.flow_builder.process_executor import process_flow_executor
+from src.utils.user_context import GroupContext
 
 # Use flow-specific logger
 logger = LoggerManager.get_instance().flow
@@ -32,7 +34,7 @@ async def update_execution_status_with_retry(
     message: Optional[str] = None,
     result: Any = None,
     max_retries: int = 3,
-    retry_delay: float = 0.5
+    retry_delay: float = 0.5,
 ) -> bool:
     """
     Update execution status with retry logic.
@@ -53,22 +55,25 @@ async def update_execution_status_with_retry(
     for attempt in range(max_retries):
         try:
             success = await ExecutionStatusService.update_status(
-                job_id=execution_id,
-                status=status,
-                message=message,
-                result=result
+                job_id=execution_id, status=status, message=message, result=result
             )
             if success:
                 return True
             else:
-                logger.warning(f"Status update returned False for {execution_id}, attempt {attempt + 1}/{max_retries}")
+                logger.warning(
+                    f"Status update returned False for {execution_id}, attempt {attempt + 1}/{max_retries}"
+                )
         except Exception as e:
-            logger.error(f"Error updating status for {execution_id}, attempt {attempt + 1}/{max_retries}: {e}")
+            logger.error(
+                f"Error updating status for {execution_id}, attempt {attempt + 1}/{max_retries}: {e}"
+            )
 
         if attempt < max_retries - 1:
             await asyncio.sleep(retry_delay * (attempt + 1))  # Exponential backoff
 
-    logger.error(f"Failed to update status for {execution_id} after {max_retries} attempts")
+    logger.error(
+        f"Failed to update status for {execution_id} after {max_retries} attempts"
+    )
     return False
 
 
@@ -77,7 +82,7 @@ async def run_flow_in_process(
     config: Dict[str, Any],
     running_jobs: Dict,
     group_context: Optional[GroupContext] = None,
-    user_token: Optional[str] = None
+    user_token: Optional[str] = None,
 ) -> None:
     """
     Run a flow in an isolated process that can be truly terminated.
@@ -93,70 +98,97 @@ async def run_flow_in_process(
         user_token: User access token for OAuth authentication
     """
     # Log immediately to ensure we know the function was called
-    logger.info(f"[run_flow_in_process] *** FUNCTION ENTERED *** execution_id: {execution_id}")
+    logger.info(
+        f"[run_flow_in_process] *** FUNCTION ENTERED *** execution_id: {execution_id}"
+    )
 
     # Write to file as backup logging
     try:
         import os
-        log_file = f'/tmp/flow_exec_{execution_id[:8]}.log'
-        with open(log_file, 'a') as f:
+
+        log_file = f"/tmp/flow_exec_{execution_id[:8]}.log"
+        with open(log_file, "a") as f:
             f.write(f"[run_flow_in_process] Function called for {execution_id}\n")
     except Exception:
         pass
 
     # Extract inputs from config
-    user_inputs = config.get('inputs', {})
+    user_inputs = config.get("inputs", {})
 
     final_status = None
     final_message = None
     final_result = None
 
     try:
-        logger.info(f"[run_flow_in_process] Preparing to run flow {execution_id} in process")
+        logger.info(
+            f"[run_flow_in_process] Preparing to run flow {execution_id} in process"
+        )
 
         # CRITICAL: Add user_token to config for OBO authentication in subprocess
         if user_token:
-            config['user_token'] = user_token
-            logger.info(f"[run_flow_in_process] Added user_token to flow_config for OBO authentication")
+            config["user_token"] = user_token
+            logger.info(
+                f"[run_flow_in_process] Added user_token to flow_config for OBO authentication"
+            )
         else:
-            logger.info(f"[run_flow_in_process] No user_token - subprocess will use PAT or SPN fallback")
+            logger.info(
+                f"[run_flow_in_process] No user_token - subprocess will use PAT or SPN fallback"
+            )
 
         # CRITICAL: Ensure group_id is in config for PAT authentication fallback
-        if group_context and hasattr(group_context, 'primary_group_id') and group_context.primary_group_id:
-            if 'group_id' not in config or not config['group_id']:
-                config['group_id'] = group_context.primary_group_id
-                logger.info(f"[run_flow_in_process] Added group_id to flow_config: {group_context.primary_group_id}")
+        if (
+            group_context
+            and hasattr(group_context, "primary_group_id")
+            and group_context.primary_group_id
+        ):
+            if "group_id" not in config or not config["group_id"]:
+                config["group_id"] = group_context.primary_group_id
+                logger.info(
+                    f"[run_flow_in_process] Added group_id to flow_config: {group_context.primary_group_id}"
+                )
 
         # Run the flow in an isolated process
-        logger.info(f"[run_flow_in_process] Calling process_flow_executor.run_flow_isolated for {execution_id}")
+        logger.info(
+            f"[run_flow_in_process] Calling process_flow_executor.run_flow_isolated for {execution_id}"
+        )
         result = await process_flow_executor.run_flow_isolated(
             execution_id=execution_id,
             flow_config=config,
             group_context=group_context,
             inputs=user_inputs,
-            timeout=3600  # 1 hour timeout
+            timeout=3600,  # 1 hour timeout
         )
 
-        logger.info(f"[run_flow_in_process] Process executor returned result for {execution_id}")
+        logger.info(
+            f"[run_flow_in_process] Process executor returned result for {execution_id}"
+        )
 
         # Check result status
         # IMPORTANT: Check for HITL pause FIRST before checking COMPLETED status
         # The subprocess may return both status='COMPLETED' AND paused_for_approval=True
         # because the flow method returns success=True when pausing at HITL gate
-        if result.get('paused_for_approval') or result.get('hitl_paused') or result.get('status') == 'WAITING_FOR_APPROVAL':
+        if (
+            result.get("paused_for_approval")
+            or result.get("hitl_paused")
+            or result.get("status") == "WAITING_FOR_APPROVAL"
+        ):
             # Flow paused at HITL gate - don't change status, it was already updated by flow_runner_service
             logger.info(f"🚦 Flow execution {execution_id} paused for HITL approval")
             logger.info(f"   Approval ID: {result.get('approval_id')}")
             logger.info(f"   Gate: {result.get('gate_node_id')}")
             final_status = None  # Status already set by flow_runner_service
             final_message = None
-        elif result.get('status') == 'COMPLETED':
+        elif result.get("status") == "COMPLETED":
             final_status = ExecutionStatus.COMPLETED.value
-            final_result = result.get('result')
-            warnings = result.get('warnings', [])
+            final_result = result.get("result")
+            warnings = result.get("warnings", [])
             if warnings:
-                final_message = "Flow execution completed with warnings: " + "; ".join(warnings)
-                logger.warning(f"Flow execution completed with MCP warnings for {execution_id}: {warnings}")
+                final_message = "Flow execution completed with warnings: " + "; ".join(
+                    warnings
+                )
+                logger.warning(
+                    f"Flow execution completed with MCP warnings for {execution_id}: {warnings}"
+                )
             else:
                 final_message = "Flow execution completed successfully"
             logger.info(f"Flow execution COMPLETED for {execution_id}")
@@ -170,12 +202,14 @@ async def run_flow_in_process(
             try:
                 import json as _json
                 import re as _re
-                from src.db.session import async_session_factory
+
                 from sqlalchemy import text as _text
+
+                from src.db.session import async_session_factory
 
                 async with async_session_factory() as _session:
                     _rows = await _session.execute(
-                        _text(CICD_ARTIFACT_QUERY), {'jid': execution_id}
+                        _text(CICD_ARTIFACT_QUERY), {"jid": execution_id}
                     )
                     _trace_rows = _rows.fetchall()
 
@@ -184,48 +218,65 @@ async def run_flow_in_process(
                 for _row in _trace_rows:
                     _output = _row[0]
                     try:
-                        _parsed = _json.loads(_output) if isinstance(_output, str) else _output
+                        _parsed = (
+                            _json.loads(_output)
+                            if isinstance(_output, str)
+                            else _output
+                        )
                         if isinstance(_parsed, str):
                             _parsed = _json.loads(_parsed)
                         # execution_trace wraps output as {"content": "<json_string>"}
-                        if isinstance(_parsed, dict) and 'content' in _parsed and 'cicd_download_url' not in _parsed:
-                            _inner = _parsed['content']
+                        if (
+                            isinstance(_parsed, dict)
+                            and "content" in _parsed
+                            and "cicd_download_url" not in _parsed
+                        ):
+                            _inner = _parsed["content"]
                             if isinstance(_inner, str):
                                 _parsed = _json.loads(_inner)
                             elif isinstance(_inner, dict):
                                 _parsed = _inner
-                        _url = _parsed.get('cicd_download_url') if isinstance(_parsed, dict) else None
+                        _url = (
+                            _parsed.get("cicd_download_url")
+                            if isinstance(_parsed, dict)
+                            else None
+                        )
                         if _url and _url not in _seen_urls:
                             _seen_urls.add(_url)
                             _art: Dict[str, Any] = {
-                                'cicd_download_url': _url,
-                                'cicd_type': _parsed.get('cicd_type', ''),
-                                'cicd_name': _parsed.get('cicd_name', ''),
+                                "cicd_download_url": _url,
+                                "cicd_type": _parsed.get("cicd_type", ""),
+                                "cicd_name": _parsed.get("cicd_name", ""),
                             }
-                            if 'cicd_serialized_space' in _parsed:
-                                _art['cicd_serialized_space'] = _parsed['cicd_serialized_space']
+                            if "cicd_serialized_space" in _parsed:
+                                _art["cicd_serialized_space"] = _parsed[
+                                    "cicd_serialized_space"
+                                ]
                             _artifacts.append(_art)
                     except Exception:
                         continue
 
                 if _artifacts:
                     if isinstance(final_result, dict):
-                        final_result['_cicd_all'] = _artifacts
+                        final_result["_cicd_all"] = _artifacts
                     elif isinstance(final_result, str):
                         try:
                             _rv = _json.loads(final_result)
-                            _rv['_cicd_all'] = _artifacts
+                            _rv["_cicd_all"] = _artifacts
                             final_result = _json.dumps(_rv, indent=2)
                         except Exception:
                             final_result = _json.dumps(
-                                {'_result': final_result, '_cicd_all': _artifacts}, indent=2
+                                {"_result": final_result, "_cicd_all": _artifacts},
+                                indent=2,
                             )
                     logger.info(
                         f"[CI/CD] Injected {len(_artifacts)} artifacts into flow result: "
                         f"{[a.get('cicd_type') for a in _artifacts]}"
                     )
                 else:
-                    logger.info("[CI/CD] No cicd_download_url entries found in executiontrace.")
+                    logger.info(
+                        "[CI/CD] No cicd_download_url entries found in executiontrace."
+                    )
             except Exception as _ce:
                 logger.warning(f"[CI/CD] Artifact injection failed: {_ce}")
             # ── end CI/CD aggregation ──────────────────────────────────────────
@@ -233,16 +284,29 @@ async def run_flow_in_process(
             # Before setting FAILED, check if the execution was stopped
             # This prevents overwriting STOPPED status with FAILED
             from src.services.execution.status import ExecutionStatusService
+
             execution_record = await ExecutionStatusService.get_status(execution_id)
-            current_status = execution_record.status if execution_record and hasattr(execution_record, 'status') else None
-            if current_status and current_status.upper() in ['STOPPED', 'STOPPING', 'WAITING_FOR_APPROVAL']:
-                logger.info(f"Flow execution {execution_id} has status {current_status} - preserving it")
+            current_status = (
+                execution_record.status
+                if execution_record and hasattr(execution_record, "status")
+                else None
+            )
+            if current_status and current_status.upper() in [
+                "STOPPED",
+                "STOPPING",
+                "WAITING_FOR_APPROVAL",
+            ]:
+                logger.info(
+                    f"Flow execution {execution_id} has status {current_status} - preserving it"
+                )
                 final_status = None  # Don't update status
                 final_message = None
             else:
                 final_status = ExecutionStatus.FAILED.value
-                final_message = result.get('error', 'Process execution failed')
-                logger.error(f"Flow execution failed for {execution_id}: {final_message}")
+                final_message = result.get("error", "Process execution failed")
+                logger.error(
+                    f"Flow execution failed for {execution_id}: {final_message}"
+                )
 
     except asyncio.CancelledError:
         # Execution was cancelled
@@ -259,7 +323,7 @@ async def run_flow_in_process(
 
         # Write error to file as backup
         try:
-            with open(f'/tmp/flow_error_{execution_id[:8]}.log', 'w') as f:
+            with open(f"/tmp/flow_error_{execution_id[:8]}.log", "w") as f:
                 f.write(f"Exception in run_flow_in_process: {e}\n")
                 f.write(traceback.format_exc())
         except Exception:
@@ -268,27 +332,39 @@ async def run_flow_in_process(
     finally:
         # Update execution status
         if final_status:
-            logger.info(f"[run_flow_in_process] Updating status to {final_status} for {execution_id}")
+            logger.info(
+                f"[run_flow_in_process] Updating status to {final_status} for {execution_id}"
+            )
             try:
                 await update_execution_status_with_retry(
                     execution_id=execution_id,
                     status=final_status,
                     message=final_message,
-                    result=final_result
+                    result=final_result,
                 )
-                logger.info(f"[run_flow_in_process] Successfully updated status to {final_status}")
+                logger.info(
+                    f"[run_flow_in_process] Successfully updated status to {final_status}"
+                )
             except Exception as status_error:
-                logger.error(f"[run_flow_in_process] Failed to update status: {status_error}")
+                logger.error(
+                    f"[run_flow_in_process] Failed to update status: {status_error}"
+                )
         else:
             # final_status is None - execution was stopped, don't update status
-            logger.info(f"[run_flow_in_process] Skipping status update for {execution_id} - execution was stopped (preserving current status)")
+            logger.info(
+                f"[run_flow_in_process] Skipping status update for {execution_id} - execution was stopped (preserving current status)"
+            )
 
         # Remove from running jobs
         if execution_id in running_jobs:
             running_jobs.pop(execution_id)
-            logger.info(f"[run_flow_in_process] Removed {execution_id} from running_jobs")
+            logger.info(
+                f"[run_flow_in_process] Removed {execution_id} from running_jobs"
+            )
 
-        logger.info(f"[run_flow_in_process] *** FUNCTION EXITING *** execution_id: {execution_id}, final_status: {final_status}")
+        logger.info(
+            f"[run_flow_in_process] *** FUNCTION EXITING *** execution_id: {execution_id}, final_status: {final_status}"
+        )
 
 
 async def run_flow(
@@ -296,7 +372,7 @@ async def run_flow(
     config: Dict[str, Any],
     running_jobs: Dict,
     group_context: Optional[GroupContext] = None,
-    user_token: Optional[str] = None
+    user_token: Optional[str] = None,
 ) -> None:
     """
     Run a flow execution (wrapper that delegates to process-based execution).
@@ -316,5 +392,5 @@ async def run_flow(
         config=config,
         running_jobs=running_jobs,
         group_context=group_context,
-        user_token=user_token
+        user_token=user_token,
     )

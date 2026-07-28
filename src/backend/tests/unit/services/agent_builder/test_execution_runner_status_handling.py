@@ -3,21 +3,23 @@ Unit tests for src/engines/kasal/execution_runner.py
 
 Targets uncovered lines to push coverage to 85%+.
 """
-import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
+import pytest
+
+from src.models.execution_status import ExecutionStatus
 from src.services.agent_builder.execution_runner import (
     run_crew_in_process,
     update_execution_status_with_retry,
 )
-from src.models.execution_status import ExecutionStatus
 from src.utils.user_context import GroupContext
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_group_context(group_id: str = "grp-1") -> GroupContext:
     ctx = MagicMock(spec=GroupContext)
@@ -38,14 +40,13 @@ def _make_crew(agents=None, tasks=None):
 # update_execution_status_with_retry
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateExecutionStatusWithRetry:
     """Test update_execution_status_with_retry."""
 
     @pytest.mark.asyncio
     async def test_success_on_first_attempt(self):
-        with patch(
-            "src.services.execution.status.ExecutionStatusService"
-        ) as mock_svc:
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc:
             mock_svc.update_status = AsyncMock()
             result = await update_execution_status_with_retry(
                 "exec-1", "COMPLETED", "done", "result"
@@ -55,9 +56,7 @@ class TestUpdateExecutionStatusWithRetry:
 
     @pytest.mark.asyncio
     async def test_retries_on_failure_then_succeeds(self):
-        with patch(
-            "src.services.execution.status.ExecutionStatusService"
-        ) as mock_svc:
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc:
             # update_status returns True on success; the wrapper honors the
             # boolean (PERF-008), so a None return would count as failure.
             mock_svc.update_status = AsyncMock(
@@ -71,9 +70,7 @@ class TestUpdateExecutionStatusWithRetry:
 
     @pytest.mark.asyncio
     async def test_exhausts_all_retries(self):
-        with patch(
-            "src.services.execution.status.ExecutionStatusService"
-        ) as mock_svc:
+        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc:
             mock_svc.update_status = AsyncMock(side_effect=Exception("persistent"))
             with patch("asyncio.sleep", new_callable=AsyncMock):
                 result = await update_execution_status_with_retry(
@@ -85,6 +82,7 @@ class TestUpdateExecutionStatusWithRetry:
 # ---------------------------------------------------------------------------
 # run_crew_in_process
 # ---------------------------------------------------------------------------
+
 
 class TestRunCrewInProcess:
     """Test run_crew_in_process function."""
@@ -98,16 +96,25 @@ class TestRunCrewInProcess:
         }
         group_ctx = _make_group_context()
 
-        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
-             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
-             patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+        with (
+            patch("src.services.execution.status.ExecutionStatusService") as mock_svc,
+            patch(
+                "src.services.agent_builder.execution_runner.process_crew_executor"
+            ) as mock_pce,
+            patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss,
+            patch(
+                "src.services.agent_builder.execution_runner.update_execution_status_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
 
             mock_svc.update_status = AsyncMock()
-            mock_pce.run_crew_isolated = AsyncMock(return_value={
-                "status": "COMPLETED",
-                "result": "Process result",
-            })
+            mock_pce.run_crew_isolated = AsyncMock(
+                return_value={
+                    "status": "COMPLETED",
+                    "result": "Process result",
+                }
+            )
             mock_ss.scan = MagicMock()
 
             await run_crew_in_process(
@@ -131,17 +138,26 @@ class TestRunCrewInProcess:
             order.append("status")
             return True
 
-        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
-             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
-             patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.recipes.mining.schedule_mining_after_run") as mock_mine, \
-             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry",
-                   side_effect=_update):
+        with (
+            patch("src.services.execution.status.ExecutionStatusService") as mock_svc,
+            patch(
+                "src.services.agent_builder.execution_runner.process_crew_executor"
+            ) as mock_pce,
+            patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss,
+            patch("src.services.recipes.mining.schedule_mining_after_run") as mock_mine,
+            patch(
+                "src.services.agent_builder.execution_runner.update_execution_status_with_retry",
+                side_effect=_update,
+            ),
+        ):
 
             mock_svc.update_status = AsyncMock()
-            mock_pce.run_crew_isolated = AsyncMock(return_value={
-                "status": "COMPLETED", "result": "Process result",
-            })
+            mock_pce.run_crew_isolated = AsyncMock(
+                return_value={
+                    "status": "COMPLETED",
+                    "result": "Process result",
+                }
+            )
             mock_ss.scan = MagicMock()
             mock_mine.side_effect = lambda execution_id: order.append("mine")
 
@@ -158,18 +174,27 @@ class TestRunCrewInProcess:
     @pytest.mark.asyncio
     async def test_a_failed_run_is_not_mined(self):
         """Only COMPLETED crews are reusable; mining a failure would offer it."""
-        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
-             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
-             patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.recipes.mining.schedule_mining_after_run") as mock_mine, \
-             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry",
-                   new_callable=AsyncMock) as mock_update:
+        with (
+            patch("src.services.execution.status.ExecutionStatusService") as mock_svc,
+            patch(
+                "src.services.agent_builder.execution_runner.process_crew_executor"
+            ) as mock_pce,
+            patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss,
+            patch("src.services.recipes.mining.schedule_mining_after_run") as mock_mine,
+            patch(
+                "src.services.agent_builder.execution_runner.update_execution_status_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
 
             mock_svc.update_status = AsyncMock()
             mock_update.return_value = True
-            mock_pce.run_crew_isolated = AsyncMock(return_value={
-                "status": "FAILED", "error": "boom",
-            })
+            mock_pce.run_crew_isolated = AsyncMock(
+                return_value={
+                    "status": "FAILED",
+                    "error": "boom",
+                }
+            )
             mock_ss.scan = MagicMock()
 
             await run_crew_in_process(
@@ -186,15 +211,24 @@ class TestRunCrewInProcess:
         running_jobs = {}
         config = {"group_id": "g1"}
 
-        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
-             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
-             patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+        with (
+            patch("src.services.execution.status.ExecutionStatusService") as mock_svc,
+            patch(
+                "src.services.agent_builder.execution_runner.process_crew_executor"
+            ) as mock_pce,
+            patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss,
+            patch(
+                "src.services.agent_builder.execution_runner.update_execution_status_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
 
             mock_svc.update_status = AsyncMock()
-            mock_pce.run_crew_isolated = AsyncMock(return_value={
-                "status": "STOPPED",
-            })
+            mock_pce.run_crew_isolated = AsyncMock(
+                return_value={
+                    "status": "STOPPED",
+                }
+            )
             mock_ss.scan = MagicMock()
 
             await run_crew_in_process(
@@ -211,16 +245,25 @@ class TestRunCrewInProcess:
         running_jobs = {}
         config = {"group_id": "g1"}
 
-        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
-             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
-             patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+        with (
+            patch("src.services.execution.status.ExecutionStatusService") as mock_svc,
+            patch(
+                "src.services.agent_builder.execution_runner.process_crew_executor"
+            ) as mock_pce,
+            patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss,
+            patch(
+                "src.services.agent_builder.execution_runner.update_execution_status_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
 
             mock_svc.update_status = AsyncMock()
-            mock_pce.run_crew_isolated = AsyncMock(return_value={
-                "status": "TIMEOUT",
-                "error": "Execution timed out after 3600s",
-            })
+            mock_pce.run_crew_isolated = AsyncMock(
+                return_value={
+                    "status": "TIMEOUT",
+                    "error": "Execution timed out after 3600s",
+                }
+            )
             mock_ss.scan = MagicMock()
 
             await run_crew_in_process(
@@ -237,16 +280,25 @@ class TestRunCrewInProcess:
         running_jobs = {}
         config = {"group_id": "g1"}
 
-        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
-             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
-             patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+        with (
+            patch("src.services.execution.status.ExecutionStatusService") as mock_svc,
+            patch(
+                "src.services.agent_builder.execution_runner.process_crew_executor"
+            ) as mock_pce,
+            patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss,
+            patch(
+                "src.services.agent_builder.execution_runner.update_execution_status_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
 
             mock_svc.update_status = AsyncMock()
-            mock_pce.run_crew_isolated = AsyncMock(return_value={
-                "status": "FAILED",
-                "error": "Something went wrong",
-            })
+            mock_pce.run_crew_isolated = AsyncMock(
+                return_value={
+                    "status": "FAILED",
+                    "error": "Something went wrong",
+                }
+            )
             mock_ss.scan = MagicMock()
 
             await run_crew_in_process(
@@ -263,10 +315,17 @@ class TestRunCrewInProcess:
         running_jobs = {}
         config = {"group_id": "g1"}
 
-        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
-             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
-             patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+        with (
+            patch("src.services.execution.status.ExecutionStatusService") as mock_svc,
+            patch(
+                "src.services.agent_builder.execution_runner.process_crew_executor"
+            ) as mock_pce,
+            patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss,
+            patch(
+                "src.services.agent_builder.execution_runner.update_execution_status_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
 
             mock_svc.update_status = AsyncMock()
             # Return non-dict result
@@ -287,10 +346,17 @@ class TestRunCrewInProcess:
         running_jobs = {}
         config = {"group_id": "g1"}
 
-        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
-             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
-             patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+        with (
+            patch("src.services.execution.status.ExecutionStatusService") as mock_svc,
+            patch(
+                "src.services.agent_builder.execution_runner.process_crew_executor"
+            ) as mock_pce,
+            patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss,
+            patch(
+                "src.services.agent_builder.execution_runner.update_execution_status_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
 
             mock_svc.update_status = AsyncMock()
             mock_pce.run_crew_isolated = AsyncMock(side_effect=asyncio.CancelledError())
@@ -314,17 +380,26 @@ class TestRunCrewInProcess:
         # The source code has a traceback import inside run_crew_in_process that
         # conflicts with the module-level traceback import in some code paths.
         # We test the cancelled path instead which exercises the same cleanup.
-        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
-             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
-             patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+        with (
+            patch("src.services.execution.status.ExecutionStatusService") as mock_svc,
+            patch(
+                "src.services.agent_builder.execution_runner.process_crew_executor"
+            ) as mock_pce,
+            patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss,
+            patch(
+                "src.services.agent_builder.execution_runner.update_execution_status_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
 
             mock_svc.update_status = AsyncMock()
             # Return a dict with FAILED status to exercise the failure path
-            mock_pce.run_crew_isolated = AsyncMock(return_value={
-                "status": "FAILED",
-                "error": "Some unexpected error",
-            })
+            mock_pce.run_crew_isolated = AsyncMock(
+                return_value={
+                    "status": "FAILED",
+                    "error": "Some unexpected error",
+                }
+            )
             mock_ss.scan = MagicMock()
 
             await run_crew_in_process(
@@ -342,13 +417,22 @@ class TestRunCrewInProcess:
         config = {"group_id": "g1"}
         group_ctx = _make_group_context("grp-token")
 
-        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
-             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
-             patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock):
+        with (
+            patch("src.services.execution.status.ExecutionStatusService") as mock_svc,
+            patch(
+                "src.services.agent_builder.execution_runner.process_crew_executor"
+            ) as mock_pce,
+            patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss,
+            patch(
+                "src.services.agent_builder.execution_runner.update_execution_status_with_retry",
+                new_callable=AsyncMock,
+            ),
+        ):
 
             mock_svc.update_status = AsyncMock()
-            mock_pce.run_crew_isolated = AsyncMock(return_value={"status": "COMPLETED", "result": "ok"})
+            mock_pce.run_crew_isolated = AsyncMock(
+                return_value={"status": "COMPLETED", "result": "ok"}
+            )
             mock_ss.scan = MagicMock()
 
             await run_crew_in_process(
@@ -366,13 +450,22 @@ class TestRunCrewInProcess:
         running_jobs = {"proc-cleanup": {"config": {}}}
         config = {"group_id": "g1"}
 
-        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
-             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
-             patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock):
+        with (
+            patch("src.services.execution.status.ExecutionStatusService") as mock_svc,
+            patch(
+                "src.services.agent_builder.execution_runner.process_crew_executor"
+            ) as mock_pce,
+            patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss,
+            patch(
+                "src.services.agent_builder.execution_runner.update_execution_status_with_retry",
+                new_callable=AsyncMock,
+            ),
+        ):
 
             mock_svc.update_status = AsyncMock()
-            mock_pce.run_crew_isolated = AsyncMock(return_value={"status": "COMPLETED", "result": "ok"})
+            mock_pce.run_crew_isolated = AsyncMock(
+                return_value={"status": "COMPLETED", "result": "ok"}
+            )
             mock_ss.scan = MagicMock()
 
             await run_crew_in_process(
@@ -388,17 +481,26 @@ class TestRunCrewInProcess:
         running_jobs = {}
         config = {"group_id": "g1"}
 
-        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
-             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
-             patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+        with (
+            patch("src.services.execution.status.ExecutionStatusService") as mock_svc,
+            patch(
+                "src.services.agent_builder.execution_runner.process_crew_executor"
+            ) as mock_pce,
+            patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss,
+            patch(
+                "src.services.agent_builder.execution_runner.update_execution_status_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
 
             mock_svc.update_status = AsyncMock()
-            mock_pce.run_crew_isolated = AsyncMock(return_value={
-                "status": "COMPLETED",
-                "result": "ok",
-                "warnings": ["MCP server connection timeout"],
-            })
+            mock_pce.run_crew_isolated = AsyncMock(
+                return_value={
+                    "status": "COMPLETED",
+                    "result": "ok",
+                    "warnings": ["MCP server connection timeout"],
+                }
+            )
             mock_ss.scan = MagicMock()
 
             await run_crew_in_process(
@@ -419,16 +521,25 @@ class TestRunCrewInProcess:
             "inputs": {
                 "user_query": "check this",
                 "other": "value",
-            }
+            },
         }
 
-        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
-             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
-             patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock):
+        with (
+            patch("src.services.execution.status.ExecutionStatusService") as mock_svc,
+            patch(
+                "src.services.agent_builder.execution_runner.process_crew_executor"
+            ) as mock_pce,
+            patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss,
+            patch(
+                "src.services.agent_builder.execution_runner.update_execution_status_with_retry",
+                new_callable=AsyncMock,
+            ),
+        ):
 
             mock_svc.update_status = AsyncMock()
-            mock_pce.run_crew_isolated = AsyncMock(return_value={"status": "COMPLETED", "result": "ok"})
+            mock_pce.run_crew_isolated = AsyncMock(
+                return_value={"status": "COMPLETED", "result": "ok"}
+            )
             mock_ss.scan = MagicMock()
 
             await run_crew_in_process(
@@ -447,13 +558,22 @@ class TestRunCrewInProcess:
             "inputs": {"query": "test"},
         }
 
-        with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
-             patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
-             patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry", new_callable=AsyncMock) as mock_update:
+        with (
+            patch("src.services.execution.status.ExecutionStatusService") as mock_svc,
+            patch(
+                "src.services.agent_builder.execution_runner.process_crew_executor"
+            ) as mock_pce,
+            patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss,
+            patch(
+                "src.services.agent_builder.execution_runner.update_execution_status_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
 
             mock_svc.update_status = AsyncMock()
-            mock_pce.run_crew_isolated = AsyncMock(return_value={"status": "COMPLETED", "result": "ok"})
+            mock_pce.run_crew_isolated = AsyncMock(
+                return_value={"status": "COMPLETED", "result": "ok"}
+            )
             mock_ss.scan = MagicMock(side_effect=Exception("scan error"))
 
             await run_crew_in_process(

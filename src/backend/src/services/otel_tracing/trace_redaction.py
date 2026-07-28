@@ -13,6 +13,7 @@ place that enables autolog (it only configures MLflow once per process).
 The processor is intentionally defensive: it never raises, so a redaction bug can never break
 tracing or crew execution.
 """
+
 from __future__ import annotations
 
 import logging
@@ -36,7 +37,7 @@ _SECRET_KEY_SUBSTRINGS = (
     "authorization",
     "password",
     "passwd",
-    "secret",          # covers client_secret, secret_key, ...
+    "secret",  # covers client_secret, secret_key, ...
     "credential",
     "private_key",
     "bearer",
@@ -134,7 +135,9 @@ def enable_secret_redaction() -> bool:
 
         configure = getattr(getattr(mlflow, "tracing", None), "configure", None)
         if configure is None:
-            logger.info("[trace_redaction] mlflow.tracing.configure unavailable — redaction not enabled")
+            logger.info(
+                "[trace_redaction] mlflow.tracing.configure unavailable — redaction not enabled"
+            )
             return False
         configure(span_processors=[redact_span])
         _redaction_enabled = True

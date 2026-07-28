@@ -1,11 +1,21 @@
-from typing import List, Optional, Dict, Any
 import logging
+from typing import Any, Dict, List, Optional
 
-from src.core.exceptions import KasalError, NotFoundError, ForbiddenError, BadRequestError
-
-from src.repositories.tool_repository import ToolRepository
+from src.core.exceptions import (
+    BadRequestError,
+    ForbiddenError,
+    KasalError,
+    NotFoundError,
+)
 from src.repositories.group_tool_repository import GroupToolRepository
-from src.schemas.tool import ToolCreate, ToolUpdate, ToolResponse, ToolListResponse, ToggleResponse
+from src.repositories.tool_repository import ToolRepository
+from src.schemas.tool import (
+    ToggleResponse,
+    ToolCreate,
+    ToolListResponse,
+    ToolResponse,
+    ToolUpdate,
+)
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -27,16 +37,24 @@ def _is_personal_workspace(group_context: Optional[GroupContext]) -> bool:
     if not primary or not email:
         return False
     try:
-        return primary.lower() == GroupContext.generate_individual_group_id(email).lower()
+        return (
+            primary.lower() == GroupContext.generate_individual_group_id(email).lower()
+        )
     except Exception:
         return False
 
 
-def _filter_personal_workspace_tools(tools: list, group_context: Optional[GroupContext]) -> list:
+def _filter_personal_workspace_tools(
+    tools: list, group_context: Optional[GroupContext]
+) -> list:
     """Drop personal-workspace-only tools unless this IS a personal workspace."""
     if _is_personal_workspace(group_context):
         return tools
-    return [t for t in tools if getattr(t, "title", None) not in PERSONAL_WORKSPACE_ONLY_TOOLS]
+    return [
+        t
+        for t in tools
+        if getattr(t, "title", None) not in PERSONAL_WORKSPACE_ONLY_TOOLS
+    ]
 
 
 class ToolService:
@@ -55,11 +73,11 @@ class ToolService:
             session: Database session from FastAPI DI
         """
         from src.repositories.tool_repository import ToolRepository
+
         self.session = session
         self.repository = ToolRepository(session)
 
     # Removed factory method - using dependency injection instead
-
 
     @staticmethod
     async def _invalidate_enabled_tools_cache() -> None:
@@ -67,6 +85,7 @@ class ToolService:
         mutation. The cache is tiny, so clearing all groups is simpler and
         safer than tracking which groups a mutation affects."""
         from src.core.cache import tool_list_cache
+
         await tool_list_cache.clear()
 
     async def get_all_tools(self) -> ToolListResponse:
@@ -79,10 +98,12 @@ class ToolService:
         tools = await self.repository.list()
         return ToolListResponse(
             tools=[ToolResponse.model_validate(tool) for tool in tools],
-            count=len(tools)
+            count=len(tools),
         )
 
-    async def get_all_tools_for_group(self, group_context: GroupContext) -> ToolListResponse:
+    async def get_all_tools_for_group(
+        self, group_context: GroupContext
+    ) -> ToolListResponse:
         """
         Get all tools for a specific group.
 
@@ -101,13 +122,10 @@ class ToolService:
 
         # If no group context, show only default tools
         if not group_context or not group_context.group_ids:
-            default_tools = [
-                tool for tool in all_tools
-                if tool.group_id is None
-            ]
+            default_tools = [tool for tool in all_tools if tool.group_id is None]
             return ToolListResponse(
                 tools=[ToolResponse.model_validate(tool) for tool in default_tools],
-                count=len(default_tools)
+                count=len(default_tools),
             )
 
         # Build a dictionary to handle overrides: tool_title -> tool
@@ -132,7 +150,7 @@ class ToolService:
 
         return ToolListResponse(
             tools=[ToolResponse.model_validate(tool) for tool in final_tools],
-            count=len(final_tools)
+            count=len(final_tools),
         )
 
     async def get_enabled_tools(self) -> ToolListResponse:
@@ -145,10 +163,12 @@ class ToolService:
         tools = await self.repository.find_enabled()
         return ToolListResponse(
             tools=[ToolResponse.model_validate(tool) for tool in tools],
-            count=len(tools)
+            count=len(tools),
         )
 
-    async def get_enabled_tools_for_group(self, group_context: GroupContext) -> ToolListResponse:
+    async def get_enabled_tools_for_group(
+        self, group_context: GroupContext
+    ) -> ToolListResponse:
         """
         Return tools eligible for the CURRENT workspace (primary group) under the new model:
         - Base/global tools are those with group_id = NULL
@@ -161,6 +181,7 @@ class ToolService:
         # ways so callers can't mutate the cached entry; every tool/group-tool
         # mutation clears the cache.
         from src.core.cache import tool_list_cache
+
         cache_group = (
             group_context.primary_group_id
             if group_context and getattr(group_context, "primary_group_id", None)
@@ -171,16 +192,20 @@ class ToolService:
             return cached.model_copy(deep=True)
 
         result = await self._build_enabled_tools_for_group(group_context)
-        await tool_list_cache.set(cache_group, "enabled_tools", result.model_copy(deep=True))
+        await tool_list_cache.set(
+            cache_group, "enabled_tools", result.model_copy(deep=True)
+        )
         return result
 
-    async def _build_enabled_tools_for_group(self, group_context: GroupContext) -> ToolListResponse:
+    async def _build_enabled_tools_for_group(
+        self, group_context: GroupContext
+    ) -> ToolListResponse:
         # Get all globally enabled tools
         enabled_tools = await self.repository.find_enabled()
 
         # Determine current workspace (primary group)
         primary_group_id: Optional[str] = None
-        if group_context and getattr(group_context, 'primary_group_id', None):
+        if group_context and getattr(group_context, "primary_group_id", None):
             primary_group_id = group_context.primary_group_id
 
         # If no explicit workspace selected, only show enabled base tools (no group merge)
@@ -188,7 +213,7 @@ class ToolService:
         if not primary_group_id:
             return ToolListResponse(
                 tools=[ToolResponse.model_validate(tool) for tool in base_enabled],
-                count=len(base_enabled)
+                count=len(base_enabled),
             )
 
         # Intersect base-enabled tools with GroupTool mappings (enabled) for this group
@@ -205,7 +230,7 @@ class ToolService:
             try:
                 resp = ToolResponse.model_validate(t)
                 base_cfg = dict(resp.config or {})
-                grp_cfg = dict(getattr(mapping_by_tool.get(t.id), 'config', {}) or {})
+                grp_cfg = dict(getattr(mapping_by_tool.get(t.id), "config", {}) or {})
                 merged_cfg = {**base_cfg, **grp_cfg}
                 resp.config = merged_cfg
                 responses.append(resp)
@@ -234,7 +259,9 @@ class ToolService:
             raise NotFoundError(detail=f"Tool with ID {tool_id} not found")
         return ToolResponse.model_validate(tool)
 
-    async def get_tool_with_group_check(self, tool_id: int, group_context: GroupContext) -> ToolResponse:
+    async def get_tool_with_group_check(
+        self, tool_id: int, group_context: GroupContext
+    ) -> ToolResponse:
         """
         Get a tool by ID with group verification.
 
@@ -262,9 +289,15 @@ class ToolService:
         # 1. Tool is a default tool (group_id is None)
         # 2. User belongs to the tool's group
         if tool.group_id is not None:  # Only check authorization for non-default tools
-            if not group_context or not group_context.group_ids or tool.group_id not in group_context.group_ids:
+            if (
+                not group_context
+                or not group_context.group_ids
+                or tool.group_id not in group_context.group_ids
+            ):
                 logger.warning(f"Tool with ID {tool_id} not authorized for group")
-                raise NotFoundError(detail=f"Tool with ID {tool_id} not found")  # Return 404 not 403 to avoid information leakage
+                raise NotFoundError(
+                    detail=f"Tool with ID {tool_id} not found"
+                )  # Return 404 not 403 to avoid information leakage
 
         return ToolResponse.model_validate(tool)
 
@@ -290,7 +323,9 @@ class ToolService:
             logger.error(f"Failed to create tool: {str(e)}")
             raise KasalError(detail=f"Failed to create tool: {str(e)}")
 
-    async def create_tool_with_group(self, tool_data: ToolCreate, group_context: GroupContext) -> ToolResponse:
+    async def create_tool_with_group(
+        self, tool_data: ToolCreate, group_context: GroupContext
+    ) -> ToolResponse:
         """
         Create a new tool with group assignment.
 
@@ -309,8 +344,8 @@ class ToolService:
 
             # Add group information
             if group_context and group_context.is_valid():
-                tool_dict['group_id'] = group_context.primary_group_id
-                tool_dict['created_by_email'] = group_context.group_email
+                tool_dict["group_id"] = group_context.primary_group_id
+                tool_dict["created_by_email"] = group_context.group_email
 
             # Create tool
             tool = await self.repository.create(tool_dict)
@@ -350,7 +385,9 @@ class ToolService:
             logger.error(f"Failed to update tool: {str(e)}")
             raise KasalError(detail=f"Failed to update tool: {str(e)}")
 
-    async def update_tool_with_group_check(self, tool_id: int, tool_data: ToolUpdate, group_context: GroupContext) -> ToolResponse:
+    async def update_tool_with_group_check(
+        self, tool_id: int, tool_data: ToolUpdate, group_context: GroupContext
+    ) -> ToolResponse:
         """
         Update a tool with group verification.
 
@@ -373,9 +410,14 @@ class ToolService:
 
         # Check group authorization
         if group_context and group_context.group_ids:
-            if tool.group_id is not None and tool.group_id not in group_context.group_ids:
+            if (
+                tool.group_id is not None
+                and tool.group_id not in group_context.group_ids
+            ):
                 logger.warning(f"Tool with ID {tool_id} not authorized for group")
-                raise NotFoundError(detail=f"Tool with ID {tool_id} not found")  # Return 404 not 403 to avoid information leakage
+                raise NotFoundError(
+                    detail=f"Tool with ID {tool_id} not found"
+                )  # Return 404 not 403 to avoid information leakage
 
         try:
             # Update tool
@@ -415,7 +457,9 @@ class ToolService:
             logger.error(f"Failed to delete tool: {str(e)}")
             raise KasalError(detail=f"Failed to delete tool: {str(e)}")
 
-    async def delete_tool_with_group_check(self, tool_id: int, group_context: GroupContext) -> bool:
+    async def delete_tool_with_group_check(
+        self, tool_id: int, group_context: GroupContext
+    ) -> bool:
         """
         Delete a tool with group verification.
 
@@ -437,9 +481,14 @@ class ToolService:
 
         # Check group authorization
         if group_context and group_context.group_ids:
-            if tool.group_id is not None and tool.group_id not in group_context.group_ids:
+            if (
+                tool.group_id is not None
+                and tool.group_id not in group_context.group_ids
+            ):
                 logger.warning(f"Tool with ID {tool_id} not authorized for group")
-                raise NotFoundError(detail=f"Tool with ID {tool_id} not found")  # Return 404 not 403 to avoid information leakage
+                raise NotFoundError(
+                    detail=f"Tool with ID {tool_id} not found"
+                )  # Return 404 not 403 to avoid information leakage
 
         try:
             # Delete tool
@@ -473,8 +522,7 @@ class ToolService:
 
             status_text = "enabled" if tool.enabled else "disabled"
             return ToggleResponse(
-                message=f"Tool {status_text} successfully",
-                enabled=tool.enabled
+                message=f"Tool {status_text} successfully", enabled=tool.enabled
             )
         except KasalError:
             raise
@@ -482,7 +530,9 @@ class ToolService:
             logger.error(f"Failed to toggle tool: {str(e)}")
             raise KasalError(detail=f"Failed to toggle tool: {str(e)}")
 
-    async def toggle_tool_enabled_with_group_check(self, tool_id: int, group_context: GroupContext) -> ToggleResponse:
+    async def toggle_tool_enabled_with_group_check(
+        self, tool_id: int, group_context: GroupContext
+    ) -> ToggleResponse:
         """
         Toggle the enabled status of a tool with group verification.
 
@@ -521,25 +571,26 @@ class ToolService:
             if tool.group_id is None:
                 # Check if a group-specific version already exists
                 existing_group_tool = await self.repository.find_by_title_and_group(
-                    tool.title,
-                    primary_group_id
+                    tool.title, primary_group_id
                 )
 
                 if existing_group_tool:
                     # Toggle the existing group-specific tool
-                    toggled_tool = await self.repository.toggle_enabled(existing_group_tool.id)
+                    toggled_tool = await self.repository.toggle_enabled(
+                        existing_group_tool.id
+                    )
                     await self._invalidate_enabled_tools_cache()
                 else:
                     # Create a new group-specific copy with toggled state
                     # Don't include 'id' to let the database auto-generate it
                     tool_data = {
-                        'title': tool.title,
-                        'description': tool.description,
-                        'icon': tool.icon if hasattr(tool, 'icon') else None,
-                        'config': tool.config if hasattr(tool, 'config') else {},
-                        'enabled': not tool.enabled,  # Toggle the state
-                        'group_id': primary_group_id,
-                        'created_by_email': group_context.group_email
+                        "title": tool.title,
+                        "description": tool.description,
+                        "icon": tool.icon if hasattr(tool, "icon") else None,
+                        "config": tool.config if hasattr(tool, "config") else {},
+                        "enabled": not tool.enabled,  # Toggle the state
+                        "group_id": primary_group_id,
+                        "created_by_email": group_context.group_email,
                     }
                     toggled_tool = await self.repository.create(tool_data)
                     await self._invalidate_enabled_tools_cache()
@@ -547,13 +598,18 @@ class ToolService:
                 status_text = "enabled" if toggled_tool.enabled else "disabled"
                 return ToggleResponse(
                     message=f"Tool {status_text} successfully for your group",
-                    enabled=toggled_tool.enabled
+                    enabled=toggled_tool.enabled,
                 )
 
             # For group-specific tools, check authorization
-            if tool.group_id is not None and tool.group_id not in group_context.group_ids:
+            if (
+                tool.group_id is not None
+                and tool.group_id not in group_context.group_ids
+            ):
                 logger.warning(f"Tool with ID {tool_id} not authorized for group")
-                raise NotFoundError(detail=f"Tool with ID {tool_id} not found")  # Return 404 not 403 to avoid information leakage
+                raise NotFoundError(
+                    detail=f"Tool with ID {tool_id} not found"
+                )  # Return 404 not 403 to avoid information leakage
 
             # Toggle the group-specific tool
             toggled_tool = await self.repository.toggle_enabled(tool_id)
@@ -561,8 +617,7 @@ class ToolService:
 
             status_text = "enabled" if toggled_tool.enabled else "disabled"
             return ToggleResponse(
-                message=f"Tool {status_text} successfully",
-                enabled=toggled_tool.enabled
+                message=f"Tool {status_text} successfully", enabled=toggled_tool.enabled
             )
         except KasalError:
             raise
@@ -591,12 +646,14 @@ class ToolService:
                 return None
 
             # Return tool configuration
-            return tool.config if hasattr(tool, 'config') else {}
+            return tool.config if hasattr(tool, "config") else {}
         except Exception as e:
             logger.error(f"Error getting tool config for '{tool_name}': {str(e)}")
             return None
 
-    async def update_tool_configuration_by_title(self, title: str, config: Dict[str, Any]) -> ToolResponse:
+    async def update_tool_configuration_by_title(
+        self, title: str, config: Dict[str, Any]
+    ) -> ToolResponse:
         """
         Update configuration for a tool identified by its title.
 
@@ -611,19 +668,27 @@ class ToolService:
             HTTPException: If tool not found or update fails
         """
         try:
-            updated_tool = await self.repository.update_configuration_by_title(title, config)
+            updated_tool = await self.repository.update_configuration_by_title(
+                title, config
+            )
             await self._invalidate_enabled_tools_cache()
             if not updated_tool:
-                logger.warning(f"Tool with title '{title}' not found for configuration update")
+                logger.warning(
+                    f"Tool with title '{title}' not found for configuration update"
+                )
                 raise NotFoundError(detail=f"Tool with title '{title}' not found")
             return ToolResponse.model_validate(updated_tool)
         except KasalError:
             raise
         except Exception as e:
             logger.error(f"Failed to update tool configuration by title: {str(e)}")
-            raise KasalError(detail=f"Failed to update tool configuration by title: {str(e)}")
+            raise KasalError(
+                detail=f"Failed to update tool configuration by title: {str(e)}"
+            )
 
-    async def get_all_tool_configurations_for_group(self, group_context: GroupContext) -> Dict[str, Dict[str, Any]]:
+    async def get_all_tool_configurations_for_group(
+        self, group_context: GroupContext
+    ) -> Dict[str, Dict[str, Any]]:
         """
         Return a mapping of tool title -> config for the current group, using
         group-first override (group version preferred over base default).
@@ -637,19 +702,29 @@ class ToolService:
                 configs[tool.title] = {}
         return configs
 
-    async def get_tool_configuration_with_group_check(self, title: str, group_context: GroupContext) -> Dict[str, Any]:
+    async def get_tool_configuration_with_group_check(
+        self, title: str, group_context: GroupContext
+    ) -> Dict[str, Any]:
         """
         Get config for a tool by title, preferring the group's version,
         and falling back to the base (group_id is null).
         """
         if group_context and group_context.primary_group_id:
-            group_tool = await self.repository.find_by_title_and_group(title, group_context.primary_group_id)
+            group_tool = await self.repository.find_by_title_and_group(
+                title, group_context.primary_group_id
+            )
             if group_tool:
                 return group_tool.config or {}
         base_tool = await self.repository.find_base_by_title(title)
-        return (base_tool.config if base_tool and base_tool.config else {}) if base_tool else {}
+        return (
+            (base_tool.config if base_tool and base_tool.config else {})
+            if base_tool
+            else {}
+        )
 
-    async def update_tool_configuration_group_scoped(self, title: str, config: Dict[str, Any], group_context: GroupContext) -> ToolResponse:
+    async def update_tool_configuration_group_scoped(
+        self, title: str, config: Dict[str, Any], group_context: GroupContext
+    ) -> ToolResponse:
         """
         Create or update a group-specific configuration for a tool title.
         - If a group-specific tool exists: update its config.
@@ -657,23 +732,29 @@ class ToolService:
         - Else: create a new group tool with the provided title and config.
         """
         if not group_context or not group_context.primary_group_id:
-            raise ForbiddenError(detail="Group context required to update tool configuration")
+            raise ForbiddenError(
+                detail="Group context required to update tool configuration"
+            )
         group_id = group_context.primary_group_id
 
-        existing_group_tool = await self.repository.find_by_title_and_group(title, group_id)
+        existing_group_tool = await self.repository.find_by_title_and_group(
+            title, group_id
+        )
         if existing_group_tool:
-            updated = await self.repository.update_configuration_for_title_and_group(title, group_id, config)
+            updated = await self.repository.update_configuration_for_title_and_group(
+                title, group_id, config
+            )
             return ToolResponse.model_validate(updated)
 
         base_tool = await self.repository.find_base_by_title(title)
         tool_payload: Dict[str, Any] = {
-            'title': title,
-            'description': base_tool.description if base_tool else title,
-            'icon': getattr(base_tool, 'icon', None) if base_tool else None,
-            'config': config,
-            'enabled': base_tool.enabled if base_tool else True,
-            'group_id': group_id,
-            'created_by_email': group_context.group_email,
+            "title": title,
+            "description": base_tool.description if base_tool else title,
+            "icon": getattr(base_tool, "icon", None) if base_tool else None,
+            "config": config,
+            "enabled": base_tool.enabled if base_tool else True,
+            "group_id": group_id,
+            "created_by_email": group_context.group_email,
         }
         created = await self.repository.create(tool_payload)
         return ToolResponse.model_validate(created)

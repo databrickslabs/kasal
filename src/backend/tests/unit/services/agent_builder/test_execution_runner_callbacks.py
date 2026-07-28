@@ -3,9 +3,10 @@ Simplified unit tests for execution runner callback integration.
 
 Tests the core callback integration functionality with minimal mocking.
 """
-import pytest
-from unittest.mock import patch, MagicMock
 
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 @pytest.fixture
@@ -41,7 +42,7 @@ def sample_config():
         "model": "test-model",
         "agents": {"agent_1": {"role": "Test Agent", "max_retry_limit": 2}},
         "tasks": {"task_1": {"description": "Test task"}},
-        "inputs": {"test_input": "test_value"}
+        "inputs": {"test_input": "test_value"},
     }
 
 
@@ -51,13 +52,19 @@ class TestExecutionRunnerCallbackIntegration:
     @pytest.mark.asyncio
     def test_callback_isolation_between_instances(self):
         """Test that different callback instances are isolated."""
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
-            step_1, task_1 = create_execution_callbacks("execution_1", {"model": "test"}, None)
-            step_2, task_2 = create_execution_callbacks("execution_2", {"model": "test"}, None)
+            step_1, task_1 = create_execution_callbacks(
+                "execution_1", {"model": "test"}, None
+            )
+            step_2, task_2 = create_execution_callbacks(
+                "execution_2", {"model": "test"}, None
+            )
 
             assert step_1 is not step_2
             assert task_1 is not task_2
@@ -81,12 +88,16 @@ class TestCallbackFunctionality:
 
     def test_step_callback_creates_execution_log(self):
         """Test that step callback creates execution log."""
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
-            step_callback, _ = create_execution_callbacks("test_job", {"model": "test"}, None)
+            step_callback, _ = create_execution_callbacks(
+                "test_job", {"model": "test"}, None
+            )
 
             mock_step_output = MagicMock()
             mock_step_output.output = "This is the agent output"
@@ -99,13 +110,17 @@ class TestCallbackFunctionality:
 
     def test_step_callback_skips_log_on_error(self):
         """Test that step callback handles enqueue errors gracefully."""
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             mock_enqueue.side_effect = Exception("Enqueue error")
-            step_callback, _ = create_execution_callbacks("test_job", {"model": "test"}, None)
+            step_callback, _ = create_execution_callbacks(
+                "test_job", {"model": "test"}, None
+            )
 
             mock_step_output = MagicMock()
             mock_step_output.output = "Regular step output"
@@ -114,12 +129,16 @@ class TestCallbackFunctionality:
 
     def test_task_callback_creates_execution_log(self):
         """Test that task callback creates execution log."""
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
-            _, task_callback = create_execution_callbacks("test_job", {"model": "test"}, None)
+            _, task_callback = create_execution_callbacks(
+                "test_job", {"model": "test"}, None
+            )
 
             mock_task_output = MagicMock()
             mock_task_output.raw = "Test task result"

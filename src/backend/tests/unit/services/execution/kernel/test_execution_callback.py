@@ -5,12 +5,14 @@ Tests the lightweight execution-scoped callbacks that handle execution log
 streaming.  Trace creation is now handled by the event bus handlers
 and the OTel pipeline.
 """
+
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from src.services.execution.kernel.execution_callback import (
-    create_execution_callbacks,
     create_crew_callbacks,
+    create_execution_callbacks,
     log_crew_initialization,
 )
 
@@ -88,7 +90,9 @@ class TestCreateExecutionCallbacks:
             assert "[STEP]" in kwargs["content"]
             assert kwargs["group_context"] == mock_group_context
 
-    def test_step_callback_handles_raw_attribute(self, mock_group_context, sample_config):
+    def test_step_callback_handles_raw_attribute(
+        self, mock_group_context, sample_config
+    ):
         """Test step callback reads 'raw' attribute when 'output' is missing."""
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
@@ -360,7 +364,9 @@ class TestCallbackSecretRedaction:
 
     _PAT = "dapi" + "a" * 32  # matches the databricks_pat detector pattern
 
-    def test_step_callback_redacts_leaked_secret(self, mock_group_context, sample_config):
+    def test_step_callback_redacts_leaked_secret(
+        self, mock_group_context, sample_config
+    ):
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
@@ -378,7 +384,9 @@ class TestCallbackSecretRedaction:
             assert self._PAT not in content
             assert "***REDACTED:databricks_pat***" in content
 
-    def test_step_callback_leaves_clean_output_untouched(self, mock_group_context, sample_config):
+    def test_step_callback_leaves_clean_output_untouched(
+        self, mock_group_context, sample_config
+    ):
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
@@ -396,7 +404,9 @@ class TestCallbackSecretRedaction:
             assert "$4.2M" in content
             assert "REDACTED" not in content
 
-    def test_task_callback_redacts_leaked_secret(self, mock_group_context, sample_config):
+    def test_task_callback_redacts_leaked_secret(
+        self, mock_group_context, sample_config
+    ):
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:

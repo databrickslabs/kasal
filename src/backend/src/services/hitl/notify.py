@@ -49,6 +49,8 @@ def notify_input_needed(execution_id: str, payload: Dict[str, Any]) -> None:
     try:
         from src.services.tools.async_bridge import run_async_with_context
 
-        run_async_with_context(notify_input_needed_sse(execution_id, payload), timeout=10)
+        run_async_with_context(
+            notify_input_needed_sse(execution_id, payload), timeout=10
+        )
     except Exception as sse_err:  # noqa: BLE001
         logger.debug(f"[hitl_notify] SSE notify skipped: {sse_err}")

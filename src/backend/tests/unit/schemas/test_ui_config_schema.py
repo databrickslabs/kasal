@@ -1,6 +1,7 @@
 """Unit tests for the Predefined UI configuration schemas."""
-from src.schemas.ui_config import UIConfigBase, UIConfigUpdate, UIConfigResponse
+
 from src.models.ui_config import UIConfig
+from src.schemas.ui_config import UIConfigBase, UIConfigResponse, UIConfigUpdate
 
 
 def test_base_defaults_are_enabled_full_catalog():
@@ -15,13 +16,21 @@ def test_base_defaults_are_enabled_full_catalog():
 
 
 def test_update_inherits_base_fields():
-    u = UIConfigUpdate(enabled=True, catalog_type="custom", catalog_json="{}", style_json="{}")
+    u = UIConfigUpdate(
+        enabled=True, catalog_type="custom", catalog_json="{}", style_json="{}"
+    )
     assert u.enabled is True
     assert u.catalog_type == "custom"
 
 
 def test_response_reads_from_model_attributes():
-    cfg = UIConfig(id=2, group_id="g", enabled=True, catalog_type="full", created_by_email="a@b.com")
+    cfg = UIConfig(
+        id=2,
+        group_id="g",
+        enabled=True,
+        catalog_type="full",
+        created_by_email="a@b.com",
+    )
     r = UIConfigResponse.model_validate(cfg)
     assert r.id == 2
     assert r.group_id == "g"

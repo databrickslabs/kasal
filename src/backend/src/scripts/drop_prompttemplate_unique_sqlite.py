@@ -9,7 +9,7 @@ Usage: python -m src.scripts.drop_prompttemplate_unique_sqlite /absolute/path/to
 """
 
 # SQL identifier validation to prevent injection in dynamic SQL
-_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+_SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _validate_identifier(name: str, kind: str = "identifier") -> str:
@@ -50,7 +50,7 @@ try:
         cur.execute(f"PRAGMA index_info('{idx_name}')")
         cols = cur.fetchall()
         col_names = [c[2] for c in cols]
-        if len(col_names) == 1 and col_names[0] == 'name':
+        if len(col_names) == 1 and col_names[0] == "name":
             try:
                 cur.execute(f"DROP INDEX IF EXISTS {idx_name}")
                 dropped.append(idx_name)

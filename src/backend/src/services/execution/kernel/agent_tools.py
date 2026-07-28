@@ -34,13 +34,15 @@ def resolve_tool_override(tool_factory, tool_id, tool_configs):
     except Exception:
         return None
     if tool_info:
-        title = getattr(tool_info, 'title', None)
+        title = getattr(tool_info, "title", None)
         if title:
             return tool_configs.get(title)
     return None
 
 
-async def add_mcp_tools(mcp_config: Dict[str, Any], label: str, call_config: Any) -> List[Any]:
+async def add_mcp_tools(
+    mcp_config: Dict[str, Any], label: str, call_config: Any
+) -> List[Any]:
     """Resolve MCP tools for an agent from ``mcp_config['tool_configs']``.
 
     Cheap dict check first: with no explicit MCP servers the integration returns
@@ -51,9 +53,12 @@ async def add_mcp_tools(mcp_config: Dict[str, Any], label: str, call_config: Any
     try:
         from src.services.tools.mcp_integration import MCPIntegration
 
-        if MCPIntegration._extract_mcp_servers_from_config((mcp_config or {}).get('tool_configs', {})):
-            from src.services.mcp.service import MCPService
+        if MCPIntegration._extract_mcp_servers_from_config(
+            (mcp_config or {}).get("tool_configs", {})
+        ):
             from src.db.session import request_scoped_session
+            from src.services.mcp.service import MCPService
+
             async with request_scoped_session() as session:
                 mcp_service = MCPService(session)
                 mcp_tools = await MCPIntegration.create_mcp_tools_for_agent(
@@ -63,6 +68,7 @@ async def add_mcp_tools(mcp_config: Dict[str, Any], label: str, call_config: Any
                 logger.info(f"Added {len(mcp_tools)} MCP tools to agent {label}")
     except Exception as e:
         import traceback
+
         logger.error(f"Error adding MCP tools to agent {label}: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
     return tools
@@ -96,7 +102,10 @@ async def resolve_agent_tools(
     # in id→name resolution must not fail agent creation (legacy crew behavior).
     try:
         if tool_service is not None:
-            from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names
+            from src.services.execution.kernel.tool_helpers import (
+                resolve_tool_ids_to_names,
+            )
+
             names = await resolve_tool_ids_to_names(tool_ids, tool_service)
             logger.info(f"Resolved tool names for agent {label}: {names}")
             identifiers = [(n, n) for n in names if n]
@@ -111,7 +120,9 @@ async def resolve_agent_tools(
         # (may not work with CrewAI, but preserves prior behavior).
         if tool_service is not None:
             tools.extend([ident for ident, _ in identifiers])
-            logger.warning("No tool_factory provided, using tool names which may not work with CrewAI")
+            logger.warning(
+                "No tool_factory provided, using tool names which may not work with CrewAI"
+            )
         else:
             logger.warning("No tool_factory provided; cannot create tool instances")
         return tools
@@ -119,12 +130,18 @@ async def resolve_agent_tools(
     for identifier, config_key in identifiers:
         try:
             result_as_answer = False
-            if tool_service is not None and hasattr(tool_service, 'get_tool_config_by_name'):
-                tool_config = await tool_service.get_tool_config_by_name(config_key) or {}
-                result_as_answer = tool_config.get('result_as_answer', False)
+            if tool_service is not None and hasattr(
+                tool_service, "get_tool_config_by_name"
+            ):
+                tool_config = (
+                    await tool_service.get_tool_config_by_name(config_key) or {}
+                )
+                result_as_answer = tool_config.get("result_as_answer", False)
                 override = tool_configs.get(config_key, {})
             else:
-                override = resolve_tool_override(tool_factory, identifier, tool_configs) or {}
+                override = (
+                    resolve_tool_override(tool_factory, identifier, tool_configs) or {}
+                )
 
             tool_instance = tool_factory.create_tool(
                 identifier,
@@ -132,17 +149,27 @@ async def resolve_agent_tools(
                 tool_config_override=override,
             )
             if not tool_instance:
-                logger.error(f"Could not create tool instance for {identifier} (agent {label})")
+                logger.error(
+                    f"Could not create tool instance for {identifier} (agent {label})"
+                )
                 continue
 
             # An MCP tool factory result is a (True, [tools]) tuple — expand it.
-            if isinstance(tool_instance, tuple) and len(tool_instance) == 2 and tool_instance[0] is True:
+            if (
+                isinstance(tool_instance, tuple)
+                and len(tool_instance) == 2
+                and tool_instance[0] is True
+            ):
                 mcp_tools = tool_instance[1]
-                if mcp_tools == 'mcp_service_adapter':
-                    logger.info("MCP service adapter requested but not supported anymore")
+                if mcp_tools == "mcp_service_adapter":
+                    logger.info(
+                        "MCP service adapter requested but not supported anymore"
+                    )
                 elif isinstance(mcp_tools, list):
                     tools.extend(mcp_tools)
-                    logger.info(f"Added {len(mcp_tools)} MCP tools from {identifier} to agent {label}")
+                    logger.info(
+                        f"Added {len(mcp_tools)} MCP tools from {identifier} to agent {label}"
+                    )
                 else:
                     logger.warning(f"Unexpected MCP tools format: {mcp_tools}")
             else:

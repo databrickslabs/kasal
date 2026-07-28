@@ -1,6 +1,7 @@
 """Unit tests for MeasureResolver in metadata_reduction package."""
 
 import pytest
+
 from src.services.tools.metadata_reduction.measure_resolver import (
     ExpressionFlags,
     MeasureResolver,
@@ -8,14 +9,22 @@ from src.services.tools.metadata_reduction.measure_resolver import (
     ResolvedMeasure,
 )
 
-
 # ─── Fixtures ────────────────────────────────────────────────────────────────
+
 
 def _flat_measures():
     return [
-        {"name": "Total Revenue", "expression": "SUM(Sales[Revenue])", "table": "Sales"},
+        {
+            "name": "Total Revenue",
+            "expression": "SUM(Sales[Revenue])",
+            "table": "Sales",
+        },
         {"name": "Total Cost", "expression": "SUM(Sales[Cost])", "table": "Sales"},
-        {"name": "Gross Profit", "expression": "[Total Revenue] - [Total Cost]", "table": "Sales"},
+        {
+            "name": "Gross Profit",
+            "expression": "[Total Revenue] - [Total Cost]",
+            "table": "Sales",
+        },
         {
             "name": "Profit Margin",
             "expression": "DIVIDE([Gross Profit], [Total Revenue])",
@@ -46,13 +55,12 @@ def _tables():
 def _sample_data():
     """Sample data that enables filtered-measure decomposition."""
     return {
-        "DQ[Dimension]": {
-            "sample_values": ["Completeness", "Uniqueness", "Accuracy"]
-        }
+        "DQ[Dimension]": {"sample_values": ["Completeness", "Uniqueness", "Accuracy"]}
     }
 
 
 # ─── MeasureType enum ────────────────────────────────────────────────────────
+
 
 class TestMeasureTypeEnum:
     def test_string_values(self):
@@ -63,6 +71,7 @@ class TestMeasureTypeEnum:
 
 
 # ─── ExpressionFlags dataclass ───────────────────────────────────────────────
+
 
 class TestExpressionFlagsDataclass:
     def test_defaults(self):
@@ -77,6 +86,7 @@ class TestExpressionFlagsDataclass:
 
 
 # ─── ResolvedMeasure.to_dict ─────────────────────────────────────────────────
+
 
 class TestResolvedMeasureToDict:
     def test_minimal_model_measure_dict(self):
@@ -143,6 +153,7 @@ class TestResolvedMeasureToDict:
 
 # ─── MeasureResolver initialization ─────────────────────────────────────────
 
+
 class TestMeasureResolverInit:
     def test_indexes_flat_measures(self):
         resolver = MeasureResolver(_flat_measures(), _tables())
@@ -155,7 +166,9 @@ class TestMeasureResolverInit:
         assert "Total Revenue" in resolver._measure_map
 
     def test_flat_list_takes_precedence_over_table_embedded(self):
-        flat = [{"name": "Total Revenue", "expression": "OVERRIDE_EXPR", "table": "Sales"}]
+        flat = [
+            {"name": "Total Revenue", "expression": "OVERRIDE_EXPR", "table": "Sales"}
+        ]
         resolver = MeasureResolver(flat, _tables())
         assert resolver._measure_map["Total Revenue"]["expression"] == "OVERRIDE_EXPR"
 
@@ -164,7 +177,9 @@ class TestMeasureResolverInit:
         assert resolver._measure_to_table.get("Total Revenue") == "Sales"
 
     def test_value_index_populated_from_sample_data(self):
-        resolver = MeasureResolver(_flat_measures(), _tables(), sample_data=_sample_data())
+        resolver = MeasureResolver(
+            _flat_measures(), _tables(), sample_data=_sample_data()
+        )
         assert "completeness" in resolver._value_index
         assert "uniqueness" in resolver._value_index
 
@@ -176,19 +191,33 @@ class TestMeasureResolverInit:
 
 # ─── MeasureResolver.resolve — MODEL_MEASURE ────────────────────────────────
 
+
 class TestResolveModelMeasure:
     def setup_method(self):
         self.resolver = MeasureResolver(_flat_measures(), _tables())
 
     def test_known_measure_resolves_to_model_measure(self):
         results = self.resolver.resolve(
-            [{"name": "Total Revenue", "expression": "SUM(Sales[Revenue])", "table": "Sales"}]
+            [
+                {
+                    "name": "Total Revenue",
+                    "expression": "SUM(Sales[Revenue])",
+                    "table": "Sales",
+                }
+            ]
         )
         assert len(results) == 1
         assert results[0]["_resolution"]["resolution_type"] == "model_measure"
 
     def test_original_dict_is_preserved(self):
-        selected = [{"name": "Total Revenue", "expression": "SUM(Sales[Revenue])", "table": "Sales", "custom_key": "val"}]
+        selected = [
+            {
+                "name": "Total Revenue",
+                "expression": "SUM(Sales[Revenue])",
+                "table": "Sales",
+                "custom_key": "val",
+            }
+        ]
         results = self.resolver.resolve(selected)
         assert results[0]["custom_key"] == "val"
 
@@ -198,7 +227,13 @@ class TestResolveModelMeasure:
         assert "_resolution" in results[0]
 
     def test_expression_flags_in_resolution(self):
-        selected = [{"name": "Total Revenue", "expression": "SUM(Sales[Revenue])", "table": "Sales"}]
+        selected = [
+            {
+                "name": "Total Revenue",
+                "expression": "SUM(Sales[Revenue])",
+                "table": "Sales",
+            }
+        ]
         results = self.resolver.resolve(selected)
         flags = results[0]["_resolution"]["expression_flags"]
         assert "has_removefilters" in flags
@@ -206,6 +241,7 @@ class TestResolveModelMeasure:
 
 
 # ─── MeasureResolver.resolve — FILTERED_MEASURE ─────────────────────────────
+
 
 class TestResolveFilteredMeasure:
     def setup_method(self):
@@ -247,6 +283,7 @@ class TestResolveFilteredMeasure:
 
 
 # ─── MeasureResolver.resolve — COMPOSITE_MEASURE ────────────────────────────
+
 
 class TestResolveCompositeMeasure:
     def setup_method(self):
@@ -318,6 +355,7 @@ class TestResolveCompositeMeasure:
 
 # ─── MeasureResolver._analyze_expression ─────────────────────────────────────
 
+
 class TestAnalyzeExpression:
     def test_empty_expression_returns_defaults(self):
         flags = MeasureResolver._analyze_expression("")
@@ -334,16 +372,22 @@ class TestAnalyzeExpression:
         assert flags.uses_calculate is True
 
     def test_removefilters_detected(self):
-        flags = MeasureResolver._analyze_expression("CALCULATE(SUM(T[C]), REMOVEFILTERS(T))")
+        flags = MeasureResolver._analyze_expression(
+            "CALCULATE(SUM(T[C]), REMOVEFILTERS(T))"
+        )
         assert flags.has_removefilters is True
         assert flags.safe_for_decompose is False
 
     def test_allselected_detected(self):
-        flags = MeasureResolver._analyze_expression("CALCULATE(SUM(T[C]), ALLSELECTED(T))")
+        flags = MeasureResolver._analyze_expression(
+            "CALCULATE(SUM(T[C]), ALLSELECTED(T))"
+        )
         assert flags.has_allselected is True
 
     def test_allexcept_detected(self):
-        flags = MeasureResolver._analyze_expression("CALCULATE(SUM(T[C]), ALLEXCEPT(T, T[Col]))")
+        flags = MeasureResolver._analyze_expression(
+            "CALCULATE(SUM(T[C]), ALLEXCEPT(T, T[Col]))"
+        )
         assert flags.has_allexcept is True
         assert flags.safe_for_decompose is False
 
@@ -361,7 +405,7 @@ class TestAnalyzeExpression:
 
     def test_treatas_makes_unsafe(self):
         flags = MeasureResolver._analyze_expression(
-            "CALCULATE(SUM(T[C]), TREATAS({\"val\"}, T[Col]))"
+            'CALCULATE(SUM(T[C]), TREATAS({"val"}, T[Col]))'
         )
         assert flags.safe_for_decompose is False
 
@@ -385,7 +429,7 @@ class TestAnalyzeExpression:
 
     def test_context_routing_selectedvalue(self):
         flags = MeasureResolver._analyze_expression(
-            "SWITCH(SELECTEDVALUE(T[Col]), \"A\", 1, 0)"
+            'SWITCH(SELECTEDVALUE(T[Col]), "A", 1, 0)'
         )
         assert flags.has_context_routing is True
 
@@ -419,6 +463,7 @@ class TestAnalyzeExpression:
 
 # ─── MeasureResolver._find_measure_match ─────────────────────────────────────
 
+
 class TestFindMeasureMatch:
     def setup_method(self):
         self.resolver = MeasureResolver(_flat_measures(), _tables())
@@ -437,6 +482,7 @@ class TestFindMeasureMatch:
 
 
 # ─── MeasureResolver.resolve — empty and malformed inputs ────────────────────
+
 
 class TestResolveEdgeCases:
     def setup_method(self):
@@ -457,8 +503,16 @@ class TestResolveEdgeCases:
 
     def test_multiple_measures_all_enriched(self):
         selected = [
-            {"name": "Total Revenue", "expression": "SUM(Sales[Revenue])", "table": "Sales"},
-            {"name": "Gross Profit", "expression": "[Total Revenue] - [Total Cost]", "table": "Sales"},
+            {
+                "name": "Total Revenue",
+                "expression": "SUM(Sales[Revenue])",
+                "table": "Sales",
+            },
+            {
+                "name": "Gross Profit",
+                "expression": "[Total Revenue] - [Total Cost]",
+                "table": "Sales",
+            },
         ]
         results = self.resolver.resolve(selected)
         assert len(results) == 2
@@ -485,6 +539,7 @@ class TestResolveEdgeCases:
 
 # ─── MeasureResolver._detect_composites ──────────────────────────────────────
 
+
 class TestDetectComposites:
     def test_no_filtered_measures_leaves_results_unchanged(self):
         resolver = MeasureResolver(_flat_measures(), _tables())
@@ -495,7 +550,10 @@ class TestDetectComposites:
                 "_resolution": {"resolution_type": "model_measure"},
             }
         ]
-        from src.services.tools.metadata_reduction.measure_resolver import ResolvedMeasure
+        from src.services.tools.metadata_reduction.measure_resolver import (
+            ResolvedMeasure,
+        )
+
         resolved_cache = {
             "Total Revenue": ResolvedMeasure(
                 name="Total Revenue",
@@ -512,7 +570,13 @@ class TestDetectComposites:
             {"name": "A Score", "expression": "", "table": ""},
             {"name": "Aggregated", "expression": "[A Score]", "table": ""},
         ]
-        tables = [{"name": "T", "measures": [{"name": "Score", "expression": "SUM(T[V])"}], "columns": []}]
+        tables = [
+            {
+                "name": "T",
+                "measures": [{"name": "Score", "expression": "SUM(T[V])"}],
+                "columns": [],
+            }
+        ]
         sample_data = {"T[Dim]": {"sample_values": ["A"]}}
         resolver = MeasureResolver(measures, tables, sample_data=sample_data)
         results = resolver.resolve(

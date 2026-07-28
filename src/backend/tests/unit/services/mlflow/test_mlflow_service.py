@@ -2,25 +2,28 @@
 Coverage-focused tests for MLflowService.
 Targets uncovered branches to push coverage to 85%+.
 """
-import os
 
-import pytest
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.services.mlflow.service import MLflowService
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def make_service(group_id="g1"):
     session = AsyncMock(spec=AsyncSession)
-    with patch("src.services.mlflow.service.MLflowRepository"), \
-         patch("src.services.mlflow.service.ExecutionHistoryRepository"), \
-         patch("src.services.mlflow.service.ModelConfigService"):
+    with (
+        patch("src.services.mlflow.service.MLflowRepository"),
+        patch("src.services.mlflow.service.ExecutionHistoryRepository"),
+        patch("src.services.mlflow.service.ModelConfigService"),
+    ):
         svc = MLflowService(session=session, group_id=group_id)
     svc.repo = AsyncMock()
     svc.exec_repo = AsyncMock()
@@ -32,21 +35,26 @@ def make_service(group_id="g1"):
 # _setup_mlflow_auth
 # ---------------------------------------------------------------------------
 
+
 class TestSetupMlflowAuth:
     @pytest.mark.asyncio
     async def test_spn_auth_success(self):
         svc = make_service()
-        with patch.dict("os.environ", {
-            "DATABRICKS_CLIENT_ID": "cid",
-            "DATABRICKS_CLIENT_SECRET": "csec",
-            "DATABRICKS_HOST": "https://example.databricks.com",
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "DATABRICKS_CLIENT_ID": "cid",
+                "DATABRICKS_CLIENT_SECRET": "csec",
+                "DATABRICKS_HOST": "https://example.databricks.com",
+            },
+        ):
             # WorkspaceClient is imported locally inside the method
             mock_w = MagicMock()
 
             def fake_authenticate():
                 def _apply(req):
                     req.headers = {"Authorization": "Bearer tok123"}
+
                 return _apply
 
             mock_w.config.authenticate = fake_authenticate
@@ -57,36 +65,49 @@ class TestSetupMlflowAuth:
                 auth_method="service_principal",
             )
 
-            with patch.dict("sys.modules", {
-                "databricks.sdk": MagicMock(WorkspaceClient=MagicMock(return_value=mock_w)),
-                "src.utils.databricks_auth": MagicMock(
-                    AuthContext=MagicMock(return_value=fake_auth_ctx),
-                    get_auth_context=AsyncMock(return_value=fake_auth_ctx),
-                ),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "databricks.sdk": MagicMock(
+                        WorkspaceClient=MagicMock(return_value=mock_w)
+                    ),
+                    "src.utils.databricks_auth": MagicMock(
+                        AuthContext=MagicMock(return_value=fake_auth_ctx),
+                        get_auth_context=AsyncMock(return_value=fake_auth_ctx),
+                    ),
+                },
+            ):
                 auth = await svc._setup_mlflow_auth()
                 assert auth is not None
 
     @pytest.mark.asyncio
     async def test_spn_auth_falls_back_on_exception(self):
         svc = make_service()
-        with patch.dict("os.environ", {
-            "DATABRICKS_CLIENT_ID": "cid",
-            "DATABRICKS_CLIENT_SECRET": "csec",
-            "DATABRICKS_HOST": "https://x.databricks.com",
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "DATABRICKS_CLIENT_ID": "cid",
+                "DATABRICKS_CLIENT_SECRET": "csec",
+                "DATABRICKS_HOST": "https://x.databricks.com",
+            },
+        ):
             fake_auth = SimpleNamespace(
                 token="pat-tok",
                 workspace_url="https://x.databricks.com",
                 auth_method="pat",
             )
-            with patch.dict("sys.modules", {
-                "databricks.sdk": MagicMock(WorkspaceClient=MagicMock(side_effect=Exception("spn fail"))),
-                "src.utils.databricks_auth": MagicMock(
-                    AuthContext=MagicMock(),
-                    get_auth_context=AsyncMock(return_value=fake_auth),
-                ),
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "databricks.sdk": MagicMock(
+                        WorkspaceClient=MagicMock(side_effect=Exception("spn fail"))
+                    ),
+                    "src.utils.databricks_auth": MagicMock(
+                        AuthContext=MagicMock(),
+                        get_auth_context=AsyncMock(return_value=fake_auth),
+                    ),
+                },
+            ):
                 auth = await svc._setup_mlflow_auth()
             assert auth is not None
 
@@ -99,12 +120,15 @@ class TestSetupMlflowAuth:
             auth_method="pat",
         )
         with patch.dict("os.environ", {}, clear=True):
-            with patch.dict("sys.modules", {
-                "src.utils.databricks_auth": MagicMock(
-                    get_auth_context=AsyncMock(return_value=fake_auth),
-                    AuthContext=MagicMock(),
-                )
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "src.utils.databricks_auth": MagicMock(
+                        get_auth_context=AsyncMock(return_value=fake_auth),
+                        AuthContext=MagicMock(),
+                    )
+                },
+            ):
                 auth = await svc._setup_mlflow_auth()
         assert auth is not None
 
@@ -112,12 +136,15 @@ class TestSetupMlflowAuth:
     async def test_returns_none_when_no_auth(self):
         svc = make_service()
         with patch.dict("os.environ", {}, clear=True):
-            with patch.dict("sys.modules", {
-                "src.utils.databricks_auth": MagicMock(
-                    get_auth_context=AsyncMock(return_value=None),
-                    AuthContext=MagicMock(),
-                )
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "src.utils.databricks_auth": MagicMock(
+                        get_auth_context=AsyncMock(return_value=None),
+                        AuthContext=MagicMock(),
+                    )
+                },
+            ):
                 auth = await svc._setup_mlflow_auth()
         assert auth is None
 
@@ -126,12 +153,15 @@ class TestSetupMlflowAuth:
         svc = make_service()
         fake_auth = SimpleNamespace(token="tok", workspace_url=None, auth_method="pat")
         with patch.dict("os.environ", {}, clear=True):
-            with patch.dict("sys.modules", {
-                "src.utils.databricks_auth": MagicMock(
-                    get_auth_context=AsyncMock(return_value=fake_auth),
-                    AuthContext=MagicMock(),
-                )
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "src.utils.databricks_auth": MagicMock(
+                        get_auth_context=AsyncMock(return_value=fake_auth),
+                        AuthContext=MagicMock(),
+                    )
+                },
+            ):
                 auth = await svc._setup_mlflow_auth()
         assert auth is None
 
@@ -139,12 +169,15 @@ class TestSetupMlflowAuth:
     async def test_exception_returns_none(self):
         svc = make_service()
         with patch.dict("os.environ", {}, clear=True):
-            with patch.dict("sys.modules", {
-                "src.utils.databricks_auth": MagicMock(
-                    get_auth_context=AsyncMock(side_effect=Exception("bad")),
-                    AuthContext=MagicMock(),
-                )
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "src.utils.databricks_auth": MagicMock(
+                        get_auth_context=AsyncMock(side_effect=Exception("bad")),
+                        AuthContext=MagicMock(),
+                    )
+                },
+            ):
                 auth = await svc._setup_mlflow_auth()
         assert auth is None
 
@@ -153,12 +186,15 @@ class TestSetupMlflowAuth:
 # get_experiment_info
 # ---------------------------------------------------------------------------
 
+
 class TestGetExperimentInfo:
     @pytest.mark.asyncio
     async def test_raises_when_no_auth(self):
         svc = make_service()
         with patch.object(svc, "_setup_mlflow_auth", return_value=None):
-            with pytest.raises(RuntimeError, match="Failed to configure MLflow authentication"):
+            with pytest.raises(
+                RuntimeError, match="Failed to configure MLflow authentication"
+            ):
                 await svc.get_experiment_info()
 
     @pytest.mark.asyncio
@@ -171,23 +207,35 @@ class TestGetExperimentInfo:
         )
         with patch.object(svc, "_setup_mlflow_auth", return_value=fake_auth):
             with patch("asyncio.to_thread") as att:
-                att.return_value = {"experiment_id": "123", "experiment_name": "/Shared/test"}
+                att.return_value = {
+                    "experiment_id": "123",
+                    "experiment_name": "/Shared/test",
+                }
                 result = await svc.get_experiment_info()
         assert result["experiment_id"] == "123"
 
     @pytest.mark.asyncio
     async def test_raises_when_experiment_id_empty(self):
         svc = make_service()
-        fake_auth = SimpleNamespace(token="tok", workspace_url="https://ws.databricks.com", auth_method="pat")
+        fake_auth = SimpleNamespace(
+            token="tok", workspace_url="https://ws.databricks.com", auth_method="pat"
+        )
         with patch.object(svc, "_setup_mlflow_auth", return_value=fake_auth):
-            with patch("asyncio.to_thread", return_value={"experiment_id": "", "experiment_name": "/test"}):
-                with pytest.raises(RuntimeError, match="Failed to resolve MLflow experiment ID"):
+            with patch(
+                "asyncio.to_thread",
+                return_value={"experiment_id": "", "experiment_name": "/test"},
+            ):
+                with pytest.raises(
+                    RuntimeError, match="Failed to resolve MLflow experiment ID"
+                ):
                     await svc.get_experiment_info()
 
     @pytest.mark.asyncio
     async def test_reraises_exception(self):
         svc = make_service()
-        fake_auth = SimpleNamespace(token="tok", workspace_url="https://ws.databricks.com", auth_method="pat")
+        fake_auth = SimpleNamespace(
+            token="tok", workspace_url="https://ws.databricks.com", auth_method="pat"
+        )
         with patch.object(svc, "_setup_mlflow_auth", return_value=fake_auth):
             with patch("asyncio.to_thread", side_effect=Exception("thread error")):
                 with pytest.raises(Exception, match="thread error"):
@@ -197,6 +245,7 @@ class TestGetExperimentInfo:
 # ---------------------------------------------------------------------------
 # get_trace_deeplink
 # ---------------------------------------------------------------------------
+
 
 def _patch_auth(return_value=None, side_effect=None):
     """Patch get_auth_context in src.utils.databricks_auth (local import in mlflow_service)."""
@@ -224,7 +273,9 @@ class TestGetTraceDeeplink:
         svc = make_service()
         ctx, m = _patch_auth(return_value=None)
         with ctx:
-            with patch("src.services.databricks.workspace.service.DatabricksService") as ds_cls:
+            with patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as ds_cls:
                 ds_cls.return_value.get_databricks_config = AsyncMock(return_value=None)
                 result = await svc.get_trace_deeplink()
         assert result["url"] is None
@@ -274,12 +325,15 @@ class TestGetTraceDeeplink:
 # _resolve_judge_model
 # ---------------------------------------------------------------------------
 
+
 class TestResolveJudgeModel:
     @pytest.mark.asyncio
     async def test_databricks_provider_adds_prefix(self):
         svc = make_service()
         svc.repo.get_evaluation_judge_model = AsyncMock(return_value="my-model")
-        svc.model_config_service.get_model_config = AsyncMock(return_value={"provider": "databricks"})
+        svc.model_config_service.get_model_config = AsyncMock(
+            return_value={"provider": "databricks"}
+        )
         result = await svc._resolve_judge_model()
         assert result == "databricks/my-model"
 
@@ -287,15 +341,21 @@ class TestResolveJudgeModel:
     async def test_non_databricks_provider_returns_as_is(self):
         svc = make_service()
         svc.repo.get_evaluation_judge_model = AsyncMock(return_value="openai-model")
-        svc.model_config_service.get_model_config = AsyncMock(return_value={"provider": "openai"})
+        svc.model_config_service.get_model_config = AsyncMock(
+            return_value={"provider": "openai"}
+        )
         result = await svc._resolve_judge_model()
         assert result == "openai-model"
 
     @pytest.mark.asyncio
     async def test_uses_provided_model_directly(self):
         svc = make_service()
-        svc.model_config_service.get_model_config = AsyncMock(return_value={"provider": "databricks"})
-        result = await svc._resolve_judge_model(configured_judge_model="my-custom-model")
+        svc.model_config_service.get_model_config = AsyncMock(
+            return_value={"provider": "databricks"}
+        )
+        result = await svc._resolve_judge_model(
+            configured_judge_model="my-custom-model"
+        )
         assert result.startswith("databricks/")
 
     @pytest.mark.asyncio
@@ -303,14 +363,18 @@ class TestResolveJudgeModel:
         svc = make_service()
         svc.repo.get_evaluation_judge_model = AsyncMock(return_value=None)
         with patch.dict("os.environ", {}, clear=True):
-            svc.model_config_service.get_model_config = AsyncMock(return_value={"provider": "databricks"})
+            svc.model_config_service.get_model_config = AsyncMock(
+                return_value={"provider": "databricks"}
+            )
             result = await svc._resolve_judge_model()
         assert "databricks-claude-sonnet-4" in result
 
     @pytest.mark.asyncio
     async def test_strips_uri_scheme_prefix(self):
         svc = make_service()
-        svc.model_config_service.get_model_config = AsyncMock(return_value={"provider": "databricks"})
+        svc.model_config_service.get_model_config = AsyncMock(
+            return_value={"provider": "databricks"}
+        )
         result = await svc._resolve_judge_model("endpoints://my-endpoint")
         assert "my-endpoint" in result
 
@@ -318,7 +382,9 @@ class TestResolveJudgeModel:
     async def test_handles_model_config_exception(self):
         svc = make_service()
         svc.repo.get_evaluation_judge_model = AsyncMock(return_value="fallback-model")
-        svc.model_config_service.get_model_config = AsyncMock(side_effect=Exception("config error"))
+        svc.model_config_service.get_model_config = AsyncMock(
+            side_effect=Exception("config error")
+        )
         result = await svc._resolve_judge_model()
         assert "fallback-model" in result
 
@@ -326,6 +392,7 @@ class TestResolveJudgeModel:
 # ---------------------------------------------------------------------------
 # trigger_evaluation
 # ---------------------------------------------------------------------------
+
 
 class TestTriggerEvaluation:
     @pytest.mark.asyncio
@@ -346,21 +413,45 @@ class TestTriggerEvaluation:
     def _trigger_context(self, judge_model="gpt-4", run_id="r-1", exp_id="e-1"):
         """Build patch stack for trigger_evaluation."""
         from contextlib import ExitStack
+
         stack = ExitStack()
-        fake_auth = SimpleNamespace(token="tok", workspace_url="https://ws.databricks.com", auth_method="pat")
-        stack.enter_context(patch("src.utils.databricks_auth.get_auth_context", AsyncMock(return_value=fake_auth)))
+        fake_auth = SimpleNamespace(
+            token="tok", workspace_url="https://ws.databricks.com", auth_method="pat"
+        )
+        stack.enter_context(
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                AsyncMock(return_value=fake_auth),
+            )
+        )
         stack.enter_context(patch("src.utils.user_context.UserContext", MagicMock()))
         mock_runner_cls = MagicMock()
         mock_runner = MagicMock()
-        mock_runner.create_run = MagicMock(return_value={"experiment_id": exp_id, "run_id": run_id})
+        mock_runner.create_run = MagicMock(
+            return_value={"experiment_id": exp_id, "run_id": run_id}
+        )
         mock_runner_cls.return_value = mock_runner
-        stack.enter_context(patch("src.services.mlflow.evaluation_runner.MLflowEvaluationRunner", mock_runner_cls))
-        stack.enter_context(patch("asyncio.to_thread", AsyncMock(return_value={"experiment_id": exp_id, "run_id": run_id})))
+        stack.enter_context(
+            patch(
+                "src.services.mlflow.evaluation_runner.MLflowEvaluationRunner",
+                mock_runner_cls,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "asyncio.to_thread",
+                AsyncMock(return_value={"experiment_id": exp_id, "run_id": run_id}),
+            )
+        )
         stack.enter_context(patch("asyncio.create_task", MagicMock()))
         ess_mock = MagicMock()
         ess_mock.update_mlflow_evaluation_run_id = AsyncMock(return_value=True)
-        stack.enter_context(patch("src.services.execution.status.ExecutionStatusService.update_mlflow_evaluation_run_id",
-                                   AsyncMock(return_value=True)))
+        stack.enter_context(
+            patch(
+                "src.services.execution.status.ExecutionStatusService.update_mlflow_evaluation_run_id",
+                AsyncMock(return_value=True),
+            )
+        )
         return stack
 
     @pytest.mark.asyncio
@@ -373,7 +464,9 @@ class TestTriggerEvaluation:
             mlflow_trace_id=None,
         )
         svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
-        with patch.object(svc, "_resolve_judge_model", return_value="databricks/claude-sonnet-4"):
+        with patch.object(
+            svc, "_resolve_judge_model", return_value="databricks/claude-sonnet-4"
+        ):
             with self._trigger_context():
                 result = await svc.trigger_evaluation("job-1")
         assert isinstance(result, dict)
@@ -382,7 +475,9 @@ class TestTriggerEvaluation:
     async def test_inputs_fallback_to_json_dump(self):
         svc = make_service()
         svc.repo.is_evaluation_enabled = AsyncMock(return_value=True)
-        fake_exec = SimpleNamespace(inputs={"unknown_key": "some value"}, result=None, mlflow_trace_id=None)
+        fake_exec = SimpleNamespace(
+            inputs={"unknown_key": "some value"}, result=None, mlflow_trace_id=None
+        )
         svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
         with patch.object(svc, "_resolve_judge_model", return_value="gpt-4"):
             with self._trigger_context(run_id=None):
@@ -393,7 +488,11 @@ class TestTriggerEvaluation:
     async def test_prediction_from_result_dict_content_key(self):
         svc = make_service()
         svc.repo.is_evaluation_enabled = AsyncMock(return_value=True)
-        fake_exec = SimpleNamespace(inputs={"query": "test"}, result={"content": "my answer"}, mlflow_trace_id=None)
+        fake_exec = SimpleNamespace(
+            inputs={"query": "test"},
+            result={"content": "my answer"},
+            mlflow_trace_id=None,
+        )
         svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
         with patch.object(svc, "_resolve_judge_model", return_value="gpt-4"):
             with self._trigger_context(run_id=None):
@@ -404,7 +503,11 @@ class TestTriggerEvaluation:
     async def test_prediction_from_string_result(self):
         svc = make_service()
         svc.repo.is_evaluation_enabled = AsyncMock(return_value=True)
-        fake_exec = SimpleNamespace(inputs={"task": "do something"}, result="plain string output", mlflow_trace_id=None)
+        fake_exec = SimpleNamespace(
+            inputs={"task": "do something"},
+            result="plain string output",
+            mlflow_trace_id=None,
+        )
         svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
         with patch.object(svc, "_resolve_judge_model", return_value="gpt-4"):
             with self._trigger_context(run_id=None):
@@ -415,12 +518,16 @@ class TestTriggerEvaluation:
     async def test_persist_evaluation_failure_is_swallowed(self):
         svc = make_service()
         svc.repo.is_evaluation_enabled = AsyncMock(return_value=True)
-        fake_exec = SimpleNamespace(inputs={"query": "q"}, result=None, mlflow_trace_id=None)
+        fake_exec = SimpleNamespace(
+            inputs={"query": "q"}, result=None, mlflow_trace_id=None
+        )
         svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
         with patch.object(svc, "_resolve_judge_model", return_value="gpt-4"):
             with self._trigger_context():
-                with patch("src.services.execution.status.ExecutionStatusService.update_mlflow_evaluation_run_id",
-                           AsyncMock(side_effect=Exception("persist fail"))):
+                with patch(
+                    "src.services.execution.status.ExecutionStatusService.update_mlflow_evaluation_run_id",
+                    AsyncMock(side_effect=Exception("persist fail")),
+                ):
                     result = await svc.trigger_evaluation("job-5")
         assert isinstance(result, dict)
 
@@ -428,6 +535,7 @@ class TestTriggerEvaluation:
 # ---------------------------------------------------------------------------
 # is/set enabled / evaluation toggle
 # ---------------------------------------------------------------------------
+
 
 class TestToggleMethods:
     @pytest.mark.asyncio
@@ -452,6 +560,7 @@ class TestToggleMethods:
 # ---------------------------------------------------------------------------
 # get_experiment_info / get_trace_deeplink inner function paths
 # ---------------------------------------------------------------------------
+
 
 class TestInnerFunctionPaths:
     """Test the inner thread functions by calling the outer methods with real to_thread."""
@@ -478,13 +587,18 @@ class TestInnerFunctionPaths:
                     return {"experiment_id": "123", "experiment_name": "/test"}
 
             with patch("asyncio.to_thread", mock_to_thread):
-                with patch.dict("sys.modules", {
-                    "mlflow": MagicMock(
-                        set_tracking_uri=MagicMock(),
-                        set_experiment=MagicMock(return_value=MagicMock(experiment_id="exp-123")),
-                    ),
-                    "databricks.sdk.core": MagicMock(Config=MagicMock()),
-                }):
+                with patch.dict(
+                    "sys.modules",
+                    {
+                        "mlflow": MagicMock(
+                            set_tracking_uri=MagicMock(),
+                            set_experiment=MagicMock(
+                                return_value=MagicMock(experiment_id="exp-123")
+                            ),
+                        ),
+                        "databricks.sdk.core": MagicMock(Config=MagicMock()),
+                    },
+                ):
                     try:
                         result = await svc.get_experiment_info()
                         assert "experiment_id" in result
@@ -507,14 +621,22 @@ class TestInnerFunctionPaths:
             except Exception:
                 return ""
 
-        with patch("src.utils.databricks_auth.get_auth_context", AsyncMock(return_value=fake_auth)):
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            AsyncMock(return_value=fake_auth),
+        ):
             with patch("asyncio.to_thread", mock_to_thread):
-                with patch.dict("sys.modules", {
-                    "mlflow": MagicMock(
-                        set_tracking_uri=MagicMock(),
-                        get_experiment_by_name=MagicMock(return_value=MagicMock(experiment_id="e123")),
-                    ),
-                }):
+                with patch.dict(
+                    "sys.modules",
+                    {
+                        "mlflow": MagicMock(
+                            set_tracking_uri=MagicMock(),
+                            get_experiment_by_name=MagicMock(
+                                return_value=MagicMock(experiment_id="e123")
+                            ),
+                        ),
+                    },
+                ):
                     try:
                         result = await svc.get_trace_deeplink()
                         assert "workspace_url" in result
@@ -526,18 +648,29 @@ class TestInnerFunctionPaths:
         """Cover the non-databricks branch in trigger_evaluation (no auth needed)."""
         svc = make_service()
         svc.repo.is_evaluation_enabled = AsyncMock(return_value=True)
-        fake_exec = SimpleNamespace(inputs={"prompt": "hello"}, result=None, mlflow_trace_id=None)
+        fake_exec = SimpleNamespace(
+            inputs={"prompt": "hello"}, result=None, mlflow_trace_id=None
+        )
         svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=fake_exec)
 
         # Non-databricks model - should skip auth
         with patch.object(svc, "_resolve_judge_model", return_value="gpt-4"):
-            with patch("asyncio.to_thread", AsyncMock(return_value={"experiment_id": "e-99", "run_id": None})):
-                with patch("src.services.mlflow.evaluation_runner.MLflowEvaluationRunner") as runner_cls:
+            with patch(
+                "asyncio.to_thread",
+                AsyncMock(return_value={"experiment_id": "e-99", "run_id": None}),
+            ):
+                with patch(
+                    "src.services.mlflow.evaluation_runner.MLflowEvaluationRunner"
+                ) as runner_cls:
                     mock_runner = MagicMock()
-                    mock_runner.create_run = MagicMock(return_value={"experiment_id": "e-99", "run_id": None})
+                    mock_runner.create_run = MagicMock(
+                        return_value={"experiment_id": "e-99", "run_id": None}
+                    )
                     runner_cls.return_value = mock_runner
-                    with patch("src.services.execution.status.ExecutionStatusService.update_mlflow_evaluation_run_id",
-                               AsyncMock(return_value=True)):
+                    with patch(
+                        "src.services.execution.status.ExecutionStatusService.update_mlflow_evaluation_run_id",
+                        AsyncMock(return_value=True),
+                    ):
                         result = await svc.trigger_evaluation("job-99")
         assert isinstance(result, dict)
 
@@ -547,11 +680,14 @@ class TestInnerFunctionPaths:
 # (merged from test_mlflow_service_more.py)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_experiment_info_auth_failed_raises_runtimeerror():
     session = AsyncMock()
     svc = MLflowService(session, group_id="g1")
-    with patch.object(MLflowService, "_setup_mlflow_auth", new=AsyncMock(return_value=None)):
+    with patch.object(
+        MLflowService, "_setup_mlflow_auth", new=AsyncMock(return_value=None)
+    ):
         with pytest.raises(RuntimeError):
             await svc.get_experiment_info()
 
@@ -562,11 +698,19 @@ async def test_get_trace_deeplink_with_auth_and_job_id_minimal():
     svc = MLflowService(session, group_id="g1")
 
     # Mock unified auth and experiment id resolution
-    with patch("src.utils.databricks_auth.get_auth_context", new=AsyncMock(return_value=SimpleNamespace(
-        workspace_url="https://abc.cloud.databricks.com",
-        token="t",
-        auth_method="obo",
-    ))), patch("asyncio.to_thread", new=AsyncMock(return_value="exp-1")):
+    with (
+        patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new=AsyncMock(
+                return_value=SimpleNamespace(
+                    workspace_url="https://abc.cloud.databricks.com",
+                    token="t",
+                    auth_method="obo",
+                )
+            ),
+        ),
+        patch("asyncio.to_thread", new=AsyncMock(return_value="exp-1")),
+    ):
         # Also mock execution repo to provide a trace id
         exec_obj = SimpleNamespace(mlflow_trace_id="trace-123")
         svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=exec_obj)
@@ -586,7 +730,9 @@ async def test_resolve_judge_model_defaults_to_databricks_prefixed():
     # repo returns None -> env missing -> default model key
     svc.repo.get_evaluation_judge_model = AsyncMock(return_value=None)
     # model config resolves provider as databricks
-    svc.model_config_service.get_model_config = AsyncMock(return_value={"provider": "databricks"})
+    svc.model_config_service.get_model_config = AsyncMock(
+        return_value={"provider": "databricks"}
+    )
     out = await svc._resolve_judge_model(None)
     assert out.startswith("databricks/")
     assert "databricks-claude-sonnet-4" in out
@@ -596,7 +742,9 @@ async def test_resolve_judge_model_defaults_to_databricks_prefixed():
 async def test_resolve_judge_model_non_databricks_as_is():
     session = AsyncMock()
     svc = MLflowService(session, group_id="g1")
-    svc.model_config_service.get_model_config = AsyncMock(return_value={"provider": "openai"})
+    svc.model_config_service.get_model_config = AsyncMock(
+        return_value={"provider": "openai"}
+    )
     out = await svc._resolve_judge_model("gpt-4o")
     assert out == "gpt-4o"
 
@@ -605,6 +753,7 @@ async def test_resolve_judge_model_non_databricks_as_is():
 # Auth paths / trace-deeplink URL building / judge-model resolution
 # (merged from test_mlflow_service_unit.py)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_setup_auth_paths(monkeypatch):
@@ -619,18 +768,21 @@ async def test_setup_auth_paths(monkeypatch):
 
     # _setup_mlflow_auth -> None when no auth
     fake_mod = SimpleNamespace()
+
     async def no_auth(**kwargs):
         return None
+
     fake_mod.get_auth_context = no_auth
-    monkeypatch.setitem(sys.modules, 'src.utils.databricks_auth', fake_mod)
+    monkeypatch.setitem(sys.modules, "src.utils.databricks_auth", fake_mod)
     assert await svc._setup_mlflow_auth() is None
 
     # returns auth when available (always passes user_token=None)
     async def yes_auth(**kwargs):
         assert kwargs.get("user_token") is None, "Should always pass user_token=None"
         return SimpleNamespace(workspace_url="https://ws", token="t", auth_method="pat")
+
     fake_mod.get_auth_context = yes_auth
-    monkeypatch.setitem(sys.modules, 'src.utils.databricks_auth', fake_mod)
+    monkeypatch.setitem(sys.modules, "src.utils.databricks_auth", fake_mod)
     auth = await svc._setup_mlflow_auth()
     assert auth.workspace_url == "https://ws"
 
@@ -638,32 +790,44 @@ async def test_setup_auth_paths(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_trace_deeplink_builds_url(monkeypatch):
     import sys
+
     svc = MLflowService(session=SimpleNamespace(), group_id="g1")
     # Use DatabricksService fallback path (no auth) to avoid heavy mlflow import
     import sys
+
     # Ensure unified auth returns None immediately (no network/config attempts)
     fake_auth_mod = SimpleNamespace()
+
     async def no_auth(**kwargs):
         return None
+
     fake_auth_mod.get_auth_context = no_auth
-    monkeypatch.setitem(sys.modules, 'src.utils.databricks_auth', fake_auth_mod)
+    monkeypatch.setitem(sys.modules, "src.utils.databricks_auth", fake_auth_mod)
 
     # Provide fake DatabricksService module where mlflow_service imports it
     fake_dbs_mod = SimpleNamespace()
+
     class FakeDBSvc:
-        def __init__(self, session): pass
+        def __init__(self, session):
+            pass
+
         async def get_databricks_config(self):
             return SimpleNamespace(workspace_url="acme.databricks.com")
+
     fake_dbs_mod.DatabricksService = FakeDBSvc
     # Use monkeypatch to avoid leaking sys.modules changes
-    monkeypatch.setitem(sys.modules, 'src.services.databricks.workspace.service', fake_dbs_mod)
+    monkeypatch.setitem(
+        sys.modules, "src.services.databricks.workspace.service", fake_dbs_mod
+    )
 
     # no job id
     out = await svc.get_trace_deeplink()
     assert out["url"].startswith("https://acme.databricks.com/ml/experiments")
 
     # with job id and trace id
-    svc.exec_repo.get_execution_by_job_id = AsyncMock(return_value=SimpleNamespace(mlflow_trace_id=123))
+    svc.exec_repo.get_execution_by_job_id = AsyncMock(
+        return_value=SimpleNamespace(mlflow_trace_id=123)
+    )
     out2 = await svc.get_trace_deeplink(job_id="job-1")
     assert "selectedEvaluationId=123" in out2["url"]
 
@@ -673,7 +837,9 @@ async def test_resolve_judge_model_paths(monkeypatch):
     svc = MLflowService(session=SimpleNamespace(), group_id="g1")
     # model_config_service mocked
     svc.repo = AsyncMock()
-    svc.model_config_service = SimpleNamespace(get_model_config=AsyncMock(return_value={"provider": "databricks"}))
+    svc.model_config_service = SimpleNamespace(
+        get_model_config=AsyncMock(return_value={"provider": "databricks"})
+    )
 
     # No configured model -> default databricks-claude-sonnet-4 -> adds databricks/
     svc.repo.get_evaluation_judge_model = AsyncMock(return_value=None)
@@ -683,7 +849,9 @@ async def test_resolve_judge_model_paths(monkeypatch):
     assert model.startswith("databricks/")
 
     # Non-databricks provider -> return normalized key without provider prefix
-    svc.model_config_service.get_model_config = AsyncMock(return_value={"provider": "openai"})
+    svc.model_config_service.get_model_config = AsyncMock(
+        return_value={"provider": "openai"}
+    )
     model2 = await svc._resolve_judge_model("endpoints://foo")
     assert model2 == "foo"
 
@@ -691,19 +859,28 @@ async def test_resolve_judge_model_paths(monkeypatch):
 @pytest.mark.asyncio
 async def test_get_trace_deeplink_with_auth_and_experiment_id(monkeypatch):
     # Arrange auth so workspace_id can be derived and avoid real mlflow via to_thread stub
-    import sys, asyncio as aio
+    import asyncio as aio
+    import sys
+
     svc = MLflowService(session=SimpleNamespace(), group_id="g1")
 
     fake_auth_mod = SimpleNamespace()
+
     async def yes_auth(**kwargs):
-        return SimpleNamespace(workspace_url="https://acme.databricks.com", token="t", auth_method="pat")
+        return SimpleNamespace(
+            workspace_url="https://acme.databricks.com", token="t", auth_method="pat"
+        )
+
     fake_auth_mod.get_auth_context = yes_auth
-    monkeypatch.setitem(sys.modules, 'src.utils.databricks_auth', fake_auth_mod)
+    monkeypatch.setitem(sys.modules, "src.utils.databricks_auth", fake_auth_mod)
 
     # Stub asyncio.to_thread used to resolve experiment id
     async def fake_to_thread(func, *args, **kwargs):
         return "exp123"
-    monkeypatch.setattr(__import__('asyncio'), 'to_thread', fake_to_thread, raising=True)
+
+    monkeypatch.setattr(
+        __import__("asyncio"), "to_thread", fake_to_thread, raising=True
+    )
 
     # Act
     out = await svc.get_trace_deeplink()
@@ -719,7 +896,9 @@ async def test_resolve_judge_model_fallback_on_exception(monkeypatch):
     svc = MLflowService(session=SimpleNamespace(), group_id="g1")
     svc.repo = AsyncMock()
     # Force model_config_service to raise so fallback kicks in
-    svc.model_config_service = SimpleNamespace(get_model_config=AsyncMock(side_effect=Exception("x")))
+    svc.model_config_service = SimpleNamespace(
+        get_model_config=AsyncMock(side_effect=Exception("x"))
+    )
 
     model = await svc._resolve_judge_model("foo/bar")
     assert model == "databricks/bar"

@@ -1,15 +1,15 @@
 """
 API endpoints for flow executions.
 """
+
 import uuid
 from typing import Any, Dict, Optional, Union
 
 from fastapi import APIRouter, Depends, status
-
-from src.core.exceptions import BadRequestError, NotFoundError
 from pydantic import BaseModel
 
 from src.core.dependencies import GroupContextDep, get_db
+from src.core.exceptions import BadRequestError, NotFoundError
 from src.services.flow_builder.kasal_flow_service import KasalFlowService
 
 router = APIRouter(
@@ -28,9 +28,9 @@ class FlowExecutionRequest(BaseModel):
     config: Optional[Dict[str, Any]] = None
     # Checkpoint resume fields
     resume_from_flow_uuid: Optional[str] = None  # CrewAI state.id to resume from
-    resume_from_execution_id: Optional[
-        int
-    ] = None  # Execution ID of checkpoint to resume
+    resume_from_execution_id: Optional[int] = (
+        None  # Execution ID of checkpoint to resume
+    )
 
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED)

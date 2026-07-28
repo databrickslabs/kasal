@@ -2,17 +2,16 @@ from typing import Annotated, Dict, List
 
 from fastapi import APIRouter, Depends, Query
 
-from src.core.exceptions import ForbiddenError, NotFoundError
-
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context, is_workspace_admin
 from src.schemas.databricks_config import (
     AIGatewayStatusUpdate,
     DatabricksConfigCreate,
     DatabricksConfigResponse,
 )
-from src.services.settings.api_keys import ApiKeysService
 from src.services.databricks.workspace.service import DatabricksService
+from src.services.settings.api_keys import ApiKeysService
 
 router = APIRouter(
     prefix="/databricks",
@@ -112,7 +111,9 @@ async def set_ai_gateway_status(
         raise ForbiddenError("Only workspace admins can change AI Gateway settings")
     ok = await service.set_ai_gateway_enabled(payload.enabled)
     if not ok:
-        raise NotFoundError("No Databricks configuration to attach the AI Gateway setting to")
+        raise NotFoundError(
+            "No Databricks configuration to attach the AI Gateway setting to"
+        )
     return {"ai_gateway_enabled": payload.enabled}
 
 
@@ -182,7 +183,9 @@ async def check_personal_token_required(
     """
     # Check permissions - only workspace admins can check token requirements
     if not is_workspace_admin(group_context):
-        raise ForbiddenError("Only workspace admins can check personal token requirements")
+        raise ForbiddenError(
+            "Only workspace admins can check personal token requirements"
+        )
 
     return await service.check_personal_token_required()
 
@@ -205,7 +208,9 @@ async def check_databricks_connection(
     """
     # Check permissions - only workspace admins can check connection status
     if not is_workspace_admin(group_context):
-        raise ForbiddenError("Only workspace admins can check Databricks connection status")
+        raise ForbiddenError(
+            "Only workspace admins can check Databricks connection status"
+        )
 
     return await service.check_databricks_connection()
 
@@ -226,7 +231,9 @@ async def get_databricks_environment(
     """
     # Check permissions - only workspace admins can view environment information
     if not is_workspace_admin(group_context):
-        raise ForbiddenError("Only workspace admins can view Databricks environment information")
+        raise ForbiddenError(
+            "Only workspace admins can view Databricks environment information"
+        )
 
     # Get workspace URL directly from DatabricksAuth config
     # This works even if full authentication isn't available

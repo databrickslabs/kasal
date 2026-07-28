@@ -1,17 +1,16 @@
-from typing import List, Optional, Dict, Any
 import logging
+from typing import Any, Dict, List, Optional
 
-from src.core.exceptions import NotFoundError, ForbiddenError, BadRequestError
-
-from src.repositories.tool_repository import ToolRepository
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.repositories.group_tool_repository import GroupToolRepository
+from src.repositories.tool_repository import ToolRepository
 from src.schemas.group_tool import (
     GroupToolCreate,
-    GroupToolUpdate,
-    GroupToolResponse,
     GroupToolListResponse,
+    GroupToolResponse,
+    GroupToolUpdate,
 )
-from src.schemas.tool import ToolResponse, ToolListResponse
+from src.schemas.tool import ToolListResponse, ToolResponse
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -36,9 +35,12 @@ class GroupToolService:
         """GroupTool mappings feed the enabled-tools list — clear its cache
         after every mapping mutation."""
         from src.core.cache import tool_list_cache
+
         await tool_list_cache.clear()
 
-    async def list_added_for_group(self, group_context: GroupContext) -> GroupToolListResponse:
+    async def list_added_for_group(
+        self, group_context: GroupContext
+    ) -> GroupToolListResponse:
         if not group_context or not group_context.primary_group_id:
             raise ForbiddenError(detail="Group context required")
         group_id = group_context.primary_group_id
@@ -48,7 +50,9 @@ class GroupToolService:
             count=len(mappings),
         )
 
-    async def list_available_to_add_for_group(self, group_context: GroupContext) -> ToolListResponse:
+    async def list_available_to_add_for_group(
+        self, group_context: GroupContext
+    ) -> ToolListResponse:
         """
         List global tools that are globally available (base tools with enabled=True, group_id=NULL)
         but not yet added to this group (no GroupTool row).
@@ -59,7 +63,11 @@ class GroupToolService:
 
         # All global tools
         all_tools = await self.tool_repo.list()
-        base_global_available = [t for t in all_tools if (t.group_id is None and getattr(t, "enabled", False))]
+        base_global_available = [
+            t
+            for t in all_tools
+            if (t.group_id is None and getattr(t, "enabled", False))
+        ]
 
         # Fetch existing mappings for the group
         mappings = await self.group_tool_repo.list_for_group(group_id)
@@ -69,10 +77,18 @@ class GroupToolService:
         # Personal-workspace-only tools (Gmail) cannot be added to a shared
         # workspace — keep them out of the "available to add" list there.
         from src.services.tools.tool_service import _filter_personal_workspace_tools
-        to_add = _filter_personal_workspace_tools(to_add, group_context)
-        return ToolListResponse(tools=[ToolResponse.model_validate(t) for t in to_add], count=len(to_add))
 
-    async def add_tool_to_group(self, tool_id: int, group_context: GroupContext, defaults: Optional[Dict[str, Any]] = None) -> GroupToolResponse:
+        to_add = _filter_personal_workspace_tools(to_add, group_context)
+        return ToolListResponse(
+            tools=[ToolResponse.model_validate(t) for t in to_add], count=len(to_add)
+        )
+
+    async def add_tool_to_group(
+        self,
+        tool_id: int,
+        group_context: GroupContext,
+        defaults: Optional[Dict[str, Any]] = None,
+    ) -> GroupToolResponse:
         if not group_context or not group_context.primary_group_id:
             raise ForbiddenError(detail="Group context required")
         group_id = group_context.primary_group_id
@@ -92,9 +108,11 @@ class GroupToolService:
             PERSONAL_WORKSPACE_ONLY_TOOLS,
             _is_personal_workspace,
         )
-        if (
-            getattr(tool, "title", None) in PERSONAL_WORKSPACE_ONLY_TOOLS
-            and not _is_personal_workspace(group_context)
+
+        if getattr(
+            tool, "title", None
+        ) in PERSONAL_WORKSPACE_ONLY_TOOLS and not _is_personal_workspace(
+            group_context
         ):
             raise ForbiddenError(
                 detail=(
@@ -111,37 +129,50 @@ class GroupToolService:
         elif "enabled" not in defaults:
             defaults = {**defaults, "enabled": True}
 
-        mapping = await self.group_tool_repo.upsert(tool_id=tool_id, group_id=group_id, defaults=defaults)
+        mapping = await self.group_tool_repo.upsert(
+            tool_id=tool_id, group_id=group_id, defaults=defaults
+        )
         await self._invalidate_enabled_tools_cache()
         return GroupToolResponse.model_validate(mapping)
 
-    async def set_group_tool_enabled(self, tool_id: int, enabled: bool, group_context: GroupContext) -> GroupToolResponse:
+    async def set_group_tool_enabled(
+        self, tool_id: int, enabled: bool, group_context: GroupContext
+    ) -> GroupToolResponse:
         if not group_context or not group_context.primary_group_id:
             raise ForbiddenError(detail="Group context required")
         group_id = group_context.primary_group_id
 
-        updated = await self.group_tool_repo.set_enabled(tool_id=tool_id, group_id=group_id, enabled=enabled)
+        updated = await self.group_tool_repo.set_enabled(
+            tool_id=tool_id, group_id=group_id, enabled=enabled
+        )
         await self._invalidate_enabled_tools_cache()
         if not updated:
             raise NotFoundError(detail="Group tool mapping not found")
         return GroupToolResponse.model_validate(updated)
 
-    async def update_group_tool_config(self, tool_id: int, config: Dict[str, Any], group_context: GroupContext) -> GroupToolResponse:
+    async def update_group_tool_config(
+        self, tool_id: int, config: Dict[str, Any], group_context: GroupContext
+    ) -> GroupToolResponse:
         if not group_context or not group_context.primary_group_id:
             raise ForbiddenError(detail="Group context required")
         group_id = group_context.primary_group_id
 
-        updated = await self.group_tool_repo.update_config(tool_id=tool_id, group_id=group_id, config=config)
+        updated = await self.group_tool_repo.update_config(
+            tool_id=tool_id, group_id=group_id, config=config
+        )
         await self._invalidate_enabled_tools_cache()
         if not updated:
             raise NotFoundError(detail="Group tool mapping not found")
         return GroupToolResponse.model_validate(updated)
 
-    async def remove_tool_from_group(self, tool_id: int, group_context: GroupContext) -> bool:
+    async def remove_tool_from_group(
+        self, tool_id: int, group_context: GroupContext
+    ) -> bool:
         if not group_context or not group_context.primary_group_id:
             raise ForbiddenError(detail="Group context required")
         group_id = group_context.primary_group_id
-        deleted = await self.group_tool_repo.delete_mapping(tool_id=tool_id, group_id=group_id)
+        deleted = await self.group_tool_repo.delete_mapping(
+            tool_id=tool_id, group_id=group_id
+        )
         await self._invalidate_enabled_tools_cache()
         return deleted > 0
-

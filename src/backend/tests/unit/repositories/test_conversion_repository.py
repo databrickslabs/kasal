@@ -4,31 +4,41 @@ Unit tests for Conversion Repositories.
 Tests the functionality of ConversionHistoryRepository, ConversionJobRepository,
 and SavedConverterConfigurationRepository including CRUD operations and custom queries.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock
+
 from datetime import datetime, timedelta
 from typing import List
+from unittest.mock import AsyncMock, MagicMock
 
-from sqlalchemy.ext.asyncio import AsyncSession
+import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.repositories.conversion_repository import (
-    ConversionHistoryRepository,
-    ConversionJobRepository,
-    SavedConverterConfigurationRepository,
-)
 from src.models.conversion import (
     ConversionHistory,
     ConversionJob,
     SavedConverterConfiguration,
 )
+from src.repositories.conversion_repository import (
+    ConversionHistoryRepository,
+    ConversionJobRepository,
+    SavedConverterConfigurationRepository,
+)
 
 
 # Mock Models
 class MockConversionHistory:
-    def __init__(self, id=1, execution_id="exec-123", source_format="powerbi",
-                 target_format="dax", status="success", measure_count=5,
-                 execution_time_ms=1500, group_id="group-1", created_by_email="user@example.com"):
+    def __init__(
+        self,
+        id=1,
+        execution_id="exec-123",
+        source_format="powerbi",
+        target_format="dax",
+        status="success",
+        measure_count=5,
+        execution_time_ms=1500,
+        group_id="group-1",
+        created_by_email="user@example.com",
+    ):
         self.id = id
         self.execution_id = execution_id
         self.source_format = source_format
@@ -45,8 +55,15 @@ class MockConversionHistory:
 
 
 class MockConversionJob:
-    def __init__(self, id="job-123", source_format="powerbi", target_format="dax",
-                 status="pending", progress=0.0, group_id="group-1"):
+    def __init__(
+        self,
+        id="job-123",
+        source_format="powerbi",
+        target_format="dax",
+        status="pending",
+        progress=0.0,
+        group_id="group-1",
+    ):
         self.id = id
         self.source_format = source_format
         self.target_format = target_format
@@ -61,9 +78,18 @@ class MockConversionJob:
 
 
 class MockSavedConfiguration:
-    def __init__(self, id=1, name="My Config", source_format="powerbi",
-                 target_format="dax", is_public=False, is_template=False,
-                 use_count=0, group_id="group-1", created_by_email="user@example.com"):
+    def __init__(
+        self,
+        id=1,
+        name="My Config",
+        source_format="powerbi",
+        target_format="dax",
+        is_public=False,
+        is_template=False,
+        use_count=0,
+        group_id="group-1",
+        created_by_email="user@example.com",
+    ):
         self.id = id
         self.name = name
         self.source_format = source_format
@@ -107,6 +133,7 @@ def mock_async_session():
 
 # ===== ConversionHistoryRepository Tests =====
 
+
 @pytest.fixture
 def history_repository(mock_async_session):
     """Create a ConversionHistoryRepository with mock session."""
@@ -117,9 +144,15 @@ def history_repository(mock_async_session):
 def sample_history_entries():
     """Create sample history entries for testing."""
     return [
-        MockConversionHistory(id=1, status="success", source_format="powerbi", target_format="dax"),
-        MockConversionHistory(id=2, status="failed", source_format="yaml", target_format="sql"),
-        MockConversionHistory(id=3, status="success", source_format="powerbi", target_format="uc_metrics"),
+        MockConversionHistory(
+            id=1, status="success", source_format="powerbi", target_format="dax"
+        ),
+        MockConversionHistory(
+            id=2, status="failed", source_format="yaml", target_format="sql"
+        ),
+        MockConversionHistory(
+            id=3, status="success", source_format="powerbi", target_format="uc_metrics"
+        ),
     ]
 
 
@@ -134,7 +167,9 @@ class TestConversionHistoryRepository:
         assert repository.model == ConversionHistory
 
     @pytest.mark.asyncio
-    async def test_find_by_execution_id_success(self, history_repository, mock_async_session):
+    async def test_find_by_execution_id_success(
+        self, history_repository, mock_async_session
+    ):
         """Test successful find by execution ID."""
         history_entry = MockConversionHistory(execution_id="exec-123")
         mock_result = MockResult([history_entry])
@@ -147,7 +182,9 @@ class TestConversionHistoryRepository:
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_find_by_execution_id_not_found(self, history_repository, mock_async_session):
+    async def test_find_by_execution_id_not_found(
+        self, history_repository, mock_async_session
+    ):
         """Test find by execution ID when not found."""
         mock_result = MockResult([])
         mock_async_session.execute.return_value = mock_result
@@ -158,13 +195,21 @@ class TestConversionHistoryRepository:
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_find_by_formats_success(self, history_repository, mock_async_session, sample_history_entries):
+    async def test_find_by_formats_success(
+        self, history_repository, mock_async_session, sample_history_entries
+    ):
         """Test successful find by formats."""
-        matching_entries = [e for e in sample_history_entries if e.source_format == "powerbi" and e.target_format == "dax"]
+        matching_entries = [
+            e
+            for e in sample_history_entries
+            if e.source_format == "powerbi" and e.target_format == "dax"
+        ]
         mock_result = MockResult(matching_entries)
         mock_async_session.execute.return_value = mock_result
 
-        result = await history_repository.find_by_formats("powerbi", "dax", group_id="group-1", limit=10)
+        result = await history_repository.find_by_formats(
+            "powerbi", "dax", group_id="group-1", limit=10
+        )
 
         assert len(result) == 1
         assert result[0].source_format == "powerbi"
@@ -172,9 +217,13 @@ class TestConversionHistoryRepository:
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_find_successful(self, history_repository, mock_async_session, sample_history_entries):
+    async def test_find_successful(
+        self, history_repository, mock_async_session, sample_history_entries
+    ):
         """Test find successful conversions."""
-        successful_entries = [e for e in sample_history_entries if e.status == "success"]
+        successful_entries = [
+            e for e in sample_history_entries if e.status == "success"
+        ]
         mock_result = MockResult(successful_entries)
         mock_async_session.execute.return_value = mock_result
 
@@ -185,7 +234,9 @@ class TestConversionHistoryRepository:
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_find_failed(self, history_repository, mock_async_session, sample_history_entries):
+    async def test_find_failed(
+        self, history_repository, mock_async_session, sample_history_entries
+    ):
         """Test find failed conversions."""
         failed_entries = [e for e in sample_history_entries if e.status == "failed"]
         mock_result = MockResult(failed_entries)
@@ -198,12 +249,16 @@ class TestConversionHistoryRepository:
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_find_by_group(self, history_repository, mock_async_session, sample_history_entries):
+    async def test_find_by_group(
+        self, history_repository, mock_async_session, sample_history_entries
+    ):
         """Test find by group ID."""
         mock_result = MockResult(sample_history_entries)
         mock_async_session.execute.return_value = mock_result
 
-        result = await history_repository.find_by_group(group_id="group-1", limit=10, offset=0)
+        result = await history_repository.find_by_group(
+            group_id="group-1", limit=10, offset=0
+        )
 
         assert len(result) == 3
         mock_async_session.execute.assert_called_once()
@@ -238,7 +293,9 @@ class TestConversionHistoryRepository:
         # Popular conversions query returns rows that are iterated directly
         # (not via .scalars()), so we need an iterable result object
         mock_popular_result = MagicMock()
-        mock_popular_result.__iter__ = MagicMock(return_value=iter([mock_row1, mock_row2]))
+        mock_popular_result.__iter__ = MagicMock(
+            return_value=iter([mock_row1, mock_row2])
+        )
 
         # Set up session.execute to return different results based on call order
         mock_async_session.execute.side_effect = [
@@ -246,7 +303,7 @@ class TestConversionHistoryRepository:
             mock_success_result,
             mock_failed_result,
             mock_avg_time_result,
-            mock_popular_result
+            mock_popular_result,
         ]
 
         result = await history_repository.get_statistics(group_id="group-1", days=30)
@@ -261,6 +318,7 @@ class TestConversionHistoryRepository:
 
 
 # ===== ConversionJobRepository Tests =====
+
 
 @pytest.fixture
 def job_repository(mock_async_session):
@@ -289,20 +347,26 @@ class TestConversionJobRepository:
         assert repository.model == ConversionJob
 
     @pytest.mark.asyncio
-    async def test_find_by_status_success(self, job_repository, mock_async_session, sample_jobs):
+    async def test_find_by_status_success(
+        self, job_repository, mock_async_session, sample_jobs
+    ):
         """Test successful find by status."""
         pending_jobs = [j for j in sample_jobs if j.status == "pending"]
         mock_result = MockResult(pending_jobs)
         mock_async_session.execute.return_value = mock_result
 
-        result = await job_repository.find_by_status(status="pending", group_id="group-1", limit=10)
+        result = await job_repository.find_by_status(
+            status="pending", group_id="group-1", limit=10
+        )
 
         assert len(result) == 1
         assert result[0].status == "pending"
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_find_active_jobs(self, job_repository, mock_async_session, sample_jobs):
+    async def test_find_active_jobs(
+        self, job_repository, mock_async_session, sample_jobs
+    ):
         """Test find active jobs (pending or running)."""
         active_jobs = [j for j in sample_jobs if j.status in ["pending", "running"]]
         mock_result = MockResult(active_jobs)
@@ -331,11 +395,13 @@ class TestConversionJobRepository:
         mock_result_updated = MockResult([updated_job])
 
         mock_async_session.execute.side_effect = [
-            mock_update_result,   # UPDATE query
-            mock_result_updated   # SELECT for get()
+            mock_update_result,  # UPDATE query
+            mock_result_updated,  # SELECT for get()
         ]
 
-        result = await job_repository.update_status("job-123", status="running", progress=0.3)
+        result = await job_repository.update_status(
+            "job-123", status="running", progress=0.3
+        )
 
         assert result is not None
         assert result.id == "job-123"
@@ -351,7 +417,7 @@ class TestConversionJobRepository:
 
         mock_async_session.execute.side_effect = [
             mock_update_result,  # UPDATE query
-            mock_get_result      # SELECT for get()
+            mock_get_result,  # SELECT for get()
         ]
 
         result = await job_repository.update_status("nonexistent", status="running")
@@ -372,8 +438,8 @@ class TestConversionJobRepository:
         mock_result_updated = MockResult([cancelled_job])
 
         mock_async_session.execute.side_effect = [
-            mock_update_result,   # UPDATE query with rowcount
-            mock_result_updated   # SELECT for get()
+            mock_update_result,  # UPDATE query with rowcount
+            mock_result_updated,  # SELECT for get()
         ]
 
         result = await job_repository.cancel_job("job-123")
@@ -390,7 +456,7 @@ class TestConversionJobRepository:
         mock_update_result.rowcount = 0
 
         mock_async_session.execute.side_effect = [
-            mock_update_result    # UPDATE query returns 0 rows
+            mock_update_result  # UPDATE query returns 0 rows
         ]
 
         result = await job_repository.cancel_job("job-123")
@@ -399,6 +465,7 @@ class TestConversionJobRepository:
 
 
 # ===== SavedConverterConfigurationRepository Tests =====
+
 
 @pytest.fixture
 def config_repository(mock_async_session):
@@ -410,9 +477,13 @@ def config_repository(mock_async_session):
 def sample_configurations():
     """Create sample configurations for testing."""
     return [
-        MockSavedConfiguration(id=1, name="PowerBI to DAX", is_public=True, use_count=10),
+        MockSavedConfiguration(
+            id=1, name="PowerBI to DAX", is_public=True, use_count=10
+        ),
         MockSavedConfiguration(id=2, name="YAML to SQL", is_public=False, use_count=5),
-        MockSavedConfiguration(id=3, name="Template Config", is_public=True, use_count=20),
+        MockSavedConfiguration(
+            id=3, name="Template Config", is_public=True, use_count=20
+        ),
     ]
 
 
@@ -427,22 +498,25 @@ class TestSavedConverterConfigurationRepository:
         assert repository.model == SavedConverterConfiguration
 
     @pytest.mark.asyncio
-    async def test_find_by_user_success(self, config_repository, mock_async_session, sample_configurations):
+    async def test_find_by_user_success(
+        self, config_repository, mock_async_session, sample_configurations
+    ):
         """Test successful find by user."""
         user_configs = [sample_configurations[1]]  # Second config belongs to user
         mock_result = MockResult(user_configs)
         mock_async_session.execute.return_value = mock_result
 
         result = await config_repository.find_by_user(
-            created_by_email="user@example.com",
-            group_id="group-1"
+            created_by_email="user@example.com", group_id="group-1"
         )
 
         assert len(result) == 1
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_find_public_success(self, config_repository, mock_async_session, sample_configurations):
+    async def test_find_public_success(
+        self, config_repository, mock_async_session, sample_configurations
+    ):
         """Test successful find public configurations."""
         public_configs = [c for c in sample_configurations if c.is_public]
         mock_result = MockResult(public_configs)
@@ -457,7 +531,9 @@ class TestSavedConverterConfigurationRepository:
     @pytest.mark.asyncio
     async def test_find_templates_success(self, config_repository, mock_async_session):
         """Test successful find templates."""
-        template_config = MockSavedConfiguration(id=1, name="Template", is_template=True)
+        template_config = MockSavedConfiguration(
+            id=1, name="Template", is_template=True
+        )
         mock_result = MockResult([template_config])
         mock_async_session.execute.return_value = mock_result
 
@@ -478,7 +554,7 @@ class TestSavedConverterConfigurationRepository:
             source_format="powerbi",
             target_format="dax",
             group_id="group-1",
-            user_email="user@example.com"
+            user_email="user@example.com",
         )
 
         assert len(result) == 1
@@ -494,16 +570,16 @@ class TestSavedConverterConfigurationRepository:
         mock_async_session.execute.return_value = mock_result
 
         result = await config_repository.search_by_name(
-            search_term="PowerBI",
-            group_id="group-1",
-            user_email="user@example.com"
+            search_term="PowerBI", group_id="group-1", user_email="user@example.com"
         )
 
         assert len(result) == 1
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_increment_use_count_success(self, config_repository, mock_async_session):
+    async def test_increment_use_count_success(
+        self, config_repository, mock_async_session
+    ):
         """Test successful use count increment."""
         updated_config = MockSavedConfiguration(id=1, use_count=6)
         updated_config.last_used_at = datetime.utcnow()
@@ -516,8 +592,8 @@ class TestSavedConverterConfigurationRepository:
         mock_result_updated = MockResult([updated_config])
 
         mock_async_session.execute.side_effect = [
-            mock_update_result,   # UPDATE query
-            mock_result_updated   # SELECT for get()
+            mock_update_result,  # UPDATE query
+            mock_result_updated,  # SELECT for get()
         ]
 
         result = await config_repository.increment_use_count(1)
@@ -526,7 +602,9 @@ class TestSavedConverterConfigurationRepository:
         assert result.id == 1
 
     @pytest.mark.asyncio
-    async def test_increment_use_count_not_found(self, config_repository, mock_async_session):
+    async def test_increment_use_count_not_found(
+        self, config_repository, mock_async_session
+    ):
         """Test use count increment when config not found."""
         # increment_use_count calls:
         # 1. session.execute(update_query)
@@ -536,7 +614,7 @@ class TestSavedConverterConfigurationRepository:
 
         mock_async_session.execute.side_effect = [
             mock_update_result,  # UPDATE query
-            mock_get_result      # SELECT for get()
+            mock_get_result,  # SELECT for get()
         ]
 
         result = await config_repository.increment_use_count(999)

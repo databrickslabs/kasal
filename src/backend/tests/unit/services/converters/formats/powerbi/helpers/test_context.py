@@ -6,6 +6,7 @@ for Power BI DAX converter.
 """
 
 import pytest
+
 from src.services.converters.base.models import KPI
 from src.services.converters.formats.powerbi.helpers.dax_context import (
     DAXBaseKBIContext,
@@ -23,7 +24,7 @@ class TestDAXBaseKBIContext:
             technical_name="revenue",
             formula="sales_amount",
             source_table="fact_sales",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         context = DAXBaseKBIContext(kbi=kbi, parent_kbis=None)
@@ -40,7 +41,7 @@ class TestDAXBaseKBIContext:
             technical_name="sales",
             formula="sales_amount",
             source_table="fact_sales",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         kbi_filtered = KPI(
@@ -48,7 +49,7 @@ class TestDAXBaseKBIContext:
             technical_name="filtered_sales",
             formula="[sales]",
             filters=["region = 'EMEA'"],
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         kbi_ytd = KPI(
@@ -56,7 +57,7 @@ class TestDAXBaseKBIContext:
             technical_name="ytd_sales",
             formula="[filtered_sales]",
             filters=["fiscal_year = 2024"],
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         # Context with no parents
@@ -78,7 +79,7 @@ class TestDAXBaseKBIContext:
             technical_name="revenue",
             formula="revenue_amount",
             filters=["status = 'ACTIVE'"],
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         kbi_parent1 = KPI(
@@ -86,7 +87,7 @@ class TestDAXBaseKBIContext:
             technical_name="emea_revenue",
             formula="[revenue]",
             filters=["region = 'EMEA'"],
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         kbi_parent2 = KPI(
@@ -94,12 +95,11 @@ class TestDAXBaseKBIContext:
             technical_name="ytd_emea_revenue",
             formula="[emea_revenue]",
             filters=["fiscal_year = 2024"],
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         context = DAXBaseKBIContext(
-            kbi=kbi_base,
-            parent_kbis=[kbi_parent1, kbi_parent2]
+            kbi=kbi_base, parent_kbis=[kbi_parent1, kbi_parent2]
         )
 
         filters = context.combined_filters
@@ -118,7 +118,7 @@ class TestDAXBaseKBIContext:
             formula="revenue_amount",
             filters=["status = 'ACTIVE'", "region = 'EMEA'"],
             source_table="FactSales",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         context = DAXBaseKBIContext(kbi)
@@ -136,7 +136,7 @@ class TestDAXBaseKBIContext:
             technical_name="revenue",
             formula="revenue_amount",
             fields_for_constant_selection=["Product", "Region"],
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         context = DAXBaseKBIContext(kbi)
@@ -153,7 +153,7 @@ class TestDAXBaseKBIContext:
             description="Sales",
             technical_name="sales",
             formula="sales_amount",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         parent = KPI(
@@ -161,7 +161,7 @@ class TestDAXBaseKBIContext:
             technical_name="filtered",
             formula="[sales]",
             filters=["region = 'EMEA'"],
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         ctx1 = DAXBaseKBIContext(kbi, [parent])
@@ -180,7 +180,7 @@ class TestDAXBaseKBIContext:
             technical_name="filtered",
             formula="sales",
             filters=["region = 'EMEA'"],
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
         assert DAXBaseKBIContext.is_valid_for_context(kbi_with_filters) is True
 
@@ -189,7 +189,7 @@ class TestDAXBaseKBIContext:
             description="Simple Sales",
             technical_name="simple",
             formula="sales",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
         assert DAXBaseKBIContext.is_valid_for_context(kbi_simple) is False
 
@@ -200,7 +200,7 @@ class TestDAXBaseKBIContext:
             technical_name="revenue",
             formula="revenue_amount",
             fields_for_constant_selection=["Product"],
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         kbi_parent = KPI(
@@ -208,7 +208,7 @@ class TestDAXBaseKBIContext:
             technical_name="regional_revenue",
             formula="[revenue]",
             fields_for_constant_selection=["Region", "Year"],
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         context = DAXBaseKBIContext(kbi_base, [kbi_parent])
@@ -227,7 +227,7 @@ class TestDAXBaseKBIContext:
             technical_name="revenue",
             formula="revenue_amount",
             fields_for_exception_aggregation=["Customer"],
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         kbi_parent = KPI(
@@ -235,7 +235,7 @@ class TestDAXBaseKBIContext:
             technical_name="detailed_revenue",
             formula="[revenue]",
             fields_for_exception_aggregation=["Order"],
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         context = DAXBaseKBIContext(kbi_base, [kbi_parent])
@@ -259,8 +259,18 @@ class TestDAXKBIContextCache:
         """Test adding and retrieving contexts"""
         cache = DAXKBIContextCache()
 
-        kbi1 = KPI(description="Sales", technical_name="sales", formula="sales_amount", aggregation_type="SUM")
-        kbi2 = KPI(description="Revenue", technical_name="revenue", formula="revenue_amount", aggregation_type="SUM")
+        kbi1 = KPI(
+            description="Sales",
+            technical_name="sales",
+            formula="sales_amount",
+            aggregation_type="SUM",
+        )
+        kbi2 = KPI(
+            description="Revenue",
+            technical_name="revenue",
+            formula="revenue_amount",
+            aggregation_type="SUM",
+        )
 
         ctx1 = DAXBaseKBIContext(kbi1)
         ctx2 = DAXBaseKBIContext(kbi2)
@@ -277,11 +287,26 @@ class TestDAXKBIContextCache:
         """Test retrieving contexts for specific KBI"""
         cache = DAXKBIContextCache()
 
-        kbi = KPI(description="Sales", technical_name="sales", formula="sales_amount", aggregation_type="SUM")
-        kbi_parent1 = KPI(description="Filtered", technical_name="filtered", formula="[sales]",
-                          filters=["region = 'EMEA'"], aggregation_type="CALCULATED")
-        kbi_parent2 = KPI(description="YTD", technical_name="ytd", formula="[sales]",
-                          filters=["year = 2024"], aggregation_type="CALCULATED")
+        kbi = KPI(
+            description="Sales",
+            technical_name="sales",
+            formula="sales_amount",
+            aggregation_type="SUM",
+        )
+        kbi_parent1 = KPI(
+            description="Filtered",
+            technical_name="filtered",
+            formula="[sales]",
+            filters=["region = 'EMEA'"],
+            aggregation_type="CALCULATED",
+        )
+        kbi_parent2 = KPI(
+            description="YTD",
+            technical_name="ytd",
+            formula="[sales]",
+            filters=["year = 2024"],
+            aggregation_type="CALCULATED",
+        )
 
         ctx1 = DAXBaseKBIContext(kbi, [])
         ctx2 = DAXBaseKBIContext(kbi, [kbi_parent1])
@@ -298,7 +323,12 @@ class TestDAXKBIContextCache:
         """Test cache clearing"""
         cache = DAXKBIContextCache()
 
-        kbi = KPI(description="Sales", technical_name="sales", formula="sales_amount", aggregation_type="SUM")
+        kbi = KPI(
+            description="Sales",
+            technical_name="sales",
+            formula="sales_amount",
+            aggregation_type="SUM",
+        )
         cache.add_context(DAXBaseKBIContext(kbi))
 
         assert len(cache.get_all_contexts()) == 1

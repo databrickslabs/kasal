@@ -126,9 +126,9 @@ def _span_started_at(span: ReadableSpan) -> Optional[datetime]:
     """
     if not span.start_time:
         return None
-    return datetime.fromtimestamp(span.start_time / 1_000_000_000, tz=timezone.utc).replace(
-        tzinfo=None
-    )
+    return datetime.fromtimestamp(
+        span.start_time / 1_000_000_000, tz=timezone.utc
+    ).replace(tzinfo=None)
 
 
 def _extract_event_source(span: ReadableSpan) -> str:
@@ -444,8 +444,8 @@ class KasalDBSpanExporter(SpanExporter):
         Runs in a ThreadPoolExecutor, so we create a fresh event loop via
         create_and_run_loop() to execute the async session operations.
         """
-        from src.models.execution_trace import ExecutionTrace
         from src.db.session import request_scoped_session
+        from src.models.execution_trace import ExecutionTrace
         from src.utils.asyncio_utils import create_and_run_loop
 
         job_id = self._job_id
@@ -533,6 +533,7 @@ class KasalDBSpanExporter(SpanExporter):
         # Wait for pending writes to complete (up to 10 s).
         # Do NOT cancel futures — that drops trace batches.
         import threading
+
         shutdown_done = threading.Event()
 
         def _do_shutdown():

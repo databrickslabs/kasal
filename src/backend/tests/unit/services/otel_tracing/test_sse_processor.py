@@ -13,10 +13,9 @@ All SSE / asyncio / OTel dependencies are mocked.
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -44,24 +43,28 @@ class TestKasalSSESpanProcessorInit:
     def test_stores_job_id(self, monkeypatch):
         monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
         proc = KasalSSESpanProcessor("job-001")
         assert proc._job_id == "job-001"
 
     def test_not_subprocess_when_env_absent(self, monkeypatch):
         monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
         proc = KasalSSESpanProcessor("job-002")
         assert proc._is_subprocess is False
 
     def test_is_subprocess_when_env_true(self, monkeypatch):
         monkeypatch.setenv("CREW_SUBPROCESS_MODE", "true")
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
         proc = KasalSSESpanProcessor("job-003")
         assert proc._is_subprocess is True
 
     def test_not_subprocess_when_env_false(self, monkeypatch):
         monkeypatch.setenv("CREW_SUBPROCESS_MODE", "false")
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
         proc = KasalSSESpanProcessor("job-004")
         assert proc._is_subprocess is False
 
@@ -76,6 +79,7 @@ class TestOnStart:
     def test_on_start_does_nothing(self, monkeypatch):
         monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
         proc = KasalSSESpanProcessor("job-start")
         span = MagicMock()
         # Should not raise and should not call anything notable
@@ -85,6 +89,7 @@ class TestOnStart:
     def test_on_start_with_parent_context_does_nothing(self, monkeypatch):
         monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
         proc = KasalSSESpanProcessor("job-start2")
         proc.on_start(MagicMock(), parent_context=MagicMock())
 
@@ -105,6 +110,7 @@ class TestOnEndSubprocessMode:
         """
         monkeypatch.setenv("CREW_SUBPROCESS_MODE", "true")
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
         proc = KasalSSESpanProcessor("job-sub")
         span = _make_span({"kasal.event_type": "task_started"}, "task_execute")
 
@@ -113,11 +119,14 @@ class TestOnEndSubprocessMode:
         # Inject a sentinel into sys.modules so that IF the import is reached
         # we can detect it via broadcast_called.
         import sys
+
         sentinel = MagicMock()
         sentinel.sse_manager.broadcast_to_job = AsyncMock(
             side_effect=lambda *a, **kw: broadcast_called.append(True)
         )
-        sentinel.SSEEvent = MagicMock(side_effect=lambda **kw: broadcast_called.append(True))
+        sentinel.SSEEvent = MagicMock(
+            side_effect=lambda **kw: broadcast_called.append(True)
+        )
 
         original = sys.modules.get("src.core.sse_manager")
         sys.modules["src.core.sse_manager"] = sentinel
@@ -165,6 +174,7 @@ class TestOnEndEventTypeFromAttributes:
             },
         ):
             from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
             proc = KasalSSESpanProcessor("job-evtype")
 
             loop = asyncio.new_event_loop()
@@ -207,6 +217,7 @@ class TestOnEndEventTypeFromAttributes:
             },
         ):
             from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
             proc = KasalSSESpanProcessor("job-skip")
             proc.on_end(span)
 
@@ -218,9 +229,14 @@ class TestOnEndEventTypeFromAttributes:
 
         with patch.dict(
             "sys.modules",
-            {"src.core.sse_manager": MagicMock(SSEEvent=MagicMock(), sse_manager=MagicMock())},
+            {
+                "src.core.sse_manager": MagicMock(
+                    SSEEvent=MagicMock(), sse_manager=MagicMock()
+                )
+            },
         ):
             from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
             proc = KasalSSESpanProcessor("job-no-attr")
             proc.on_end(span)  # must not raise
 
@@ -258,6 +274,7 @@ class TestOnEndSpanNameFallback:
             },
         ):
             from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
             proc = KasalSSESpanProcessor("job-name-fb")
 
             # Patch get_running_loop to trigger the loop.create_task path
@@ -280,9 +297,14 @@ class TestOnEndSpanNameFallback:
         mock_sse_event_cls = MagicMock()
         with patch.dict(
             "sys.modules",
-            {"src.core.sse_manager": MagicMock(SSEEvent=mock_sse_event_cls, sse_manager=MagicMock())},
+            {
+                "src.core.sse_manager": MagicMock(
+                    SSEEvent=mock_sse_event_cls, sse_manager=MagicMock()
+                )
+            },
         ):
             from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
             proc = KasalSSESpanProcessor("job-notask")
             proc.on_end(_make_span({}, "agent_thinking"))
 
@@ -331,6 +353,7 @@ class TestOnEndSSEPayload:
             },
         ):
             from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
             proc = KasalSSESpanProcessor("job-payload-check")
 
             with patch("asyncio.get_running_loop", return_value=mock_loop):
@@ -350,11 +373,10 @@ class TestOnEndSSEPayload:
 
         with patch.dict(
             "sys.modules",
-            {
-                "src.core.sse_manager": MagicMock(side_effect=ImportError("no sse"))
-            },
+            {"src.core.sse_manager": MagicMock(side_effect=ImportError("no sse"))},
         ):
             from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
             proc = KasalSSESpanProcessor("job-exc")
 
             with caplog.at_level(logging.WARNING):
@@ -371,17 +393,20 @@ class TestShutdownAndForceFlush:
     def test_shutdown_is_no_op(self, monkeypatch):
         monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
         proc = KasalSSESpanProcessor("job-sd")
         proc.shutdown()  # must not raise
 
     def test_force_flush_returns_true(self, monkeypatch):
         monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
         proc = KasalSSESpanProcessor("job-ff")
         assert proc.force_flush() is True
 
     def test_force_flush_with_timeout_returns_true(self, monkeypatch):
         monkeypatch.delenv("CREW_SUBPROCESS_MODE", raising=False)
         from src.services.otel_tracing.sse_processor import KasalSSESpanProcessor
+
         proc = KasalSSESpanProcessor("job-ff2")
         assert proc.force_flush(timeout_millis=5000) is True

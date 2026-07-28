@@ -135,7 +135,9 @@ class KnowledgeSearchBudget:
         )
 
 
-def no_relevant_results_notice(query: str, best_score: float, min_score: float = MIN_SCORE) -> str:
+def no_relevant_results_notice(
+    query: str, best_score: float, min_score: float = MIN_SCORE
+) -> str:
     """The answer when the index returned only distant matches.
 
     Says what was searched, how close the best match came, and — the part that

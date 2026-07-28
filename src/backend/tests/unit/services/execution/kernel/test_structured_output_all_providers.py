@@ -67,22 +67,32 @@ class TestSharedWithTheDatabricksWrapper:
     def test_wrapper_delegates_to_the_engine_helper(self):
         """One implementation: the wrapper adapts kwargs, it does not re-parse."""
         with patch("src.services.llm.handlers.databricks_retry_llm.litellm"):
-            from src.services.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
+            from src.services.llm.handlers.databricks_retry_llm import (
+                DatabricksRetryLLM,
+            )
 
             llm = DatabricksRetryLLM(model="databricks/x", api_key="k")
 
         with patch.object(
             llm, "_validate_structured_output", return_value="sentinel"
         ) as helper:
-            out = llm._coerce_to_response_model('{"keep": true}', {"response_model": _Plan})
+            out = llm._coerce_to_response_model(
+                '{"keep": true}', {"response_model": _Plan}
+            )
 
         assert out == "sentinel"
         helper.assert_called_once_with('{"keep": true}', _Plan)
 
-    @pytest.mark.parametrize("result,kwargs", [("x", {}), (_Plan(keep=True), {"response_model": _Plan})])
-    def test_adapter_passes_through_when_there_is_nothing_to_parse(self, result, kwargs):
+    @pytest.mark.parametrize(
+        "result,kwargs", [("x", {}), (_Plan(keep=True), {"response_model": _Plan})]
+    )
+    def test_adapter_passes_through_when_there_is_nothing_to_parse(
+        self, result, kwargs
+    ):
         with patch("src.services.llm.handlers.databricks_retry_llm.litellm"):
-            from src.services.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
+            from src.services.llm.handlers.databricks_retry_llm import (
+                DatabricksRetryLLM,
+            )
 
             llm = DatabricksRetryLLM(model="databricks/x", api_key="k")
 

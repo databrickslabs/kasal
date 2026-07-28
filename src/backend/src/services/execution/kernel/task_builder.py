@@ -319,8 +319,8 @@ async def _apply_output_pydantic(task_args, task_config, agent, task_key):
         return
 
     from src.services.execution.kernel.model_conversion_handler import (
-        get_compatible_converter_for_model,
         configure_output_json_approach,
+        get_compatible_converter_for_model,
     )
 
     converter_cls, pydantic_cls, use_output_json, is_compatible = (

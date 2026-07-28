@@ -6,8 +6,10 @@ authentication, Service Account authentication, token validation, and credential
 """
 
 import os
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+
 from src.services.converters.formats.powerbi.authentication import AadService
 
 
@@ -24,7 +26,7 @@ class TestAadService:
         """Create AadService with pre-obtained token"""
         return AadService(
             access_token="eyJ.test.token",  # gitleaks:allow JWT-shaped dummy for format checks
-            logger=mock_logger
+            logger=mock_logger,
         )
 
     @pytest.fixture
@@ -34,7 +36,7 @@ class TestAadService:
             client_id="test_client_id",
             client_secret="test_client_secret",
             tenant_id="test_tenant_id",
-            logger=mock_logger
+            logger=mock_logger,
         )
 
     @pytest.fixture
@@ -46,7 +48,7 @@ class TestAadService:
             username="test_user@domain.com",
             password="test_password",
             auth_method="service_account",
-            logger=mock_logger
+            logger=mock_logger,
         )
 
     @pytest.fixture
@@ -92,7 +94,7 @@ class TestAadService:
             auth_method="service_account",
             project_id="proj123",
             use_database=True,
-            logger=mock_logger
+            logger=mock_logger,
         )
 
         assert service.client_id == "client"
@@ -119,7 +121,10 @@ class TestAadService:
 
     def test_powerbi_scope_constant(self):
         """Test POWERBI_SCOPE constant is set"""
-        assert AadService.POWERBI_SCOPE == "https://analysis.windows.net/powerbi/api/.default"
+        assert (
+            AadService.POWERBI_SCOPE
+            == "https://analysis.windows.net/powerbi/api/.default"
+        )
 
     def test_auth_method_constants(self):
         """Test authentication method constants"""
@@ -136,9 +141,16 @@ class TestAadService:
         assert token == service_with_token._access_token
         assert "eyJ" in token  # JWT format
 
-    @patch('src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE', True)
-    @patch('src.services.converters.formats.powerbi.authentication.ClientSecretCredential')
-    def test_get_access_token_with_credentials(self, mock_credential_class, service_with_credentials):
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE",
+        True,
+    )
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.ClientSecretCredential"
+    )
+    def test_get_access_token_with_credentials(
+        self, mock_credential_class, service_with_credentials
+    ):
         """Test getting access token with direct credentials"""
         # Mock ClientSecretCredential
         mock_credential = Mock()
@@ -153,13 +165,20 @@ class TestAadService:
         mock_credential_class.assert_called_once_with(
             tenant_id="test_tenant_id",
             client_id="test_client_id",
-            client_secret="test_client_secret"
+            client_secret="test_client_secret",
         )
         mock_credential.get_token.assert_called_once_with(AadService.POWERBI_SCOPE)
 
-    @patch('src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE', True)
-    @patch('src.services.converters.formats.powerbi.authentication.UsernamePasswordCredential')
-    def test_get_access_token_with_service_account(self, mock_credential_class, service_with_service_account):
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE",
+        True,
+    )
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.UsernamePasswordCredential"
+    )
+    def test_get_access_token_with_service_account(
+        self, mock_credential_class, service_with_service_account
+    ):
         """Test getting access token with service account credentials"""
         # Mock UsernamePasswordCredential
         mock_credential = Mock()
@@ -180,8 +199,13 @@ class TestAadService:
         )
         mock_credential.get_token.assert_called_once_with(AadService.POWERBI_SCOPE)
 
-    @patch('src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE', False)
-    def test_get_access_token_azure_identity_not_available(self, service_with_credentials):
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE",
+        False,
+    )
+    def test_get_access_token_azure_identity_not_available(
+        self, service_with_credentials
+    ):
         """Test error when azure-identity library not available"""
         with pytest.raises(RuntimeError, match="azure-identity library required"):
             service_with_credentials.get_access_token()
@@ -191,9 +215,16 @@ class TestAadService:
         with pytest.raises(ValueError, match="No credentials available"):
             service_empty.get_access_token()
 
-    @patch('src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE', True)
-    @patch('src.services.converters.formats.powerbi.authentication.ClientSecretCredential')
-    def test_get_access_token_credential_exception(self, mock_credential_class, service_with_credentials):
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE",
+        True,
+    )
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.ClientSecretCredential"
+    )
+    def test_get_access_token_credential_exception(
+        self, mock_credential_class, service_with_credentials
+    ):
         """Test handling credential exception"""
         mock_credential_class.side_effect = Exception("Azure identity error")
 
@@ -204,7 +235,9 @@ class TestAadService:
         """Test database credential lookup raises NotImplementedError"""
         service = AadService(use_database=True, logger=mock_logger)
 
-        with pytest.raises(NotImplementedError, match="Database credential storage not yet implemented"):
+        with pytest.raises(
+            NotImplementedError, match="Database credential storage not yet implemented"
+        ):
             service.get_access_token()
 
     # ========== Auth Method Detection Tests ==========
@@ -217,7 +250,7 @@ class TestAadService:
             username="user",
             password="pass",
             auth_method="service_principal",  # Explicit override
-            logger=mock_logger
+            logger=mock_logger,
         )
         assert service._determine_auth_method() == "service_principal"
 
@@ -228,20 +261,28 @@ class TestAadService:
             client_secret="secret",
             tenant_id="tenant",
             auth_method="service_account",  # Explicit override
-            logger=mock_logger
+            logger=mock_logger,
         )
         assert service._determine_auth_method() == "service_account"
 
-    def test_determine_auth_method_auto_service_principal(self, service_with_credentials):
+    def test_determine_auth_method_auto_service_principal(
+        self, service_with_credentials
+    ):
         """Test auto-detection of service principal"""
         assert service_with_credentials._determine_auth_method() == "service_principal"
 
-    def test_determine_auth_method_auto_service_account(self, service_with_service_account):
+    def test_determine_auth_method_auto_service_account(
+        self, service_with_service_account
+    ):
         """Test auto-detection of service account"""
         # Override auth_method to None to test auto-detection
         service_with_service_account.auth_method = None
-        service_with_service_account.client_secret = None  # Remove secret to prefer service account
-        assert service_with_service_account._determine_auth_method() == "service_account"
+        service_with_service_account.client_secret = (
+            None  # Remove secret to prefer service account
+        )
+        assert (
+            service_with_service_account._determine_auth_method() == "service_account"
+        )
 
     def test_determine_auth_method_no_credentials(self, service_empty):
         """Test no auth method when no credentials"""
@@ -291,14 +332,23 @@ class TestAadService:
     def test_get_service_principal_credentials_incomplete(self, mock_logger):
         """Test error with incomplete service principal credentials"""
         service = AadService(client_id="client", logger=mock_logger)
-        with pytest.raises(ValueError, match="Incomplete Service Principal credentials"):
+        with pytest.raises(
+            ValueError, match="Incomplete Service Principal credentials"
+        ):
             service._get_service_principal_credentials()
 
     # ========== Service Account Token Acquisition Tests ==========
 
-    @patch('src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE', True)
-    @patch('src.services.converters.formats.powerbi.authentication.UsernamePasswordCredential')
-    def test_acquire_token_with_username_password_complete(self, mock_credential_class, service_with_service_account):
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE",
+        True,
+    )
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.UsernamePasswordCredential"
+    )
+    def test_acquire_token_with_username_password_complete(
+        self, mock_credential_class, service_with_service_account
+    ):
         """Test successful service account token acquisition"""
         mock_credential = Mock()
         mock_token = Mock()
@@ -316,18 +366,27 @@ class TestAadService:
             tenant_id="tenant",
             # Missing username and password
             auth_method="service_account",
-            logger=mock_logger
+            logger=mock_logger,
         )
         with pytest.raises(ValueError, match="Incomplete Service Account credentials"):
             service._acquire_token_with_username_password()
 
-    @patch('src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE', True)
-    @patch('src.services.converters.formats.powerbi.authentication.UsernamePasswordCredential')
-    def test_acquire_token_with_username_password_exception(self, mock_credential_class, service_with_service_account):
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE",
+        True,
+    )
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.UsernamePasswordCredential"
+    )
+    def test_acquire_token_with_username_password_exception(
+        self, mock_credential_class, service_with_service_account
+    ):
         """Test handling exception during service account token acquisition"""
         mock_credential_class.side_effect = Exception("Authentication failed")
 
-        with pytest.raises(Exception, match="Error retrieving access token with service account"):
+        with pytest.raises(
+            Exception, match="Error retrieving access token with service account"
+        ):
             service_with_service_account._acquire_token_with_username_password()
 
     # ========== Validate Token Tests ==========
@@ -380,14 +439,23 @@ class TestAadService:
 
     def test_get_credentials_from_database_not_implemented(self, service_empty):
         """Test _get_credentials_from_database raises NotImplementedError"""
-        with pytest.raises(NotImplementedError, match="Database credential storage not yet implemented"):
+        with pytest.raises(
+            NotImplementedError, match="Database credential storage not yet implemented"
+        ):
             service_empty._get_credentials_from_database()
 
     # ========== Integration Tests ==========
 
-    @patch('src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE', True)
-    @patch('src.services.converters.formats.powerbi.authentication.ClientSecretCredential')
-    def test_full_authentication_flow_service_principal(self, mock_credential_class, mock_logger):
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE",
+        True,
+    )
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.ClientSecretCredential"
+    )
+    def test_full_authentication_flow_service_principal(
+        self, mock_credential_class, mock_logger
+    ):
         """Test complete authentication flow with service principal"""
         mock_credential = Mock()
         mock_token = Mock()
@@ -400,7 +468,7 @@ class TestAadService:
             client_id="test_client",
             client_secret="test_secret",
             tenant_id="test_tenant",
-            logger=mock_logger
+            logger=mock_logger,
         )
 
         token = service.get_access_token()
@@ -409,9 +477,16 @@ class TestAadService:
         assert token == "eyJ.integration.token"
         assert service.validate_token(token) is True
 
-    @patch('src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE', True)
-    @patch('src.services.converters.formats.powerbi.authentication.UsernamePasswordCredential')
-    def test_full_authentication_flow_service_account(self, mock_credential_class, mock_logger):
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE",
+        True,
+    )
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.UsernamePasswordCredential"
+    )
+    def test_full_authentication_flow_service_account(
+        self, mock_credential_class, mock_logger
+    ):
         """Test complete authentication flow with service account"""
         mock_credential = Mock()
         mock_token = Mock()
@@ -426,7 +501,7 @@ class TestAadService:
             username="user@domain.com",
             password="password123",
             auth_method="service_account",
-            logger=mock_logger
+            logger=mock_logger,
         )
 
         token = service.get_access_token()
@@ -442,7 +517,7 @@ class TestAadService:
             client_id="client",
             client_secret="secret",
             tenant_id="tenant",
-            logger=mock_logger
+            logger=mock_logger,
         )
 
         # Should return pre-obtained token without calling azure-identity
@@ -451,22 +526,32 @@ class TestAadService:
 
     # ========== Edge Cases ==========
 
-    @patch('src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE', True)
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE",
+        True,
+    )
     def test_get_access_token_with_partial_credentials(self, mock_logger):
         """Test getting token with only some credentials fails properly"""
         service = AadService(
             client_id="client",
             client_secret="secret",
             # Missing tenant_id
-            logger=mock_logger
+            logger=mock_logger,
         )
 
         with pytest.raises(ValueError, match="No credentials available"):
             service.get_access_token()
 
-    @patch('src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE', True)
-    @patch('src.services.converters.formats.powerbi.authentication.ClientSecretCredential')
-    def test_acquire_token_logs_tenant_id(self, mock_credential_class, service_with_credentials, mock_logger):
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE",
+        True,
+    )
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.ClientSecretCredential"
+    )
+    def test_acquire_token_logs_tenant_id(
+        self, mock_credential_class, service_with_credentials, mock_logger
+    ):
         """Test _acquire_token_with_client_credential logs tenant ID"""
         mock_credential = Mock()
         mock_token = Mock()
@@ -477,7 +562,7 @@ class TestAadService:
         credentials = {
             "client_id": "client",
             "client_secret": "secret",
-            "tenant_id": "tenant123"
+            "tenant_id": "tenant123",
         }
 
         service_with_credentials._acquire_token_with_client_credential(credentials)
@@ -492,12 +577,17 @@ class TestAadService:
         assert "https://" in AadService.AUTHORITY_BASE
         assert "powerbi" in AadService.POWERBI_SCOPE.lower()
 
-    @patch.dict(os.environ, {
-        "CUSTOM_USERNAME": "env_user@domain.com",
-        "CUSTOM_PASSWORD": "env_password"
-    })
-    @patch('src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE', True)
-    @patch('src.services.converters.formats.powerbi.authentication.UsernamePasswordCredential')
+    @patch.dict(
+        os.environ,
+        {"CUSTOM_USERNAME": "env_user@domain.com", "CUSTOM_PASSWORD": "env_password"},
+    )
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.AZURE_IDENTITY_AVAILABLE",
+        True,
+    )
+    @patch(
+        "src.services.converters.formats.powerbi.authentication.UsernamePasswordCredential"
+    )
     def test_service_account_with_env_vars(self, mock_credential_class, mock_logger):
         """Test service account authentication using environment variables"""
         mock_credential = Mock()
@@ -512,7 +602,7 @@ class TestAadService:
             username_env="CUSTOM_USERNAME",
             password_env="CUSTOM_PASSWORD",
             auth_method="service_account",
-            logger=mock_logger
+            logger=mock_logger,
         )
 
         token = service.get_access_token()

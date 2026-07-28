@@ -6,18 +6,18 @@ Covers:
 - AgentConfig._create_tools_from_ids passes tool_config_override to create_tool
 """
 
+import importlib
 import os
 import sys
-import importlib
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
-from src.services.flow_builder.modules.task_adapter import (
-    _resolve_tool_override,
-    TaskConfig,
-)
 from src.services.flow_builder.modules.agent_adapter import AgentConfig
+from src.services.flow_builder.modules.task_adapter import (
+    TaskConfig,
+    _resolve_tool_override,
+)
 
 # This file used to load those two modules through ~100 lines of sys.modules
 # surgery: stub out `src.*` and `crewai.*`, exec the source files by path, then
@@ -164,7 +164,9 @@ class TestTaskConfigToolOverride:
 
         refs = self._setup_factory_mock(tool_factory)
         try:
-            await TaskConfig._configure_task_tools(task_data, agent, flow_data=None, group_context=None)
+            await TaskConfig._configure_task_tools(
+                task_data, agent, flow_data=None, group_context=None
+            )
         finally:
             self._restore(*refs)
 
@@ -193,7 +195,9 @@ class TestTaskConfigToolOverride:
 
         refs = self._setup_factory_mock(tool_factory)
         try:
-            await TaskConfig._configure_task_tools(task_data, agent, flow_data=None, group_context=None)
+            await TaskConfig._configure_task_tools(
+                task_data, agent, flow_data=None, group_context=None
+            )
         finally:
             self._restore(*refs)
 
@@ -223,16 +227,13 @@ class TestTaskConfigToolOverride:
         agent.tools = []
 
         flow_data = MagicMock()
-        flow_data.nodes = [
-            {
-                "id": "task-42",
-                "data": {"tools": ["35"]}
-            }
-        ]
+        flow_data.nodes = [{"id": "task-42", "data": {"tools": ["35"]}}]
 
         refs = self._setup_factory_mock(tool_factory)
         try:
-            await TaskConfig._configure_task_tools(task_data, agent, flow_data=flow_data, group_context=None)
+            await TaskConfig._configure_task_tools(
+                task_data, agent, flow_data=flow_data, group_context=None
+            )
         finally:
             self._restore(*refs)
 

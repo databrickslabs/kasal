@@ -9,10 +9,12 @@ This module provides decorators for enforcing the three-tier authorization model
 
 from functools import wraps
 from typing import Callable, List, Optional
-from fastapi import HTTPException, status, Depends, Request
+
+from fastapi import Depends, HTTPException, Request, status
+
 from src.core.dependencies import get_group_context
-from src.utils.user_context import GroupContext
 from src.models.enums import GroupUserRole
+from src.utils.user_context import GroupContext
 
 
 def require_roles(allowed_roles: List[str]):
@@ -30,6 +32,7 @@ def require_roles(allowed_roles: List[str]):
         async def create_agent(...):
             ...
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(*args, **kwargs):
@@ -43,7 +46,7 @@ def require_roles(allowed_roles: List[str]):
             if not group_context:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Unable to verify permissions - no group context"
+                    detail="Unable to verify permissions - no group context",
                 )
 
             # Get effective role using the new resolution algorithm
@@ -52,20 +55,21 @@ def require_roles(allowed_roles: List[str]):
             if not effective_role:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="No role assigned for this user in the selected workspace"
+                    detail="No role assigned for this user in the selected workspace",
                 )
 
             # Check if effective role is allowed
             if effective_role.lower() not in [role.lower() for role in allowed_roles]:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Access denied. Required roles: {', '.join(allowed_roles)}. Your role: {effective_role}"
+                    detail=f"Access denied. Required roles: {', '.join(allowed_roles)}. Your role: {effective_role}",
                 )
 
             # Call the original function
             return await func(*args, **kwargs)
 
         return wrapper
+
     return decorator
 
 
@@ -125,7 +129,9 @@ def is_operator_or_above(role: Optional[str]) -> bool:
     return role and role.lower() in ["admin", "editor", "operator"]
 
 
-def check_role_in_context(group_context: GroupContext, allowed_roles: List[str]) -> bool:
+def check_role_in_context(
+    group_context: GroupContext, allowed_roles: List[str]
+) -> bool:
     """
     Check if the user's role in the group context is allowed.
 
@@ -161,8 +167,8 @@ def is_system_admin(group_context: GroupContext) -> bool:
         return False
 
     # Check if user is a system admin
-    if hasattr(group_context, 'current_user') and group_context.current_user:
-        return getattr(group_context.current_user, 'is_system_admin', False)
+    if hasattr(group_context, "current_user") and group_context.current_user:
+        return getattr(group_context.current_user, "is_system_admin", False)
 
     return False
 
@@ -187,14 +193,19 @@ def is_workspace_admin(group_context: GroupContext) -> bool:
         return False
 
     # Check if user is a system admin (they have admin role everywhere)
-    if hasattr(group_context, 'current_user') and group_context.current_user:
-        if getattr(group_context.current_user, 'is_system_admin', False):
+    if hasattr(group_context, "current_user") and group_context.current_user:
+        if getattr(group_context.current_user, "is_system_admin", False):
             return True
 
         # Personal workspace - check if user has personal workspace manager permission
-        if group_context.primary_group_id and group_context.primary_group_id.startswith("user_"):
+        if (
+            group_context.primary_group_id
+            and group_context.primary_group_id.startswith("user_")
+        ):
             # User needs is_personal_workspace_manager to have admin rights in personal workspace
-            return getattr(group_context.current_user, 'is_personal_workspace_manager', False)
+            return getattr(
+                group_context.current_user, "is_personal_workspace_manager", False
+            )
 
     # Team workspace - check if user has admin role in their current group
     return group_context.user_role and group_context.user_role.lower() == "admin"
@@ -219,13 +230,18 @@ def get_effective_role(group_context: GroupContext) -> Optional[str]:
         return None
 
     # Check if user is a system admin
-    if hasattr(group_context, 'current_user') and group_context.current_user:
-        if getattr(group_context.current_user, 'is_system_admin', False):
+    if hasattr(group_context, "current_user") and group_context.current_user:
+        if getattr(group_context.current_user, "is_system_admin", False):
             return "admin"
 
         # Personal workspace logic
-        if group_context.primary_group_id and group_context.primary_group_id.startswith("user_"):
-            if getattr(group_context.current_user, 'is_personal_workspace_manager', False):
+        if (
+            group_context.primary_group_id
+            and group_context.primary_group_id.startswith("user_")
+        ):
+            if getattr(
+                group_context.current_user, "is_personal_workspace_manager", False
+            ):
                 return "admin"
             else:
                 return "editor"  # Default role in personal workspace

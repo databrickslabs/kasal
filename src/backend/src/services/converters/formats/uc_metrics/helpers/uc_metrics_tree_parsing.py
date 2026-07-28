@@ -4,7 +4,8 @@ Extends the generic tree parsing generator to handle UC Metrics-specific generat
 """
 
 import re
-from typing import Dict, Any
+from typing import Any, Dict
+
 from ....base.models import KPI, KPIDefinition
 from ....common.transformers.tree_parsing import BaseTreeParsingGenerator
 from ..yaml_to_uc_metrics import UCMetricsGenerator
@@ -30,7 +31,9 @@ class UCMetricsTreeParsingGenerator(BaseTreeParsingGenerator[Dict], UCMetricsGen
 
     # Implement abstract methods from BaseTreeParsingGenerator
 
-    def _generate_leaf_measure(self, definition: KPIDefinition, kpi: KPI) -> Dict[str, Any]:
+    def _generate_leaf_measure(
+        self, definition: KPIDefinition, kpi: KPI
+    ) -> Dict[str, Any]:
         """
         Generate a leaf measure (no dependencies) using standard UC Metrics generation.
 
@@ -47,9 +50,9 @@ class UCMetricsTreeParsingGenerator(BaseTreeParsingGenerator[Dict], UCMetricsGen
         measure_expr = self.aggregation_builder.build_measure_expression(kpi)
 
         # Apply display sign if needed (SAP BW visualization property)
-        if hasattr(kpi, 'display_sign') and kpi.display_sign == -1:
+        if hasattr(kpi, "display_sign") and kpi.display_sign == -1:
             measure_expr = f"(-1) * ({measure_expr})"
-        elif hasattr(kpi, 'display_sign') and kpi.display_sign != 1:
+        elif hasattr(kpi, "display_sign") and kpi.display_sign != 1:
             measure_expr = f"{kpi.display_sign} * ({measure_expr})"
 
         return {
@@ -58,7 +61,9 @@ class UCMetricsTreeParsingGenerator(BaseTreeParsingGenerator[Dict], UCMetricsGen
             "description": kpi.description or f"Measure for {measure_name}",
         }
 
-    def _generate_calculated_measure(self, definition: KPIDefinition, kpi: KPI) -> Dict[str, Any]:
+    def _generate_calculated_measure(
+        self, definition: KPIDefinition, kpi: KPI
+    ) -> Dict[str, Any]:
         """
         Generate a calculated measure with dependencies inlined.
 
@@ -72,10 +77,14 @@ class UCMetricsTreeParsingGenerator(BaseTreeParsingGenerator[Dict], UCMetricsGen
         measure_name = kpi.technical_name or "unnamed_measure"
 
         # Resolve dependencies inline (all dependencies expanded into single formula)
-        resolved_formula = self.dependency_resolver.resolve_formula_inline(kpi.technical_name)
+        resolved_formula = self.dependency_resolver.resolve_formula_inline(
+            kpi.technical_name
+        )
 
         # Build measure expression (UC Metrics uses SQL-like syntax)
-        aggregation_type = kpi.aggregation_type.upper() if kpi.aggregation_type else "SUM"
+        aggregation_type = (
+            kpi.aggregation_type.upper() if kpi.aggregation_type else "SUM"
+        )
 
         # For CALCULATED type, the resolved formula IS the expression
         if aggregation_type == "CALCULATED":
@@ -85,9 +94,9 @@ class UCMetricsTreeParsingGenerator(BaseTreeParsingGenerator[Dict], UCMetricsGen
             measure_expr = self.aggregation_builder.build_measure_expression(kpi)
 
         # Apply display sign if needed (SAP BW visualization property)
-        if hasattr(kpi, 'display_sign') and kpi.display_sign == -1:
+        if hasattr(kpi, "display_sign") and kpi.display_sign == -1:
             measure_expr = f"(-1) * ({measure_expr})"
-        elif hasattr(kpi, 'display_sign') and kpi.display_sign != 1:
+        elif hasattr(kpi, "display_sign") and kpi.display_sign != 1:
             measure_expr = f"{kpi.display_sign} * ({measure_expr})"
 
         return {
@@ -97,9 +106,7 @@ class UCMetricsTreeParsingGenerator(BaseTreeParsingGenerator[Dict], UCMetricsGen
         }
 
     def _generate_calculated_measure_with_references(
-        self,
-        definition: KPIDefinition,
-        kpi: KPI
+        self, definition: KPIDefinition, kpi: KPI
     ) -> Dict[str, Any]:
         """
         Generate a calculated measure that references other measures by name.
@@ -118,7 +125,9 @@ class UCMetricsTreeParsingGenerator(BaseTreeParsingGenerator[Dict], UCMetricsGen
 
         # Get dependencies
         formula = kpi.formula
-        dependencies = self.dependency_resolver.dependency_graph.get(kpi.technical_name, [])
+        dependencies = self.dependency_resolver.dependency_graph.get(
+            kpi.technical_name, []
+        )
 
         # Replace measure technical names with their actual measure names
         # (In UC Metrics, measures are referenced directly by name)
@@ -128,15 +137,13 @@ class UCMetricsTreeParsingGenerator(BaseTreeParsingGenerator[Dict], UCMetricsGen
             dep_measure_name = dep_kpi.technical_name
             # Replace with measure reference (UC Metrics uses column-style references)
             resolved_formula = re.sub(
-                r'\b' + re.escape(dep) + r'\b',
-                dep_measure_name,
-                resolved_formula
+                r"\b" + re.escape(dep) + r"\b", dep_measure_name, resolved_formula
             )
 
         # Apply display sign if needed (SAP BW visualization property)
-        if hasattr(kpi, 'display_sign') and kpi.display_sign == -1:
+        if hasattr(kpi, "display_sign") and kpi.display_sign == -1:
             resolved_formula = f"(-1) * ({resolved_formula})"
-        elif hasattr(kpi, 'display_sign') and kpi.display_sign != 1:
+        elif hasattr(kpi, "display_sign") and kpi.display_sign != 1:
             resolved_formula = f"{kpi.display_sign} * ({resolved_formula})"
 
         return {

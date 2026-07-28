@@ -4,11 +4,13 @@ Unit tests for services/tools/custom/measure_conversion_pipeline_tool.py
 Tests universal measure conversion pipeline tool for CrewAI.
 """
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+
 from src.services.tools.measure_conversion_pipeline_tool import (
     MeasureConversionPipelineSchema,
-    MeasureConversionPipelineTool
+    MeasureConversionPipelineTool,
 )
 
 
@@ -23,7 +25,7 @@ class TestMeasureConversionPipelineSchema:
             powerbi_group_id="workspace456",
             powerbi_tenant_id="tenant123",
             powerbi_client_id="client456",
-            powerbi_client_secret="secret789"
+            powerbi_client_secret="secret789",
         )
 
         assert schema.inbound_connector == "powerbi"
@@ -38,8 +40,7 @@ class TestMeasureConversionPipelineSchema:
     def test_schema_initialization_yaml_minimal(self):
         """Test schema with minimal YAML parameters"""
         schema = MeasureConversionPipelineSchema(
-            inbound_connector="yaml",
-            yaml_content="version: 0.1\nkpis: []"
+            inbound_connector="yaml", yaml_content="version: 0.1\nkpis: []"
         )
 
         assert schema.inbound_connector == "yaml"
@@ -62,7 +63,7 @@ class TestMeasureConversionPipelineSchema:
             sql_dialect="postgresql",
             sql_include_comments=True,
             sql_process_structures=True,
-            definition_name="test_conversion"
+            definition_name="test_conversion",
         )
 
         assert schema.powerbi_tenant_id == "tenant123"
@@ -82,7 +83,7 @@ class TestMeasureConversionPipelineSchema:
             outbound_format="uc_metrics",
             uc_catalog="analytics",
             uc_schema="metrics",
-            uc_process_structures=True
+            uc_process_structures=True,
         )
 
         assert schema.outbound_format == "uc_metrics"
@@ -110,7 +111,7 @@ class TestMeasureConversionPipelineTool:
             powerbi_client_id="client456",
             powerbi_client_secret="secret789",
             outbound_format="sql",
-            sql_dialect="databricks"
+            sql_dialect="databricks",
         )
 
     @pytest.fixture
@@ -119,7 +120,7 @@ class TestMeasureConversionPipelineTool:
         return MeasureConversionPipelineTool(
             inbound_connector="yaml",
             yaml_content="version: 0.1\nkpis: []",
-            outbound_format="dax"
+            outbound_format="dax",
         )
 
     def _set_default_config(self, tool, **overrides):
@@ -141,31 +142,29 @@ class TestMeasureConversionPipelineTool:
         assert tool.name == "Measure Conversion Pipeline"
         assert "Universal measure conversion pipeline" in tool.description
         assert tool.args_schema == MeasureConversionPipelineSchema
-        assert hasattr(tool, '_pipeline')
+        assert hasattr(tool, "_pipeline")
 
     def test_tool_initialization_with_config(self, tool_preconfigured_powerbi_to_sql):
         """Test tool initializes with pre-configured parameters"""
         tool = tool_preconfigured_powerbi_to_sql
-        assert hasattr(tool, '_default_config')
-        assert tool._default_config['inbound_connector'] == "powerbi"
-        assert tool._default_config['powerbi_semantic_model_id'] == "model123"
-        assert tool._default_config['outbound_format'] == "sql"
+        assert hasattr(tool, "_default_config")
+        assert tool._default_config["inbound_connector"] == "powerbi"
+        assert tool._default_config["powerbi_semantic_model_id"] == "model123"
+        assert tool._default_config["outbound_format"] == "sql"
 
     def test_tool_has_required_attributes(self, tool):
         """Test tool has all required CrewAI tool attributes"""
-        assert hasattr(tool, 'name')
-        assert hasattr(tool, 'description')
-        assert hasattr(tool, 'args_schema')
-        assert hasattr(tool, '_run')
+        assert hasattr(tool, "name")
+        assert hasattr(tool, "description")
+        assert hasattr(tool, "args_schema")
+        assert hasattr(tool, "_run")
 
     # ========== Run Method Tests - Parameter Validation ==========
 
     def test_run_invalid_inbound_connector(self, tool):
         """Test _run fails with invalid inbound_connector"""
         self._set_default_config(tool, inbound_connector="invalid_connector")
-        result = tool._run(
-            powerbi_semantic_model_id="model123"
-        )
+        result = tool._run(powerbi_semantic_model_id="model123")
 
         assert "Error" in result
         assert "Unsupported inbound_connector" in result
@@ -247,7 +246,7 @@ class TestMeasureConversionPipelineTool:
 
     # ========== Run Method Tests - Power BI Success Paths ==========
 
-    @patch('src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline')
+    @patch("src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline")
     def test_run_powerbi_to_dax_success(self, mock_pipeline_class, tool):
         """Test _run Power BI to DAX conversion"""
         mock_pipeline = Mock()
@@ -260,11 +259,11 @@ class TestMeasureConversionPipelineTool:
                 {
                     "name": "Total Sales",
                     "expression": "SUM(Sales[Amount])",
-                    "description": "Total sales"
+                    "description": "Total sales",
                 }
             ],
             "measure_count": 1,
-            "errors": []
+            "errors": [],
         }
 
         self._set_default_config(
@@ -284,7 +283,7 @@ class TestMeasureConversionPipelineTool:
         assert "Total Sales" in result
         assert "SUM(Sales[Amount])" in result
 
-    @patch('src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline')
+    @patch("src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline")
     def test_run_powerbi_to_sql_success(self, mock_pipeline_class, tool):
         """Test _run Power BI to SQL conversion"""
         mock_pipeline = Mock()
@@ -295,7 +294,7 @@ class TestMeasureConversionPipelineTool:
             "success": True,
             "output": "SELECT SUM(amount) as total_sales FROM sales",
             "measure_count": 1,
-            "errors": []
+            "errors": [],
         }
 
         self._set_default_config(
@@ -315,7 +314,7 @@ class TestMeasureConversionPipelineTool:
         assert "SQL" in result
         assert "SELECT SUM(amount)" in result
 
-    @patch('src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline')
+    @patch("src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline")
     def test_run_powerbi_to_uc_metrics_success(self, mock_pipeline_class, tool):
         """Test _run Power BI to UC Metrics conversion"""
         mock_pipeline = Mock()
@@ -326,7 +325,7 @@ class TestMeasureConversionPipelineTool:
             "success": True,
             "output": "version: 0.1\nmeasures:\n  - name: total_sales",
             "measure_count": 1,
-            "errors": []
+            "errors": [],
         }
 
         self._set_default_config(
@@ -349,9 +348,11 @@ class TestMeasureConversionPipelineTool:
 
     # ========== Run Method Tests - YAML Success Paths ==========
 
-    @patch('src.services.converters.formats.powerbi.DAXGenerator')
-    @patch('src.services.converters.common.transformers.yaml.YAMLKPIParser')
-    def test_run_yaml_to_dax_success(self, mock_yaml_parser_class, mock_dax_generator_class, tool):
+    @patch("src.services.converters.formats.powerbi.DAXGenerator")
+    @patch("src.services.converters.common.transformers.yaml.YAMLKPIParser")
+    def test_run_yaml_to_dax_success(
+        self, mock_yaml_parser_class, mock_dax_generator_class, tool
+    ):
         """Test _run YAML to DAX conversion"""
         # Mock YAML parser
         mock_parser = Mock()
@@ -386,10 +387,12 @@ class TestMeasureConversionPipelineTool:
         assert "DAX" in result
         assert "Total Sales" in result
 
-    @patch('src.services.converters.formats.sql.SQLTranslationOptions')
-    @patch('src.services.converters.formats.sql.SQLGenerator')
-    @patch('src.services.converters.common.transformers.yaml.YAMLKPIParser')
-    def test_run_yaml_to_sql_success(self, mock_yaml_parser_class, mock_sql_generator_class, mock_options_class, tool):
+    @patch("src.services.converters.formats.sql.SQLTranslationOptions")
+    @patch("src.services.converters.formats.sql.SQLGenerator")
+    @patch("src.services.converters.common.transformers.yaml.YAMLKPIParser")
+    def test_run_yaml_to_sql_success(
+        self, mock_yaml_parser_class, mock_sql_generator_class, mock_options_class, tool
+    ):
         """Test _run YAML to SQL conversion"""
         # Mock YAML parser
         mock_parser = Mock()
@@ -430,9 +433,11 @@ class TestMeasureConversionPipelineTool:
         assert "YAML Measures" in result
         assert "SQL" in result
 
-    @patch('src.services.converters.formats.uc_metrics.UCMetricsGenerator')
-    @patch('src.services.converters.common.transformers.yaml.YAMLKPIParser')
-    def test_run_yaml_to_uc_metrics_success(self, mock_yaml_parser_class, mock_uc_generator_class, tool):
+    @patch("src.services.converters.formats.uc_metrics.UCMetricsGenerator")
+    @patch("src.services.converters.common.transformers.yaml.YAMLKPIParser")
+    def test_run_yaml_to_uc_metrics_success(
+        self, mock_yaml_parser_class, mock_uc_generator_class, tool
+    ):
         """Test _run YAML to UC Metrics conversion"""
         # Mock YAML parser
         mock_parser = Mock()
@@ -446,7 +451,9 @@ class TestMeasureConversionPipelineTool:
         mock_generator = Mock()
         mock_uc_generator_class.return_value = mock_generator
         mock_generator.generate_consolidated_uc_metrics.return_value = Mock()
-        mock_generator.format_consolidated_uc_metrics_yaml.return_value = "version: 0.1\nmeasures: []"
+        mock_generator.format_consolidated_uc_metrics_yaml.return_value = (
+            "version: 0.1\nmeasures: []"
+        )
 
         self._set_default_config(
             tool,
@@ -464,8 +471,10 @@ class TestMeasureConversionPipelineTool:
 
     # ========== Run Method Tests - Pre-configured Tool ==========
 
-    @patch('src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline')
-    def test_run_preconfigured_tool_without_parameters(self, mock_pipeline_class, tool_preconfigured_powerbi_to_sql):
+    @patch("src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline")
+    def test_run_preconfigured_tool_without_parameters(
+        self, mock_pipeline_class, tool_preconfigured_powerbi_to_sql
+    ):
         """Test _run with pre-configured tool using no runtime parameters"""
         tool = tool_preconfigured_powerbi_to_sql
         mock_pipeline = Mock()
@@ -476,7 +485,7 @@ class TestMeasureConversionPipelineTool:
             "success": True,
             "output": "SELECT * FROM table",
             "measure_count": 1,
-            "errors": []
+            "errors": [],
         }
 
         # Call with no parameters - should use pre-configured values
@@ -486,8 +495,10 @@ class TestMeasureConversionPipelineTool:
         # Verify it used pre-configured values
         mock_pipeline.execute.assert_called_once()
 
-    @patch('src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline')
-    def test_run_preconfigured_tool_override_parameters(self, mock_pipeline_class, tool_preconfigured_powerbi_to_sql):
+    @patch("src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline")
+    def test_run_preconfigured_tool_override_parameters(
+        self, mock_pipeline_class, tool_preconfigured_powerbi_to_sql
+    ):
         """Test _run with pre-configured tool overriding parameters at runtime"""
         tool = tool_preconfigured_powerbi_to_sql
         mock_pipeline = Mock()
@@ -498,7 +509,7 @@ class TestMeasureConversionPipelineTool:
             "success": True,
             "output": "SELECT * FROM table",
             "measure_count": 1,
-            "errors": []
+            "errors": [],
         }
 
         # Override sql_dialect at runtime
@@ -506,7 +517,7 @@ class TestMeasureConversionPipelineTool:
 
         assert "Error" not in result
         call_args = mock_pipeline.execute.call_args
-        assert call_args[1]['outbound_params']['dialect'] == "postgresql"
+        assert call_args[1]["outbound_params"]["dialect"] == "postgresql"
 
     # ========== Run Method Tests - Parameter Resolution ==========
 
@@ -544,7 +555,7 @@ class TestMeasureConversionPipelineTool:
 
     # ========== Run Method Tests - Error Handling ==========
 
-    @patch('src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline')
+    @patch("src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline")
     def test_run_pipeline_failure(self, mock_pipeline_class, tool):
         """Test _run handles pipeline failure"""
         mock_pipeline = Mock()
@@ -555,7 +566,7 @@ class TestMeasureConversionPipelineTool:
             "success": False,
             "output": None,
             "measure_count": 0,
-            "errors": ["Connection failed", "Authentication error"]
+            "errors": ["Connection failed", "Authentication error"],
         }
 
         self._set_default_config(
@@ -573,7 +584,7 @@ class TestMeasureConversionPipelineTool:
         assert "Error" in result
         assert "Conversion failed" in result
 
-    @patch('src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline')
+    @patch("src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline")
     def test_run_exception_handling(self, mock_pipeline_class, tool):
         """Test _run handles exceptions gracefully"""
         mock_pipeline = Mock()
@@ -597,7 +608,7 @@ class TestMeasureConversionPipelineTool:
         assert "Error" in result
         assert "Unexpected error" in result
 
-    @patch('src.services.converters.common.transformers.yaml.YAMLKPIParser')
+    @patch("src.services.converters.common.transformers.yaml.YAMLKPIParser")
     def test_run_yaml_conversion_exception(self, mock_yaml_parser_class, tool):
         """Test _run handles YAML conversion exceptions"""
         mock_parser = Mock()
@@ -624,7 +635,7 @@ class TestMeasureConversionPipelineTool:
             {
                 "name": "Measure1",
                 "expression": "SUM(Table[Column])",
-                "description": "Test measure"
+                "description": "Test measure",
             }
         ]
 
@@ -633,7 +644,7 @@ class TestMeasureConversionPipelineTool:
             inbound_connector="powerbi",
             outbound_format="dax",
             measure_count=1,
-            source_id="model123"
+            source_id="model123",
         )
 
         assert "Power BI Measures" in result
@@ -655,7 +666,7 @@ class TestMeasureConversionPipelineTool:
             inbound_connector="yaml",
             outbound_format="sql",
             measure_count=1,
-            source_id="yaml_file"
+            source_id="yaml_file",
         )
 
         assert "YAML Measures" in result
@@ -669,7 +680,7 @@ class TestMeasureConversionPipelineTool:
             inbound_connector="powerbi",
             outbound_format="sql",
             measure_count=1,
-            source_id="model123"
+            source_id="model123",
         )
 
         assert "Power BI Measures" in result
@@ -682,7 +693,7 @@ class TestMeasureConversionPipelineTool:
             {
                 "name": "total_sales",
                 "sql": "SELECT SUM(amount) FROM sales",
-                "is_transpilable": True
+                "is_transpilable": True,
             }
         ]
 
@@ -691,7 +702,7 @@ class TestMeasureConversionPipelineTool:
             inbound_connector="powerbi",
             outbound_format="sql",
             measure_count=1,
-            source_id="model123"
+            source_id="model123",
         )
 
         assert "total_sales" in result
@@ -704,7 +715,7 @@ class TestMeasureConversionPipelineTool:
             inbound_connector="yaml",
             outbound_format="sql",
             measure_count=0,
-            source_id="yaml_file"
+            source_id="yaml_file",
         )
 
         assert "No SQL queries generated" in result
@@ -716,7 +727,7 @@ class TestMeasureConversionPipelineTool:
             inbound_connector="powerbi",
             outbound_format="uc_metrics",
             measure_count=1,
-            source_id="model123"
+            source_id="model123",
         )
 
         assert "Power BI Measures" in result
@@ -730,7 +741,7 @@ class TestMeasureConversionPipelineTool:
             inbound_connector="powerbi",
             outbound_format="yaml",
             measure_count=1,
-            source_id="model123"
+            source_id="model123",
         )
 
         assert "Power BI Measures" in result
@@ -739,7 +750,7 @@ class TestMeasureConversionPipelineTool:
 
     # ========== Edge Cases ==========
 
-    @patch('src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline')
+    @patch("src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline")
     def test_run_with_service_principal_auth(self, mock_pipeline_class, tool):
         """Test _run with Service Principal authentication"""
         mock_pipeline = Mock()
@@ -750,7 +761,7 @@ class TestMeasureConversionPipelineTool:
             "success": True,
             "output": [],
             "measure_count": 0,
-            "errors": []
+            "errors": [],
         }
 
         self._set_default_config(
@@ -767,7 +778,7 @@ class TestMeasureConversionPipelineTool:
 
         assert "Error" not in result
 
-    @patch('src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline')
+    @patch("src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline")
     def test_run_with_device_code_auth(self, mock_pipeline_class, tool):
         """Test _run with device code authentication"""
         mock_pipeline = Mock()
@@ -778,7 +789,7 @@ class TestMeasureConversionPipelineTool:
             "success": True,
             "output": [],
             "measure_count": 0,
-            "errors": []
+            "errors": [],
         }
 
         self._set_default_config(
@@ -795,7 +806,7 @@ class TestMeasureConversionPipelineTool:
 
         assert "Error" not in result
 
-    @patch('src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline')
+    @patch("src.services.tools.measure_conversion_pipeline_tool.ConversionPipeline")
     def test_run_with_all_optional_parameters(self, mock_pipeline_class, tool):
         """Test _run with all optional parameters"""
         mock_pipeline = Mock()
@@ -806,7 +817,7 @@ class TestMeasureConversionPipelineTool:
             "success": True,
             "output": "SELECT * FROM table",
             "measure_count": 1,
-            "errors": []
+            "errors": [],
         }
 
         self._set_default_config(
@@ -826,7 +837,7 @@ class TestMeasureConversionPipelineTool:
             sql_dialect="snowflake",
             sql_include_comments=True,
             sql_process_structures=True,
-            definition_name="custom_name"
+            definition_name="custom_name",
         )
 
         assert "Error" not in result
@@ -843,17 +854,15 @@ class TestMeasureConversionPipelineTool:
             powerbi_client_secret="secret789",
             outbound_format="dax",
         )
-        with patch.object(tool._pipeline, 'execute') as mock_execute:
+        with patch.object(tool._pipeline, "execute") as mock_execute:
             mock_execute.return_value = {
                 "success": True,
                 "output": [],
                 "measure_count": 0,
-                "errors": []
+                "errors": [],
             }
 
             # This tests that execution_inputs would be used if provided
-            result = tool._run(
-                execution_inputs={"dataset_id": "override_model"}
-            )
+            result = tool._run(execution_inputs={"dataset_id": "override_model"})
 
             assert "Error" not in result

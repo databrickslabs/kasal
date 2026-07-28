@@ -1,4 +1,5 @@
 """Scan Data Parser — extract PBI native SQL + M transforms from scan JSON."""
+
 from __future__ import annotations
 
 import re
@@ -11,7 +12,7 @@ class ScanDataParser:
 
     _RE_NATIVE_SQL = re.compile(
         r'Value\.NativeQuery\s*\(\s*\w+\s*,\s*"(.*?)"'
-        r'\s*,\s*\n?\s*null\s*,\s*\[EnableFolding\s*=\s*true\]',
+        r"\s*,\s*\n?\s*null\s*,\s*\[EnableFolding\s*=\s*true\]",
         re.DOTALL,
     )
 
@@ -20,7 +21,9 @@ class ScanDataParser:
         re.DOTALL,
     )
 
-    def parse(self, json_source: str | dict, dataset_name: str | None = None) -> dict[str, ScanTableInfo]:
+    def parse(
+        self, json_source: str | dict, dataset_name: str | None = None
+    ) -> dict[str, ScanTableInfo]:
         """Parse scan JSON → dict[pbi_table_name, ScanTableInfo].
 
         Args:
@@ -28,80 +31,89 @@ class ScanDataParser:
             dataset_name: Optional PBI dataset name. If None, auto-selects.
         """
         import json as _json
+
         if isinstance(json_source, str):
             with open(json_source) as f:
                 data = _json.load(f)
         else:
             data = json_source
 
-        workspaces = data.get('workspaces', [])
+        workspaces = data.get("workspaces", [])
         if not workspaces:
             return {}
         ws = workspaces[0]
-        datasets = ws.get('datasets', [])
+        datasets = ws.get("datasets", [])
         if not datasets:
             return {}
 
         if dataset_name:
-            ds = next((d for d in datasets if d.get('name') == dataset_name), None)
+            ds = next((d for d in datasets if d.get("name") == dataset_name), None)
             if not ds:
                 return {}
         else:
-            ds = max(datasets, key=lambda d: sum(
-                1 for t in d.get('tables', [])
-                for s in t.get('source', [])
-                if 'NativeQuery' in str(s.get('expression', ''))
-            ))
+            ds = max(
+                datasets,
+                key=lambda d: sum(
+                    1
+                    for t in d.get("tables", [])
+                    for s in t.get("source", [])
+                    if "NativeQuery" in str(s.get("expression", ""))
+                ),
+            )
 
         # Extract RLS roles if present
         rls_tables: set[str] = set()
-        for role in ds.get('roles', []):
-            for table_permission in role.get('tablePermissions', []):
-                tbl_name = table_permission.get('name', '')
+        for role in ds.get("roles", []):
+            for table_permission in role.get("tablePermissions", []):
+                tbl_name = table_permission.get("name", "")
                 if tbl_name:
                     rls_tables.add(tbl_name)
         self._rls_tables = rls_tables
 
         # Track tables with refresh policies
         self._refresh_policy_tables: list[dict] = []
-        for table in ds.get('tables', []):
-            refresh_policy = table.get('refreshPolicy')
+        for table in ds.get("tables", []):
+            refresh_policy = table.get("refreshPolicy")
             if refresh_policy:
-                self._refresh_policy_tables.append({
-                    'table_name': table['name'],
-                    'policy': str(refresh_policy),
-                })
+                self._refresh_policy_tables.append(
+                    {
+                        "table_name": table["name"],
+                        "policy": str(refresh_policy),
+                    }
+                )
 
         # Track columns with SummarizeBy = None (should not be aggregated)
         self._no_summarize_columns: list[dict] = []
-        for table in ds.get('tables', []):
-            for col in table.get('columns', []):
-                summarize_by = col.get('summarizeBy', '')
-                if summarize_by and summarize_by.lower() == 'none':
-                    self._no_summarize_columns.append({
-                        'table_name': table['name'],
-                        'column_name': col.get('name', ''),
-                        'summarize_by': summarize_by,
-                    })
+        for table in ds.get("tables", []):
+            for col in table.get("columns", []):
+                summarize_by = col.get("summarizeBy", "")
+                if summarize_by and summarize_by.lower() == "none":
+                    self._no_summarize_columns.append(
+                        {
+                            "table_name": table["name"],
+                            "column_name": col.get("name", ""),
+                            "summarize_by": summarize_by,
+                        }
+                    )
 
         result: dict[str, ScanTableInfo] = {}
-        for table in ds.get('tables', []):
-            sources = table.get('source', [])
+        for table in ds.get("tables", []):
+            sources = table.get("source", [])
             if not sources:
                 continue
-            expr = sources[0].get('expression', '')
-            if 'Value.NativeQuery' not in expr:
+            expr = sources[0].get("expression", "")
+            if "Value.NativeQuery" not in expr:
                 continue
 
-            pbi_name = table['name']
+            pbi_name = table["name"]
             native_sql = self._extract_native_sql(expr)
             if not native_sql:
                 continue
 
             m_steps = self._parse_m_steps(expr)
-            has_union = 'union' in native_sql.lower()
-            pbi_columns = table.get('columns', [])
-            storage_mode = table.get('storageMode', '')
+            has_union = "union" in native_sql.lower()
+            pbi_columns = table.get("columns", [])
+            storage_mode = table.get("storageMode", "")
 
             result[pbi_name] = ScanTableInfo(
                 pbi_table_name=pbi_name,
@@ -117,43 +129,54 @@ class ScanDataParser:
 
     def get_rls_tables(self) -> set[str]:
         """Return the set of table names that have RLS roles defined."""
-        return getattr(self, '_rls_tables', set())
+        return getattr(self, "_rls_tables", set())
 
     def _extract_native_sql(self, m_expr: str) -> str:
         """Extract the SQL string from Value.NativeQuery(conn, "SQL", ...)."""
         m = self._RE_NATIVE_SQL.search(m_expr)
         if not m:
-            idx = m_expr.find('Value.NativeQuery')
+            idx = m_expr.find("Value.NativeQuery")
             if idx < 0:
-                return ''
+                return ""
             rest = m_expr[idx:]
-            comma_idx = rest.find(',')
+            comma_idx = rest.find(",")
             if comma_idx < 0:
-                return ''
-            after_comma = rest[comma_idx + 1:]
+                return ""
+            after_comma = rest[comma_idx + 1 :]
             q1 = after_comma.find('"')
             if q1 < 0:
-                return ''
-            remaining = after_comma[q1 + 1:]
-            end_pattern = re.search(r'"\s*,\s*\n?\s*null\s*,\s*\[EnableFolding', remaining)
+                return ""
+            remaining = after_comma[q1 + 1 :]
+            end_pattern = re.search(
+                r'"\s*,\s*\n?\s*null\s*,\s*\[EnableFolding', remaining
+            )
             if end_pattern:
-                return remaining[:end_pattern.start()].strip()
-            return ''
+                return remaining[: end_pattern.start()].strip()
+            return ""
         return m.group(1).strip()
 
     def _parse_m_steps(self, m_expr: str) -> list[MStep]:
         """Parse M transform steps after the NativeQuery/EnableFolding block."""
-        idx = m_expr.find('[EnableFolding=true])')
+        idx = m_expr.find("[EnableFolding=true])")
         if idx < 0:
             return []
-        rest = m_expr[idx + len('[EnableFolding=true])'):]
+        rest = m_expr[idx + len("[EnableFolding=true])") :]
 
         steps = []
-        for line in rest.split('\n'):
-            line = line.strip().rstrip(',')
-            if not line or line.startswith('Result') or line.startswith('in') or line.startswith('let'):
+        for line in rest.split("\n"):
+            line = line.strip().rstrip(",")
+            if (
+                not line
+                or line.startswith("Result")
+                or line.startswith("in")
+                or line.startswith("let")
+            ):
                 continue
-            if 'Table.FirstN' in line or 'RowLimit' in line or line.startswith('if RowLimit'):
+            if (
+                "Table.FirstN" in line
+                or "RowLimit" in line
+                or line.startswith("if RowLimit")
+            ):
                 continue
             m = self._RE_M_STEP.match(line)
             if m:
@@ -164,8 +187,8 @@ class ScanDataParser:
 
     def get_refresh_policy_tables(self) -> list[dict]:
         """Return tables that have incremental refresh policies in PBI."""
-        return getattr(self, '_refresh_policy_tables', [])
+        return getattr(self, "_refresh_policy_tables", [])
 
     def get_no_summarize_columns(self) -> list[dict]:
         """Return columns with SummarizeBy=None (should not be aggregated)."""
-        return getattr(self, '_no_summarize_columns', [])
+        return getattr(self, "_no_summarize_columns", [])

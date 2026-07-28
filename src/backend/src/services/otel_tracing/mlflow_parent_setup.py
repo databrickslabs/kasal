@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 try:  # mirror dispatcher's guarded import
     import mlflow as _mlflow  # noqa: F401
+
     _HAS_MLFLOW = True
 except Exception:  # pragma: no cover - mlflow always present in prod
     _mlflow = None
@@ -165,7 +166,7 @@ def _setup_sync(
 
         auth_header = headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
-            os.environ["DATABRICKS_TOKEN"] = auth_header[len("Bearer "):]
+            os.environ["DATABRICKS_TOKEN"] = auth_header[len("Bearer ") :]
             if not workspace_url.startswith("http"):
                 workspace_url = f"https://{workspace_url}"
             os.environ["DATABRICKS_HOST"] = workspace_url
@@ -178,7 +179,9 @@ def _setup_sync(
     except Exception as spn_err:
         logger.warning(
             "[%s] SPN extraction failed: %s: %s",
-            label, type(spn_err).__name__, spn_err,
+            label,
+            type(spn_err).__name__,
+            spn_err,
         )
 
     if not auth_method:
@@ -188,15 +191,17 @@ def _setup_sync(
     mlflow.set_tracking_uri("databricks")
 
     from src.services.otel_tracing.mlflow_setup import (
+        KASAL_TRACE_TABLE_PREFIX,
         _build_uc_trace_location,
         uc_experiment_name,
-        KASAL_TRACE_TABLE_PREFIX,
     )
 
     if warehouse_id:
         os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] = str(warehouse_id)
 
-    trace_location = _build_uc_trace_location(uc_catalog, uc_schema, warehouse_id, logger)
+    trace_location = _build_uc_trace_location(
+        uc_catalog, uc_schema, warehouse_id, logger
+    )
     uc_active = trace_location is not None
 
     if uc_active:
@@ -205,7 +210,12 @@ def _setup_sync(
         exp = mlflow.set_experiment(exp_name, trace_location=trace_location)
         logger.info(
             "[%s] MLflow trace storage: Unity Catalog %s.%s.%s_otel_* (warehouse=%s), experiment=%s",
-            label, uc_catalog, uc_schema, KASAL_TRACE_TABLE_PREFIX, warehouse_id, exp_name,
+            label,
+            uc_catalog,
+            uc_schema,
+            KASAL_TRACE_TABLE_PREFIX,
+            warehouse_id,
+            exp_name,
         )
     else:
         exp = mlflow.set_experiment(exp_name)
@@ -223,10 +233,12 @@ def _setup_sync(
             logger.info(
                 "[%s] UC trace storage: destination auto-resolves to experiment %s "
                 "(Databricks experiment-id destination intentionally NOT set)",
-                label, getattr(exp, "experiment_id", "?"),
+                label,
+                getattr(exp, "experiment_id", "?"),
             )
         else:
             from mlflow.tracing.destination import Databricks as _Dest
+
             mlflow.tracing.set_destination(
                 _Dest(experiment_id=str(getattr(exp, "experiment_id", "")))
             )
@@ -288,11 +300,15 @@ async def configure_parent_mlflow_tracing(
             from src.services.mlflow.service import MLflowService
 
             group_id = (
-                getattr(group_context, "primary_group_id", None) if group_context else None
+                getattr(group_context, "primary_group_id", None)
+                if group_context
+                else None
             )
             svc = MLflowService(session, group_id=group_id)
             if not await svc.is_enabled():
-                logger.info("[%s] MLflow disabled for this workspace; skipping tracing", label)
+                logger.info(
+                    "[%s] MLflow disabled for this workspace; skipping tracing", label
+                )
                 _off_cache[group_key] = time.monotonic() + _SETUP_TTL_SECONDS
                 set_mlflow_tracing(False)
                 return False
@@ -317,7 +333,11 @@ async def configure_parent_mlflow_tracing(
                     uc_schema = getattr(db_config, "db_schema", None)
                     warehouse_id = getattr(db_config, "warehouse_id", None)
             except Exception as cfg_err:
-                logger.info("[%s] Could not fetch MLflow config: %s; using default", label, cfg_err)
+                logger.info(
+                    "[%s] Could not fetch MLflow config: %s; using default",
+                    label,
+                    cfg_err,
+                )
 
             setup_ok = await asyncio.to_thread(
                 _setup_sync, exp_name, uc_catalog, uc_schema, warehouse_id, label

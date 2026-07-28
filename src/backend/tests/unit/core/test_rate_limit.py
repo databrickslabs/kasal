@@ -8,6 +8,7 @@ Two layers:
     ``importorskip("limits")`` so it runs in CI (where uv sync installs the
     ``limits`` package) and skips cleanly in a venv that hasn't synced it yet.
 """
+
 import os
 from unittest.mock import patch
 
@@ -46,7 +47,9 @@ async def _invoke(mw, scope):
         return {"type": "http.request", "body": b"", "more_body": False}
 
     await mw(scope, receive, send)
-    status = next((m["status"] for m in sent if m["type"] == "http.response.start"), None)
+    status = next(
+        (m["status"] for m in sent if m["type"] == "http.response.start"), None
+    )
     return status, sent
 
 
@@ -54,32 +57,41 @@ async def _invoke(mw, scope):
 #  Pure logic — no optional deps required
 # --------------------------------------------------------------------------- #
 class TestShouldLimit:
-    @pytest.mark.parametrize("path", [
-        "/api/v1/agents",
-        "/api/v1/executions",
-        "/api/generate",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/v1/agents",
+            "/api/v1/executions",
+            "/api/generate",
+        ],
+    )
     def test_api_paths_are_limited(self, path):
         assert RateLimitMiddleware._should_limit(path) is True
 
-    @pytest.mark.parametrize("path", [
-        "/",                         # SPA root
-        "/assets/main.js",           # static asset
-        "/static/index.css",
-        "/docs/guide.md",
-        "/health",                   # non-API health
-        "/favicon.ico",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/",  # SPA root
+            "/assets/main.js",  # static asset
+            "/static/index.css",
+            "/docs/guide.md",
+            "/health",  # non-API health
+            "/favicon.ico",
+        ],
+    )
     def test_non_api_paths_are_exempt(self, path):
         assert RateLimitMiddleware._should_limit(path) is False
 
-    @pytest.mark.parametrize("path", [
-        "/api/v1/sse/executions/job-1/stream",   # SSE (contains /sse/)
-        "/api/v1/runs/abc/stream",               # ends with /stream
-        "/api/v1/health",                        # health under /api
-        "/api/v1/healthcheck",
-        "/api/v1/healthz",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/v1/sse/executions/job-1/stream",  # SSE (contains /sse/)
+            "/api/v1/runs/abc/stream",  # ends with /stream
+            "/api/v1/health",  # health under /api
+            "/api/v1/healthcheck",
+            "/api/v1/healthz",
+        ],
+    )
     def test_sse_and_health_under_api_are_exempt(self, path):
         assert RateLimitMiddleware._should_limit(path) is False
 
@@ -90,7 +102,9 @@ class TestIdentity:
         assert RateLimitMiddleware._identity(scope) == "user:alice@example.com"
 
     def test_auth_request_email_fallback(self):
-        scope = _scope("/api/x", headers=[(b"x-auth-request-email", b"bob@example.com")])
+        scope = _scope(
+            "/api/x", headers=[(b"x-auth-request-email", b"bob@example.com")]
+        )
         assert RateLimitMiddleware._identity(scope) == "user:bob@example.com"
 
     def test_falls_back_to_client_ip(self):
@@ -102,8 +116,12 @@ class TestIdentity:
         assert RateLimitMiddleware._identity(scope) == "ip:unknown"
 
     def test_two_users_get_distinct_keys(self):
-        a = RateLimitMiddleware._identity(_scope("/api/x", [(b"x-forwarded-email", b"a@x.com")]))
-        b = RateLimitMiddleware._identity(_scope("/api/x", [(b"x-forwarded-email", b"b@x.com")]))
+        a = RateLimitMiddleware._identity(
+            _scope("/api/x", [(b"x-forwarded-email", b"a@x.com")])
+        )
+        b = RateLimitMiddleware._identity(
+            _scope("/api/x", [(b"x-forwarded-email", b"b@x.com")])
+        )
         assert a != b
 
 
@@ -157,11 +175,14 @@ class TestDisabledPassThrough:
 # --------------------------------------------------------------------------- #
 def _active_mw(app, limit="3/minute"):
     """Construct an ACTIVE middleware with a tiny in-memory limit."""
-    with patch.dict(os.environ, {
-        "RATE_LIMIT_ENABLED": "true",
-        "RATE_LIMIT_DEFAULT": limit,
-        "RATE_LIMIT_STORAGE_URI": "memory://",
-    }):
+    with patch.dict(
+        os.environ,
+        {
+            "RATE_LIMIT_ENABLED": "true",
+            "RATE_LIMIT_DEFAULT": limit,
+            "RATE_LIMIT_STORAGE_URI": "memory://",
+        },
+    ):
         return RateLimitMiddleware(app)
 
 
@@ -207,7 +228,7 @@ class TestActiveEnforcement:
         app = RecordingApp()
         mw = _active_mw(app, "1/minute")
         scope = _scope("/api/v1/agents", [(b"x-forwarded-email", b"u@x.com")])
-        await _invoke(mw, scope)               # consume the single token
+        await _invoke(mw, scope)  # consume the single token
         status, sent = await _invoke(mw, scope)  # this one is blocked
 
         assert status == 429

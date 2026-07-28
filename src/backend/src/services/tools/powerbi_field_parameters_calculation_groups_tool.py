@@ -16,14 +16,15 @@ Date: 2026
 
 import asyncio
 import base64
+import json
 import logging
 import re
-import json
-from typing import Any, Optional, Type, Dict, List
+from typing import Any, Dict, List, Optional, Type
+
+import httpx
+from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
-from pydantic import BaseModel, Field, PrivateAttr
-import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def _sql_lit(value: Any) -> str:
     (doubled) + strip NUL so a crafted label cannot break out of the literal. The
     markdown output path already did this inline; the SQL path did not (SEC ext-#1).
     """
-    return "'" + str(value).replace('\x00', '').replace("'", "''") + "'"
+    return "'" + str(value).replace("\x00", "").replace("'", "''") + "'"
 
 
 def _sql_int(value: Any, default: int = 0) -> int:
@@ -59,31 +60,30 @@ class PowerBIFieldParametersCalculationGroupsSchema(BaseModel):
     # ===== UNITY CATALOG TARGET CONFIGURATION =====
     target_catalog: str = Field(
         "main",
-        description="[Target] Unity Catalog catalog name for generated SQL (default: 'main')."
+        description="[Target] Unity Catalog catalog name for generated SQL (default: 'main').",
     )
     target_schema: str = Field(
         "default",
-        description="[Target] Unity Catalog schema name for generated SQL (default: 'default')."
+        description="[Target] Unity Catalog schema name for generated SQL (default: 'default').",
     )
 
     # ===== MEASURE TRANSLATION OPTIONS =====
     translate_measures: bool = Field(
         True,
-        description="[LLM] Whether to translate referenced DAX measures to SQL (default: True)."
+        description="[LLM] Whether to translate referenced DAX measures to SQL (default: True).",
     )
 
     # ===== OUTPUT OPTIONS =====
     include_sql_translation: bool = Field(
         True,
-        description="[Output] Include SQL equivalents for calculation items (default: True)."
+        description="[Output] Include SQL equivalents for calculation items (default: True).",
     )
     include_metadata_tables: bool = Field(
-        True,
-        description="[Output] Generate metadata table DDL (default: True)."
+        True, description="[Output] Generate metadata table DDL (default: True)."
     )
     output_format: str = Field(
         "markdown",
-        description="[Output] Output format: 'markdown', 'json', or 'sql' (default: 'markdown')."
+        description="[Output] Output format: 'markdown', 'json', or 'sql' (default: 'markdown').",
     )
 
 
@@ -135,17 +135,22 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
     def __init__(self, **kwargs: Any) -> None:
         """Initialize the tool with configuration."""
         import uuid
+
         instance_id = str(uuid.uuid4())[:8]
 
-        logger.info(f"[PowerBIFieldParametersCalculationGroupsTool.__init__] Instance ID: {instance_id}")
-        logger.info(f"[PowerBIFieldParametersCalculationGroupsTool.__init__] kwargs keys: {list(kwargs.keys())}")
+        logger.info(
+            f"[PowerBIFieldParametersCalculationGroupsTool.__init__] Instance ID: {instance_id}"
+        )
+        logger.info(
+            f"[PowerBIFieldParametersCalculationGroupsTool.__init__] kwargs keys: {list(kwargs.keys())}"
+        )
 
         # Helper to check if a value is a placeholder that should be treated as empty
         def is_placeholder_value(value: Any) -> bool:
             if not isinstance(value, str):
                 return False
             # Check for {placeholder} patterns
-            if re.search(r'^\{[a-z_]+\}$', value):
+            if re.search(r"^\{[a-z_]+\}$", value):
                 return True
             return False
 
@@ -153,7 +158,9 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         def get_filtered_value(key: str, default: Any = None) -> Any:
             value = kwargs.get(key, default)
             if is_placeholder_value(value):
-                logger.info(f"[PowerBIFieldParametersCalculationGroupsTool.__init__] Filtering placeholder for {key}: {value}")
+                logger.info(
+                    f"[PowerBIFieldParametersCalculationGroupsTool.__init__] Filtering placeholder for {key}: {value}"
+                )
                 return default
             return value
 
@@ -178,27 +185,42 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             # LLM configuration
             "llm_workspace_url": get_filtered_value("llm_workspace_url"),
             "llm_token": get_filtered_value("llm_token"),
-            "llm_model": get_filtered_value("llm_model", "databricks-claude-sonnet-4-5"),
+            "llm_model": get_filtered_value(
+                "llm_model", "databricks-claude-sonnet-4-5"
+            ),
             # Feature flags
             "translate_measures": get_filtered_value("translate_measures", True),
-            "include_sql_translation": get_filtered_value("include_sql_translation", True),
-            "include_metadata_tables": get_filtered_value("include_metadata_tables", True),
+            "include_sql_translation": get_filtered_value(
+                "include_sql_translation", True
+            ),
+            "include_metadata_tables": get_filtered_value(
+                "include_metadata_tables", True
+            ),
             # Output options
             "output_format": get_filtered_value("output_format", "markdown"),
-            "mode": get_filtered_value("mode", "static"),  # Also store mode for debugging
+            "mode": get_filtered_value(
+                "mode", "static"
+            ),  # Also store mode for debugging
         }
 
         # Dynamic parameter resolution
         if execution_inputs:
             resolved_config = {}
             for key, value in default_config.items():
-                resolved_config[key] = self._resolve_placeholder(value, execution_inputs)
+                resolved_config[key] = self._resolve_placeholder(
+                    value, execution_inputs
+                )
             default_config = resolved_config
 
         # Log configuration (mask secrets)
-        safe_config = {k: v if 'secret' not in k.lower() and 'token' not in k.lower() else '***'
-                       for k, v in default_config.items() if v is not None}
-        logger.info(f"[PowerBIFieldParametersCalculationGroupsTool] Config: {safe_config}")
+        safe_config = {
+            k: v if "secret" not in k.lower() and "token" not in k.lower() else "***"
+            for k, v in default_config.items()
+            if v is not None
+        }
+        logger.info(
+            f"[PowerBIFieldParametersCalculationGroupsTool] Config: {safe_config}"
+        )
 
         # Call parent init
         tool_kwargs = {k: v for k, v in kwargs.items() if k not in default_config}
@@ -213,7 +235,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         if not isinstance(value, str):
             return value
 
-        placeholders = re.findall(r'\{(\w+)\}', value)
+        placeholders = re.findall(r"\{(\w+)\}", value)
         if not placeholders:
             return value
 
@@ -221,18 +243,22 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         for placeholder in placeholders:
             if placeholder in execution_inputs:
                 replacement = str(execution_inputs[placeholder])
-                resolved_value = resolved_value.replace(f'{{{placeholder}}}', replacement)
+                resolved_value = resolved_value.replace(
+                    f"{{{placeholder}}}", replacement
+                )
 
         return resolved_value
 
     def _run(self, **kwargs: Any) -> str:
         """Execute field parameters and calculation groups extraction."""
         try:
-            instance_id = getattr(self, '_instance_id', 'UNKNOWN')
-            logger.info(f"[PowerBIFieldParametersCalculationGroupsTool] Instance {instance_id} - _run() called")
+            instance_id = getattr(self, "_instance_id", "UNKNOWN")
+            logger.info(
+                f"[PowerBIFieldParametersCalculationGroupsTool] Instance {instance_id} - _run() called"
+            )
 
             # Extract execution_inputs
-            execution_inputs = kwargs.pop('execution_inputs', {})
+            execution_inputs = kwargs.pop("execution_inputs", {})
 
             # Filter placeholder values - including {placeholder} patterns from dynamic mode
             def is_placeholder(value: Any) -> bool:
@@ -243,19 +269,24 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                 if any(p in value.lower() for p in patterns):
                     return True
                 # Check for {placeholder} patterns (e.g., {workspace_id}, {dataset_id})
-                if re.search(r'^\{[a-z_]+\}$', value):
+                if re.search(r"^\{[a-z_]+\}$", value):
                     return True
                 return False
 
             filtered_kwargs = {
-                k: v for k, v in kwargs.items()
+                k: v
+                for k, v in kwargs.items()
                 if v is not None and not is_placeholder(v)
             }
 
             # Log what was filtered for debugging
-            filtered_out = {k: v for k, v in kwargs.items() if v is not None and is_placeholder(v)}
+            filtered_out = {
+                k: v for k, v in kwargs.items() if v is not None and is_placeholder(v)
+            }
             if filtered_out:
-                logger.info(f"[PowerBIFieldParametersCalculationGroupsTool] Filtered out placeholder kwargs: {list(filtered_out.keys())}")
+                logger.info(
+                    f"[PowerBIFieldParametersCalculationGroupsTool] Filtered out placeholder kwargs: {list(filtered_out.keys())}"
+                )
 
             # Merge with defaults - IMPORTANT: default_config must be second to override agent's values
             merged_kwargs = {**filtered_kwargs, **self._default_config}
@@ -264,7 +295,9 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             if execution_inputs:
                 resolved_kwargs = {}
                 for key, value in merged_kwargs.items():
-                    resolved_kwargs[key] = self._resolve_placeholder(value, execution_inputs)
+                    resolved_kwargs[key] = self._resolve_placeholder(
+                        value, execution_inputs
+                    )
                 merged_kwargs = resolved_kwargs
 
             # Extract and validate parameters
@@ -284,15 +317,25 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
 
             # DEBUG: Log auth config being used
             logger.info("=" * 80)
-            logger.info("[PowerBIFieldParametersCalculationGroupsTool] AUTH CONFIG DEBUG")
+            logger.info(
+                "[PowerBIFieldParametersCalculationGroupsTool] AUTH CONFIG DEBUG"
+            )
             logger.info("=" * 80)
             logger.info(f"  tenant_id: {auth_config.get('tenant_id')}")
             logger.info(f"  client_id: {auth_config.get('client_id')}")
-            logger.info(f"  client_secret: {'*' * len(auth_config.get('client_secret') or '') if auth_config.get('client_secret') else 'None'}")
+            logger.info(
+                f"  client_secret: {'*' * len(auth_config.get('client_secret') or '') if auth_config.get('client_secret') else 'None'}"
+            )
             logger.info(f"  username: {auth_config.get('username')}")
-            logger.info(f"  password: {'*' * len(auth_config.get('password') or '') if auth_config.get('password') else 'None'}")
-            logger.info(f"  auth_method: {auth_config.get('auth_method')} (type: {type(auth_config.get('auth_method'))})")
-            logger.info(f"  access_token: {'*' * 10 if auth_config.get('access_token') else 'None'}")
+            logger.info(
+                f"  password: {'*' * len(auth_config.get('password') or '') if auth_config.get('password') else 'None'}"
+            )
+            logger.info(
+                f"  auth_method: {auth_config.get('auth_method')} (type: {type(auth_config.get('auth_method'))})"
+            )
+            logger.info(
+                f"  access_token: {'*' * 10 if auth_config.get('access_token') else 'None'}"
+            )
             logger.info("=" * 80)
 
             # Log which authentication method will be used (auto-detect if not specified)
@@ -301,17 +344,26 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                 # Replicate AadService._determine_auth_method() logic
                 if auth_config.get("access_token"):
                     detected_auth_method = "user_oauth (pre-obtained token)"
-                elif (auth_config.get("client_id") and auth_config.get("client_secret") and
-                      auth_config.get("tenant_id")):
+                elif (
+                    auth_config.get("client_id")
+                    and auth_config.get("client_secret")
+                    and auth_config.get("tenant_id")
+                ):
                     detected_auth_method = "service_principal (auto-detected)"
-                elif (auth_config.get("username") and auth_config.get("password") and
-                      auth_config.get("client_id") and auth_config.get("tenant_id")):
+                elif (
+                    auth_config.get("username")
+                    and auth_config.get("password")
+                    and auth_config.get("client_id")
+                    and auth_config.get("tenant_id")
+                ):
                     detected_auth_method = "service_account (auto-detected)"
                 else:
                     detected_auth_method = "UNKNOWN - insufficient credentials"
 
             logger.info("=" * 80)
-            logger.info("[PowerBIFieldParametersCalculationGroupsTool] 🔑 AUTHENTICATION METHOD DETECTION")
+            logger.info(
+                "[PowerBIFieldParametersCalculationGroupsTool] 🔑 AUTHENTICATION METHOD DETECTION"
+            )
             logger.info("=" * 80)
             logger.info(f"  Detected auth method: {detected_auth_method}")
             logger.info("=" * 80)
@@ -320,7 +372,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             def has_unresolved_placeholder(value: Any) -> bool:
                 if not isinstance(value, str):
                     return False
-                return bool(re.search(r'\{[a-z_]+\}', value))
+                return bool(re.search(r"\{[a-z_]+\}", value))
 
             # Check for unresolved placeholders (dynamic mode without execution_inputs)
             unresolved = []
@@ -339,14 +391,27 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
 
             if unresolved:
                 # Log detailed debug info
-                mode = merged_kwargs.get('mode', 'unknown')
-                logger.error(f"[PowerBIFieldParametersCalculationGroupsTool] Unresolved placeholders: {unresolved}")
-                logger.error(f"[PowerBIFieldParametersCalculationGroupsTool] Mode: {mode}")
-                logger.error(f"[PowerBIFieldParametersCalculationGroupsTool] _default_config keys: {list(self._default_config.keys())}")
-                logger.error(f"[PowerBIFieldParametersCalculationGroupsTool] kwargs keys: {list(kwargs.keys())}")
+                mode = merged_kwargs.get("mode", "unknown")
+                logger.error(
+                    f"[PowerBIFieldParametersCalculationGroupsTool] Unresolved placeholders: {unresolved}"
+                )
+                logger.error(
+                    f"[PowerBIFieldParametersCalculationGroupsTool] Mode: {mode}"
+                )
+                logger.error(
+                    f"[PowerBIFieldParametersCalculationGroupsTool] _default_config keys: {list(self._default_config.keys())}"
+                )
+                logger.error(
+                    f"[PowerBIFieldParametersCalculationGroupsTool] kwargs keys: {list(kwargs.keys())}"
+                )
                 # Log actual values (mask secrets)
-                for param_name, param_value in [("workspace_id", workspace_id), ("dataset_id", dataset_id)]:
-                    logger.error(f"[PowerBIFieldParametersCalculationGroupsTool] {param_name}: {param_value}")
+                for param_name, param_value in [
+                    ("workspace_id", workspace_id),
+                    ("dataset_id", dataset_id),
+                ]:
+                    logger.error(
+                        f"[PowerBIFieldParametersCalculationGroupsTool] {param_name}: {param_value}"
+                    )
 
                 return (
                     f"Error: Unresolved placeholder(s) detected: {', '.join(unresolved)}\n\n"
@@ -374,35 +439,47 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
 
             # Validate authentication using shared utility (filters out placeholders)
             clean_auth_config = {
-                k: v for k, v in auth_config.items()
+                k: v
+                for k, v in auth_config.items()
                 if v and not has_unresolved_placeholder(v)
             }
             from src.services.tools.powerbi_auth_utils import validate_auth_config
+
             is_valid, error_msg = validate_auth_config(clean_auth_config)
             if not is_valid:
                 return f"Error: {error_msg}\n\nService Principal requires SemanticModel.ReadWrite.All permission."
 
             # Run async extraction
-            result = self._run_sync(self._extract_and_process(
-                workspace_id=workspace_id,
-                dataset_id=dataset_id,
-                auth_config=clean_auth_config,
-                target_catalog=merged_kwargs.get("target_catalog", "main"),
-                target_schema=merged_kwargs.get("target_schema", "default"),
-                include_sql_translation=merged_kwargs.get("include_sql_translation", True),
-                include_metadata_tables=merged_kwargs.get("include_metadata_tables", True),
-                output_format=merged_kwargs.get("output_format", "markdown"),
-            ))
+            result = self._run_sync(
+                self._extract_and_process(
+                    workspace_id=workspace_id,
+                    dataset_id=dataset_id,
+                    auth_config=clean_auth_config,
+                    target_catalog=merged_kwargs.get("target_catalog", "main"),
+                    target_schema=merged_kwargs.get("target_schema", "default"),
+                    include_sql_translation=merged_kwargs.get(
+                        "include_sql_translation", True
+                    ),
+                    include_metadata_tables=merged_kwargs.get(
+                        "include_metadata_tables", True
+                    ),
+                    output_format=merged_kwargs.get("output_format", "markdown"),
+                )
+            )
 
             return result
 
         except Exception as e:
-            logger.error(f"[PowerBIFieldParametersCalculationGroupsTool] Error: {str(e)}", exc_info=True)
+            logger.error(
+                f"[PowerBIFieldParametersCalculationGroupsTool] Error: {str(e)}",
+                exc_info=True,
+            )
             return f"Error: {str(e)}"
 
     def _run_sync(self, coro):
         """Run async coroutine from sync context (ContextVars preserved)."""
         from src.services.tools.async_bridge import run_async_with_context
+
         return run_async_with_context(coro)
 
     async def _extract_and_process(
@@ -448,26 +525,40 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         # Step 5: Extract referenced measures
         logger.info("Extracting referenced measures")
         all_measures = self._parse_all_measures(tmdl_parts)
-        referenced_measures = self._get_referenced_measures(field_parameters, all_measures)
+        referenced_measures = self._get_referenced_measures(
+            field_parameters, all_measures
+        )
 
         # Step 6: Generate output
         if output_format == "json":
             return self._format_json_output(
-                workspace_id, dataset_id,
-                field_parameters, calculation_groups,
-                referenced_measures, target_catalog, target_schema
+                workspace_id,
+                dataset_id,
+                field_parameters,
+                calculation_groups,
+                referenced_measures,
+                target_catalog,
+                target_schema,
             )
         elif output_format == "sql":
             return self._format_sql_output(
-                field_parameters, calculation_groups,
-                referenced_measures, target_catalog, target_schema
+                field_parameters,
+                calculation_groups,
+                referenced_measures,
+                target_catalog,
+                target_schema,
             )
         else:
             return self._format_markdown_output(
-                workspace_id, dataset_id,
-                field_parameters, calculation_groups,
-                referenced_measures, target_catalog, target_schema,
-                include_sql_translation, include_metadata_tables
+                workspace_id,
+                dataset_id,
+                field_parameters,
+                calculation_groups,
+                referenced_measures,
+                target_catalog,
+                target_schema,
+                include_sql_translation,
+                include_metadata_tables,
             )
 
     async def _fetch_tmdl_definition(
@@ -481,7 +572,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
 
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         async with httpx.AsyncClient(timeout=180.0) as client:
@@ -504,9 +595,13 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                         status = poll_data.get("status", "")
 
                         if status == "Succeeded":
-                            logger.info(f"Definition fetch succeeded after {attempt + 1} poll(s)")
+                            logger.info(
+                                f"Definition fetch succeeded after {attempt + 1} poll(s)"
+                            )
                             result_url = location + "/result"
-                            result_response = await client.get(result_url, headers=headers)
+                            result_response = await client.get(
+                                result_url, headers=headers
+                            )
                             result_response.raise_for_status()
                             definition = result_response.json()
                             return definition.get("definition", {}).get("parts", [])
@@ -527,13 +622,17 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                     return []
 
             except httpx.HTTPStatusError as e:
-                logger.error(f"HTTP error: {e.response.status_code} - {e.response.text}")
+                logger.error(
+                    f"HTTP error: {e.response.status_code} - {e.response.text}"
+                )
                 return []
             except Exception as e:
                 logger.error(f"Error fetching definition: {e}")
                 return []
 
-    def _parse_field_parameters(self, tmdl_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _parse_field_parameters(
+        self, tmdl_parts: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Parse TMDL parts to extract field parameters."""
         field_parameters = []
 
@@ -552,7 +651,9 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                     continue
 
                 # Extract table name
-                table_match = re.match(r"table\s+(?:'([^']+)'|(\w+))", tmdl_content.strip())
+                table_match = re.match(
+                    r"table\s+(?:'([^']+)'|(\w+))", tmdl_content.strip()
+                )
                 if not table_match:
                     continue
                 table_name = table_match.group(1) or table_match.group(2)
@@ -561,7 +662,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                 partition_match = re.search(
                     r"partition\s+['\"]?[^'\"=]+['\"]?\s*=\s*calculated.*?source\s*=\s*\{([^}]+)\}",
                     tmdl_content,
-                    re.DOTALL | re.IGNORECASE
+                    re.DOTALL | re.IGNORECASE,
                 )
 
                 if not partition_match:
@@ -572,17 +673,19 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                 # Parse tuples: ("Label", NAMEOF('table'[measure]), ordinal)
                 tuple_pattern = re.compile(
                     r'\(\s*"([^"]+)"\s*,\s*NAMEOF\s*\(\s*\'([^\']+)\'\s*\[([^\]]+)\]\s*\)\s*,\s*(\d+)\s*\)',
-                    re.IGNORECASE
+                    re.IGNORECASE,
                 )
 
                 items = []
                 for match in tuple_pattern.finditer(source_content):
-                    items.append({
-                        "label": match.group(1),
-                        "source_table": match.group(2),
-                        "source_measure": match.group(3),
-                        "ordinal": int(match.group(4))
-                    })
+                    items.append(
+                        {
+                            "label": match.group(1),
+                            "source_table": match.group(2),
+                            "source_measure": match.group(3),
+                            "ordinal": int(match.group(4)),
+                        }
+                    )
 
                 if not items:
                     continue
@@ -590,7 +693,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                 # Extract associated measure if exists
                 measure_match = re.search(
                     r"measure\s+['\"]?([^'\"\\n=]+)['\"]?\s*=\s*([\\s\\S]*?)(?=\\n\\s*column|\\n\\t[^\\t]|$)",
-                    tmdl_content
+                    tmdl_content,
                 )
 
                 associated_measure = None
@@ -599,23 +702,29 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                     associated_measure = measure_match.group(1).strip()
                     measure_expression = measure_match.group(2).strip()
 
-                field_parameters.append({
-                    "type": "Field Parameter",
-                    "name": table_name,
-                    "items": sorted(items, key=lambda x: x["ordinal"]),
-                    "associated_measure": associated_measure,
-                    "measure_expression": measure_expression,
-                    "raw_tmdl": tmdl_content
-                })
+                field_parameters.append(
+                    {
+                        "type": "Field Parameter",
+                        "name": table_name,
+                        "items": sorted(items, key=lambda x: x["ordinal"]),
+                        "associated_measure": associated_measure,
+                        "measure_expression": measure_expression,
+                        "raw_tmdl": tmdl_content,
+                    }
+                )
 
-                logger.info(f"Found field parameter: {table_name} with {len(items)} items")
+                logger.info(
+                    f"Found field parameter: {table_name} with {len(items)} items"
+                )
 
             except Exception as e:
                 logger.warning(f"Error parsing {path}: {e}")
 
         return field_parameters
 
-    def _parse_calculation_groups(self, tmdl_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _parse_calculation_groups(
+        self, tmdl_parts: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Parse TMDL parts to extract calculation groups."""
         calculation_groups = []
 
@@ -634,7 +743,9 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                     continue
 
                 # Extract table name
-                table_match = re.match(r"table\s+(?:'([^']+)'|(\w+))", tmdl_content.strip())
+                table_match = re.match(
+                    r"table\s+(?:'([^']+)'|(\w+))", tmdl_content.strip()
+                )
                 if not table_match:
                     continue
                 table_name = table_match.group(1) or table_match.group(2)
@@ -647,13 +758,15 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                 items = []
 
                 # Split by calculationItem to get each item
-                item_blocks = re.split(r'\n\s*calculationItem\s+', tmdl_content)
+                item_blocks = re.split(r"\n\s*calculationItem\s+", tmdl_content)
 
-                for i, block in enumerate(item_blocks[1:], 1):  # Skip first split (before first item)
+                for i, block in enumerate(
+                    item_blocks[1:], 1
+                ):  # Skip first split (before first item)
                     # Extract item name and expression
                     item_match = re.match(
                         r"(?:'([^']+)'|(\w+))\s*=\s*([\s\S]*?)(?=\n\s*calculationItem|\n\s*column|\Z)",
-                        block.strip()
+                        block.strip(),
                     )
 
                     if item_match:
@@ -662,39 +775,49 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
 
                         # Clean expression - remove trailing metadata
                         clean_lines = []
-                        for line in expression.split('\n'):
+                        for line in expression.split("\n"):
                             stripped = line.strip()
-                            if stripped.startswith(('lineageTag:', 'formatString:', 'annotation')):
+                            if stripped.startswith(
+                                ("lineageTag:", "formatString:", "annotation")
+                            ):
                                 break
                             clean_lines.append(line)
 
-                        clean_expression = '\n'.join(clean_lines).strip()
+                        clean_expression = "\n".join(clean_lines).strip()
 
-                        items.append({
-                            "name": item_name,
-                            "expression": clean_expression,
-                            "ordinal": i - 1
-                        })
+                        items.append(
+                            {
+                                "name": item_name,
+                                "expression": clean_expression,
+                                "ordinal": i - 1,
+                            }
+                        )
 
                 if not items:
                     continue
 
-                calculation_groups.append({
-                    "type": "Calculation Group",
-                    "name": table_name,
-                    "precedence": precedence,
-                    "items": items,
-                    "raw_tmdl": tmdl_content
-                })
+                calculation_groups.append(
+                    {
+                        "type": "Calculation Group",
+                        "name": table_name,
+                        "precedence": precedence,
+                        "items": items,
+                        "raw_tmdl": tmdl_content,
+                    }
+                )
 
-                logger.info(f"Found calculation group: {table_name} with {len(items)} items")
+                logger.info(
+                    f"Found calculation group: {table_name} with {len(items)} items"
+                )
 
             except Exception as e:
                 logger.warning(f"Error parsing {path}: {e}")
 
         return calculation_groups
 
-    def _parse_all_measures(self, tmdl_parts: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    def _parse_all_measures(
+        self, tmdl_parts: List[Dict[str, Any]]
+    ) -> Dict[str, Dict[str, Any]]:
         """Parse all measures from TMDL parts."""
         measures = {}
 
@@ -709,7 +832,9 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                 tmdl_content = base64.b64decode(payload).decode("utf-8")
 
                 # Extract table name
-                table_match = re.match(r"table\s+(?:'([^']+)'|(\w+))", tmdl_content.strip())
+                table_match = re.match(
+                    r"table\s+(?:'([^']+)'|(\w+))", tmdl_content.strip()
+                )
                 if not table_match:
                     continue
                 table_name = table_match.group(1) or table_match.group(2)
@@ -717,7 +842,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                 # Find all measures in this table
                 measure_pattern = re.compile(
                     r"measure\s+(?:'([^']+)'|(\w+))\s*=\s*([\s\S]*?)(?=\n\s*measure|\n\s*column|\n\t[^\t]|\Z)",
-                    re.MULTILINE
+                    re.MULTILINE,
                 )
 
                 for match in measure_pattern.finditer(tmdl_content):
@@ -726,16 +851,18 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
 
                     # Clean expression
                     clean_lines = []
-                    for line in expression.split('\n'):
+                    for line in expression.split("\n"):
                         stripped = line.strip()
-                        if stripped.startswith(('lineageTag:', 'formatString:', 'annotation')):
+                        if stripped.startswith(
+                            ("lineageTag:", "formatString:", "annotation")
+                        ):
                             break
                         clean_lines.append(line)
 
                     measures[measure_name] = {
                         "name": measure_name,
                         "table": table_name,
-                        "expression": '\n'.join(clean_lines).strip()
+                        "expression": "\n".join(clean_lines).strip(),
                     }
 
             except Exception as e:
@@ -746,7 +873,7 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
     def _get_referenced_measures(
         self,
         field_parameters: List[Dict[str, Any]],
-        all_measures: Dict[str, Dict[str, Any]]
+        all_measures: Dict[str, Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         """Get measures referenced by field parameters."""
         referenced = []
@@ -760,11 +887,13 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                     if measure_name in all_measures:
                         referenced.append(all_measures[measure_name])
                     else:
-                        referenced.append({
-                            "name": measure_name,
-                            "table": item.get("source_table"),
-                            "expression": None
-                        })
+                        referenced.append(
+                            {
+                                "name": measure_name,
+                                "table": item.get("source_table"),
+                                "expression": None,
+                            }
+                        )
 
         return referenced
 
@@ -784,7 +913,9 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         output = []
 
         # Header
-        output.append("# Power BI Field Parameters & Calculation Groups Extraction Results\n")
+        output.append(
+            "# Power BI Field Parameters & Calculation Groups Extraction Results\n"
+        )
         output.append(f"**Workspace ID**: `{workspace_id}`")
         output.append(f"**Dataset ID**: `{dataset_id}`")
         output.append(f"**Target**: `{target_catalog}.{target_schema}`\n")
@@ -799,14 +930,18 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
 
             for fp in field_parameters:
                 output.append(f"### {fp['name']}\n")
-                if fp.get('associated_measure'):
-                    output.append(f"**Associated Measure**: `{fp['associated_measure']}`\n")
+                if fp.get("associated_measure"):
+                    output.append(
+                        f"**Associated Measure**: `{fp['associated_measure']}`\n"
+                    )
 
                 output.append("**Items**:\n")
                 output.append("| Ordinal | Label | Source Table | Source Measure |")
                 output.append("|---------|-------|--------------|----------------|")
-                for item in fp['items']:
-                    output.append(f"| {item['ordinal']} | {item['label']} | {item['source_table']} | {item['source_measure']} |")
+                for item in fp["items"]:
+                    output.append(
+                        f"| {item['ordinal']} | {item['label']} | {item['source_table']} | {item['source_measure']} |"
+                    )
                 output.append("")
 
         # Calculation Groups Section
@@ -819,10 +954,10 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
                 output.append(f"**Precedence**: {cg['precedence']}\n")
                 output.append("**Calculation Items**:\n")
 
-                for item in cg['items']:
+                for item in cg["items"]:
                     output.append(f"#### {item['name']}\n")
                     output.append("```dax")
-                    output.append(item['expression'])
+                    output.append(item["expression"])
                     output.append("```\n")
 
         # Referenced Measures Section
@@ -833,9 +968,9 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             for measure in referenced_measures:
                 output.append(f"### {measure['name']}\n")
                 output.append(f"**Table**: `{measure['table']}`\n")
-                if measure.get('expression'):
+                if measure.get("expression"):
                     output.append("```dax")
-                    output.append(measure['expression'])
+                    output.append(measure["expression"])
                     output.append("```\n")
                 else:
                     output.append("*Expression not found in model*\n")
@@ -848,11 +983,19 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             # Field Parameters Metadata Table
             output.append("### Field Parameters Config Table\n")
             output.append("```sql")
-            output.append(f"CREATE TABLE IF NOT EXISTS {target_catalog}.{target_schema}._config_field_parameters (")
-            output.append("    parameter_name STRING COMMENT 'Field parameter table name',")
+            output.append(
+                f"CREATE TABLE IF NOT EXISTS {target_catalog}.{target_schema}._config_field_parameters ("
+            )
+            output.append(
+                "    parameter_name STRING COMMENT 'Field parameter table name',"
+            )
             output.append("    label STRING COMMENT 'User-friendly display label',")
-            output.append("    source_table STRING COMMENT 'Source table containing the measure',")
-            output.append("    source_measure STRING COMMENT 'Measure name in source table',")
+            output.append(
+                "    source_table STRING COMMENT 'Source table containing the measure',"
+            )
+            output.append(
+                "    source_measure STRING COMMENT 'Measure name in source table',"
+            )
             output.append("    ordinal INT COMMENT 'Sort order',")
             output.append("    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()")
             output.append(") COMMENT 'Configuration for Power BI field parameters';")
@@ -861,17 +1004,19 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             # Insert statements for field parameters
             if field_parameters:
                 output.append("```sql")
-                output.append(f"INSERT INTO {target_catalog}.{target_schema}._config_field_parameters VALUES")
+                output.append(
+                    f"INSERT INTO {target_catalog}.{target_schema}._config_field_parameters VALUES"
+                )
                 inserts = []
                 for fp in field_parameters:
-                    for item in fp['items']:
+                    for item in fp["items"]:
                         # SECURITY: escape single quotes so attacker-influenced PowerBI
                         # metadata cannot break out of these string literals, and force
                         # the numeric ordinal to an int (it is interpolated unquoted).
-                        _name = str(fp['name']).replace("'", "''")
-                        _label = str(item['label']).replace("'", "''")
-                        _src_table = str(item['source_table']).replace("'", "''")
-                        _src_measure = str(item['source_measure']).replace("'", "''")
+                        _name = str(fp["name"]).replace("'", "''")
+                        _label = str(item["label"]).replace("'", "''")
+                        _src_table = str(item["source_table"]).replace("'", "''")
+                        _src_measure = str(item["source_measure"]).replace("'", "''")
                         inserts.append(
                             f"    ('{_name}', '{_label}', '{_src_table}', "
                             f"'{_src_measure}', {int(item['ordinal'])}, CURRENT_TIMESTAMP())"
@@ -882,10 +1027,14 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             # Calculation Groups Metadata Table
             output.append("### Calculation Groups Config Table\n")
             output.append("```sql")
-            output.append(f"CREATE TABLE IF NOT EXISTS {target_catalog}.{target_schema}._config_calculation_groups (")
+            output.append(
+                f"CREATE TABLE IF NOT EXISTS {target_catalog}.{target_schema}._config_calculation_groups ("
+            )
             output.append("    group_name STRING COMMENT 'Calculation group name',")
             output.append("    item_name STRING COMMENT 'Calculation item name',")
-            output.append("    dax_expression STRING COMMENT 'Original DAX expression',")
+            output.append(
+                "    dax_expression STRING COMMENT 'Original DAX expression',"
+            )
             output.append("    precedence INT COMMENT 'Calculation group precedence',")
             output.append("    ordinal INT COMMENT 'Sort order within group',")
             output.append("    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()")
@@ -895,16 +1044,20 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             # Insert statements for calculation groups
             if calculation_groups:
                 output.append("```sql")
-                output.append(f"INSERT INTO {target_catalog}.{target_schema}._config_calculation_groups VALUES")
+                output.append(
+                    f"INSERT INTO {target_catalog}.{target_schema}._config_calculation_groups VALUES"
+                )
                 inserts = []
                 for cg in calculation_groups:
-                    for item in cg['items']:
+                    for item in cg["items"]:
                         # SECURITY: escape single quotes in ALL string literals
                         # (name fields too, not just the expression) and force the
                         # unquoted numeric fields to ints.
-                        escaped_expr = item['expression'].replace("'", "''").replace('\n', '\\n')
-                        _cg_name = str(cg['name']).replace("'", "''")
-                        _item_name = str(item['name']).replace("'", "''")
+                        escaped_expr = (
+                            item["expression"].replace("'", "''").replace("\n", "\\n")
+                        )
+                        _cg_name = str(cg["name"]).replace("'", "''")
+                        _item_name = str(item["name"]).replace("'", "''")
                         inserts.append(
                             f"    ('{_cg_name}', '{_item_name}', '{escaped_expr}', "
                             f"{int(cg['precedence'])}, {int(item['ordinal'])}, CURRENT_TIMESTAMP())"
@@ -919,48 +1072,74 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             output.append("*Equivalent SQL for common calculation group patterns:*\n")
 
             for cg in calculation_groups:
-                if "Time" in cg['name'] or "time" in cg['name'].lower():
+                if "Time" in cg["name"] or "time" in cg["name"].lower():
                     output.append(f"### {cg['name']} - SQL Equivalents\n")
 
-                    for item in cg['items']:
+                    for item in cg["items"]:
                         output.append(f"**{item['name']}**:\n")
 
                         # Generate SQL based on common patterns
-                        if item['name'].upper() == 'CURRENT':
+                        if item["name"].upper() == "CURRENT":
                             output.append("```sql")
-                            output.append("-- Current: No date filter, use measure as-is")
-                            output.append("SELECT SUM(measure_column) AS value FROM table_name;")
+                            output.append(
+                                "-- Current: No date filter, use measure as-is"
+                            )
+                            output.append(
+                                "SELECT SUM(measure_column) AS value FROM table_name;"
+                            )
                             output.append("```\n")
-                        elif 'YTD' in item['name'].upper():
+                        elif "YTD" in item["name"].upper():
                             output.append("```sql")
-                            output.append("-- YTD: Filter from start of year to current date")
+                            output.append(
+                                "-- YTD: Filter from start of year to current date"
+                            )
                             output.append("SELECT SUM(measure_column) AS value")
                             output.append("FROM table_name")
-                            output.append("WHERE date_column >= DATE_TRUNC('year', CURRENT_DATE())")
+                            output.append(
+                                "WHERE date_column >= DATE_TRUNC('year', CURRENT_DATE())"
+                            )
                             output.append("  AND date_column <= CURRENT_DATE();")
                             output.append("```\n")
-                        elif 'MTD' in item['name'].upper():
+                        elif "MTD" in item["name"].upper():
                             output.append("```sql")
-                            output.append("-- MTD: Filter from start of month to current date")
+                            output.append(
+                                "-- MTD: Filter from start of month to current date"
+                            )
                             output.append("SELECT SUM(measure_column) AS value")
                             output.append("FROM table_name")
-                            output.append("WHERE date_column >= DATE_TRUNC('month', CURRENT_DATE())")
+                            output.append(
+                                "WHERE date_column >= DATE_TRUNC('month', CURRENT_DATE())"
+                            )
                             output.append("  AND date_column <= CURRENT_DATE();")
                             output.append("```\n")
-                        elif item['name'].upper() in ('PY', 'PRIOR YEAR', 'LY', 'LAST YEAR'):
+                        elif item["name"].upper() in (
+                            "PY",
+                            "PRIOR YEAR",
+                            "LY",
+                            "LAST YEAR",
+                        ):
                             output.append("```sql")
                             output.append("-- PY: Same period in prior year")
                             output.append("SELECT SUM(measure_column) AS value")
                             output.append("FROM table_name")
-                            output.append("WHERE date_column >= DATEADD(year, -1, start_date)")
-                            output.append("  AND date_column <= DATEADD(year, -1, end_date);")
+                            output.append(
+                                "WHERE date_column >= DATEADD(year, -1, start_date)"
+                            )
+                            output.append(
+                                "  AND date_column <= DATEADD(year, -1, end_date);"
+                            )
                             output.append("```\n")
-                        elif 'YOY' in item['name'].upper() or 'YEAR OVER YEAR' in item['name'].upper():
+                        elif (
+                            "YOY" in item["name"].upper()
+                            or "YEAR OVER YEAR" in item["name"].upper()
+                        ):
                             output.append("```sql")
                             output.append("-- YoY %: Year-over-year percentage change")
                             output.append("WITH current_period AS (...),")
                             output.append("     prior_period AS (...)")
-                            output.append("SELECT (current_value - prior_value) / NULLIF(prior_value, 0) AS yoy_pct;")
+                            output.append(
+                                "SELECT (current_value - prior_value) / NULLIF(prior_value, 0) AS yoy_pct;"
+                            )
                             output.append("```\n")
 
         # Summary
@@ -968,7 +1147,9 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         output.append("## Summary\n")
         output.append(f"- **Total Field Parameters**: {len(field_parameters)}")
         output.append(f"- **Total Calculation Groups**: {len(calculation_groups)}")
-        output.append(f"- **Total Calculation Items**: {sum(len(cg['items']) for cg in calculation_groups)}")
+        output.append(
+            f"- **Total Calculation Items**: {sum(len(cg['items']) for cg in calculation_groups)}"
+        )
         output.append(f"- **Referenced Measures**: {len(referenced_measures)}")
 
         return "\n".join(output)
@@ -987,12 +1168,12 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         # Remove raw_tmdl from output for cleaner JSON
         clean_fps = []
         for fp in field_parameters:
-            clean_fp = {k: v for k, v in fp.items() if k != 'raw_tmdl'}
+            clean_fp = {k: v for k, v in fp.items() if k != "raw_tmdl"}
             clean_fps.append(clean_fp)
 
         clean_cgs = []
         for cg in calculation_groups:
-            clean_cg = {k: v for k, v in cg.items() if k != 'raw_tmdl'}
+            clean_cg = {k: v for k, v in cg.items() if k != "raw_tmdl"}
             clean_cgs.append(clean_cg)
 
         result = {
@@ -1006,9 +1187,11 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             "summary": {
                 "field_parameter_count": len(field_parameters),
                 "calculation_group_count": len(calculation_groups),
-                "calculation_item_count": sum(len(cg['items']) for cg in calculation_groups),
-                "referenced_measure_count": len(referenced_measures)
-            }
+                "calculation_item_count": sum(
+                    len(cg["items"]) for cg in calculation_groups
+                ),
+                "referenced_measure_count": len(referenced_measures),
+            },
         }
 
         return json.dumps(result, indent=2)
@@ -1024,10 +1207,14 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         """Format output as comprehensive SQL statements (Option C)."""
         sql_lines = []
 
-        sql_lines.append("-- ============================================================")
+        sql_lines.append(
+            "-- ============================================================"
+        )
         sql_lines.append("-- POWER BI FIELD PARAMETERS & CALCULATION GROUPS")
         sql_lines.append("-- Comprehensive SQL Export (Option C: Full Flexibility)")
-        sql_lines.append("-- ============================================================")
+        sql_lines.append(
+            "-- ============================================================"
+        )
         sql_lines.append(f"-- Target Catalog: {target_catalog}")
         sql_lines.append(f"-- Target Schema: {target_schema}")
         sql_lines.append("--")
@@ -1036,7 +1223,9 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         sql_lines.append("--   2. Measure definitions table (translated DAX)")
         sql_lines.append("--   3. Dynamic KPI selection view with time intelligence")
         sql_lines.append("--   4. Parameterized query templates for AI/BI Genie")
-        sql_lines.append("-- ============================================================")
+        sql_lines.append(
+            "-- ============================================================"
+        )
         sql_lines.append("")
 
         # ==========================================
@@ -1048,23 +1237,35 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         sql_lines.append("")
 
         # Field Parameters Config Table
-        sql_lines.append(f"CREATE TABLE IF NOT EXISTS {target_catalog}.{target_schema}._config_field_parameters (")
-        sql_lines.append("    parameter_name STRING COMMENT 'Field parameter name (e.g., KPI Selector)',")
+        sql_lines.append(
+            f"CREATE TABLE IF NOT EXISTS {target_catalog}.{target_schema}._config_field_parameters ("
+        )
+        sql_lines.append(
+            "    parameter_name STRING COMMENT 'Field parameter name (e.g., KPI Selector)',"
+        )
         sql_lines.append("    label STRING COMMENT 'User-friendly display label',")
-        sql_lines.append("    source_table STRING COMMENT 'Source table containing the measure',")
-        sql_lines.append("    source_measure STRING COMMENT 'Measure name in source table',")
+        sql_lines.append(
+            "    source_table STRING COMMENT 'Source table containing the measure',"
+        )
+        sql_lines.append(
+            "    source_measure STRING COMMENT 'Measure name in source table',"
+        )
         sql_lines.append("    ordinal INT COMMENT 'Display order',")
         sql_lines.append("    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()")
         sql_lines.append(") COMMENT 'Power BI field parameter configuration';")
         sql_lines.append("")
 
         if field_parameters:
-            sql_lines.append(f"INSERT INTO {target_catalog}.{target_schema}._config_field_parameters")
-            sql_lines.append("(parameter_name, label, source_table, source_measure, ordinal)")
+            sql_lines.append(
+                f"INSERT INTO {target_catalog}.{target_schema}._config_field_parameters"
+            )
+            sql_lines.append(
+                "(parameter_name, label, source_table, source_measure, ordinal)"
+            )
             sql_lines.append("VALUES")
             inserts = []
             for fp in field_parameters:
-                for item in fp['items']:
+                for item in fp["items"]:
                     inserts.append(
                         f"({_sql_lit(fp['name'])}, {_sql_lit(item['label'])}, "
                         f"{_sql_lit(item['source_table'])}, "
@@ -1074,7 +1275,9 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
             sql_lines.append("")
 
         # Calculation Groups Config Table
-        sql_lines.append(f"CREATE TABLE IF NOT EXISTS {target_catalog}.{target_schema}._config_calculation_groups (")
+        sql_lines.append(
+            f"CREATE TABLE IF NOT EXISTS {target_catalog}.{target_schema}._config_calculation_groups ("
+        )
         sql_lines.append("    group_name STRING COMMENT 'Calculation group name',")
         sql_lines.append("    item_name STRING COMMENT 'Time intelligence type',")
         sql_lines.append("    dax_expression STRING COMMENT 'Original DAX expression',")
@@ -1086,14 +1289,18 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         sql_lines.append("")
 
         if calculation_groups:
-            sql_lines.append(f"INSERT INTO {target_catalog}.{target_schema}._config_calculation_groups")
-            sql_lines.append("(group_name, item_name, dax_expression, sql_pattern, precedence, ordinal)")
+            sql_lines.append(
+                f"INSERT INTO {target_catalog}.{target_schema}._config_calculation_groups"
+            )
+            sql_lines.append(
+                "(group_name, item_name, dax_expression, sql_pattern, precedence, ordinal)"
+            )
             sql_lines.append("VALUES")
             inserts = []
             for cg in calculation_groups:
-                for item in cg['items']:
-                    escaped_expr = item['expression'].replace('\n', '\\n')
-                    sql_pattern = self._get_sql_pattern_for_calc_item(item['name'])
+                for item in cg["items"]:
+                    escaped_expr = item["expression"].replace("\n", "\\n")
+                    sql_pattern = self._get_sql_pattern_for_calc_item(item["name"])
                     inserts.append(
                         f"({_sql_lit(cg['name'])}, {_sql_lit(item['name'])}, "
                         f"{_sql_lit(escaped_expr)}, "
@@ -1112,23 +1319,35 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         sql_lines.append("-- ==========================================")
         sql_lines.append("")
 
-        sql_lines.append(f"CREATE TABLE IF NOT EXISTS {target_catalog}.{target_schema}._config_measures (")
+        sql_lines.append(
+            f"CREATE TABLE IF NOT EXISTS {target_catalog}.{target_schema}._config_measures ("
+        )
         sql_lines.append("    measure_name STRING COMMENT 'Measure identifier',")
         sql_lines.append("    source_table STRING COMMENT 'Source table name',")
         sql_lines.append("    dax_expression STRING COMMENT 'Original DAX expression',")
-        sql_lines.append("    sql_expression STRING COMMENT 'Translated SQL expression',")
+        sql_lines.append(
+            "    sql_expression STRING COMMENT 'Translated SQL expression',"
+        )
         sql_lines.append("    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()")
-        sql_lines.append(") COMMENT 'Power BI measure definitions with SQL translations';")
+        sql_lines.append(
+            ") COMMENT 'Power BI measure definitions with SQL translations';"
+        )
         sql_lines.append("")
 
         if referenced_measures:
-            sql_lines.append(f"INSERT INTO {target_catalog}.{target_schema}._config_measures")
-            sql_lines.append("(measure_name, source_table, dax_expression, sql_expression)")
+            sql_lines.append(
+                f"INSERT INTO {target_catalog}.{target_schema}._config_measures"
+            )
+            sql_lines.append(
+                "(measure_name, source_table, dax_expression, sql_expression)"
+            )
             sql_lines.append("VALUES")
             inserts = []
             for measure in referenced_measures:
-                dax_expr = (measure.get('expression') or '').replace('\n', '\\n')
-                sql_expr = self._translate_dax_to_sql_simple(measure.get('expression'), measure.get('table'))
+                dax_expr = (measure.get("expression") or "").replace("\n", "\\n")
+                sql_expr = self._translate_dax_to_sql_simple(
+                    measure.get("expression"), measure.get("table")
+                )
                 inserts.append(
                     f"({_sql_lit(measure['name'])}, {_sql_lit(measure.get('table', ''))}, "
                     f"{_sql_lit(dax_expr)}, {_sql_lit(sql_expr)})"
@@ -1145,21 +1364,36 @@ class PowerBIFieldParametersCalculationGroupsTool(BaseTool):
         sql_lines.append("-- ==========================================")
         sql_lines.append("-- This view queries actual source tables and UNIONs results")
         sql_lines.append("-- Each KPI is aggregated from its source table")
-        sql_lines.append("-- NOTE: Assumes source tables exist in the target catalog/schema")
-        sql_lines.append("--       Adjust table references if they are in different locations")
+        sql_lines.append(
+            "-- NOTE: Assumes source tables exist in the target catalog/schema"
+        )
+        sql_lines.append(
+            "--       Adjust table references if they are in different locations"
+        )
         sql_lines.append("")
 
         if field_parameters and referenced_measures:
             fp = field_parameters[0]
 
-            sql_lines.append(f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_base AS")
+            sql_lines.append(
+                f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_base AS"
+            )
 
             union_parts = []
-            for idx, item in enumerate(fp['items']):
-                measure = next((m for m in referenced_measures if m['name'] == item['source_measure']), None)
-                if measure and measure.get('expression'):
-                    sql_expr = self._translate_dax_to_sql_simple(measure['expression'], measure.get('table'))
-                    source_table = item['source_table']
+            for idx, item in enumerate(fp["items"]):
+                measure = next(
+                    (
+                        m
+                        for m in referenced_measures
+                        if m["name"] == item["source_measure"]
+                    ),
+                    None,
+                )
+                if measure and measure.get("expression"):
+                    sql_expr = self._translate_dax_to_sql_simple(
+                        measure["expression"], measure.get("table")
+                    )
+                    source_table = item["source_table"]
                     # Qualify table with catalog.schema
                     qualified_table = f"{target_catalog}.{target_schema}.{source_table}"
 
@@ -1175,8 +1409,12 @@ FROM {qualified_table}"""
 
             # Also create a simple usage example
             sql_lines.append("-- Usage examples:")
-            sql_lines.append(f"-- SELECT * FROM {target_catalog}.{target_schema}.v_kpi_base;")
-            sql_lines.append(f"-- SELECT * FROM {target_catalog}.{target_schema}.v_kpi_base WHERE kpi_name = 'Confirmed PHC';")
+            sql_lines.append(
+                f"-- SELECT * FROM {target_catalog}.{target_schema}.v_kpi_base;"
+            )
+            sql_lines.append(
+                f"-- SELECT * FROM {target_catalog}.{target_schema}.v_kpi_base WHERE kpi_name = 'Confirmed PHC';"
+            )
             sql_lines.append("")
 
         # ==========================================
@@ -1187,20 +1425,33 @@ FROM {qualified_table}"""
         sql_lines.append("-- SECTION 4: KPI VIEW WITH TIME DIMENSIONS")
         sql_lines.append("-- ==========================================")
         sql_lines.append("-- This view adds date grouping for time intelligence")
-        sql_lines.append("-- IMPORTANT: Update 'date_column' to match your actual date column name")
+        sql_lines.append(
+            "-- IMPORTANT: Update 'date_column' to match your actual date column name"
+        )
         sql_lines.append("")
 
         if field_parameters and referenced_measures:
             fp = field_parameters[0]
 
-            sql_lines.append(f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_with_dates AS")
+            sql_lines.append(
+                f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_with_dates AS"
+            )
 
             union_parts = []
-            for idx, item in enumerate(fp['items']):
-                measure = next((m for m in referenced_measures if m['name'] == item['source_measure']), None)
-                if measure and measure.get('expression'):
-                    sql_expr = self._translate_dax_to_sql_simple(measure['expression'], measure.get('table'))
-                    source_table = item['source_table']
+            for idx, item in enumerate(fp["items"]):
+                measure = next(
+                    (
+                        m
+                        for m in referenced_measures
+                        if m["name"] == item["source_measure"]
+                    ),
+                    None,
+                )
+                if measure and measure.get("expression"):
+                    sql_expr = self._translate_dax_to_sql_simple(
+                        measure["expression"], measure.get("table")
+                    )
+                    source_table = item["source_table"]
                     qualified_table = f"{target_catalog}.{target_schema}.{source_table}"
 
                     # Generate SQL that groups by date dimensions
@@ -1226,8 +1477,12 @@ FROM {qualified_table}"""
         sql_lines.append("-- SECTION 5: TIME INTELLIGENCE VIEWS")
         sql_lines.append("-- ==========================================")
         sql_lines.append("-- These views apply standard time intelligence patterns")
-        sql_lines.append("-- IMPORTANT: Assumes your source tables have a 'date_column' column")
-        sql_lines.append("--            Replace 'date_column' with your actual date column name")
+        sql_lines.append(
+            "-- IMPORTANT: Assumes your source tables have a 'date_column' column"
+        )
+        sql_lines.append(
+            "--            Replace 'date_column' with your actual date column name"
+        )
         sql_lines.append("")
 
         if field_parameters and referenced_measures and calculation_groups:
@@ -1235,14 +1490,25 @@ FROM {qualified_table}"""
 
             # Generate YTD View
             sql_lines.append(f"-- YTD (Year-to-Date) View")
-            sql_lines.append(f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_ytd AS")
+            sql_lines.append(
+                f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_ytd AS"
+            )
 
             union_parts = []
-            for item in fp['items']:
-                measure = next((m for m in referenced_measures if m['name'] == item['source_measure']), None)
-                if measure and measure.get('expression'):
-                    sql_expr = self._translate_dax_to_sql_simple(measure['expression'], measure.get('table'))
-                    source_table = item['source_table']
+            for item in fp["items"]:
+                measure = next(
+                    (
+                        m
+                        for m in referenced_measures
+                        if m["name"] == item["source_measure"]
+                    ),
+                    None,
+                )
+                if measure and measure.get("expression"):
+                    sql_expr = self._translate_dax_to_sql_simple(
+                        measure["expression"], measure.get("table")
+                    )
+                    source_table = item["source_table"]
                     qualified_table = f"{target_catalog}.{target_schema}.{source_table}"
 
                     union_part = f"""SELECT
@@ -1260,14 +1526,25 @@ WHERE date_column >= DATE_TRUNC('year', CURRENT_DATE())
 
             # Generate MTD View
             sql_lines.append(f"-- MTD (Month-to-Date) View")
-            sql_lines.append(f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_mtd AS")
+            sql_lines.append(
+                f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_mtd AS"
+            )
 
             union_parts = []
-            for item in fp['items']:
-                measure = next((m for m in referenced_measures if m['name'] == item['source_measure']), None)
-                if measure and measure.get('expression'):
-                    sql_expr = self._translate_dax_to_sql_simple(measure['expression'], measure.get('table'))
-                    source_table = item['source_table']
+            for item in fp["items"]:
+                measure = next(
+                    (
+                        m
+                        for m in referenced_measures
+                        if m["name"] == item["source_measure"]
+                    ),
+                    None,
+                )
+                if measure and measure.get("expression"):
+                    sql_expr = self._translate_dax_to_sql_simple(
+                        measure["expression"], measure.get("table")
+                    )
+                    source_table = item["source_table"]
                     qualified_table = f"{target_catalog}.{target_schema}.{source_table}"
 
                     union_part = f"""SELECT
@@ -1285,14 +1562,25 @@ WHERE date_column >= DATE_TRUNC('month', CURRENT_DATE())
 
             # Generate Prior Year View
             sql_lines.append(f"-- PY (Prior Year) View")
-            sql_lines.append(f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_py AS")
+            sql_lines.append(
+                f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_py AS"
+            )
 
             union_parts = []
-            for item in fp['items']:
-                measure = next((m for m in referenced_measures if m['name'] == item['source_measure']), None)
-                if measure and measure.get('expression'):
-                    sql_expr = self._translate_dax_to_sql_simple(measure['expression'], measure.get('table'))
-                    source_table = item['source_table']
+            for item in fp["items"]:
+                measure = next(
+                    (
+                        m
+                        for m in referenced_measures
+                        if m["name"] == item["source_measure"]
+                    ),
+                    None,
+                )
+                if measure and measure.get("expression"):
+                    sql_expr = self._translate_dax_to_sql_simple(
+                        measure["expression"], measure.get("table")
+                    )
+                    source_table = item["source_table"]
                     qualified_table = f"{target_catalog}.{target_schema}.{source_table}"
 
                     union_part = f"""SELECT
@@ -1316,29 +1604,47 @@ WHERE date_column >= DATEADD(year, -1, DATE_TRUNC('year', CURRENT_DATE()))
         sql_lines.append("-- SECTION 6: COMBINED TIME INTELLIGENCE VIEW")
         sql_lines.append("-- ==========================================")
         sql_lines.append("-- Master view combining all time periods for easy querying")
-        sql_lines.append("-- Query: SELECT * FROM v_kpi_all_periods WHERE kpi_name = 'X' AND time_period = 'YTD'")
+        sql_lines.append(
+            "-- Query: SELECT * FROM v_kpi_all_periods WHERE kpi_name = 'X' AND time_period = 'YTD'"
+        )
         sql_lines.append("")
 
         if field_parameters and referenced_measures:
-            sql_lines.append(f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_all_periods AS")
-            sql_lines.append(f"SELECT kpi_name, 'Current' AS time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_base")
+            sql_lines.append(
+                f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_all_periods AS"
+            )
+            sql_lines.append(
+                f"SELECT kpi_name, 'Current' AS time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_base"
+            )
             sql_lines.append("UNION ALL")
-            sql_lines.append(f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_ytd")
+            sql_lines.append(
+                f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_ytd"
+            )
             sql_lines.append("UNION ALL")
-            sql_lines.append(f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_mtd")
+            sql_lines.append(
+                f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_mtd"
+            )
             sql_lines.append("UNION ALL")
-            sql_lines.append(f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_py;")
+            sql_lines.append(
+                f"SELECT kpi_name, time_period, kpi_value FROM {target_catalog}.{target_schema}.v_kpi_py;"
+            )
             sql_lines.append("")
 
             sql_lines.append("-- Usage examples:")
             sql_lines.append(f"-- Get all KPIs with all time periods:")
-            sql_lines.append(f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods;")
+            sql_lines.append(
+                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods;"
+            )
             sql_lines.append("")
             sql_lines.append(f"-- Get specific KPI across time periods:")
-            sql_lines.append(f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods WHERE kpi_name = 'Confirmed PHC';")
+            sql_lines.append(
+                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods WHERE kpi_name = 'Confirmed PHC';"
+            )
             sql_lines.append("")
             sql_lines.append(f"-- Compare Current vs YTD for all KPIs:")
-            sql_lines.append(f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods WHERE time_period IN ('Current', 'YTD');")
+            sql_lines.append(
+                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods WHERE time_period IN ('Current', 'YTD');"
+            )
             sql_lines.append("")
 
         # ==========================================
@@ -1348,27 +1654,39 @@ WHERE date_column >= DATEADD(year, -1, DATE_TRUNC('year', CURRENT_DATE()))
         sql_lines.append("-- ==========================================")
         sql_lines.append("-- SECTION 7: YEAR-OVER-YEAR COMPARISON VIEW")
         sql_lines.append("-- ==========================================")
-        sql_lines.append("-- Calculates YoY % change by comparing Current to Prior Year")
+        sql_lines.append(
+            "-- Calculates YoY % change by comparing Current to Prior Year"
+        )
         sql_lines.append("")
 
         if field_parameters and referenced_measures:
-            sql_lines.append(f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_yoy AS")
+            sql_lines.append(
+                f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_yoy AS"
+            )
             sql_lines.append("SELECT")
             sql_lines.append("    c.kpi_name,")
             sql_lines.append("    c.kpi_value AS current_value,")
             sql_lines.append("    p.kpi_value AS prior_year_value,")
             sql_lines.append("    c.kpi_value - p.kpi_value AS yoy_change,")
             sql_lines.append("    CASE WHEN p.kpi_value != 0")
-            sql_lines.append("         THEN ROUND((c.kpi_value - p.kpi_value) / p.kpi_value * 100, 2)")
+            sql_lines.append(
+                "         THEN ROUND((c.kpi_value - p.kpi_value) / p.kpi_value * 100, 2)"
+            )
             sql_lines.append("         ELSE NULL")
             sql_lines.append("    END AS yoy_pct_change")
             sql_lines.append(f"FROM {target_catalog}.{target_schema}.v_kpi_base c")
-            sql_lines.append(f"LEFT JOIN {target_catalog}.{target_schema}.v_kpi_py p ON c.kpi_name = p.kpi_name;")
+            sql_lines.append(
+                f"LEFT JOIN {target_catalog}.{target_schema}.v_kpi_py p ON c.kpi_name = p.kpi_name;"
+            )
             sql_lines.append("")
 
             sql_lines.append("-- Usage:")
-            sql_lines.append(f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy;")
-            sql_lines.append(f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy WHERE yoy_pct_change > 10;  -- KPIs up more than 10%")
+            sql_lines.append(
+                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy;"
+            )
+            sql_lines.append(
+                f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy WHERE yoy_pct_change > 10;  -- KPIs up more than 10%"
+            )
             sql_lines.append("")
 
         # Summary
@@ -1381,64 +1699,129 @@ WHERE date_column >= DATEADD(year, -1, DATE_TRUNC('year', CURRENT_DATE()))
         sql_lines.append(f"-- Referenced Measures: {len(referenced_measures)}")
         sql_lines.append("--")
         sql_lines.append("-- Objects created:")
-        sql_lines.append(f"--   TABLE: {target_catalog}.{target_schema}._config_field_parameters  (metadata)")
-        sql_lines.append(f"--   TABLE: {target_catalog}.{target_schema}._config_calculation_groups (metadata)")
-        sql_lines.append(f"--   TABLE: {target_catalog}.{target_schema}._config_measures           (metadata)")
-        sql_lines.append(f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_base                 (base KPI values)")
-        sql_lines.append(f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_with_dates           (KPIs with date dims)")
-        sql_lines.append(f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_ytd                  (Year-to-Date)")
-        sql_lines.append(f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_mtd                  (Month-to-Date)")
-        sql_lines.append(f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_py                   (Prior Year)")
-        sql_lines.append(f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_all_periods          (Combined view)")
-        sql_lines.append(f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_yoy                  (YoY comparison)")
+        sql_lines.append(
+            f"--   TABLE: {target_catalog}.{target_schema}._config_field_parameters  (metadata)"
+        )
+        sql_lines.append(
+            f"--   TABLE: {target_catalog}.{target_schema}._config_calculation_groups (metadata)"
+        )
+        sql_lines.append(
+            f"--   TABLE: {target_catalog}.{target_schema}._config_measures           (metadata)"
+        )
+        sql_lines.append(
+            f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_base                 (base KPI values)"
+        )
+        sql_lines.append(
+            f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_with_dates           (KPIs with date dims)"
+        )
+        sql_lines.append(
+            f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_ytd                  (Year-to-Date)"
+        )
+        sql_lines.append(
+            f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_mtd                  (Month-to-Date)"
+        )
+        sql_lines.append(
+            f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_py                   (Prior Year)"
+        )
+        sql_lines.append(
+            f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_all_periods          (Combined view)"
+        )
+        sql_lines.append(
+            f"--   VIEW:  {target_catalog}.{target_schema}.v_kpi_yoy                  (YoY comparison)"
+        )
         sql_lines.append("--")
-        sql_lines.append("-- IMPORTANT: Before running, update 'date_column' references to your actual date column!")
+        sql_lines.append(
+            "-- IMPORTANT: Before running, update 'date_column' references to your actual date column!"
+        )
         sql_lines.append("--")
         sql_lines.append("-- Quick Start:")
         sql_lines.append(f"--   1. Run this SQL to create all objects")
-        sql_lines.append(f"--   2. SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods;")
-        sql_lines.append(f"--   3. SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy;")
+        sql_lines.append(
+            f"--   2. SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods;"
+        )
+        sql_lines.append(
+            f"--   3. SELECT * FROM {target_catalog}.{target_schema}.v_kpi_yoy;"
+        )
 
         return "\n".join(sql_lines)
 
     def _get_sql_pattern_for_calc_item(self, item_name: str) -> str:
         """Get SQL pattern template for a calculation item."""
         name_upper = item_name.upper()
-        if name_upper == 'CURRENT':
-            return '{measure}'
-        elif 'YTD' in name_upper:
-            return 'SUM({measure}) WHERE date >= DATE_TRUNC(year)'
-        elif 'MTD' in name_upper:
-            return 'SUM({measure}) WHERE date >= DATE_TRUNC(month)'
-        elif name_upper in ('PY', 'PRIOR YEAR', 'LY'):
-            return 'SUM({measure}) WHERE year = year - 1'
-        elif 'YOY' in name_upper:
-            return '(current - prior) / NULLIF(prior, 0)'
-        return '{measure}'
+        if name_upper == "CURRENT":
+            return "{measure}"
+        elif "YTD" in name_upper:
+            return "SUM({measure}) WHERE date >= DATE_TRUNC(year)"
+        elif "MTD" in name_upper:
+            return "SUM({measure}) WHERE date >= DATE_TRUNC(month)"
+        elif name_upper in ("PY", "PRIOR YEAR", "LY"):
+            return "SUM({measure}) WHERE year = year - 1"
+        elif "YOY" in name_upper:
+            return "(current - prior) / NULLIF(prior, 0)"
+        return "{measure}"
 
-    def _translate_dax_to_sql_simple(self, dax_expression: Optional[str], table_name: Optional[str]) -> str:
+    def _translate_dax_to_sql_simple(
+        self, dax_expression: Optional[str], table_name: Optional[str]
+    ) -> str:
         """Simple DAX to SQL translation for common patterns."""
         if not dax_expression:
-            return 'NULL'
+            return "NULL"
 
         sql = dax_expression.strip()
 
         # Handle common DAX patterns
         # SUM(table[column]) -> SUM(column)
-        sql = re.sub(r"SUM\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)", r"SUM(\2)", sql, flags=re.IGNORECASE)
+        sql = re.sub(
+            r"SUM\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)",
+            r"SUM(\2)",
+            sql,
+            flags=re.IGNORECASE,
+        )
         # AVERAGE(table[column]) -> AVG(column)
-        sql = re.sub(r"AVERAGE\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)", r"AVG(\2)", sql, flags=re.IGNORECASE)
+        sql = re.sub(
+            r"AVERAGE\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)",
+            r"AVG(\2)",
+            sql,
+            flags=re.IGNORECASE,
+        )
         # COUNT(table[column]) -> COUNT(column)
-        sql = re.sub(r"COUNT\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)", r"COUNT(\2)", sql, flags=re.IGNORECASE)
+        sql = re.sub(
+            r"COUNT\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)",
+            r"COUNT(\2)",
+            sql,
+            flags=re.IGNORECASE,
+        )
         # COUNTROWS(table) -> COUNT(*)
-        sql = re.sub(r"COUNTROWS\s*\(\s*'?(\w+)'?\s*\)", r"COUNT(*)", sql, flags=re.IGNORECASE)
+        sql = re.sub(
+            r"COUNTROWS\s*\(\s*'?(\w+)'?\s*\)", r"COUNT(*)", sql, flags=re.IGNORECASE
+        )
         # DISTINCTCOUNT(table[column]) -> COUNT(DISTINCT column)
-        sql = re.sub(r"DISTINCTCOUNT\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)", r"COUNT(DISTINCT \2)", sql, flags=re.IGNORECASE)
+        sql = re.sub(
+            r"DISTINCTCOUNT\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)",
+            r"COUNT(DISTINCT \2)",
+            sql,
+            flags=re.IGNORECASE,
+        )
         # MIN/MAX
-        sql = re.sub(r"MIN\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)", r"MIN(\2)", sql, flags=re.IGNORECASE)
-        sql = re.sub(r"MAX\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)", r"MAX(\2)", sql, flags=re.IGNORECASE)
+        sql = re.sub(
+            r"MIN\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)",
+            r"MIN(\2)",
+            sql,
+            flags=re.IGNORECASE,
+        )
+        sql = re.sub(
+            r"MAX\s*\(\s*'?(\w+)'?\s*\[(\w+)\]\s*\)",
+            r"MAX(\2)",
+            sql,
+            flags=re.IGNORECASE,
+        )
         # DIVIDE(a, b) -> a / NULLIF(b, 0)
-        sql = re.sub(r"DIVIDE\s*\(\s*([^,]+)\s*,\s*([^)]+)\s*\)", r"(\1) / NULLIF(\2, 0)", sql, flags=re.IGNORECASE)
+        sql = re.sub(
+            r"DIVIDE\s*\(\s*([^,]+)\s*,\s*([^)]+)\s*\)",
+            r"(\1) / NULLIF(\2, 0)",
+            sql,
+            flags=re.IGNORECASE,
+        )
 
         # Escape single quotes for SQL string
         sql = sql.replace("'", "''")

@@ -11,18 +11,24 @@ Focuses on:
 """
 
 import pytest
+
+from src.services.converters.base.models import (
+    KPI,
+    KPIDefinition,
+    QueryFilter,
+    Structure,
+)
 from src.services.converters.formats.sql.helpers.sql_structures import (
     SQLStructureExpander,
-    SQLTimeIntelligenceHelper
+    SQLTimeIntelligenceHelper,
 )
-from src.services.converters.base.models import KPI, KPIDefinition, Structure, QueryFilter
 from src.services.converters.formats.sql.models import (
-    SQLDialect,
-    SQLTranslationOptions,
-    SQLStructure,
     SQLAggregationType,
     SQLDefinition,
-    SQLMeasure
+    SQLDialect,
+    SQLMeasure,
+    SQLStructure,
+    SQLTranslationOptions,
 )
 
 
@@ -48,9 +54,9 @@ class TestSQLStructureExpanderGeneration:
                     technical_name="total_revenue",
                     formula="amount",
                     aggregation_type="SUM",
-                    source_table="FactSales"
+                    source_table="FactSales",
                 )
-            ]
+            ],
         )
 
     @pytest.fixture
@@ -64,23 +70,23 @@ class TestSQLStructureExpanderGeneration:
                     technical_name="total_revenue",
                     formula="amount",
                     aggregation_type="SUM",
-                    source_table="FactSales"
+                    source_table="FactSales",
                 ),
                 KPI(
                     description="Total Cost",
                     technical_name="total_cost",
                     formula="cost",
                     aggregation_type="SUM",
-                    source_table="FactSales"
+                    source_table="FactSales",
                 ),
                 KPI(
                     description="Order Count",
                     technical_name="order_count",
                     formula="order_id",
                     aggregation_type="COUNT",
-                    source_table="FactSales"
-                )
-            ]
+                    source_table="FactSales",
+                ),
+            ],
         )
 
     @pytest.fixture
@@ -96,9 +102,9 @@ class TestSQLStructureExpanderGeneration:
                     formula="amount",
                     aggregation_type="SUM",
                     source_table="FactSales",
-                    filters=["region = 'EMEA'", "year = 2024"]
+                    filters=["region = 'EMEA'", "year = 2024"],
                 )
-            ]
+            ],
         )
 
     @pytest.fixture
@@ -114,9 +120,9 @@ class TestSQLStructureExpanderGeneration:
                     formula="amount",
                     aggregation_type="SUM",
                     source_table="FactSales",
-                    filters=["fiscyear = $var_current_year"]
+                    filters=["fiscyear = $var_current_year"],
                 )
-            ]
+            ],
         )
 
     # ========== process_definition Tests ==========
@@ -129,14 +135,18 @@ class TestSQLStructureExpanderGeneration:
         assert result is not None
         assert len(result.sql_measures) > 0
 
-    def test_process_definition_returns_sql_definition(self, expander, simple_kpi_definition):
+    def test_process_definition_returns_sql_definition(
+        self, expander, simple_kpi_definition
+    ):
         """Test that process_definition returns SQLDefinition"""
         result = expander.process_definition(simple_kpi_definition)
 
         assert isinstance(result, SQLDefinition)
         assert result.technical_name == "sales_metrics"
 
-    def test_process_definition_with_multiple_kpis(self, expander, multi_kpi_definition):
+    def test_process_definition_with_multiple_kpis(
+        self, expander, multi_kpi_definition
+    ):
         """Test processing definition with multiple KPIs"""
         result = expander.process_definition(multi_kpi_definition)
 
@@ -203,11 +213,15 @@ class TestSQLStructureExpanderGeneration:
 
         assert len(queries) >= 1
 
-    def test_generate_sql_queries_standard_dialect(self, standard_expander, simple_kpi_definition):
+    def test_generate_sql_queries_standard_dialect(
+        self, standard_expander, simple_kpi_definition
+    ):
         """Test SQL generation with STANDARD dialect"""
         options = SQLTranslationOptions(target_dialect=SQLDialect.STANDARD)
         sql_def = standard_expander.process_definition(simple_kpi_definition, options)
-        queries = standard_expander.generate_sql_queries_from_definition(sql_def, options)
+        queries = standard_expander.generate_sql_queries_from_definition(
+            sql_def, options
+        )
 
         assert len(queries) > 0
         sql_text = queries[0].to_sql()
@@ -217,24 +231,22 @@ class TestSQLStructureExpanderGeneration:
 
     def test_is_base_kbi_empty_formula(self, expander):
         """Test _is_base_kbi with empty formula"""
-        kbi = KPI(
-            description="Empty",
-            technical_name="empty",
-            formula=""
-        )
+        kbi = KPI(description="Empty", technical_name="empty", formula="")
         assert expander._is_base_kbi(kbi) is True
 
     def test_is_base_kbi_with_brackets_reference(self, expander):
         """Test _is_base_kbi with bracketed KBI reference"""
         # Build lookup first
         expander._dependency_resolver._kbi_lookup = {
-            "revenue": KPI(description="Revenue", technical_name="revenue", formula="amount")
+            "revenue": KPI(
+                description="Revenue", technical_name="revenue", formula="amount"
+            )
         }
         kbi = KPI(
             description="Profit",
             technical_name="profit",
             formula="[revenue] - cost",
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
         assert expander._is_base_kbi(kbi) is False
 
@@ -249,7 +261,7 @@ class TestSQLStructureExpanderGeneration:
                 "YTD": Structure(
                     description="Year to Date",
                     filter=["fiscyear = '2024'"],
-                    display_sign=1
+                    display_sign=1,
                 )
             },
             kpis=[
@@ -259,9 +271,9 @@ class TestSQLStructureExpanderGeneration:
                     formula="amount",
                     aggregation_type="SUM",
                     source_table="FactSales",
-                    apply_structures=["YTD"]
+                    apply_structures=["YTD"],
                 )
-            ]
+            ],
         )
 
         result = expander.process_definition(definition)
@@ -288,9 +300,9 @@ class TestSQLStructureExpanderGeneration:
                     technical_name="revenue",
                     formula="amount",
                     aggregation_type="SUM",
-                    source_table="Sales"
+                    source_table="Sales",
                 )
-            ]
+            ],
         )
 
         options = SQLTranslationOptions(target_dialect=SQLDialect.DATABRICKS)
@@ -312,9 +324,9 @@ class TestSQLStructureExpanderGeneration:
                     technical_name="orders",
                     formula="order_id",
                     aggregation_type="COUNT",
-                    source_table="Orders"
+                    source_table="Orders",
                 )
-            ]
+            ],
         )
 
         options = SQLTranslationOptions(target_dialect=SQLDialect.DATABRICKS)
@@ -336,9 +348,9 @@ class TestSQLStructureExpanderGeneration:
                     technical_name="avg_price",
                     formula="price",
                     aggregation_type="AVERAGE",
-                    source_table="Products"
+                    source_table="Products",
                 )
-            ]
+            ],
         )
 
         options = SQLTranslationOptions(target_dialect=SQLDialect.DATABRICKS)
@@ -360,9 +372,9 @@ class TestSQLStructureExpanderGeneration:
                     technical_name="unique_customers",
                     formula="customer_id",
                     aggregation_type="DISTINCTCOUNT",
-                    source_table="FactSales"
+                    source_table="FactSales",
                 )
-            ]
+            ],
         )
 
         options = SQLTranslationOptions(target_dialect=SQLDialect.DATABRICKS)
@@ -387,9 +399,9 @@ class TestSQLStructureExpanderGeneration:
                     formula="amount",
                     aggregation_type="SUM",
                     source_table="Sales",
-                    filters=["status = 'active'"]
+                    filters=["status = 'active'"],
                 )
-            ]
+            ],
         )
 
         options = SQLTranslationOptions(target_dialect=SQLDialect.DATABRICKS)
@@ -412,9 +424,9 @@ class TestSQLStructureExpanderGeneration:
                     formula="amount",
                     aggregation_type="SUM",
                     source_table="Sales",
-                    filters=["region = 'EMEA'", "year = 2024", "status = 'active'"]
+                    filters=["region = 'EMEA'", "year = 2024", "status = 'active'"],
                 )
-            ]
+            ],
         )
 
         options = SQLTranslationOptions(target_dialect=SQLDialect.DATABRICKS)
@@ -438,9 +450,9 @@ class TestSQLStructureExpanderGeneration:
                     formula="amount",
                     aggregation_type="SUM",
                     source_table="FactSales",
-                    filters=["fiscyear = $var_current_year"]
+                    filters=["fiscyear = $var_current_year"],
                 )
-            ]
+            ],
         )
 
         result = expander.process_definition(definition)
@@ -449,7 +461,9 @@ class TestSQLStructureExpanderGeneration:
 
     # ========== SQL Output Structure Tests ==========
 
-    def test_sql_query_has_aggregation_expression(self, expander, simple_kpi_definition):
+    def test_sql_query_has_aggregation_expression(
+        self, expander, simple_kpi_definition
+    ):
         """Test SQL query contains aggregation expression"""
         options = SQLTranslationOptions(target_dialect=SQLDialect.DATABRICKS)
         sql_def = expander.process_definition(simple_kpi_definition, options)
@@ -457,7 +471,9 @@ class TestSQLStructureExpanderGeneration:
 
         sql_text = queries[0].to_sql()
         # Should have some aggregation function
-        has_agg = any(func in sql_text.upper() for func in ['SUM', 'COUNT', 'AVG', 'MIN', 'MAX'])
+        has_agg = any(
+            func in sql_text.upper() for func in ["SUM", "COUNT", "AVG", "MIN", "MAX"]
+        )
         assert has_agg
 
     def test_sql_query_references_source_table(self, expander, simple_kpi_definition):
@@ -470,7 +486,9 @@ class TestSQLStructureExpanderGeneration:
         # Should reference FactSales table
         assert "FactSales" in sql_text or "factsales" in sql_text.lower()
 
-    def test_sql_measure_technical_name_preserved(self, expander, simple_kpi_definition):
+    def test_sql_measure_technical_name_preserved(
+        self, expander, simple_kpi_definition
+    ):
         """Test SQL measure preserves technical name"""
         result = expander.process_definition(simple_kpi_definition)
 
@@ -492,9 +510,9 @@ class TestSQLStructureExpanderGeneration:
                     formula="amount",
                     aggregation_type="SUM",
                     source_table="FactSales",
-                    fields_for_constant_selection=["region", "year"]
+                    fields_for_constant_selection=["region", "year"],
                 )
-            ]
+            ],
         )
 
         result = expander.process_definition(definition)
@@ -516,9 +534,9 @@ class TestSQLStructureExpanderGeneration:
                     aggregation_type="EXCEPTION_AGGREGATION",
                     source_table="FactSales",
                     exception_aggregation="SUM",
-                    fields_for_exception_aggregation=["product_id"]
+                    fields_for_exception_aggregation=["product_id"],
                 )
-            ]
+            ],
         )
 
         result = expander.process_definition(definition)
@@ -528,11 +546,7 @@ class TestSQLStructureExpanderGeneration:
 
     def test_empty_definition(self, expander):
         """Test processing empty KPI definition"""
-        definition = KPIDefinition(
-            description="Empty",
-            technical_name="empty",
-            kpis=[]
-        )
+        definition = KPIDefinition(description="Empty", technical_name="empty", kpis=[])
 
         result = expander.process_definition(definition)
         assert result is not None
@@ -548,9 +562,9 @@ class TestSQLStructureExpanderGeneration:
                     description="Revenue",
                     technical_name="revenue",
                     formula="amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 )
-            ]
+            ],
         )
 
         result = expander.process_definition(definition)
@@ -567,9 +581,9 @@ class TestSQLStructureExpanderGeneration:
                     technical_name="min_price",
                     formula="price",
                     aggregation_type="MIN",
-                    source_table="Products"
+                    source_table="Products",
                 )
-            ]
+            ],
         )
 
         options = SQLTranslationOptions(target_dialect=SQLDialect.DATABRICKS)
@@ -590,9 +604,9 @@ class TestSQLStructureExpanderGeneration:
                     technical_name="max_price",
                     formula="price",
                     aggregation_type="MAX",
-                    source_table="Products"
+                    source_table="Products",
                 )
-            ]
+            ],
         )
 
         options = SQLTranslationOptions(target_dialect=SQLDialect.DATABRICKS)

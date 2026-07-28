@@ -1,6 +1,7 @@
 from typing import List, Optional
 
-from sqlalchemy import select, delete as sa_delete
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -57,8 +58,7 @@ class MCPServerRepository(BaseRepository[MCPServer]):
             List of globally enabled MCP servers
         """
         query = select(self.model).where(
-            (self.model.enabled == True) &
-            (self.model.global_enabled == True)
+            (self.model.enabled == True) & (self.model.global_enabled == True)
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())
@@ -77,16 +77,20 @@ class MCPServerRepository(BaseRepository[MCPServer]):
             return []
 
         query = select(self.model).where(
-            (self.model.name.in_(names)) &
-            (self.model.enabled == True)
+            (self.model.name.in_(names)) & (self.model.enabled == True)
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())
-    async def find_by_name_and_group(self, name: str, group_id: str) -> Optional[MCPServer]:
+
+    async def find_by_name_and_group(
+        self, name: str, group_id: str
+    ) -> Optional[MCPServer]:
         """
         Find a MCP server by name scoped to a group/workspace.
         """
-        query = select(self.model).where((self.model.name == name) & (self.model.group_id == group_id))
+        query = select(self.model).where(
+            (self.model.name == name) & (self.model.group_id == group_id)
+        )
         result = await self.session.execute(query)
         return result.scalars().first()
 
@@ -94,7 +98,9 @@ class MCPServerRepository(BaseRepository[MCPServer]):
         """
         Find a base (global) MCP server by name (group_id is NULL).
         """
-        query = select(self.model).where((self.model.name == name) & (self.model.group_id.is_(None)))
+        query = select(self.model).where(
+            (self.model.name == name) & (self.model.group_id.is_(None))
+        )
         result = await self.session.execute(query)
         return result.scalars().first()
 
@@ -134,9 +140,8 @@ class MCPServerRepository(BaseRepository[MCPServer]):
         )
         # Names whose GLOBAL base row is disabled — a system admin disabling a
         # global server cascades to workspaces, so hide the workspace override too.
-        disabled_base_names = (
-            select(self.model.name)
-            .where((self.model.group_id.is_(None)) & (self.model.enabled == False))
+        disabled_base_names = select(self.model.name).where(
+            (self.model.group_id.is_(None)) & (self.model.enabled == False)
         )
         query = select(self.model).where(
             (
@@ -152,7 +157,9 @@ class MCPServerRepository(BaseRepository[MCPServer]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def find_by_names_group_scope(self, names: List[str], group_id: Optional[str]) -> List[MCPServer]:
+    async def find_by_names_group_scope(
+        self, names: List[str], group_id: Optional[str]
+    ) -> List[MCPServer]:
         """
         Find ENABLED servers by names usable in a workspace under the OPT-IN
         global + per-workspace model:
@@ -180,9 +187,8 @@ class MCPServerRepository(BaseRepository[MCPServer]):
         else:
             # Names whose GLOBAL base row is disabled — excluded so a global
             # disable cascades to workspaces regardless of their own override.
-            disabled_base_names = (
-                select(self.model.name)
-                .where((self.model.group_id.is_(None)) & (self.model.enabled == False))
+            disabled_base_names = select(self.model.name).where(
+                (self.model.group_id.is_(None)) & (self.model.enabled == False)
             )
             query = select(self.model).where(
                 (self.model.name.in_(names))
@@ -211,7 +217,6 @@ class MCPServerRepository(BaseRepository[MCPServer]):
         await self.session.flush()
         return getattr(result, "rowcount", 0) or 0
 
-
     async def toggle_enabled(self, server_id: int) -> Optional[MCPServer]:
         """
         Toggle the enabled status of a MCP server.
@@ -235,7 +240,10 @@ class MCPServerRepository(BaseRepository[MCPServer]):
         except Exception as e:
             # Log the error and rollback
             import logging
-            logging.error(f"Error in toggle_enabled for MCP server ID {server_id}: {str(e)}")
+
+            logging.error(
+                f"Error in toggle_enabled for MCP server ID {server_id}: {str(e)}"
+            )
             await self.session.rollback()
             raise
 
@@ -262,7 +270,10 @@ class MCPServerRepository(BaseRepository[MCPServer]):
         except Exception as e:
             # Log the error and rollback
             import logging
-            logging.error(f"Error in toggle_global_enabled for MCP server ID {server_id}: {str(e)}")
+
+            logging.error(
+                f"Error in toggle_global_enabled for MCP server ID {server_id}: {str(e)}"
+            )
             await self.session.rollback()
             raise
 
@@ -334,7 +345,11 @@ class MCPSettingsRepository(BaseRepository[MCPSettings]):
         await self.session.refresh(settings)
         return settings
 
-    async def update_settings(self, global_enabled: Optional[bool] = None, individual_enabled: Optional[bool] = None) -> MCPSettings:
+    async def update_settings(
+        self,
+        global_enabled: Optional[bool] = None,
+        individual_enabled: Optional[bool] = None,
+    ) -> MCPSettings:
         """
         Update MCP settings.
 
@@ -422,10 +437,11 @@ class SyncMCPServerRepository:
         Returns:
             List of globally enabled MCP servers
         """
-        return self.db.query(MCPServer).filter(
-            (MCPServer.enabled == True) &
-            (MCPServer.global_enabled == True)
-        ).all()
+        return (
+            self.db.query(MCPServer)
+            .filter((MCPServer.enabled == True) & (MCPServer.global_enabled == True))
+            .all()
+        )
 
     def find_by_names(self, names: List[str]) -> List[MCPServer]:
         """
@@ -440,7 +456,8 @@ class SyncMCPServerRepository:
         if not names:
             return []
 
-        return self.db.query(MCPServer).filter(
-            (MCPServer.name.in_(names)) &
-            (MCPServer.enabled == True)
-        ).all()
+        return (
+            self.db.query(MCPServer)
+            .filter((MCPServer.name.in_(names)) & (MCPServer.enabled == True))
+            .all()
+        )

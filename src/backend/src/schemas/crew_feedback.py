@@ -8,12 +8,16 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class CrewFeedbackCreateRequest(BaseModel):
     rating: str = Field(..., pattern="^(up|down)$", description="Thumbs up or down")
-    comment: Optional[str] = Field(None, max_length=4000, description="What went wrong (required for down)")
+    comment: Optional[str] = Field(
+        None, max_length=4000, description="What went wrong (required for down)"
+    )
 
     @model_validator(mode="after")
     def _down_requires_comment(self):
         if self.rating == "down" and not (self.comment or "").strip():
-            raise ValueError("a comment explaining what went wrong is required for thumbs-down")
+            raise ValueError(
+                "a comment explaining what went wrong is required for thumbs-down"
+            )
         return self
 
 

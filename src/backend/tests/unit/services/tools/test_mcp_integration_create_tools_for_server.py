@@ -11,9 +11,11 @@ Covers missing lines:
 - validate_mcp_configuration - invalid agent tool_configs, invalid task tool_configs
 - _resolve_agent_reference - exception path
 """
+
 import os
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
 
 from src.services.tools.mcp_integration import MCPIntegration
 
@@ -112,16 +114,19 @@ class TestCreateMcpToolsForAgentExtended:
         mock_tool = MagicMock()
         mock_tool.name = "server1_tool1"
 
-        with patch.object(
-            MCPIntegration,
-            "resolve_effective_mcp_servers",
-            new_callable=AsyncMock,
-            return_value=[{"name": "server1", "server_url": "https://example.com"}],
-        ), patch.object(
-            MCPIntegration,
-            "_create_tools_for_server",
-            new_callable=AsyncMock,
-            return_value=[mock_tool],
+        with (
+            patch.object(
+                MCPIntegration,
+                "resolve_effective_mcp_servers",
+                new_callable=AsyncMock,
+                return_value=[{"name": "server1", "server_url": "https://example.com"}],
+            ),
+            patch.object(
+                MCPIntegration,
+                "_create_tools_for_server",
+                new_callable=AsyncMock,
+                return_value=[mock_tool],
+            ),
         ):
             tools = await MCPIntegration.create_mcp_tools_for_agent(
                 agent_config, "a1", mock_service, config=config
@@ -149,16 +154,19 @@ class TestCreateMcpToolsForAgentExtended:
                 raise Exception("server1 failed")
             return [mock_tool]
 
-        with patch.object(
-            MCPIntegration,
-            "resolve_effective_mcp_servers",
-            new_callable=AsyncMock,
-            return_value=[
-                {"name": "server1", "server_url": "https://example.com"},
-                {"name": "server2", "server_url": "https://example.com"},
-            ],
-        ), patch.object(
-            MCPIntegration, "_create_tools_for_server", side_effect=mock_create
+        with (
+            patch.object(
+                MCPIntegration,
+                "resolve_effective_mcp_servers",
+                new_callable=AsyncMock,
+                return_value=[
+                    {"name": "server1", "server_url": "https://example.com"},
+                    {"name": "server2", "server_url": "https://example.com"},
+                ],
+            ),
+            patch.object(
+                MCPIntegration, "_create_tools_for_server", side_effect=mock_create
+            ),
         ):
             tools = await MCPIntegration.create_mcp_tools_for_agent(
                 agent_config, "a1", mock_service, config=config
@@ -206,16 +214,19 @@ class TestCreateMcpToolsForTaskExtended:
         mock_service = AsyncMock()
         mock_tool = MagicMock()
 
-        with patch.object(
-            MCPIntegration,
-            "resolve_effective_mcp_servers",
-            new_callable=AsyncMock,
-            return_value=[{"name": "server1", "server_url": "https://example.com"}],
-        ), patch.object(
-            MCPIntegration,
-            "_create_tools_for_server",
-            new_callable=AsyncMock,
-            return_value=[mock_tool],
+        with (
+            patch.object(
+                MCPIntegration,
+                "resolve_effective_mcp_servers",
+                new_callable=AsyncMock,
+                return_value=[{"name": "server1", "server_url": "https://example.com"}],
+            ),
+            patch.object(
+                MCPIntegration,
+                "_create_tools_for_server",
+                new_callable=AsyncMock,
+                return_value=[mock_tool],
+            ),
         ):
             tools = await MCPIntegration.create_mcp_tools_for_task(
                 task_config, "t1", mock_service, config=config
@@ -243,16 +254,19 @@ class TestCreateMcpToolsForTaskExtended:
                 raise Exception("s1 failed")
             return [mock_tool]
 
-        with patch.object(
-            MCPIntegration,
-            "resolve_effective_mcp_servers",
-            new_callable=AsyncMock,
-            return_value=[
-                {"name": "s1", "server_url": "https://example.com"},
-                {"name": "s2", "server_url": "https://example.com"},
-            ],
-        ), patch.object(
-            MCPIntegration, "_create_tools_for_server", side_effect=mock_create
+        with (
+            patch.object(
+                MCPIntegration,
+                "resolve_effective_mcp_servers",
+                new_callable=AsyncMock,
+                return_value=[
+                    {"name": "s1", "server_url": "https://example.com"},
+                    {"name": "s2", "server_url": "https://example.com"},
+                ],
+            ),
+            patch.object(
+                MCPIntegration, "_create_tools_for_server", side_effect=mock_create
+            ),
         ):
             tools = await MCPIntegration.create_mcp_tools_for_task(
                 task_config, "t1", mock_service, config=config
@@ -355,13 +369,16 @@ class TestCreateToolsForServerExtended:
         mock_wrapped = MagicMock()
         mock_wrapped.name = "my-server_existing_tool"
 
-        with patch(
-            "src.services.tools.mcp_handler.get_or_create_mcp_adapter",
-            new_callable=AsyncMock,
-            return_value=mock_adapter,
-        ), patch(
-            "src.services.tools.mcp_integration.create_kasal_tool_from_mcp",
-            return_value=mock_wrapped,
+        with (
+            patch(
+                "src.services.tools.mcp_handler.get_or_create_mcp_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ),
+            patch(
+                "src.services.tools.mcp_integration.create_kasal_tool_from_mcp",
+                return_value=mock_wrapped,
+            ),
         ):
             tools = await MCPIntegration._create_tools_for_server(
                 server, "agent1", MagicMock()
@@ -401,13 +418,16 @@ class TestCreateToolsForServerExtended:
                 raise ValueError("tool1 wrapping failed")
             return mock_good_tool
 
-        with patch(
-            "src.services.tools.mcp_handler.get_or_create_mcp_adapter",
-            new_callable=AsyncMock,
-            return_value=mock_adapter,
-        ), patch(
-            "src.services.tools.mcp_integration.create_kasal_tool_from_mcp",
-            side_effect=mock_create_tool,
+        with (
+            patch(
+                "src.services.tools.mcp_handler.get_or_create_mcp_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ),
+            patch(
+                "src.services.tools.mcp_integration.create_kasal_tool_from_mcp",
+                side_effect=mock_create_tool,
+            ),
         ):
             tools = await MCPIntegration._create_tools_for_server(
                 server, "agent1", MagicMock()
@@ -531,11 +551,13 @@ class TestFlowSubprocessModeLogger:
         # We test indirectly by checking that the module loaded correctly.
         # The logger selection happens at module import time.
         import src.services.tools.mcp_integration as mcp_mod
+
         assert mcp_mod.logger is not None
 
     def test_crew_logger_selected_by_default(self):
         """By default (no FLOW_SUBPROCESS_MODE), crew logger should be used."""
         import src.services.tools.mcp_integration as mcp_mod
+
         # Logger should be set (either crew or flow depending on env)
         assert mcp_mod.logger is not None
 
@@ -550,7 +572,10 @@ class TestCollectAgentMcpRequirementsExtended:
             "agents": [{"id": "a1", "role": "dev"}],
             "tasks": [
                 {"agent": "a1", "tool_configs": {"MCP_SERVERS": ["server1"]}},
-                {"agent": "a1", "tool_configs": {"MCP_SERVERS": ["server1"]}},  # duplicate
+                {
+                    "agent": "a1",
+                    "tool_configs": {"MCP_SERVERS": ["server1"]},
+                },  # duplicate
             ],
         }
         result = await MCPIntegration.collect_agent_mcp_requirements(config)

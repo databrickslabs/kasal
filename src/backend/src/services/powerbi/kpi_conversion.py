@@ -7,16 +7,17 @@ Orchestrates conversion between different KPI formats using the converters packa
 
 import logging
 from typing import Any, Dict, List, Optional
-from src.services.converters.base.converter import ConversionFormat
-from src.services.converters.base.factory import ConverterFactory
+
 from src.schemas.kpi_conversion import (
+    ConversionFormatsResponse,
+    ConversionPath,
     ConversionRequest,
     ConversionResponse,
-    ConversionPath,
-    ConversionFormatsResponse,
-    ValidationResponse,
     ValidationError,
+    ValidationResponse,
 )
+from src.services.converters.base.converter import ConversionFormat
+from src.services.converters.base.factory import ConverterFactory
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +61,7 @@ class KPIConversionService:
             ]
 
             return ConversionFormatsResponse(
-                formats=list(formats),
-                conversion_paths=paths
+                formats=list(formats), conversion_paths=paths
             )
         except Exception as e:
             logger.error(f"Error fetching available formats: {e}")
@@ -72,7 +72,7 @@ class KPIConversionService:
         source_format: ConversionFormat,
         target_format: ConversionFormat,
         input_data: Any,
-        config: Optional[Dict[str, Any]] = None
+        config: Optional[Dict[str, Any]] = None,
     ) -> ConversionResponse:
         """
         Convert KPIs from source format to target format.
@@ -98,9 +98,7 @@ class KPIConversionService:
 
             # Create converter instance
             converter = self.factory.create(
-                source_format=source_format,
-                target_format=target_format,
-                config=config
+                source_format=source_format, target_format=target_format, config=config
             )
 
             # Validate input
@@ -119,7 +117,7 @@ class KPIConversionService:
                 metadata={
                     "converter_type": type(converter).__name__,
                 },
-                warnings=[]
+                warnings=[],
             )
 
         except ValueError as e:
@@ -130,9 +128,7 @@ class KPIConversionService:
             raise ValueError(f"Conversion failed: {str(e)}")
 
     async def validate(
-        self,
-        format: ConversionFormat,
-        input_data: Any
+        self, format: ConversionFormat, input_data: Any
     ) -> ValidationResponse:
         """
         Validate KPI definition for a specific format.
@@ -158,32 +154,34 @@ class KPIConversionService:
 
             # Basic structure validation
             if not isinstance(input_data, dict):
-                errors.append(ValidationError(
-                    field="root",
-                    message="Input data must be a dictionary",
-                    severity="error"
-                ))
+                errors.append(
+                    ValidationError(
+                        field="root",
+                        message="Input data must be a dictionary",
+                        severity="error",
+                    )
+                )
 
             # Format-specific validation could go here
             # For now, just basic checks
             if format == ConversionFormat.YAML:
                 if "kbis" not in input_data:
-                    errors.append(ValidationError(
-                        field="kbis",
-                        message="YAML format requires 'kbis' field",
-                        severity="error"
-                    ))
+                    errors.append(
+                        ValidationError(
+                            field="kbis",
+                            message="YAML format requires 'kbis' field",
+                            severity="error",
+                        )
+                    )
                 elif not input_data.get("kbis"):
-                    warnings.append(ValidationError(
-                        field="kbis",
-                        message="No KBIs defined",
-                        severity="warning"
-                    ))
+                    warnings.append(
+                        ValidationError(
+                            field="kbis", message="No KBIs defined", severity="warning"
+                        )
+                    )
 
             return ValidationResponse(
-                valid=len(errors) == 0,
-                errors=errors,
-                warnings=warnings
+                valid=len(errors) == 0, errors=errors, warnings=warnings
             )
 
         except Exception as e:
@@ -191,8 +189,7 @@ class KPIConversionService:
             raise ValueError(f"Validation failed: {str(e)}")
 
     async def batch_convert(
-        self,
-        requests: List[ConversionRequest]
+        self, requests: List[ConversionRequest]
     ) -> List[ConversionResponse]:
         """
         Convert multiple KPIs in a batch operation.
@@ -213,7 +210,7 @@ class KPIConversionService:
                     source_format=request.source_format,
                     target_format=request.target_format,
                     input_data=request.input_data,
-                    config=request.config
+                    config=request.config,
                 )
                 results.append(result)
 

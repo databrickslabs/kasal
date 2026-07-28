@@ -1,10 +1,12 @@
-import queue
 import logging
+import queue
 
 logger = logging.getLogger(__name__)
 
+
 class TraceQueue:
     """Singleton holder for the agent trace queue."""
+
     _instance = None
     _queue = None
 
@@ -17,10 +19,13 @@ class TraceQueue:
 
     def get_queue(self) -> queue.Queue:
         """Get the singleton queue instance."""
-        logger.debug(f"[TRACE_DEBUG] get_queue called, queue size: {self._queue.qsize()}")
+        logger.debug(
+            f"[TRACE_DEBUG] get_queue called, queue size: {self._queue.qsize()}"
+        )
         return self._queue
+
 
 # Function to get the singleton queue instance easily
 def get_trace_queue() -> queue.Queue:
     logger.debug(f"[TRACE_DEBUG] get_trace_queue function called")
-    return TraceQueue().get_queue() 
+    return TraceQueue().get_queue()

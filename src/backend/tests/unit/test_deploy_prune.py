@@ -15,13 +15,16 @@ because ``assets/`` (a directory) still exists locally by name.
 The fix makes the prune recurse into subdirectories that still exist locally,
 so orphaned files *inside* them are deleted.
 """
+
 import os
 import sys
 from unittest.mock import MagicMock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
+sys.path.insert(
+    0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src")
+)
 
-from deploy import prune_remote_dir, clear_remote_dir
+from deploy import clear_remote_dir, prune_remote_dir
 
 
 def _entry(path):
@@ -46,7 +49,9 @@ def _client(tree):
 
 
 def _deleted_paths(client):
-    return [c.kwargs.get("path", c.args[0]) for c in client.workspace.delete.call_args_list]
+    return [
+        c.kwargs.get("path", c.args[0]) for c in client.workspace.delete.call_args_list
+    ]
 
 
 def test_prunes_orphaned_top_level_entry(tmp_path):
@@ -67,14 +72,16 @@ def test_recurses_into_subdir_to_prune_orphaned_hashed_chunks(tmp_path):
     assets.mkdir()
     (assets / "index-NEWHASH.js").write_text("x")  # current build's chunk
 
-    client = _client({
-        "/remote": ["/remote/assets"],
-        "/remote/assets": [
-            "/remote/assets/index-NEWHASH.js",   # matches local — keep
-            "/remote/assets/index-OLDHASH1.js",  # orphan from a prior build
-            "/remote/assets/index-OLDHASH2.js",  # orphan from a prior build
-        ],
-    })
+    client = _client(
+        {
+            "/remote": ["/remote/assets"],
+            "/remote/assets": [
+                "/remote/assets/index-NEWHASH.js",  # matches local — keep
+                "/remote/assets/index-OLDHASH1.js",  # orphan from a prior build
+                "/remote/assets/index-OLDHASH2.js",  # orphan from a prior build
+            ],
+        }
+    )
 
     prune_remote_dir(client, "/remote", tmp_path)
 
@@ -92,10 +99,12 @@ def test_orphaned_subdir_deleted_wholesale_not_recursed(tmp_path):
     """A remote directory absent locally is deleted in one recursive call —
     we must NOT descend into it (no need, and it may be huge)."""
     # tmp_path is empty: nothing local matches the remote "oldfeature" dir.
-    client = _client({
-        "/remote": ["/remote/oldfeature"],
-        "/remote/oldfeature": ["/remote/oldfeature/a.js"],
-    })
+    client = _client(
+        {
+            "/remote": ["/remote/oldfeature"],
+            "/remote/oldfeature": ["/remote/oldfeature/a.js"],
+        }
+    )
 
     prune_remote_dir(client, "/remote", tmp_path)
 
@@ -113,10 +122,12 @@ def test_keeps_everything_when_remote_matches_local(tmp_path):
     sub.mkdir()
     (sub / "b.js").write_text("x")
 
-    client = _client({
-        "/remote": ["/remote/a.js", "/remote/sub"],
-        "/remote/sub": ["/remote/sub/b.js"],
-    })
+    client = _client(
+        {
+            "/remote": ["/remote/a.js", "/remote/sub"],
+            "/remote/sub": ["/remote/sub/b.js"],
+        }
+    )
 
     prune_remote_dir(client, "/remote", tmp_path)
 

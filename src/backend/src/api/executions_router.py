@@ -14,13 +14,10 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 
 from src.config.settings import settings
-
-from src.core.exceptions import ForbiddenError, NotFoundError
-
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import ForbiddenError, NotFoundError
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context
-from src.services.execution.config_adapter import get_execution_logger
 from src.schemas.execution import (
     CrewConfig,
     ExecutionCreateResponse,
@@ -32,6 +29,7 @@ from src.schemas.execution import (
     StopExecutionRequest,
     StopExecutionResponse,
 )
+from src.services.execution.config_adapter import get_execution_logger
 from src.services.execution.service import ExecutionService
 from src.services.flow_builder.flow_service import FlowService
 

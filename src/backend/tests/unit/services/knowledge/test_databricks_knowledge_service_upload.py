@@ -5,9 +5,10 @@ Targets uncovered branches to push coverage to 85%+.
 
 import asyncio
 import io
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 from src.services.knowledge.databricks_service import DatabricksKnowledgeService
 
@@ -236,11 +237,14 @@ class TestUploadKnowledgeFile:
         the embedding attempt — success or failure."""
         import os as _os
         import tempfile as _tempfile
+
         from src.core.exceptions import KasalError
 
         svc = make_svc()
         file = make_upload_file("notes.txt", b"some text")
-        svc.embedding_service.embed_file = AsyncMock(side_effect=Exception("embed boom"))
+        svc.embedding_service.embed_file = AsyncMock(
+            side_effect=Exception("embed boom")
+        )
 
         staged = []
         # Bind the real function BEFORE patching: the service imports the
@@ -374,7 +378,9 @@ class TestUploadKnowledgeFile:
 
         svc = make_svc()
         file = make_upload_file()
-        svc.embedding_service.purge_expired = AsyncMock(side_effect=Exception("db crash"))
+        svc.embedding_service.purge_expired = AsyncMock(
+            side_effect=Exception("db crash")
+        )
 
         with pytest.raises(KasalError) as exc:
             await svc.upload_knowledge_file(

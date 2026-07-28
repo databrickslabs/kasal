@@ -5,7 +5,10 @@ Tests SQL-style formula conversion to DAX syntax (CASE WHEN → IF, operators, e
 """
 
 import pytest
-from src.services.converters.formats.powerbi.helpers.dax_syntax_converter import DaxSyntaxConverter
+
+from src.services.converters.formats.powerbi.helpers.dax_syntax_converter import (
+    DaxSyntaxConverter,
+)
 
 
 class TestDaxSyntaxConverter:
@@ -22,13 +25,13 @@ class TestDaxSyntaxConverter:
         """Test DaxSyntaxConverter initializes with DAX functions"""
         assert converter.dax_functions is not None
         assert len(converter.dax_functions) > 0
-        assert 'IF' in converter.dax_functions
-        assert 'SUM' in converter.dax_functions
-        assert 'CALCULATE' in converter.dax_functions
+        assert "IF" in converter.dax_functions
+        assert "SUM" in converter.dax_functions
+        assert "CALCULATE" in converter.dax_functions
 
     def test_converter_has_required_functions(self, converter):
         """Test converter has all required DAX function names"""
-        required = ['IF', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'AND', 'OR', 'NOT']
+        required = ["IF", "CASE", "WHEN", "THEN", "ELSE", "END", "AND", "OR", "NOT"]
         for func in required:
             assert func in converter.dax_functions
 

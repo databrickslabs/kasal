@@ -8,16 +8,18 @@ Tests:
 - supports_conversion returns correct True/False
 - Registry isolation between tests via setup_method
 """
-import pytest
+
 from typing import Any
+
+import pytest
 
 from src.services.converters.base.converter import BaseConverter, ConversionFormat
 from src.services.converters.base.factory import ConverterFactory
 
-
 # ---------------------------------------------------------------------------
 # Minimal concrete converters used in tests
 # ---------------------------------------------------------------------------
+
 
 class StubYamlToDaxConverter(BaseConverter):
     """Stub: YAML -> DAX."""
@@ -77,6 +79,7 @@ class StubPowerBIToYamlConverter(BaseConverter):
 # Test class
 # ---------------------------------------------------------------------------
 
+
 class TestConverterFactory:
     """Tests for ConverterFactory class-level registry."""
 
@@ -115,11 +118,18 @@ class TestConverterFactory:
         ConverterFactory.register(
             ConversionFormat.YAML, ConversionFormat.SQL, StubYamlToSqlConverter
         )
-        assert (ConversionFormat.YAML, ConversionFormat.DAX) in ConverterFactory._converters
-        assert (ConversionFormat.YAML, ConversionFormat.SQL) in ConverterFactory._converters
+        assert (
+            ConversionFormat.YAML,
+            ConversionFormat.DAX,
+        ) in ConverterFactory._converters
+        assert (
+            ConversionFormat.YAML,
+            ConversionFormat.SQL,
+        ) in ConverterFactory._converters
 
     def test_register_overwrites_existing_path(self):
         """Re-registering the same path replaces the old converter class."""
+
         class AltDaxConverter(StubYamlToDaxConverter):
             pass
 
@@ -129,9 +139,10 @@ class TestConverterFactory:
         ConverterFactory.register(
             ConversionFormat.YAML, ConversionFormat.DAX, AltDaxConverter
         )
-        assert ConverterFactory._converters[
-            (ConversionFormat.YAML, ConversionFormat.DAX)
-        ] is AltDaxConverter
+        assert (
+            ConverterFactory._converters[(ConversionFormat.YAML, ConversionFormat.DAX)]
+            is AltDaxConverter
+        )
 
     # ------------------------------------------------------------------
     # create
@@ -180,7 +191,9 @@ class TestConverterFactory:
             (ConversionFormat.POWERBI, ConversionFormat.UC_METRICS), None
         )
         with pytest.raises(ValueError) as exc_info:
-            ConverterFactory.create(ConversionFormat.POWERBI, ConversionFormat.UC_METRICS)
+            ConverterFactory.create(
+                ConversionFormat.POWERBI, ConversionFormat.UC_METRICS
+            )
         msg = str(exc_info.value)
         assert "powerbi" in msg.lower() or "POWERBI" in msg
         assert "uc_metrics" in msg.lower() or "UC_METRICS" in msg
@@ -257,18 +270,24 @@ class TestConverterFactory:
         ConverterFactory.register(
             ConversionFormat.YAML, ConversionFormat.DAX, StubYamlToDaxConverter
         )
-        assert ConverterFactory.supports_conversion(
-            ConversionFormat.YAML, ConversionFormat.DAX
-        ) is True
+        assert (
+            ConverterFactory.supports_conversion(
+                ConversionFormat.YAML, ConversionFormat.DAX
+            )
+            is True
+        )
 
     def test_supports_conversion_unregistered_path_returns_false(self):
         """Returns False when the path is not in the registry."""
         ConverterFactory._converters.pop(
             (ConversionFormat.SQL, ConversionFormat.UC_METRICS), None
         )
-        assert ConverterFactory.supports_conversion(
-            ConversionFormat.SQL, ConversionFormat.UC_METRICS
-        ) is False
+        assert (
+            ConverterFactory.supports_conversion(
+                ConversionFormat.SQL, ConversionFormat.UC_METRICS
+            )
+            is False
+        )
 
     def test_supports_conversion_direction_matters(self):
         """A->B is different from B->A in supports_conversion."""
@@ -276,37 +295,52 @@ class TestConverterFactory:
         ConverterFactory.register(
             ConversionFormat.YAML, ConversionFormat.DAX, StubYamlToDaxConverter
         )
-        assert ConverterFactory.supports_conversion(
-            ConversionFormat.YAML, ConversionFormat.DAX
-        ) is True
-        assert ConverterFactory.supports_conversion(
-            ConversionFormat.DAX, ConversionFormat.YAML
-        ) is False
+        assert (
+            ConverterFactory.supports_conversion(
+                ConversionFormat.YAML, ConversionFormat.DAX
+            )
+            is True
+        )
+        assert (
+            ConverterFactory.supports_conversion(
+                ConversionFormat.DAX, ConversionFormat.YAML
+            )
+            is False
+        )
 
     def test_supports_conversion_after_registration(self):
         """supports_conversion reflects the state after registration."""
         ConverterFactory._converters.pop(
             (ConversionFormat.POWERBI, ConversionFormat.YAML), None
         )
-        assert ConverterFactory.supports_conversion(
-            ConversionFormat.POWERBI, ConversionFormat.YAML
-        ) is False
+        assert (
+            ConverterFactory.supports_conversion(
+                ConversionFormat.POWERBI, ConversionFormat.YAML
+            )
+            is False
+        )
 
         ConverterFactory.register(
             ConversionFormat.POWERBI, ConversionFormat.YAML, StubPowerBIToYamlConverter
         )
-        assert ConverterFactory.supports_conversion(
-            ConversionFormat.POWERBI, ConversionFormat.YAML
-        ) is True
+        assert (
+            ConverterFactory.supports_conversion(
+                ConversionFormat.POWERBI, ConversionFormat.YAML
+            )
+            is True
+        )
 
     def test_supports_conversion_same_format_not_registered_by_default(self):
         """Identity conversion (format -> same format) is not registered by default."""
         ConverterFactory._converters.pop(
             (ConversionFormat.YAML, ConversionFormat.YAML), None
         )
-        assert ConverterFactory.supports_conversion(
-            ConversionFormat.YAML, ConversionFormat.YAML
-        ) is False
+        assert (
+            ConverterFactory.supports_conversion(
+                ConversionFormat.YAML, ConversionFormat.YAML
+            )
+            is False
+        )
 
     # ------------------------------------------------------------------
     # Registry isolation between tests
@@ -327,4 +361,7 @@ class TestConverterFactory:
         # state it was in at the start of this test (which could be empty or
         # contain real registrations from production code — neither matters,
         # only that our test-specific addition is absent).
-        assert (ConversionFormat.SQL, ConversionFormat.DAX) not in ConverterFactory._converters
+        assert (
+            ConversionFormat.SQL,
+            ConversionFormat.DAX,
+        ) not in ConverterFactory._converters

@@ -21,7 +21,9 @@ wrapper's inner type).
 from src.services.guardrails.base_guardrail import BaseGuardrail, is_task_output
 from src.services.guardrails.core.llm_injection_guardrail import LLMInjectionGuardrail
 from src.services.guardrails.core.minimum_number_guardrail import MinimumNumberGuardrail
-from src.services.guardrails.core.self_reflection_guardrail import SelfReflectionGuardrail
+from src.services.guardrails.core.self_reflection_guardrail import (
+    SelfReflectionGuardrail,
+)
 from src.services.guardrails.demo.company_count_guardrail import CompanyCountGuardrail
 from src.services.guardrails.demo.company_name_not_null_guardrail import (
     CompanyNameNotNullGuardrail,
@@ -29,7 +31,9 @@ from src.services.guardrails.demo.company_name_not_null_guardrail import (
 from src.services.guardrails.demo.data_processing_count_guardrail import (
     DataProcessingCountGuardrail,
 )
-from src.services.guardrails.demo.data_processing_guardrail import DataProcessingGuardrail
+from src.services.guardrails.demo.data_processing_guardrail import (
+    DataProcessingGuardrail,
+)
 from src.services.guardrails.demo.empty_data_processing_guardrail import (
     EmptyDataProcessingGuardrail,
 )

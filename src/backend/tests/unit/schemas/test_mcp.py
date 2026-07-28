@@ -4,28 +4,34 @@ Unit tests for MCP (Model Control Protocol) schemas.
 Tests the functionality of Pydantic schemas for MCP server operations
 including validation, serialization, and field constraints.
 """
-import pytest
+
 from datetime import datetime
+from typing import Any, Dict, List
+
+import pytest
 from pydantic import ValidationError
-from typing import Dict, Any, List
 
 from src.schemas.mcp import (
-    MCPServerBase, MCPServerCreate, MCPServerUpdate, MCPServerResponse,
-    MCPServerListResponse, MCPToggleResponse, MCPTestConnectionRequest,
-    MCPTestConnectionResponse, MCPSettingsBase, MCPSettingsUpdate,
-    MCPSettingsResponse
+    MCPServerBase,
+    MCPServerCreate,
+    MCPServerListResponse,
+    MCPServerResponse,
+    MCPServerUpdate,
+    MCPSettingsBase,
+    MCPSettingsResponse,
+    MCPSettingsUpdate,
+    MCPTestConnectionRequest,
+    MCPTestConnectionResponse,
+    MCPToggleResponse,
 )
 
 
 class TestMCPServerBase:
     """Test cases for MCPServerBase schema."""
-    
+
     def test_valid_mcp_server_base_minimal(self):
         """Test MCPServerBase with minimal required fields."""
-        data = {
-            "name": "test-server",
-            "server_url": "https://api.example.com"
-        }
+        data = {"name": "test-server", "server_url": "https://api.example.com"}
         server = MCPServerBase(**data)
         assert server.name == "test-server"
         assert server.server_url == "https://api.example.com"
@@ -48,7 +54,7 @@ class TestMCPServerBase:
             "max_retries": 5,
             "model_mapping_enabled": True,
             "rate_limit": 120,
-            "additional_config": {"debug": True, "log_level": "INFO"}
+            "additional_config": {"debug": True, "log_level": "INFO"},
         }
         server = MCPServerBase(**data)
         assert server.name == "full-server"
@@ -65,9 +71,11 @@ class TestMCPServerBase:
         """Test MCPServerBase validation with missing required fields."""
         with pytest.raises(ValidationError) as exc_info:
             MCPServerBase(name="test-server")
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "server_url" in missing_fields
 
     def test_mcp_server_base_boolean_conversions(self):
@@ -76,7 +84,7 @@ class TestMCPServerBase:
             "name": "bool-server",
             "server_url": "https://bool.example.com",
             "enabled": "true",
-            "model_mapping_enabled": 1
+            "model_mapping_enabled": 1,
         }
         server = MCPServerBase(**data)
         assert server.enabled is True
@@ -89,7 +97,7 @@ class TestMCPServerBase:
             "server_url": "https://int.example.com",
             "timeout_seconds": "45",  # String that can be converted
             "max_retries": 3.0,  # Float that can be converted
-            "rate_limit": "90"
+            "rate_limit": "90",
         }
         server = MCPServerBase(**data)
         assert server.timeout_seconds == 45
@@ -102,23 +110,23 @@ class TestMCPServerBase:
 
 class TestMCPServerCreate:
     """Test cases for MCPServerCreate schema."""
-    
+
     def test_mcp_server_create_inheritance(self):
         """Test that MCPServerCreate inherits from MCPServerBase."""
         data = {
             "name": "create-server",
             "server_url": "https://create.example.com",
-            "api_key": "secret-api-key"
+            "api_key": "secret-api-key",
         }
         create_server = MCPServerCreate(**data)
-        
+
         # Should have all base class attributes
-        assert hasattr(create_server, 'name')
-        assert hasattr(create_server, 'server_url')
-        assert hasattr(create_server, 'server_type')
-        assert hasattr(create_server, 'enabled')
-        assert hasattr(create_server, 'api_key')
-        
+        assert hasattr(create_server, "name")
+        assert hasattr(create_server, "server_url")
+        assert hasattr(create_server, "server_type")
+        assert hasattr(create_server, "enabled")
+        assert hasattr(create_server, "api_key")
+
         # Should behave like base class
         assert create_server.name == "create-server"
         assert create_server.server_url == "https://create.example.com"
@@ -127,10 +135,7 @@ class TestMCPServerCreate:
 
     def test_mcp_server_create_missing_api_key_defaults_to_empty(self):
         """Test MCPServerCreate defaults api_key to empty string (for SPN auth)."""
-        data = {
-            "name": "create-server",
-            "server_url": "https://create.example.com"
-        }
+        data = {"name": "create-server", "server_url": "https://create.example.com"}
         server = MCPServerCreate(**data)
         assert server.api_key == ""
         assert server.name == "create-server"
@@ -154,7 +159,7 @@ class TestMCPServerCreate:
             "api_key": "custom-api-key",
             "server_type": "streamable",
             "enabled": True,
-            "timeout_seconds": 90
+            "timeout_seconds": 90,
         }
         create_server = MCPServerCreate(**data)
         assert create_server.name == "custom-server"
@@ -166,7 +171,7 @@ class TestMCPServerCreate:
 
 class TestMCPServerUpdate:
     """Test cases for MCPServerUpdate schema."""
-    
+
     def test_mcp_server_update_all_optional(self):
         """Test that all MCPServerUpdate fields are optional."""
         update = MCPServerUpdate()
@@ -186,7 +191,7 @@ class TestMCPServerUpdate:
         update_data = {
             "name": "updated-server",
             "enabled": True,
-            "timeout_seconds": 120
+            "timeout_seconds": 120,
         }
         update = MCPServerUpdate(**update_data)
         assert update.name == "updated-server"
@@ -207,7 +212,7 @@ class TestMCPServerUpdate:
             "max_retries": 10,
             "model_mapping_enabled": True,
             "rate_limit": 240,
-            "additional_config": {"updated": True}
+            "additional_config": {"updated": True},
         }
         update = MCPServerUpdate(**update_data)
         assert update.name == "fully-updated-server"
@@ -224,7 +229,7 @@ class TestMCPServerUpdate:
 
 class TestMCPServerResponse:
     """Test cases for MCPServerResponse schema."""
-    
+
     def test_valid_mcp_server_response(self):
         """Test MCPServerResponse with all required fields."""
         now = datetime.now()
@@ -234,7 +239,7 @@ class TestMCPServerResponse:
             "server_url": "https://response.example.com",
             "api_key": "decrypted-key",
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         response = MCPServerResponse(**data)
         assert response.id == 123
@@ -243,7 +248,7 @@ class TestMCPServerResponse:
         assert response.api_key == "decrypted-key"
         assert response.created_at == now
         assert response.updated_at == now
-        
+
         # Should inherit all base class defaults
         assert response.server_type == "sse"
         assert response.enabled is False
@@ -251,19 +256,18 @@ class TestMCPServerResponse:
 
     def test_mcp_server_response_config(self):
         """Test MCPServerResponse model config."""
-        assert hasattr(MCPServerResponse, 'model_config')
+        assert hasattr(MCPServerResponse, "model_config")
         assert MCPServerResponse.model_config["from_attributes"] is True
 
     def test_mcp_server_response_missing_fields(self):
         """Test MCPServerResponse validation with missing fields."""
         with pytest.raises(ValidationError) as exc_info:
-            MCPServerResponse(
-                name="test-server",
-                server_url="https://test.example.com"
-            )
-        
+            MCPServerResponse(name="test-server", server_url="https://test.example.com")
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "id" in missing_fields
         assert "created_at" in missing_fields
         assert "updated_at" in missing_fields
@@ -276,7 +280,7 @@ class TestMCPServerResponse:
             "server_url": "https://datetime.example.com",
             "api_key": "",
             "created_at": "2023-01-01T12:00:00",
-            "updated_at": "2023-01-01T12:00:00"
+            "updated_at": "2023-01-01T12:00:00",
         }
         response = MCPServerResponse(**data)
         assert response.id == 456
@@ -286,7 +290,7 @@ class TestMCPServerResponse:
 
 class TestMCPServerListResponse:
     """Test cases for MCPServerListResponse schema."""
-    
+
     def test_valid_mcp_server_list_response(self):
         """Test MCPServerListResponse with all fields."""
         now = datetime.now()
@@ -297,7 +301,7 @@ class TestMCPServerListResponse:
                 server_url="https://server1.example.com",
                 api_key="key-1",
                 created_at=now,
-                updated_at=now
+                updated_at=now,
             ),
             MCPServerResponse(
                 id=2,
@@ -305,16 +309,13 @@ class TestMCPServerListResponse:
                 server_url="https://server2.example.com",
                 api_key="key-2",
                 created_at=now,
-                updated_at=now
-            )
+                updated_at=now,
+            ),
         ]
-        
-        data = {
-            "servers": servers,
-            "count": 2
-        }
+
+        data = {"servers": servers, "count": 2}
         list_response = MCPServerListResponse(**data)
-        
+
         assert len(list_response.servers) == 2
         assert list_response.count == 2
         assert list_response.servers[0].name == "server-1"
@@ -322,10 +323,7 @@ class TestMCPServerListResponse:
 
     def test_empty_server_list(self):
         """Test MCPServerListResponse with empty server list."""
-        data = {
-            "servers": [],
-            "count": 0
-        }
+        data = {"servers": [], "count": 0}
         list_response = MCPServerListResponse(**data)
         assert len(list_response.servers) == 0
         assert list_response.count == 0
@@ -333,23 +331,17 @@ class TestMCPServerListResponse:
 
 class TestMCPToggleResponse:
     """Test cases for MCPToggleResponse schema."""
-    
+
     def test_valid_mcp_toggle_response(self):
         """Test MCPToggleResponse with all fields."""
-        data = {
-            "message": "Server enabled successfully",
-            "enabled": True
-        }
+        data = {"message": "Server enabled successfully", "enabled": True}
         toggle_response = MCPToggleResponse(**data)
         assert toggle_response.message == "Server enabled successfully"
         assert toggle_response.enabled is True
 
     def test_mcp_toggle_response_disabled(self):
         """Test MCPToggleResponse for disabled state."""
-        data = {
-            "message": "Server disabled successfully",
-            "enabled": False
-        }
+        data = {"message": "Server disabled successfully", "enabled": False}
         toggle_response = MCPToggleResponse(**data)
         assert toggle_response.message == "Server disabled successfully"
         assert toggle_response.enabled is False
@@ -357,14 +349,14 @@ class TestMCPToggleResponse:
 
 class TestMCPTestConnectionRequest:
     """Test cases for MCPTestConnectionRequest schema."""
-    
+
     def test_valid_mcp_test_connection_request(self):
         """Test MCPTestConnectionRequest with all fields."""
         data = {
             "server_url": "https://test.example.com",
             "api_key": "test-api-key",
             "server_type": "streamable",
-            "timeout_seconds": 45
+            "timeout_seconds": 45,
         }
         request = MCPTestConnectionRequest(**data)
         assert request.server_url == "https://test.example.com"
@@ -374,10 +366,7 @@ class TestMCPTestConnectionRequest:
 
     def test_mcp_test_connection_request_defaults(self):
         """Test MCPTestConnectionRequest with default values."""
-        data = {
-            "server_url": "https://default.example.com",
-            "api_key": "default-key"
-        }
+        data = {"server_url": "https://default.example.com", "api_key": "default-key"}
         request = MCPTestConnectionRequest(**data)
         assert request.server_url == "https://default.example.com"
         assert request.api_key == "default-key"
@@ -388,31 +377,27 @@ class TestMCPTestConnectionRequest:
         """Test MCPTestConnectionRequest validation with missing fields."""
         with pytest.raises(ValidationError) as exc_info:
             MCPTestConnectionRequest(server_url="https://test.example.com")
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "api_key" in missing_fields
 
 
 class TestMCPTestConnectionResponse:
     """Test cases for MCPTestConnectionResponse schema."""
-    
+
     def test_valid_mcp_test_connection_response_success(self):
         """Test MCPTestConnectionResponse for successful connection."""
-        data = {
-            "success": True,
-            "message": "Connection successful"
-        }
+        data = {"success": True, "message": "Connection successful"}
         response = MCPTestConnectionResponse(**data)
         assert response.success is True
         assert response.message == "Connection successful"
 
     def test_valid_mcp_test_connection_response_failure(self):
         """Test MCPTestConnectionResponse for failed connection."""
-        data = {
-            "success": False,
-            "message": "Connection failed: timeout"
-        }
+        data = {"success": False, "message": "Connection failed: timeout"}
         response = MCPTestConnectionResponse(**data)
         assert response.success is False
         assert response.message == "Connection failed: timeout"
@@ -421,20 +406,20 @@ class TestMCPTestConnectionResponse:
         """Test MCPTestConnectionResponse validation with missing fields."""
         with pytest.raises(ValidationError) as exc_info:
             MCPTestConnectionResponse(success=True)
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "message" in missing_fields
 
 
 class TestMCPSettingsBase:
     """Test cases for MCPSettingsBase schema."""
-    
+
     def test_valid_mcp_settings_base(self):
         """Test MCPSettingsBase with all fields."""
-        data = {
-            "global_enabled": True
-        }
+        data = {"global_enabled": True}
         settings = MCPSettingsBase(**data)
         assert settings.global_enabled is True
 
@@ -451,15 +436,13 @@ class TestMCPSettingsBase:
 
 class TestMCPSettingsUpdate:
     """Test cases for MCPSettingsUpdate schema."""
-    
+
     def test_mcp_settings_update_inheritance(self):
         """Test that MCPSettingsUpdate inherits from MCPSettingsBase."""
-        data = {
-            "global_enabled": True
-        }
+        data = {"global_enabled": True}
         update = MCPSettingsUpdate(**data)
-        
-        assert hasattr(update, 'global_enabled')
+
+        assert hasattr(update, "global_enabled")
         assert update.global_enabled is True
 
     def test_mcp_settings_update_empty(self):
@@ -470,16 +453,11 @@ class TestMCPSettingsUpdate:
 
 class TestMCPSettingsResponse:
     """Test cases for MCPSettingsResponse schema."""
-    
+
     def test_valid_mcp_settings_response(self):
         """Test MCPSettingsResponse with all required fields."""
         now = datetime.now()
-        data = {
-            "id": 1,
-            "global_enabled": True,
-            "created_at": now,
-            "updated_at": now
-        }
+        data = {"id": 1, "global_enabled": True, "created_at": now, "updated_at": now}
         response = MCPSettingsResponse(**data)
         assert response.id == 1
         assert response.global_enabled is True
@@ -488,16 +466,18 @@ class TestMCPSettingsResponse:
 
     def test_mcp_settings_response_config(self):
         """Test MCPSettingsResponse model config."""
-        assert hasattr(MCPSettingsResponse, 'model_config')
+        assert hasattr(MCPSettingsResponse, "model_config")
         assert MCPSettingsResponse.model_config["from_attributes"] is True
 
     def test_mcp_settings_response_missing_fields(self):
         """Test MCPSettingsResponse validation with missing fields."""
         with pytest.raises(ValidationError) as exc_info:
             MCPSettingsResponse(global_enabled=True)
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "id" in missing_fields
         assert "created_at" in missing_fields
         assert "updated_at" in missing_fields
@@ -505,7 +485,7 @@ class TestMCPSettingsResponse:
 
 class TestSchemaIntegration:
     """Integration tests for MCP schema interactions."""
-    
+
     def test_mcp_server_workflow(self):
         """Test complete MCP server workflow."""
         # Create server
@@ -514,30 +494,25 @@ class TestSchemaIntegration:
             "server_url": "https://workflow.example.com",
             "api_key": "workflow-key",
             "server_type": "sse",
-            "enabled": False
+            "enabled": False,
         }
         create_schema = MCPServerCreate(**create_data)
-        
+
         # Update server
-        update_data = {
-            "enabled": True,
-            "timeout_seconds": 60,
-            "rate_limit": 120
-        }
+        update_data = {"enabled": True, "timeout_seconds": 60, "rate_limit": 120}
         update_schema = MCPServerUpdate(**update_data)
-        
+
         # Test connection
         test_request = MCPTestConnectionRequest(
             server_url=create_schema.server_url,
             api_key=create_schema.api_key,
-            server_type=create_schema.server_type
+            server_type=create_schema.server_type,
         )
-        
+
         test_response = MCPTestConnectionResponse(
-            success=True,
-            message="Connection test successful"
+            success=True, message="Connection test successful"
         )
-        
+
         # Simulate database entity
         now = datetime.now()
         db_data = {
@@ -550,16 +525,15 @@ class TestSchemaIntegration:
             "timeout_seconds": update_data["timeout_seconds"],
             "rate_limit": update_data["rate_limit"],
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         server_response = MCPServerResponse(**db_data)
-        
+
         # Toggle response
         toggle_response = MCPToggleResponse(
-            message="Server enabled successfully",
-            enabled=True
+            message="Server enabled successfully", enabled=True
         )
-        
+
         # Verify the complete workflow
         assert create_schema.name == "workflow-server"
         assert create_schema.enabled is False
@@ -575,16 +549,16 @@ class TestSchemaIntegration:
         """Test MCP settings workflow."""
         # Create settings update
         settings_update = MCPSettingsUpdate(global_enabled=True)
-        
+
         # Simulate database entity
         now = datetime.now()
         settings_response = MCPSettingsResponse(
             id=1,
             global_enabled=settings_update.global_enabled,
             created_at=now,
-            updated_at=now
+            updated_at=now,
         )
-        
+
         # Verify workflow
         assert settings_update.global_enabled is True
         assert settings_response.id == 1
@@ -600,21 +574,21 @@ class TestSchemaIntegration:
             api_key="sse-key",
             server_type="sse",
             timeout_seconds=30,
-            rate_limit=60
+            rate_limit=60,
         )
         assert sse_server.server_type == "sse"
-        
+
         # Streamable server configuration
         streamable_server = MCPServerCreate(
             name="streamable-server",
             server_url="https://streamable.example.com/api/mcp/",
             api_key="streamable-key",
             server_type="streamable",
-            additional_config={"env": {"PATH": "/usr/bin"}}
+            additional_config={"env": {"PATH": "/usr/bin"}},
         )
         assert streamable_server.server_type == "streamable"
         assert streamable_server.additional_config == {"env": {"PATH": "/usr/bin"}}
-        
+
         # High-performance server configuration
         high_perf_server = MCPServerCreate(
             name="high-perf-server",
@@ -624,7 +598,7 @@ class TestSchemaIntegration:
             max_retries=10,
             rate_limit=300,
             model_mapping_enabled=True,
-            additional_config={"cache_enabled": True, "batch_size": 100}
+            additional_config={"cache_enabled": True, "batch_size": 100},
         )
         assert high_perf_server.timeout_seconds == 120
         assert high_perf_server.max_retries == 10

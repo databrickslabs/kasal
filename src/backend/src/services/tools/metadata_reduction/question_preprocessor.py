@@ -42,6 +42,7 @@ class OutputShape(str, Enum):
 @dataclass
 class TimeIntelligence:
     """Time-related intent extracted from the question."""
+
     grain: Optional[TimeGrain] = None
     delta_periods: List[str] = field(default_factory=list)  # e.g., ["yoy", "mom"]
     has_ytd: bool = False
@@ -52,6 +53,7 @@ class TimeIntelligence:
 @dataclass
 class QuestionIntent:
     """Structured intent extracted from a user question."""
+
     original_question: str
     keywords: List[str] = field(default_factory=list)
     measures: List[str] = field(default_factory=list)
@@ -70,7 +72,11 @@ class QuestionIntent:
             "measures": self.measures,
             "dimensions": self.dimensions,
             "time_intelligence": {
-                "grain": self.time_intelligence.grain.value if self.time_intelligence.grain else None,
+                "grain": (
+                    self.time_intelligence.grain.value
+                    if self.time_intelligence.grain
+                    else None
+                ),
                 "delta_periods": self.time_intelligence.delta_periods,
                 "has_ytd": self.time_intelligence.has_ytd,
                 "has_mtd": self.time_intelligence.has_mtd,
@@ -87,26 +93,63 @@ class QuestionIntent:
 
 _TIME_GRAIN_TOKENS: Dict[TimeGrain, Set[str]] = {
     TimeGrain.YEAR: {"year", "yearly", "annual", "annually", "years", "yoy", "y/y"},
-    TimeGrain.QUARTER: {"quarter", "quarterly", "quarters", "qoq", "q/q", "q1", "q2", "q3", "q4"},
+    TimeGrain.QUARTER: {
+        "quarter",
+        "quarterly",
+        "quarters",
+        "qoq",
+        "q/q",
+        "q1",
+        "q2",
+        "q3",
+        "q4",
+    },
     TimeGrain.MONTH: {"month", "monthly", "months", "mom", "m/m"},
     TimeGrain.WEEK: {"week", "weekly", "weeks", "wow", "w/w"},
     TimeGrain.DAY: {"day", "daily", "days"},
 }
 
 _DELTA_TOKENS: Dict[str, str] = {
-    "yoy": "yoy", "y/y": "yoy", "year over year": "yoy", "year-over-year": "yoy",
-    "mom": "mom", "m/m": "mom", "month over month": "mom", "month-over-month": "mom",
-    "qoq": "qoq", "q/q": "qoq", "quarter over quarter": "qoq", "quarter-over-quarter": "qoq",
-    "wow": "wow", "w/w": "wow", "week over week": "wow", "week-over-week": "wow",
-    "delta": "delta", "change": "change", "diff": "diff", "difference": "diff",
-    "growth": "growth", "decline": "decline", "increase": "increase", "decrease": "decrease",
-    "variance": "variance", "vs": "comparison", "versus": "comparison", "compared to": "comparison",
+    "yoy": "yoy",
+    "y/y": "yoy",
+    "year over year": "yoy",
+    "year-over-year": "yoy",
+    "mom": "mom",
+    "m/m": "mom",
+    "month over month": "mom",
+    "month-over-month": "mom",
+    "qoq": "qoq",
+    "q/q": "qoq",
+    "quarter over quarter": "qoq",
+    "quarter-over-quarter": "qoq",
+    "wow": "wow",
+    "w/w": "wow",
+    "week over week": "wow",
+    "week-over-week": "wow",
+    "delta": "delta",
+    "change": "change",
+    "diff": "diff",
+    "difference": "diff",
+    "growth": "growth",
+    "decline": "decline",
+    "increase": "increase",
+    "decrease": "decrease",
+    "variance": "variance",
+    "vs": "comparison",
+    "versus": "comparison",
+    "compared to": "comparison",
 }
 
 _ACCUMULATION_TOKENS = {
-    "ytd": "ytd", "year to date": "ytd", "year-to-date": "ytd",
-    "mtd": "mtd", "month to date": "mtd", "month-to-date": "mtd",
-    "qtd": "qtd", "quarter to date": "qtd", "quarter-to-date": "qtd",
+    "ytd": "ytd",
+    "year to date": "ytd",
+    "year-to-date": "ytd",
+    "mtd": "mtd",
+    "month to date": "mtd",
+    "month-to-date": "mtd",
+    "qtd": "qtd",
+    "quarter to date": "qtd",
+    "quarter-to-date": "qtd",
 }
 
 _TOP_N_PATTERN = re.compile(
@@ -114,23 +157,109 @@ _TOP_N_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-_TREND_TOKENS = {"trend", "over time", "evolution", "progression", "trajectory", "history", "historical"}
+_TREND_TOKENS = {
+    "trend",
+    "over time",
+    "evolution",
+    "progression",
+    "trajectory",
+    "history",
+    "historical",
+}
 
-_COMPARISON_TOKENS = {"compare", "comparison", "vs", "versus", "against", "between", "relative"}
+_COMPARISON_TOKENS = {
+    "compare",
+    "comparison",
+    "vs",
+    "versus",
+    "against",
+    "between",
+    "relative",
+}
 
-_SINGLE_VALUE_TOKENS = {"total", "sum", "count", "average", "avg", "overall", "grand total"}
+_SINGLE_VALUE_TOKENS = {
+    "total",
+    "sum",
+    "count",
+    "average",
+    "avg",
+    "overall",
+    "grand total",
+}
 
 # Stopwords for keyword extraction
-_STOPWORDS = frozenset({
-    "a", "an", "and", "are", "as", "at", "be", "by", "do", "for", "from",
-    "get", "has", "have", "how", "i", "if", "in", "is", "it", "its", "me",
-    "much", "my", "no", "not", "of", "on", "or", "our", "per", "show",
-    "tell", "the", "to", "us", "was", "we", "what", "when", "where",
-    "which", "who", "why", "will", "with", "would", "yes",
-    "can", "could", "does", "each", "many", "should", "than", "that",
-    "their", "them", "then", "there", "these", "this", "those", "very",
-    "give", "list", "display", "report",
-})
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "do",
+        "for",
+        "from",
+        "get",
+        "has",
+        "have",
+        "how",
+        "i",
+        "if",
+        "in",
+        "is",
+        "it",
+        "its",
+        "me",
+        "much",
+        "my",
+        "no",
+        "not",
+        "of",
+        "on",
+        "or",
+        "our",
+        "per",
+        "show",
+        "tell",
+        "the",
+        "to",
+        "us",
+        "was",
+        "we",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "why",
+        "will",
+        "with",
+        "would",
+        "yes",
+        "can",
+        "could",
+        "does",
+        "each",
+        "many",
+        "should",
+        "than",
+        "that",
+        "their",
+        "them",
+        "then",
+        "there",
+        "these",
+        "this",
+        "those",
+        "very",
+        "give",
+        "list",
+        "display",
+        "report",
+    }
+)
 
 
 class QuestionPreprocessor:
@@ -165,11 +294,16 @@ class QuestionPreprocessor:
         if use_llm:
             try:
                 intent = self._llm_extract(
-                    intent, question, llm_model,
-                    known_measures, known_dimensions,
+                    intent,
+                    question,
+                    llm_model,
+                    known_measures,
+                    known_dimensions,
                 )
             except Exception as e:
-                logger.warning(f"[QuestionPreprocessor] LLM extraction failed, using deterministic: {e}")
+                logger.warning(
+                    f"[QuestionPreprocessor] LLM extraction failed, using deterministic: {e}"
+                )
 
         logger.info(
             f"[QuestionPreprocessor] Intent: shape={intent.output_shape.value}, "
@@ -201,8 +335,14 @@ class QuestionPreprocessor:
         keywords = self._extract_keywords(question)
 
         # Match known measures/dimensions if provided
-        matched_measures = self._match_known_names(q_lower, known_measures) if known_measures else []
-        matched_dimensions = self._match_known_names(q_lower, known_dimensions) if known_dimensions else []
+        matched_measures = (
+            self._match_known_names(q_lower, known_measures) if known_measures else []
+        )
+        matched_dimensions = (
+            self._match_known_names(q_lower, known_dimensions)
+            if known_dimensions
+            else []
+        )
 
         return QuestionIntent(
             original_question=question,
@@ -219,7 +359,13 @@ class QuestionPreprocessor:
         time_intel = TimeIntelligence()
 
         # Detect grain (finest wins)
-        for grain in [TimeGrain.DAY, TimeGrain.WEEK, TimeGrain.MONTH, TimeGrain.QUARTER, TimeGrain.YEAR]:
+        for grain in [
+            TimeGrain.DAY,
+            TimeGrain.WEEK,
+            TimeGrain.MONTH,
+            TimeGrain.QUARTER,
+            TimeGrain.YEAR,
+        ]:
             tokens = _TIME_GRAIN_TOKENS[grain]
             for token in tokens:
                 if token in q_lower.split() or token in q_lower:
@@ -307,7 +453,7 @@ class QuestionPreprocessor:
 
         async def _call():
             from src.services.llm.manager import LLMManager
-            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            from src.utils.telemetry import KasalProduct, get_user_agent_header
 
             measure_hint = ""
             if known_measures:
@@ -349,12 +495,16 @@ Return JSON:
                 deterministic_intent.dimensions = parsed["dimensions"]
             if parsed.get("time_grain") and parsed["time_grain"] != "null":
                 try:
-                    deterministic_intent.time_intelligence.grain = TimeGrain(parsed["time_grain"])
+                    deterministic_intent.time_intelligence.grain = TimeGrain(
+                        parsed["time_grain"]
+                    )
                 except ValueError:
                     pass
             if parsed.get("output_shape"):
                 try:
-                    deterministic_intent.output_shape = OutputShape(parsed["output_shape"])
+                    deterministic_intent.output_shape = OutputShape(
+                        parsed["output_shape"]
+                    )
                 except ValueError:
                     pass
 
@@ -365,6 +515,7 @@ Return JSON:
             loop = asyncio.get_running_loop()
             import concurrent.futures
             import contextvars
+
             ctx = contextvars.copy_context()
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(ctx.run, asyncio.run, _call())

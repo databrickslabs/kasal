@@ -4,15 +4,23 @@ Unit tests for user schemas.
 Tests the functionality of Pydantic schemas for user management
 including validation, serialization, and field constraints.
 """
-import pytest
+
 from datetime import datetime
+
+import pytest
 from pydantic import ValidationError
 
-from src.schemas.user import (
-    UserBase, UserUpdate, UserPermissionUpdate, IdentityProviderType,
-    UserInDB, UserResponse, GroupCreate, GroupUpdate
-)
 from src.models.enums import UserRole, UserStatus
+from src.schemas.user import (
+    GroupCreate,
+    GroupUpdate,
+    IdentityProviderType,
+    UserBase,
+    UserInDB,
+    UserPermissionUpdate,
+    UserResponse,
+    UserUpdate,
+)
 
 
 class TestIdentityProviderType:
@@ -38,10 +46,7 @@ class TestUserBase:
 
     def test_valid_user_base(self):
         """Test valid UserBase creation."""
-        user_data = {
-            "username": "testuser",
-            "email": "test@example.com"
-        }
+        user_data = {"username": "testuser", "email": "test@example.com"}
 
         user = UserBase(**user_data)
 
@@ -50,10 +55,7 @@ class TestUserBase:
 
     def test_user_base_localhost_email(self):
         """Test UserBase with localhost email (allowed in development)."""
-        user_data = {
-            "username": "devuser",
-            "email": "dev@localhost"
-        }
+        user_data = {"username": "devuser", "email": "dev@localhost"}
 
         user = UserBase(**user_data)
 
@@ -76,7 +78,9 @@ class TestUserBase:
             with pytest.raises(ValidationError) as exc_info:
                 UserBase(username=username, email="test@example.com")
 
-            assert "can only contain letters, numbers, underscores, and hyphens" in str(exc_info.value)
+            assert "can only contain letters, numbers, underscores, and hyphens" in str(
+                exc_info.value
+            )
 
     def test_user_base_username_validation_length(self):
         """Test UserBase username validation for length constraints."""
@@ -123,7 +127,7 @@ class TestUserBase:
             "test@example.com",
             "user@localhost",
             "complex.email+tag@domain.co.uk",
-            "numbers123@test.org"
+            "numbers123@test.org",
         ]
 
         for email in valid_emails:
@@ -142,7 +146,7 @@ class TestUserBase:
             "@example.com",
             "test@",
             "test.example.com",
-            "test@example"
+            "test@example",
         ]
 
         for email in tolerant_emails:
@@ -158,7 +162,7 @@ class TestUserUpdate:
         update_data = {
             "username": "updateduser",
             "email": "updated@example.com",
-            "status": UserStatus.ACTIVE
+            "status": UserStatus.ACTIVE,
         }
 
         user_update = UserUpdate(**update_data)
@@ -216,8 +220,7 @@ class TestUserPermissionUpdate:
     def test_valid_permission_update(self):
         """Test valid UserPermissionUpdate creation."""
         perm_update = UserPermissionUpdate(
-            is_system_admin=True,
-            is_personal_workspace_manager=False
+            is_system_admin=True, is_personal_workspace_manager=False
         )
 
         assert perm_update.is_system_admin is True
@@ -250,7 +253,7 @@ class TestUserInDB:
             "role": UserRole.TECHNICAL,
             "status": UserStatus.ACTIVE,
             "created_at": datetime.now(),
-            "updated_at": datetime.now()
+            "updated_at": datetime.now(),
         }
 
         user = UserInDB(**user_data)
@@ -269,7 +272,7 @@ class TestUserInDB:
             "role": UserRole.REGULAR,
             "status": UserStatus.ACTIVE,
             "created_at": datetime.now(),
-            "updated_at": datetime.now()
+            "updated_at": datetime.now(),
         }
 
         user = UserInDB(**user_data)
@@ -281,9 +284,9 @@ class TestUserInDB:
 
     def test_user_in_db_model_config(self):
         """Test UserInDB model configuration."""
-        assert 'from_attributes' in UserInDB.model_config
-        assert UserInDB.model_config['from_attributes'] is True
-        assert UserInDB.model_config['use_enum_values'] is True
+        assert "from_attributes" in UserInDB.model_config
+        assert UserInDB.model_config["from_attributes"] is True
+        assert UserInDB.model_config["use_enum_values"] is True
 
     def test_user_in_db_with_all_fields(self):
         """Test UserInDB with all fields populated."""
@@ -299,7 +302,7 @@ class TestUserInDB:
             "is_personal_workspace_manager": True,
             "created_at": now,
             "updated_at": now,
-            "last_login": now
+            "last_login": now,
         }
 
         user = UserInDB(**user_data)
@@ -326,7 +329,7 @@ class TestUserResponse:
             "role": UserRole.REGULAR,
             "status": UserStatus.ACTIVE,
             "created_at": datetime.now(),
-            "updated_at": datetime.now()
+            "updated_at": datetime.now(),
         }
 
         response = UserResponse(**user_data)
@@ -354,7 +357,9 @@ class TestGroupSchemas:
 
     def test_group_update(self):
         """Test GroupUpdate schema."""
-        group_update = GroupUpdate(name="updated-group", description="Updated description")
+        group_update = GroupUpdate(
+            name="updated-group", description="Updated description"
+        )
 
         assert group_update.name == "updated-group"
         assert group_update.description == "Updated description"
@@ -386,7 +391,7 @@ class TestSchemaInteraction:
             role=UserRole.ADMIN,
             status=UserStatus.ACTIVE,
             created_at=datetime.now(),
-            updated_at=datetime.now()
+            updated_at=datetime.now(),
         )
 
         assert user.role == UserRole.ADMIN

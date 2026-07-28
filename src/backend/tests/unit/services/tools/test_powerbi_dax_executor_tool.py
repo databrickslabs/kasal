@@ -1,19 +1,22 @@
 """Unit tests for PowerBIDaxExecutorTool (Tool 82)."""
+
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
 from src.services.tools.powerbi_dax_executor_tool import (
-    PowerBIDaxExecutorTool,
     PowerBIDaxExecutorSchema,
+    PowerBIDaxExecutorTool,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
-DAX_QUERY = "EVALUATE SUMMARIZECOLUMNS('Geography'[Region], \"Revenue\", [Total Revenue])"
+DAX_QUERY = (
+    "EVALUATE SUMMARIZECOLUMNS('Geography'[Region], \"Revenue\", [Total Revenue])"
+)
 WORKSPACE_ID = "ws-aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb"
 DATASET_ID = "ds-cccccccc-4444-5555-6666-dddddddddddd"
 
@@ -49,6 +52,7 @@ def _mock_http_post(status=200, body=None):
 # Schema tests
 # ---------------------------------------------------------------------------
 
+
 class TestPowerBIDaxExecutorSchema:
     def test_all_optional_fields(self):
         schema = PowerBIDaxExecutorSchema()
@@ -63,8 +67,14 @@ class TestPowerBIDaxExecutorSchema:
         # Connection/auth plumbing is injected via tool_configs at construction
         # time and must never be LLM-fillable schema fields.
         forbidden = {
-            "workspace_id", "dataset_id", "auth_method", "tenant_id",
-            "client_id", "client_secret", "username", "password",
+            "workspace_id",
+            "dataset_id",
+            "auth_method",
+            "tenant_id",
+            "client_id",
+            "client_secret",
+            "username",
+            "password",
             "access_token",
         }
         assert not forbidden & set(PowerBIDaxExecutorSchema.model_fields)
@@ -77,6 +87,7 @@ class TestPowerBIDaxExecutorSchema:
 # ---------------------------------------------------------------------------
 # Initialization tests
 # ---------------------------------------------------------------------------
+
 
 class TestPowerBIDaxExecutorToolInit:
     def test_tool_name(self):
@@ -101,20 +112,27 @@ class TestPowerBIDaxExecutorToolInit:
 # Missing required fields
 # ---------------------------------------------------------------------------
 
+
 class TestMissingFields:
     def test_missing_workspace_id(self):
         tool = PowerBIDaxExecutorTool()
-        result = tool._run(dataset_id=DATASET_ID, dax_query=DAX_QUERY, access_token="tok")
+        result = tool._run(
+            dataset_id=DATASET_ID, dax_query=DAX_QUERY, access_token="tok"
+        )
         assert "error" in result.lower() or "workspace" in result.lower()
 
     def test_missing_dataset_id(self):
         tool = PowerBIDaxExecutorTool()
-        result = tool._run(workspace_id=WORKSPACE_ID, dax_query=DAX_QUERY, access_token="tok")
+        result = tool._run(
+            workspace_id=WORKSPACE_ID, dax_query=DAX_QUERY, access_token="tok"
+        )
         assert "error" in result.lower() or "dataset" in result.lower()
 
     def test_missing_dax_query(self):
         tool = PowerBIDaxExecutorTool()
-        result = tool._run(workspace_id=WORKSPACE_ID, dataset_id=DATASET_ID, access_token="tok")
+        result = tool._run(
+            workspace_id=WORKSPACE_ID, dataset_id=DATASET_ID, access_token="tok"
+        )
         assert "error" in result.lower() or "query" in result.lower()
 
     def test_missing_auth(self):
@@ -124,12 +142,17 @@ class TestMissingFields:
             dataset_id=DATASET_ID,
             dax_query=DAX_QUERY,
         )
-        assert "error" in result.lower() or "auth" in result.lower() or "token" in result.lower()
+        assert (
+            "error" in result.lower()
+            or "auth" in result.lower()
+            or "token" in result.lower()
+        )
 
 
 # ---------------------------------------------------------------------------
 # Successful execution
 # ---------------------------------------------------------------------------
+
 
 class TestSuccessfulExecution:
     @patch(
@@ -192,6 +215,7 @@ class TestSuccessfulExecution:
 # API error handling
 # ---------------------------------------------------------------------------
 
+
 class TestApiErrorHandling:
     @patch(
         "src.services.tools.powerbi_dax_executor_tool.get_powerbi_access_token",
@@ -199,7 +223,9 @@ class TestApiErrorHandling:
     )
     @patch("httpx.AsyncClient.post")
     def test_api_401_returns_error(self, mock_post, mock_token):
-        mock_post.return_value = _mock_http_post(status=401, body={"error": {"code": "Unauthorized"}})
+        mock_post.return_value = _mock_http_post(
+            status=401, body={"error": {"code": "Unauthorized"}}
+        )
         tool = PowerBIDaxExecutorTool()
         result = tool._run(
             workspace_id=WORKSPACE_ID,
@@ -208,7 +234,11 @@ class TestApiErrorHandling:
             auth_method="user_oauth",
             access_token="bad-tok",
         )
-        assert "error" in result.lower() or "401" in result or "unauthorized" in result.lower()
+        assert (
+            "error" in result.lower()
+            or "401" in result
+            or "unauthorized" in result.lower()
+        )
 
     @patch(
         "src.services.tools.powerbi_dax_executor_tool.get_powerbi_access_token",
@@ -242,12 +272,17 @@ class TestApiErrorHandling:
             access_token="tok",
         )
         result_lower = result.lower()
-        assert "error" in result_lower or "failed" in result_lower or "timeout" in result_lower
+        assert (
+            "error" in result_lower
+            or "failed" in result_lower
+            or "timeout" in result_lower
+        )
 
 
 # ---------------------------------------------------------------------------
 # Output format tests
 # ---------------------------------------------------------------------------
+
 
 class TestOutputFormats:
     @patch(

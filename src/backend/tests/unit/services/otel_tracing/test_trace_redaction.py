@@ -3,6 +3,7 @@
 Regression guard for the leak where autolog wrote the Agent's llm.api_key OBO token into
 the Task.execute_sync span inputs.
 """
+
 from src.services.otel_tracing import trace_redaction as tr
 
 # Tokens are assembled from fragments so no contiguous secret-shaped literal lives in
@@ -13,16 +14,26 @@ _FAKE_PAT = "dap" + "i" + ("deadbeef" * 3) + "12345678"
 
 class TestScrub:
     def test_redacts_secret_named_keys_wholesale(self):
-        out = tr.scrub({"api_key": _JWT, "Authorization": "Bearer x",
-                        "client_secret": "shh", "password": "p"})
+        out = tr.scrub(
+            {
+                "api_key": _JWT,
+                "Authorization": "Bearer x",
+                "client_secret": "shh",
+                "password": "p",
+            }
+        )
         assert out["api_key"] == tr._REDACTED
         assert out["Authorization"] == tr._REDACTED
         assert out["client_secret"] == tr._REDACTED
         assert out["password"] == tr._REDACTED
 
     def test_preserves_non_secret_values(self):
-        data = {"model": "databricks-gpt-5-3-codex", "temperature": 0.2,
-                "base_url": "https://example.com/ai-gateway", "count": 3}
+        data = {
+            "model": "databricks-gpt-5-3-codex",
+            "temperature": 0.2,
+            "base_url": "https://example.com/ai-gateway",
+            "count": 3,
+        }
         assert tr.scrub(data) == data
 
     def test_redacts_jwt_inside_free_text(self):
@@ -37,10 +48,17 @@ class TestScrub:
         assert tr._REDACTED in out
 
     def test_nested_structures(self):
-        data = {"llm": {"model": "gpt", "api_key": _JWT,
-                        "additional_params": {"nested_token": _JWT}},
-                "messages": [{"role": "user", "content": "hi"},
-                             {"role": "system", "api_key": _JWT}]}
+        data = {
+            "llm": {
+                "model": "gpt",
+                "api_key": _JWT,
+                "additional_params": {"nested_token": _JWT},
+            },
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "system", "api_key": _JWT},
+            ],
+        }
         out = tr.scrub(data)
         assert out["llm"]["api_key"] == tr._REDACTED
         assert out["llm"]["model"] == "gpt"
@@ -64,14 +82,20 @@ class TestScrub:
 
 class _FakeSpan:
     """Minimal LiveSpan stand-in: inputs/outputs/attributes + setters."""
+
     def __init__(self, inputs=None, outputs=None, attributes=None):
         self.inputs = inputs
         self.outputs = outputs
         self.attributes = attributes or {}
 
-    def set_inputs(self, v): self.inputs = v
-    def set_outputs(self, v): self.outputs = v
-    def set_attributes(self, d): self.attributes.update(d)
+    def set_inputs(self, v):
+        self.inputs = v
+
+    def set_outputs(self, v):
+        self.outputs = v
+
+    def set_attributes(self, d):
+        self.attributes.update(d)
 
 
 class TestRedactSpan:
@@ -100,7 +124,9 @@ class TestRedactSpan:
     def test_never_raises_on_bad_span(self):
         class Broken:
             @property
-            def inputs(self): raise RuntimeError("boom")
+            def inputs(self):
+                raise RuntimeError("boom")
+
         # must swallow the error, not propagate
         tr.redact_span(Broken())
 

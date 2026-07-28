@@ -77,7 +77,12 @@ class TestBuildAttachmentHint:
         search, prescribe queries, or claim what the files contain."""
         hint = build_attachment_hint(_spec("uploads/g/s/report.md")).lower()
 
-        for imperative in ("you must", "always search", "first search", "before answering"):
+        for imperative in (
+            "you must",
+            "always search",
+            "first search",
+            "before answering",
+        ):
             assert imperative not in hint
 
     def test_no_attachments_costs_the_prompt_nothing(self):

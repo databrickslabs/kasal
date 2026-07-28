@@ -5,8 +5,9 @@ Covers group-scoped CRUD, ordering, the empty-group short-circuits, and the
 model's table shape (server-side replacement for browser IndexedDB storage).
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.chat_session import ChatSession

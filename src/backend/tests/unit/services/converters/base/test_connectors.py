@@ -7,14 +7,15 @@ Tests:
 - BaseInboundConnector abstract base class
 """
 
-import pytest
-from unittest.mock import Mock, patch
 from dataclasses import asdict
+from unittest.mock import Mock, patch
+
+import pytest
 
 from src.services.converters.base.connectors import (
+    BaseInboundConnector,
     ConnectorType,
     InboundConnectorMetadata,
-    BaseInboundConnector,
 )
 from src.services.converters.base.models import KPI, KPIDefinition
 
@@ -46,8 +47,7 @@ class TestInboundConnectorMetadata:
     def test_create_metadata_minimal(self):
         """Test creating metadata with minimal fields"""
         metadata = InboundConnectorMetadata(
-            connector_type=ConnectorType.POWERBI,
-            source_id="dataset-123"
+            connector_type=ConnectorType.POWERBI, source_id="dataset-123"
         )
 
         assert metadata.connector_type == ConnectorType.POWERBI
@@ -64,7 +64,7 @@ class TestInboundConnectorMetadata:
             description="Production sales data",
             connected=True,
             measure_count=15,
-            additional_info={"workspace": "Sales Workspace", "refreshed": "2024-01-15"}
+            additional_info={"workspace": "Sales Workspace", "refreshed": "2024-01-15"},
         )
 
         assert metadata.source_name == "Sales Dataset"
@@ -77,7 +77,7 @@ class TestInboundConnectorMetadata:
         metadata = InboundConnectorMetadata(
             connector_type=ConnectorType.POWERBI,
             source_id="dataset-123",
-            connected=True
+            connected=True,
         )
 
         metadata_dict = asdict(metadata)
@@ -110,13 +110,13 @@ class TestConnector(BaseInboundConnector):
             KPI(
                 description="Total Sales",
                 formula="SUM(Sales[Amount])",
-                technical_name="total_sales"
+                technical_name="total_sales",
             ),
             KPI(
                 description="Total Cost",
                 formula="SUM(Cost[Amount])",
-                technical_name="total_cost"
-            )
+                technical_name="total_cost",
+            ),
         ]
 
     def get_metadata(self) -> InboundConnectorMetadata:
@@ -125,7 +125,7 @@ class TestConnector(BaseInboundConnector):
             connector_type=ConnectorType.POWERBI,
             source_id=self.connection_params.get("source_id", "test-123"),
             connected=self._connected,
-            measure_count=2
+            measure_count=2,
         )
 
 
@@ -192,8 +192,7 @@ class TestBaseInboundConnector:
         connector.connect()
 
         definition = connector.extract_to_definition(
-            definition_name="Sales Metrics",
-            definition_description="Sales KPIs"
+            definition_name="Sales Metrics", definition_description="Sales KPIs"
         )
 
         assert isinstance(definition, KPIDefinition)
@@ -205,9 +204,7 @@ class TestBaseInboundConnector:
         """Test extract_to_definition uses name as description if not provided"""
         connector.connect()
 
-        definition = connector.extract_to_definition(
-            definition_name="Test Metrics"
-        )
+        definition = connector.extract_to_definition(definition_name="Test Metrics")
 
         assert definition.description == "Test Metrics"
 
@@ -230,16 +227,15 @@ class TestBaseInboundConnector:
         """Test extract_to_definition passes kwargs to extract_measures"""
         connector.connect()
 
-        with patch.object(connector, 'extract_measures', return_value=[]) as mock_extract:
+        with patch.object(
+            connector, "extract_measures", return_value=[]
+        ) as mock_extract:
             connector.extract_to_definition(
-                definition_name="Test",
-                include_hidden=True,
-                filter_pattern="Sales.*"
+                definition_name="Test", include_hidden=True, filter_pattern="Sales.*"
             )
 
             mock_extract.assert_called_once_with(
-                include_hidden=True,
-                filter_pattern="Sales.*"
+                include_hidden=True, filter_pattern="Sales.*"
             )
 
     def test_context_manager_support(self, connector):

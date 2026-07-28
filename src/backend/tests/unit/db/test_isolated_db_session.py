@@ -15,6 +15,7 @@ interfere.
 These tests demonstrate the mechanism (shared connection loses the write) and
 the property the fix relies on (a private connection does not).
 """
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -59,7 +60,9 @@ async def test_shared_connection_loses_write_on_other_sessions_rollback(tmp_path
             await other.close()
 
         async with Session() as check:
-            remaining = (await check.execute(text("SELECT COUNT(*) FROM agents"))).scalar()
+            remaining = (
+                await check.execute(text("SELECT COUNT(*) FROM agents"))
+            ).scalar()
         # The agent is GONE despite writer.commit() — the shared-connection hazard.
         assert remaining == 0
     finally:
@@ -101,14 +104,16 @@ async def test_private_connection_isolates_writes_from_other_sessions(tmp_path):
 
         # Inserting a task referencing the agent succeeds (agent survived).
         async with Session() as writer:
-            await writer.execute(text("INSERT INTO tasks (id, agent_id) VALUES ('t1', 'a1')"))
+            await writer.execute(
+                text("INSERT INTO tasks (id, agent_id) VALUES ('t1', 'a1')")
+            )
             await writer.commit()
 
         async with Session() as check:
-            agents = (await check.execute(text("SELECT id FROM agents"))).scalars().all()
-            tasks = (
-                await check.execute(text("SELECT id, agent_id FROM tasks"))
-            ).all()
+            agents = (
+                (await check.execute(text("SELECT id FROM agents"))).scalars().all()
+            )
+            tasks = (await check.execute(text("SELECT id, agent_id FROM tasks"))).all()
         assert agents == ["a1"]
         assert [(r[0], r[1]) for r in tasks] == [("t1", "a1")]
     finally:
@@ -116,19 +121,25 @@ async def test_private_connection_isolates_writes_from_other_sessions(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_get_isolated_db_session_uses_private_nullpool_engine_for_sqlite(monkeypatch, tmp_path):
+async def test_get_isolated_db_session_uses_private_nullpool_engine_for_sqlite(
+    monkeypatch, tmp_path
+):
     """The helper must route SQLite onto a NullPool engine that is NOT the shared
     StaticPool `engine` — otherwise the generation flow shares the one connection
     again and the bug returns."""
     from src.db import session as sess_mod
 
     db_file = tmp_path / "iso_helper.db"
-    monkeypatch.setattr(sess_mod.settings, "DATABASE_URI", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setattr(
+        sess_mod.settings, "DATABASE_URI", f"sqlite+aiosqlite:///{db_file}"
+    )
     # Force a fresh isolated engine bound to the temp DB (module-level cache).
     monkeypatch.setattr(sess_mod, "_isolated_sqlite_engine", None)
     monkeypatch.setattr(sess_mod, "_isolated_sqlite_session_factory", None)
     # Ensure the factory does not believe Lakebase is active.
-    monkeypatch.setattr(sess_mod.async_session_factory, "_is_lakebase", False, raising=False)
+    monkeypatch.setattr(
+        sess_mod.async_session_factory, "_is_lakebase", False, raising=False
+    )
 
     try:
         async with sess_mod.get_isolated_db_session() as session:
@@ -167,9 +178,13 @@ async def test_get_isolated_db_session_routes_to_lakebase_when_enabled_but_not_s
     from src.db import session as sess_mod
 
     db_file = tmp_path / "iso_helper.db"
-    monkeypatch.setattr(sess_mod.settings, "DATABASE_URI", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setattr(
+        sess_mod.settings, "DATABASE_URI", f"sqlite+aiosqlite:///{db_file}"
+    )
     # Global factory was NOT swapped to Lakebase in this process...
-    monkeypatch.setattr(sess_mod.async_session_factory, "_is_lakebase", False, raising=False)
+    monkeypatch.setattr(
+        sess_mod.async_session_factory, "_is_lakebase", False, raising=False
+    )
     # ...so we'd otherwise fall to the private SQLite engine. Prove we don't build it.
     monkeypatch.setattr(sess_mod, "_isolated_sqlite_engine", None)
     monkeypatch.setattr(sess_mod, "_isolated_sqlite_session_factory", None)

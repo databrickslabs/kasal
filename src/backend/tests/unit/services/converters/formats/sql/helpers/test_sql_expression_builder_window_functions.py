@@ -12,11 +12,12 @@ Focuses on:
 """
 
 import pytest
+
 from src.services.converters.formats.sql.helpers.sql_expression_builder import (
     SQLExpressionEngine,
     detect_aggregation_type,
 )
-from src.services.converters.formats.sql.models import SQLDialect, SQLAggregationType
+from src.services.converters.formats.sql.models import SQLAggregationType, SQLDialect
 
 
 class TestSQLExpressionEngineWindowFunctions:
@@ -41,8 +42,7 @@ class TestSQLExpressionEngineWindowFunctions:
     def test_build_window_function_with_partition(self, databricks_engine):
         """Test window function with PARTITION BY"""
         result = databricks_engine.build_window_function(
-            "ROW_NUMBER()",
-            partition_by=["region", "year"]
+            "ROW_NUMBER()", partition_by=["region", "year"]
         )
         assert "PARTITION BY" in result
         assert "region" in result
@@ -51,8 +51,7 @@ class TestSQLExpressionEngineWindowFunctions:
     def test_build_window_function_with_order(self, databricks_engine):
         """Test window function with ORDER BY"""
         result = databricks_engine.build_window_function(
-            "RANK()",
-            order_by=[("amount", "DESC")]
+            "RANK()", order_by=[("amount", "DESC")]
         )
         assert "ORDER BY" in result
         assert "amount" in result
@@ -62,16 +61,14 @@ class TestSQLExpressionEngineWindowFunctions:
         """Test window function with frame clause"""
         result = databricks_engine.build_window_function(
             "SUM(`amount`)",
-            frame_clause="ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW"
+            frame_clause="ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW",
         )
         assert "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW" in result
 
     def test_build_window_function_partition_and_order(self, databricks_engine):
         """Test window function with both PARTITION BY and ORDER BY"""
         result = databricks_engine.build_window_function(
-            "DENSE_RANK()",
-            partition_by=["region"],
-            order_by=[("revenue", "DESC")]
+            "DENSE_RANK()", partition_by=["region"], order_by=[("revenue", "DESC")]
         )
         assert "PARTITION BY" in result
         assert "ORDER BY" in result
@@ -79,8 +76,7 @@ class TestSQLExpressionEngineWindowFunctions:
     def test_build_window_function_multiple_partition_cols(self, databricks_engine):
         """Test window function with multiple partition columns"""
         result = databricks_engine.build_window_function(
-            "COUNT(*)",
-            partition_by=["year", "month", "day"]
+            "COUNT(*)", partition_by=["year", "month", "day"]
         )
         assert "year" in result
         assert "month" in result
@@ -89,8 +85,7 @@ class TestSQLExpressionEngineWindowFunctions:
     def test_build_window_function_multiple_order_cols(self, databricks_engine):
         """Test window function with multiple order columns"""
         result = databricks_engine.build_window_function(
-            "ROW_NUMBER()",
-            order_by=[("created_date", "ASC"), ("amount", "DESC")]
+            "ROW_NUMBER()", order_by=[("created_date", "ASC"), ("amount", "DESC")]
         )
         assert "created_date" in result
         assert "amount" in result
@@ -108,8 +103,10 @@ class TestSQLExpressionEngineWindowFunctions:
     def test_build_row_number_with_partition(self, databricks_engine):
         """Test ROW_NUMBER with partition context"""
         result = databricks_engine.build_aggregation(
-            SQLAggregationType.ROW_NUMBER, "order_date", "Sales",
-            {"partition_by": ["region"], "order_by": [("order_date", "ASC")]}
+            SQLAggregationType.ROW_NUMBER,
+            "order_date",
+            "Sales",
+            {"partition_by": ["region"], "order_by": [("order_date", "ASC")]},
         )
         assert "ROW_NUMBER()" in result
         assert "PARTITION BY" in result
@@ -125,8 +122,10 @@ class TestSQLExpressionEngineWindowFunctions:
     def test_build_rank_with_context(self, databricks_engine):
         """Test RANK with partition context"""
         result = databricks_engine.build_aggregation(
-            SQLAggregationType.RANK, "revenue", "Sales",
-            {"partition_by": ["region"], "order_by": [("revenue", "DESC")]}
+            SQLAggregationType.RANK,
+            "revenue",
+            "Sales",
+            {"partition_by": ["region"], "order_by": [("revenue", "DESC")]},
         )
         assert "RANK()" in result
         assert "PARTITION BY" in result
@@ -141,8 +140,10 @@ class TestSQLExpressionEngineWindowFunctions:
     def test_build_dense_rank_with_context(self, databricks_engine):
         """Test DENSE_RANK with partition context"""
         result = databricks_engine.build_aggregation(
-            SQLAggregationType.DENSE_RANK, "revenue", "Sales",
-            {"order_by": [("revenue", "DESC")]}
+            SQLAggregationType.DENSE_RANK,
+            "revenue",
+            "Sales",
+            {"order_by": [("revenue", "DESC")]},
         )
         assert "DENSE_RANK()" in result
 
@@ -159,8 +160,10 @@ class TestSQLExpressionEngineWindowFunctions:
     def test_build_running_sum_with_partition(self, databricks_engine):
         """Test running sum with partition"""
         result = databricks_engine.build_aggregation(
-            SQLAggregationType.RUNNING_SUM, "amount", "Sales",
-            {"partition_by": ["region"]}
+            SQLAggregationType.RUNNING_SUM,
+            "amount",
+            "Sales",
+            {"partition_by": ["region"]},
         )
         assert "PARTITION BY" in result
         assert "region" in result
@@ -177,8 +180,10 @@ class TestSQLExpressionEngineWindowFunctions:
     def test_build_exception_aggregation_with_exceptions(self, databricks_engine):
         """Test exception aggregation with exception values"""
         result = databricks_engine.build_aggregation(
-            SQLAggregationType.EXCEPTION_AGGREGATION, "amount", "Sales",
-            {"exception_values": [0, -1]}
+            SQLAggregationType.EXCEPTION_AGGREGATION,
+            "amount",
+            "Sales",
+            {"exception_values": [0, -1]},
         )
         assert "SUM" in result.upper()
         assert "CASE" in result.upper()
@@ -224,10 +229,9 @@ class TestSQLExpressionEngineWindowFunctions:
 
     def test_build_case_when_basic(self, databricks_engine):
         """Test building basic CASE WHEN"""
-        result = databricks_engine.build_case_when([
-            ("status = 'active'", 1),
-            ("status = 'inactive'", 0)
-        ])
+        result = databricks_engine.build_case_when(
+            [("status = 'active'", 1), ("status = 'inactive'", 0)]
+        )
         assert "CASE" in result
         assert "WHEN" in result
         assert "THEN" in result
@@ -237,53 +241,41 @@ class TestSQLExpressionEngineWindowFunctions:
     def test_build_case_when_with_else(self, databricks_engine):
         """Test CASE WHEN with ELSE value"""
         result = databricks_engine.build_case_when(
-            [("status = 'active'", 1)],
-            else_value=0
+            [("status = 'active'", 1)], else_value=0
         )
         assert "ELSE" in result
         assert "0" in result
 
     def test_build_case_when_without_else(self, databricks_engine):
         """Test CASE WHEN without ELSE"""
-        result = databricks_engine.build_case_when([
-            ("status = 'active'", 1)
-        ])
+        result = databricks_engine.build_case_when([("status = 'active'", 1)])
         assert "ELSE" not in result
 
     def test_build_case_when_string_value(self, databricks_engine):
         """Test CASE WHEN with string value"""
-        result = databricks_engine.build_case_when([
-            ("type = 'premium'", "HIGH")
-        ])
+        result = databricks_engine.build_case_when([("type = 'premium'", "HIGH")])
         assert "'HIGH'" in result
 
     def test_build_case_when_none_value(self, databricks_engine):
         """Test CASE WHEN with None else value"""
         result = databricks_engine.build_case_when(
-            [("flag = 1", True)],
-            else_value=None
+            [("flag = 1", True)], else_value=None
         )
         assert "NULL" in result or "ELSE" not in result
 
     def test_build_case_when_bool_true(self, databricks_engine):
         """Test CASE WHEN with True value"""
-        result = databricks_engine.build_case_when([
-            ("flag = 1", True)
-        ])
+        result = databricks_engine.build_case_when([("flag = 1", True)])
         assert "TRUE" in result
 
     def test_build_case_when_bool_false(self, databricks_engine):
         """Test CASE WHEN with False value"""
-        result = databricks_engine.build_case_when([
-            ("flag = 1", False)
-        ])
+        result = databricks_engine.build_case_when([("flag = 1", False)])
         assert "FALSE" in result
 
     def test_build_case_when_float_value(self, databricks_engine):
         """Test CASE WHEN with float value"""
-        result = databricks_engine.build_case_when([
-            ("is_premium = 1", 1.5)
-        ])
+        result = databricks_engine.build_case_when([("is_premium = 1", 1.5)])
         assert "1.5" in result
 
     # ========== _format_value Tests ==========
@@ -331,7 +323,9 @@ class TestSQLExpressionEngineWindowFunctions:
 
     def test_is_valid_sql_filter_with_in(self, databricks_engine):
         """Test filter validity with IN"""
-        assert databricks_engine._is_valid_sql_filter("region IN ('EMEA', 'APAC')") is True
+        assert (
+            databricks_engine._is_valid_sql_filter("region IN ('EMEA', 'APAC')") is True
+        )
 
     def test_is_valid_sql_filter_with_like(self, databricks_engine):
         """Test filter validity with LIKE"""
@@ -339,7 +333,12 @@ class TestSQLExpressionEngineWindowFunctions:
 
     def test_is_valid_sql_filter_with_between(self, databricks_engine):
         """Test filter validity with BETWEEN"""
-        assert databricks_engine._is_valid_sql_filter("date BETWEEN '2024-01-01' AND '2024-12-31'") is True
+        assert (
+            databricks_engine._is_valid_sql_filter(
+                "date BETWEEN '2024-01-01' AND '2024-12-31'"
+            )
+            is True
+        )
 
     def test_is_valid_sql_filter_greater_than(self, databricks_engine):
         """Test filter validity with >"""
@@ -351,6 +350,7 @@ class TestSQLExpressionEngineWindowFunctions:
         """Test unknown aggregation type falls back to SUM"""
         # Provide a fake aggregation type not in the mapping
         from src.services.converters.formats.sql.models import SQLAggregationType
+
         # Call with a valid but perhaps uncovered path
         result = databricks_engine.build_aggregation(
             SQLAggregationType.SUM, "amount", "Sales", {}

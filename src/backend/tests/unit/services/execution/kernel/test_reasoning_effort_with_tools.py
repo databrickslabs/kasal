@@ -20,10 +20,10 @@ not the same as sending "none": the model applies a reasoning budget server-side
 by default, and that default is what the tool-carrying call is refused for. The
 value has to be stated explicitly whenever tools are present.
 """
+
 import pytest
 
 from src.core.llm.transport.completion import OpenAICompletion
-
 
 TOOLS = [
     {

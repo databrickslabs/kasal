@@ -31,6 +31,4 @@ class CrewFeedback(Base):
     group_id = Column(String(100), index=True, nullable=True)
     group_email = Column(String(255), nullable=True)
 
-    __table_args__ = (
-        Index("idx_crew_feedback_crew_created", "crew_id", "created_at"),
-    )
+    __table_args__ = (Index("idx_crew_feedback_crew_created", "crew_id", "created_at"),)

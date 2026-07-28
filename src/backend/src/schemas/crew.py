@@ -1,21 +1,23 @@
 from datetime import datetime
-from typing import List, Optional, Dict, Any, Union
+from typing import Any, Dict, List, Optional, Union
 from uuid import UUID as PyUUID
 
-from pydantic import BaseModel, Field, ConfigDict
-
+from pydantic import BaseModel, ConfigDict, Field
 
 # Node data models
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
+
 class Position(BaseModel):
     """Position of a node in the flow diagram."""
+
     x: float
     y: float
 
 
 class Style(BaseModel):
     """Visual styling for a node."""
+
     background: Optional[str] = None
     border: Optional[str] = None
     borderRadius: Optional[str] = None
@@ -25,12 +27,17 @@ class Style(BaseModel):
 
 class LLMGuardrailConfig(BaseModel):
     """Configuration for LLM-based output validation guardrail."""
+
     description: str = Field(..., description="Validation criteria for the task output")
-    llm_model: Optional[str] = Field(None, description="Deprecated/ignored — guardrail uses the run's model (the chat-input selection)")
+    llm_model: Optional[str] = Field(
+        None,
+        description="Deprecated/ignored — guardrail uses the run's model (the chat-input selection)",
+    )
 
 
 class TaskConfig(BaseModel):
     """Configuration specific to tasks."""
+
     cache_response: Optional[bool] = False
     cache_ttl: Optional[int] = 3600
     retry_on_fail: Optional[bool] = False
@@ -45,17 +52,22 @@ class TaskConfig(BaseModel):
     callback_function: Optional[str] = None
     human_input: Optional[bool] = False
     markdown: Optional[bool] = False
-    llm_guardrail: Optional[LLMGuardrailConfig] = Field(None, description="LLM-based output validation configuration")
+    llm_guardrail: Optional[LLMGuardrailConfig] = Field(
+        None, description="LLM-based output validation configuration"
+    )
 
 
 class NodeData(BaseModel):
     """Data associated with a node in the flow diagram."""
+
     label: str
     role: Optional[str] = None
     goal: Optional[str] = None
     backstory: Optional[str] = None
     tools: List[Any] = Field(default_factory=list)
-    tool_configs: Optional[Dict[str, Any]] = None  # Tool-specific configuration overrides (e.g., MCP_SERVERS, GenieTool)
+    tool_configs: Optional[Dict[str, Any]] = (
+        None  # Tool-specific configuration overrides (e.g., MCP_SERVERS, GenieTool)
+    )
     agentId: Optional[str] = None
     taskId: Optional[str] = None
     llm: Optional[str] = None
@@ -86,12 +98,17 @@ class NodeData(BaseModel):
     context: List[str] = Field(default_factory=list)
     async_execution: Optional[bool] = False
     knowledge_sources: Optional[List[Dict[str, Any]]] = None
-    markdown: Optional[bool] = Field(False, description="Whether to use markdown formatting")
-    llm_guardrail: Optional[LLMGuardrailConfig] = Field(None, description="LLM-based output validation at node level")
+    markdown: Optional[bool] = Field(
+        False, description="Whether to use markdown formatting"
+    )
+    llm_guardrail: Optional[LLMGuardrailConfig] = Field(
+        None, description="LLM-based output validation at node level"
+    )
 
 
 class Node(BaseModel):
     """A node in the flow diagram representing an agent or task."""
+
     id: str
     type: str
     position: Position
@@ -106,6 +123,7 @@ class Node(BaseModel):
 
 class Edge(BaseModel):
     """An edge in the flow diagram representing a connection between nodes."""
+
     source: str
     target: str
     id: str
@@ -116,6 +134,7 @@ class Edge(BaseModel):
 # Shared properties
 class CrewBase(BaseModel):
     """Base Pydantic model for Crews with shared attributes."""
+
     name: str
     agent_ids: List[str] = Field(default_factory=list)
     task_ids: List[str] = Field(default_factory=list)
@@ -123,12 +142,27 @@ class CrewBase(BaseModel):
     edges: List[Edge] = Field(default_factory=list)
 
     # Crew execution configuration
-    process: Optional[str] = Field("sequential", description="Execution process type: sequential, hierarchical, or parallel (independent tasks run concurrently)")
-    reasoning: Optional[bool] = Field(False, description="Enable the model's native reasoning budget for this crew's agents")
-    reasoning_llm: Optional[str] = Field(None, description="LLM model for reasoning operations")
-    reasoning_config: Optional[Dict[str, Any]] = Field(None, description="Reasoning budget, e.g. {'reasoning_effort': 'low'|'medium'|'high'}")
-    manager_llm: Optional[str] = Field(None, description="LLM model for hierarchical process manager")
-    tool_configs: Optional[Dict[str, Any]] = Field(None, description="Crew-level tool configurations (MCP servers, etc.)")
+    process: Optional[str] = Field(
+        "sequential",
+        description="Execution process type: sequential, hierarchical, or parallel (independent tasks run concurrently)",
+    )
+    reasoning: Optional[bool] = Field(
+        False,
+        description="Enable the model's native reasoning budget for this crew's agents",
+    )
+    reasoning_llm: Optional[str] = Field(
+        None, description="LLM model for reasoning operations"
+    )
+    reasoning_config: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Reasoning budget, e.g. {'reasoning_effort': 'low'|'medium'|'high'}",
+    )
+    manager_llm: Optional[str] = Field(
+        None, description="LLM model for hierarchical process manager"
+    )
+    tool_configs: Optional[Dict[str, Any]] = Field(
+        None, description="Crew-level tool configurations (MCP servers, etc.)"
+    )
     memory: Optional[bool] = Field(True, description="Enable crew memory")
     verbose: Optional[bool] = Field(True, description="Enable verbose output")
     max_rpm: Optional[int] = Field(None, description="Maximum requests per minute")
@@ -137,12 +171,14 @@ class CrewBase(BaseModel):
 # Properties to receive on crew creation
 class CrewCreate(CrewBase):
     """Pydantic model for creating a crew."""
+
     pass
 
 
 # Properties to receive on crew update
 class CrewUpdate(BaseModel):
     """Pydantic model for updating a crew, all fields optional."""
+
     name: Optional[str] = None
     agent_ids: Optional[List[str]] = None
     task_ids: Optional[List[str]] = None
@@ -163,6 +199,7 @@ class CrewUpdate(BaseModel):
 # Properties shared by models stored in DB
 class CrewInDBBase(CrewBase):
     """Base Pydantic model for crews in the database, including id and timestamps."""
+
     id: PyUUID
     created_at: datetime
     updated_at: datetime
@@ -173,12 +210,14 @@ class CrewInDBBase(CrewBase):
 # Properties to return to client
 class Crew(CrewInDBBase):
     """Pydantic model for returning crews to clients."""
+
     pass
 
 
 # Custom response model with string timestamps
 class CrewResponse(BaseModel):
     """Pydantic model for Crew response with string timestamps."""
+
     id: PyUUID
     name: str
     agent_ids: List[str]
@@ -203,9 +242,14 @@ class CrewResponse(BaseModel):
 
 class CrewGenerationRequest(BaseModel):
     """Request schema for generating crew setup with agents and tasks."""
-    prompt: str = Field(..., description="Natural language description of the crew setup")
+
+    prompt: str = Field(
+        ..., description="Natural language description of the crew setup"
+    )
     model: Optional[str] = Field(None, description="LLM model to use for generation")
-    tools: Optional[List[str]] = Field([], description="List of available tools for the crew")
+    tools: Optional[List[str]] = Field(
+        [], description="List of available tools for the crew"
+    )
     api_key: Optional[str] = Field(None, description="API key for the LLM provider")
 
 
@@ -216,109 +260,203 @@ class CrewFromConversationRequest(BaseModel):
     generic chat assistant, the backend reads the session's conversation and
     synthesizes an Agent + Task that capture what the user actually asked for.
     """
-    session_id: str = Field(..., description="Chat session whose conversation is distilled into a reusable crew")
+
+    session_id: str = Field(
+        ...,
+        description="Chat session whose conversation is distilled into a reusable crew",
+    )
     model: Optional[str] = Field(None, description="LLM model to use for the synthesis")
 
 
 class AgentConfig(BaseModel):
     """Configuration for an agent in the crew."""
-    llm: Optional[str] = Field(DEFAULT_ENGINE_MODEL, description="LLM model for the agent")
-    function_calling_llm: Optional[str] = Field(None, description="LLM model for function calling")
+
+    llm: Optional[str] = Field(
+        DEFAULT_ENGINE_MODEL, description="LLM model for the agent"
+    )
+    function_calling_llm: Optional[str] = Field(
+        None, description="LLM model for function calling"
+    )
     max_iter: Optional[int] = Field(25, description="Maximum iterations for the agent")
     max_rpm: Optional[int] = Field(None, description="Maximum requests per minute")
-    max_execution_time: Optional[int] = Field(None, description="Maximum execution time in seconds")
+    max_execution_time: Optional[int] = Field(
+        None, description="Maximum execution time in seconds"
+    )
     verbose: Optional[bool] = Field(False, description="Whether to use verbose output")
-    allow_delegation: Optional[bool] = Field(False, description="Whether to allow delegation")
+    allow_delegation: Optional[bool] = Field(
+        False, description="Whether to allow delegation"
+    )
     cache: Optional[bool] = Field(True, description="Whether to use cache")
     system_template: Optional[str] = Field(None, description="System template")
     prompt_template: Optional[str] = Field(None, description="Prompt template")
     response_template: Optional[str] = Field(None, description="Response template")
-    allow_code_execution: Optional[bool] = Field(False, description="Whether to allow code execution")
-    code_execution_mode: Optional[str] = Field("safe", description="Code execution mode")
+    allow_code_execution: Optional[bool] = Field(
+        False, description="Whether to allow code execution"
+    )
+    code_execution_mode: Optional[str] = Field(
+        "safe", description="Code execution mode"
+    )
     max_retry_limit: Optional[int] = Field(2, description="Maximum retry limit")
-    use_system_prompt: Optional[bool] = Field(True, description="Whether to use system prompt")
-    respect_context_window: Optional[bool] = Field(True, description="Whether to respect context window")
+    use_system_prompt: Optional[bool] = Field(
+        True, description="Whether to use system prompt"
+    )
+    respect_context_window: Optional[bool] = Field(
+        True, description="Whether to respect context window"
+    )
 
 
 class Agent(BaseModel):
     """Agent in the crew."""
+
     id: Optional[str] = Field(None, description="Unique identifier for the agent")
     name: str = Field(..., description="Name of the agent")
     role: str = Field(..., description="Role of the agent")
     goal: str = Field(..., description="Goal of the agent")
     backstory: str = Field(..., description="Backstory of the agent")
     tools: Optional[List[str]] = Field([], description="Tools available to the agent")
-    llm: Optional[str] = Field(DEFAULT_ENGINE_MODEL, description="LLM model for the agent")
-    function_calling_llm: Optional[str] = Field(None, description="LLM model for function calling")
+    llm: Optional[str] = Field(
+        DEFAULT_ENGINE_MODEL, description="LLM model for the agent"
+    )
+    function_calling_llm: Optional[str] = Field(
+        None, description="LLM model for function calling"
+    )
     max_iter: Optional[int] = Field(25, description="Maximum iterations")
     max_rpm: Optional[int] = Field(None, description="Maximum requests per minute")
-    max_execution_time: Optional[int] = Field(None, description="Maximum execution time in seconds")
+    max_execution_time: Optional[int] = Field(
+        None, description="Maximum execution time in seconds"
+    )
     verbose: Optional[bool] = Field(False, description="Whether to use verbose output")
-    allow_delegation: Optional[bool] = Field(False, description="Whether to allow delegation")
+    allow_delegation: Optional[bool] = Field(
+        False, description="Whether to allow delegation"
+    )
     cache: Optional[bool] = Field(True, description="Whether to use cache")
     system_template: Optional[str] = Field(None, description="System template")
     prompt_template: Optional[str] = Field(None, description="Prompt template")
     response_template: Optional[str] = Field(None, description="Response template")
-    allow_code_execution: Optional[bool] = Field(False, description="Whether to allow code execution")
-    code_execution_mode: Optional[str] = Field("safe", description="Code execution mode")
+    allow_code_execution: Optional[bool] = Field(
+        False, description="Whether to allow code execution"
+    )
+    code_execution_mode: Optional[str] = Field(
+        "safe", description="Code execution mode"
+    )
     max_retry_limit: Optional[int] = Field(2, description="Maximum retry limit")
-    use_system_prompt: Optional[bool] = Field(True, description="Whether to use system prompt")
-    respect_context_window: Optional[bool] = Field(True, description="Whether to respect context window")
+    use_system_prompt: Optional[bool] = Field(
+        True, description="Whether to use system prompt"
+    )
+    respect_context_window: Optional[bool] = Field(
+        True, description="Whether to respect context window"
+    )
 
 
 class Task(BaseModel):
     """Task in the crew."""
+
     id: Optional[str] = Field(None, description="Unique identifier for the task")
     name: str = Field(..., description="Name of the task")
     description: str = Field(..., description="Description of the task")
-    expected_output: Optional[str] = Field(None, description="Expected output of the task")
+    expected_output: Optional[str] = Field(
+        None, description="Expected output of the task"
+    )
     tools: Optional[List[str]] = Field([], description="Tools required for the task")
-    assigned_agent: Optional[str] = Field(None, description="Agent assigned to the task")
-    async_execution: Optional[bool] = Field(False, description="Whether to execute the task asynchronously")
-    context: Optional[List[str]] = Field([], description="Task IDs that provide context")
+    assigned_agent: Optional[str] = Field(
+        None, description="Agent assigned to the task"
+    )
+    async_execution: Optional[bool] = Field(
+        False, description="Whether to execute the task asynchronously"
+    )
+    context: Optional[List[str]] = Field(
+        [], description="Task IDs that provide context"
+    )
     config: Optional[Dict[str, Any]] = Field({}, description="Additional configuration")
     output_json: Optional[bool] = Field(None, description="Whether to output as JSON")
-    output_pydantic: Optional[str] = Field(None, description="Pydantic model for output")
+    output_pydantic: Optional[str] = Field(
+        None, description="Pydantic model for output"
+    )
     output_file: Optional[str] = Field(None, description="File to output to")
     output: Optional[str] = Field(None, description="Output variable name")
     callback: Optional[str] = Field(None, description="Callback function")
-    human_input: Optional[bool] = Field(False, description="Whether to request human input")
+    human_input: Optional[bool] = Field(
+        False, description="Whether to request human input"
+    )
     converter_cls: Optional[str] = Field(None, description="Converter class")
-    markdown: Optional[bool] = Field(False, description="Whether to use markdown formatting")
+    markdown: Optional[bool] = Field(
+        False, description="Whether to use markdown formatting"
+    )
 
 
 class CrewGenerationResponse(BaseModel):
     """Response schema for crew generation."""
+
     agents: List[Agent] = Field(..., description="List of agents in the crew")
     tasks: List[Task] = Field(..., description="List of tasks for the crew")
 
 
 class CrewCreationResponse(BaseModel):
     """Response schema for crew creation with database entities."""
-    agents: List[Any] = Field(..., description="List of created agent entities with database IDs")
-    tasks: List[Any] = Field(..., description="List of created task entities with database IDs")
+
+    agents: List[Any] = Field(
+        ..., description="List of created agent entities with database IDs"
+    )
+    tasks: List[Any] = Field(
+        ..., description="List of created task entities with database IDs"
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class CrewStreamingRequest(BaseModel):
     """Request schema for progressive/streaming crew generation."""
-    prompt: str = Field(..., description="Natural language description of the crew setup")
-    original_prompt: Optional[str] = Field(None, description="Original user message before LLM rewrite, used for cap computation")
+
+    prompt: str = Field(
+        ..., description="Natural language description of the crew setup"
+    )
+    original_prompt: Optional[str] = Field(
+        None,
+        description="Original user message before LLM rewrite, used for cap computation",
+    )
     model: Optional[str] = Field(None, description="LLM model to use for generation")
-    tools: Optional[List[str]] = Field(default_factory=list, description="List of available tools for the crew")
+    tools: Optional[List[str]] = Field(
+        default_factory=list, description="List of available tools for the crew"
+    )
     # --- ChatMode auto-execute. AgentBuilder/crew canvas leaves these at the
     # defaults, so it stays generate-only (renders the plan as nodes, no run). ---
-    auto_execute: bool = Field(False, description="When true, run the generated crew on the backend immediately after generation (ChatMode). AgentBuilder keeps this false and only renders the plan.")
-    session_id: Optional[str] = Field(None, description="Chat session id — memory partition + run ownership for the auto-executed run")
-    memory_workspace_scope: Optional[bool] = Field(True, description="Memory recall scope for the auto-executed run: True = workspace-wide, False = this session only")
-    disable_memory: bool = Field(False, description="'No memory' mode — build agents without memory for the auto-executed run")
-    mcp_servers: Optional[List[str]] = Field(default_factory=list, description="MCP server names to equip the auto-executed crew with")
-    agentbricks_endpoints: Optional[List[str]] = Field(default_factory=list, description="Agent Bricks serving-endpoint names picked in the chat '+' menu to equip + configure the AgentBricksTool on the auto-executed crew")
-    knowledge_file_paths: Optional[List[str]] = Field(default_factory=list, description="Paths of knowledge files attached in this chat turn; scopes DatabricksKnowledgeSearchTool to ONLY these files so the run grounds on the just-uploaded document")
-    chat_mode_type: Optional[str] = Field("chat", description="ChatMode answer mode (chat|research|deep): drives the reasoning budget and execution_type in build_crew_config_from_generated. 'chat' = single light agent (no extra thinking), 'research' = crew with a medium reasoning budget, 'deep' = crew with a high reasoning budget")
+    auto_execute: bool = Field(
+        False,
+        description="When true, run the generated crew on the backend immediately after generation (ChatMode). AgentBuilder keeps this false and only renders the plan.",
+    )
+    session_id: Optional[str] = Field(
+        None,
+        description="Chat session id — memory partition + run ownership for the auto-executed run",
+    )
+    memory_workspace_scope: Optional[bool] = Field(
+        True,
+        description="Memory recall scope for the auto-executed run: True = workspace-wide, False = this session only",
+    )
+    disable_memory: bool = Field(
+        False,
+        description="'No memory' mode — build agents without memory for the auto-executed run",
+    )
+    mcp_servers: Optional[List[str]] = Field(
+        default_factory=list,
+        description="MCP server names to equip the auto-executed crew with",
+    )
+    agentbricks_endpoints: Optional[List[str]] = Field(
+        default_factory=list,
+        description="Agent Bricks serving-endpoint names picked in the chat '+' menu to equip + configure the AgentBricksTool on the auto-executed crew",
+    )
+    knowledge_file_paths: Optional[List[str]] = Field(
+        default_factory=list,
+        description="Paths of knowledge files attached in this chat turn; scopes DatabricksKnowledgeSearchTool to ONLY these files so the run grounds on the just-uploaded document",
+    )
+    chat_mode_type: Optional[str] = Field(
+        "chat",
+        description="ChatMode answer mode (chat|research|deep): drives the reasoning budget and execution_type in build_crew_config_from_generated. 'chat' = single light agent (no extra thinking), 'research' = crew with a medium reasoning budget, 'deep' = crew with a high reasoning budget",
+    )
 
 
 class CrewStreamingResponse(BaseModel):
     """Response schema for streaming crew generation initiation."""
-    generation_id: str = Field(..., description="Unique ID for tracking the progressive generation via SSE")
+
+    generation_id: str = Field(
+        ..., description="Unique ID for tracking the progressive generation via SSE"
+    )

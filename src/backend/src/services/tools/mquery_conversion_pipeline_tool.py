@@ -7,12 +7,12 @@ Uses the Power BI Admin API for extraction and LLM-powered conversion for comple
 
 import asyncio
 import logging
-from typing import Any, Optional, Type, Dict, List, Tuple
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List, Optional, Tuple, Type
 
-from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
+from src.services.tools.base import BaseTool
 from src.services.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
@@ -22,12 +22,12 @@ logger = logging.getLogger(__name__)
 # executed on the SQL warehouse. These helpers prevent identifier breakout.
 import re as _ident_re
 
-_SAFE_SQL_IDENTIFIER = _ident_re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+_SAFE_SQL_IDENTIFIER = _ident_re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _sanitize_sql_identifier(name: str, fallback: str = "tbl") -> str:
     """Coerce an arbitrary string into a safe unquoted SQL identifier."""
-    cleaned = _ident_re.sub(r'[^0-9A-Za-z_]', '_', str(name)).strip('_').lower()
+    cleaned = _ident_re.sub(r"[^0-9A-Za-z_]", "_", str(name)).strip("_").lower()
     if not cleaned:
         cleaned = fallback
     if cleaned[0].isdigit():
@@ -51,8 +51,21 @@ def _quote_sql_column(name: str) -> str:
 # LLM-hallucinated/injected "type") falls back to STRING so a type token cannot
 # carry extra clauses (e.g. "STRING) LOCATION 'abfss://evil' --").
 _ALLOWED_SQL_TYPES = {
-    "STRING", "INT", "INTEGER", "BIGINT", "SMALLINT", "TINYINT", "LONG",
-    "DOUBLE", "FLOAT", "DECIMAL", "NUMERIC", "BOOLEAN", "DATE", "TIMESTAMP", "BINARY",
+    "STRING",
+    "INT",
+    "INTEGER",
+    "BIGINT",
+    "SMALLINT",
+    "TINYINT",
+    "LONG",
+    "DOUBLE",
+    "FLOAT",
+    "DECIMAL",
+    "NUMERIC",
+    "BOOLEAN",
+    "DATE",
+    "TIMESTAMP",
+    "BINARY",
 }
 
 
@@ -93,6 +106,7 @@ def run_sync(coro):
         # ContextVars copied in (LLMManager needs the UserContext group_id).
         logger.debug("Detected running event loop, using ThreadPoolExecutor")
         import contextvars
+
         ctx = contextvars.copy_context()
         future = _EXECUTOR.submit(ctx.run, asyncio.run, coro)
         return future.result()
@@ -112,130 +126,132 @@ class MqueryConversionPipelineSchema(BaseModel):
 
     # ===== POWER BI ADMIN API CONFIGURATION =====
     workspace_id: Optional[str] = Field(
-        None,
-        description="[Power BI] Workspace ID to scan (required)"
+        None, description="[Power BI] Workspace ID to scan (required)"
     )
     dataset_id: Optional[str] = Field(
         None,
-        description="[Power BI] Specific dataset/semantic model ID to filter (optional, scans all if not provided)"
+        description="[Power BI] Specific dataset/semantic model ID to filter (optional, scans all if not provided)",
     )
 
     # Service Principal authentication for Admin API
     tenant_id: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Azure AD tenant ID (required for Service Principal or Service Account auth)"
+        description="[Power BI Auth] Azure AD tenant ID (required for Service Principal or Service Account auth)",
     )
     client_id: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Application/Client ID (required for Service Principal or Service Account auth)"
+        description="[Power BI Auth] Application/Client ID (required for Service Principal or Service Account auth)",
     )
     client_secret: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Client secret (required for Service Principal auth)"
+        description="[Power BI Auth] Client secret (required for Service Principal auth)",
     )
 
     # Service Account authentication (alternative to Service Principal)
     username: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Service account username/UPN (for Service Account authentication)"
+        description="[Power BI Auth] Service account username/UPN (for Service Account authentication)",
     )
     password: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Service account password (for Service Account authentication)"
+        description="[Power BI Auth] Service account password (for Service Account authentication)",
     )
     auth_method: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Authentication method: 'service_principal', 'service_account', or auto-detect"
+        description="[Power BI Auth] Authentication method: 'service_principal', 'service_account', or auto-detect",
     )
 
     # User OAuth token (alternative to Service Principal/Service Account)
     access_token: Optional[str] = Field(
         None,
-        description="[Power BI Auth] Pre-obtained OAuth access token (alternative to SP/Service Account credentials)."
+        description="[Power BI Auth] Pre-obtained OAuth access token (alternative to SP/Service Account credentials).",
     )
 
     # ===== LLM CONVERSION CONFIGURATION =====
     llm_workspace_url: Optional[str] = Field(
         None,
-        description="[LLM] Databricks workspace URL for LLM conversion (optional, uses rule-based if not provided)"
+        description="[LLM] Databricks workspace URL for LLM conversion (optional, uses rule-based if not provided)",
     )
     llm_token: Optional[str] = Field(
-        None,
-        description="[LLM] Databricks API token for LLM access (optional)"
+        None, description="[LLM] Databricks API token for LLM access (optional)"
     )
     llm_model: str = Field(
         "databricks-claude-sonnet-4-5",
-        description="[LLM] Model endpoint name for conversion (default: databricks-claude-sonnet-4-5)"
+        description="[LLM] Model endpoint name for conversion (default: databricks-claude-sonnet-4-5)",
     )
     use_llm: bool = Field(
         True,
-        description="[LLM] Whether to use LLM for complex conversions (default: True)"
+        description="[LLM] Whether to use LLM for complex conversions (default: True)",
     )
 
     # ===== TARGET CONFIGURATION =====
     target_catalog: str = Field(
         "main",
-        description="[Target] Unity Catalog catalog name for generated SQL (default: 'main')"
+        description="[Target] Unity Catalog catalog name for generated SQL (default: 'main')",
     )
     target_schema: str = Field(
         "default",
-        description="[Target] Unity Catalog schema name for generated SQL (default: 'default')"
+        description="[Target] Unity Catalog schema name for generated SQL (default: 'default')",
     )
 
     # ===== DATA RETRIEVAL CREDENTIALS (optional — for PBI Execute Queries / EVALUATE) =====
     # The Admin API SP (above) scans M-Query but may lack Dataset.ReadWrite.All.
     # Set these to a SP or token that IS a workspace member with dataset read access.
-    exec_tenant_id: Optional[str] = Field(None, description="[Data Retrieval] Azure AD tenant ID for Execute Queries SP")
-    exec_client_id: Optional[str] = Field(None, description="[Data Retrieval] Client ID for Execute Queries SP")
-    exec_client_secret: Optional[str] = Field(None, description="[Data Retrieval] Client secret for Execute Queries SP")
-    exec_access_token: Optional[str] = Field(None, description="[Data Retrieval] Pre-obtained OAuth token with Dataset.ReadWrite.All (alternative to SP credentials)")
+    exec_tenant_id: Optional[str] = Field(
+        None, description="[Data Retrieval] Azure AD tenant ID for Execute Queries SP"
+    )
+    exec_client_id: Optional[str] = Field(
+        None, description="[Data Retrieval] Client ID for Execute Queries SP"
+    )
+    exec_client_secret: Optional[str] = Field(
+        None, description="[Data Retrieval] Client secret for Execute Queries SP"
+    )
+    exec_access_token: Optional[str] = Field(
+        None,
+        description="[Data Retrieval] Pre-obtained OAuth token with Dataset.ReadWrite.All (alternative to SP credentials)",
+    )
 
     # ===== DBSQL VALIDATION (optional — enables classify-first + DAX vs SQL comparison) =====
     databricks_sql_endpoint: Optional[str] = Field(
         None,
         description="[Validation] Databricks SQL endpoint URL, e.g. "
-                    "https://workspace.cloud.databricks.com/api/2.0/mcp/sql. "
-                    "When set together with databricks_pat, enables validation mode."
+        "https://workspace.cloud.databricks.com/api/2.0/mcp/sql. "
+        "When set together with databricks_pat, enables validation mode.",
     )
     databricks_pat: Optional[str] = Field(
         None,
-        description="[Validation] Databricks PAT for SQL execution and INSERT operations."
+        description="[Validation] Databricks PAT for SQL execution and INSERT operations.",
     )
     max_iterations: int = Field(
         10,
-        description="[Validation] Max LLM correction iterations per table when SQL vs DAX aggregates differ (default: 10)."
+        description="[Validation] Max LLM correction iterations per table when SQL vs DAX aggregates differ (default: 10).",
     )
 
     # ===== SCAN OPTIONS =====
     include_lineage: bool = Field(
-        True,
-        description="[Scan] Include lineage information in scan (default: True)"
+        True, description="[Scan] Include lineage information in scan (default: True)"
     )
     include_datasource_details: bool = Field(
-        True,
-        description="[Scan] Include data source details in scan (default: True)"
+        True, description="[Scan] Include data source details in scan (default: True)"
     )
     include_dataset_schema: bool = Field(
-        True,
-        description="[Scan] Include dataset schema in scan (default: True)"
+        True, description="[Scan] Include dataset schema in scan (default: True)"
     )
     include_dataset_expressions: bool = Field(
         True,
-        description="[Scan] Include dataset expressions (M-Query) in scan (default: True)"
+        description="[Scan] Include dataset expressions (M-Query) in scan (default: True)",
     )
     include_hidden_tables: bool = Field(
-        False,
-        description="[Scan] Include hidden tables in extraction (default: False)"
+        False, description="[Scan] Include hidden tables in extraction (default: False)"
     )
     skip_static_tables: bool = Field(
         True,
-        description="[Scan] Skip static tables (Table.FromRows) in conversion (default: True)"
+        description="[Scan] Skip static tables (Table.FromRows) in conversion (default: True)",
     )
 
     # ===== OUTPUT OPTIONS =====
     include_summary: bool = Field(
-        True,
-        description="[Output] Include summary report in output (default: True)"
+        True, description="[Output] Include summary report in output (default: True)"
     )
 
 
@@ -298,11 +314,18 @@ class MqueryConversionPipelineTool(BaseTool):
     def __init__(self, **kwargs: Any) -> None:
         """Initialize the M-Query Conversion Pipeline tool."""
         import uuid
+
         instance_id = str(uuid.uuid4())[:8]
 
-        logger.info(f"[MqueryConversionPipelineTool.__init__] Instance ID: {instance_id}")
-        logger.info(f"[MqueryConversionPipelineTool.__init__] Received kwargs keys: {list(kwargs.keys())}")
-        logger.info(f"[MqueryConversionPipelineTool.__init__] workspace_id: {kwargs.get('workspace_id', 'NOT PROVIDED')}")
+        logger.info(
+            f"[MqueryConversionPipelineTool.__init__] Instance ID: {instance_id}"
+        )
+        logger.info(
+            f"[MqueryConversionPipelineTool.__init__] Received kwargs keys: {list(kwargs.keys())}"
+        )
+        logger.info(
+            f"[MqueryConversionPipelineTool.__init__] workspace_id: {kwargs.get('workspace_id', 'NOT PROVIDED')}"
+        )
 
         # Extract execution_inputs if provided (for dynamic parameter resolution)
         execution_inputs = kwargs.get("execution_inputs", {})
@@ -341,9 +364,13 @@ class MqueryConversionPipelineTool(BaseTool):
             "max_iterations": kwargs.get("max_iterations", 10),
             # Scan Options
             "include_lineage": kwargs.get("include_lineage", True),
-            "include_datasource_details": kwargs.get("include_datasource_details", True),
+            "include_datasource_details": kwargs.get(
+                "include_datasource_details", True
+            ),
             "include_dataset_schema": kwargs.get("include_dataset_schema", True),
-            "include_dataset_expressions": kwargs.get("include_dataset_expressions", True),
+            "include_dataset_expressions": kwargs.get(
+                "include_dataset_expressions", True
+            ),
             "include_hidden_tables": kwargs.get("include_hidden_tables", False),
             "skip_static_tables": kwargs.get("skip_static_tables", True),
             # Output Options
@@ -352,19 +379,26 @@ class MqueryConversionPipelineTool(BaseTool):
 
         # DYNAMIC PARAMETER RESOLUTION: If execution_inputs provided, resolve placeholders during init
         if execution_inputs:
-            logger.info(f"[MqueryConversionPipelineTool.__init__] Instance {instance_id} - Resolving parameters from execution_inputs: {list(execution_inputs.keys())}")
+            logger.info(
+                f"[MqueryConversionPipelineTool.__init__] Instance {instance_id} - Resolving parameters from execution_inputs: {list(execution_inputs.keys())}"
+            )
             resolved_config = {}
             for key, value in default_config.items():
-                if isinstance(value, str) and '{' in value:
+                if isinstance(value, str) and "{" in value:
                     import re
-                    placeholders = re.findall(r'\{(\w+)\}', value)
+
+                    placeholders = re.findall(r"\{(\w+)\}", value)
                     if placeholders:
                         resolved_value = value
                         for placeholder in placeholders:
                             if placeholder in execution_inputs:
                                 replacement = str(execution_inputs[placeholder])
-                                resolved_value = resolved_value.replace(f'{{{placeholder}}}', replacement)
-                                logger.info(f"[INIT RESOLUTION] Resolved {key}: {{{placeholder}}} → {replacement}")
+                                resolved_value = resolved_value.replace(
+                                    f"{{{placeholder}}}", replacement
+                                )
+                                logger.info(
+                                    f"[INIT RESOLUTION] Resolved {key}: {{{placeholder}}} → {replacement}"
+                                )
                         resolved_config[key] = resolved_value
                     else:
                         resolved_config[key] = value
@@ -380,7 +414,9 @@ class MqueryConversionPipelineTool(BaseTool):
         self._instance_id = instance_id
         self._default_config = default_config
 
-        logger.info(f"[MqueryConversionPipelineTool.__init__] Instance {instance_id} initialized with config keys: {list(default_config.keys())}")
+        logger.info(
+            f"[MqueryConversionPipelineTool.__init__] Instance {instance_id} initialized with config keys: {list(default_config.keys())}"
+        )
 
     def _resolve_parameter(self, value: Any, execution_inputs: Dict[str, Any]) -> Any:
         """
@@ -397,7 +433,8 @@ class MqueryConversionPipelineTool(BaseTool):
             return value
 
         import re
-        placeholders = re.findall(r'\{(\w+)\}', value)
+
+        placeholders = re.findall(r"\{(\w+)\}", value)
 
         if not placeholders:
             return value
@@ -406,10 +443,16 @@ class MqueryConversionPipelineTool(BaseTool):
         for placeholder in placeholders:
             if placeholder in execution_inputs:
                 replacement = str(execution_inputs[placeholder])
-                resolved_value = resolved_value.replace(f'{{{placeholder}}}', replacement)
-                logger.info(f"[PARAM RESOLUTION] Resolved {{{placeholder}}} → {replacement}")
+                resolved_value = resolved_value.replace(
+                    f"{{{placeholder}}}", replacement
+                )
+                logger.info(
+                    f"[PARAM RESOLUTION] Resolved {{{placeholder}}} → {replacement}"
+                )
             else:
-                logger.warning(f"[PARAM RESOLUTION] Placeholder {{{placeholder}}} not found in execution_inputs")
+                logger.warning(
+                    f"[PARAM RESOLUTION] Placeholder {{{placeholder}}} not found in execution_inputs"
+                )
 
         return resolved_value
 
@@ -429,13 +472,17 @@ class MqueryConversionPipelineTool(BaseTool):
             Formatted output with converted SQL and metadata
         """
         try:
-            instance_id = getattr(self, '_instance_id', 'UNKNOWN')
+            instance_id = getattr(self, "_instance_id", "UNKNOWN")
             logger.info(f"[TOOL CALL] Instance {instance_id} - _run() called")
-            logger.info(f"[TOOL CALL] Instance {instance_id} - Received kwargs: {list(kwargs.keys())}")
+            logger.info(
+                f"[TOOL CALL] Instance {instance_id} - Received kwargs: {list(kwargs.keys())}"
+            )
 
             # Extract execution_inputs if provided
-            execution_inputs = kwargs.pop('execution_inputs', {})
-            logger.info(f"[TOOL CALL] Instance {instance_id} - Execution inputs: {list(execution_inputs.keys())}")
+            execution_inputs = kwargs.pop("execution_inputs", {})
+            logger.info(
+                f"[TOOL CALL] Instance {instance_id} - Execution inputs: {list(execution_inputs.keys())}"
+            )
 
             # Merge agent-provided kwargs with pre-configured defaults
             # Filter out None values AND placeholder-like strings that agents often generate
@@ -444,21 +491,36 @@ class MqueryConversionPipelineTool(BaseTool):
                 if not isinstance(value, str):
                     return False
                 placeholder_patterns = [
-                    "your_", "your-", "<your", "[your",
-                    "placeholder", "example_", "example-",
-                    "xxx", "yyy", "zzz",
-                    "insert_", "enter_", "put_",
-                    "replace_", "fill_in",
+                    "your_",
+                    "your-",
+                    "<your",
+                    "[your",
+                    "placeholder",
+                    "example_",
+                    "example-",
+                    "xxx",
+                    "yyy",
+                    "zzz",
+                    "insert_",
+                    "enter_",
+                    "put_",
+                    "replace_",
+                    "fill_in",
                 ]
                 value_lower = value.lower()
                 return any(pattern in value_lower for pattern in placeholder_patterns)
 
             filtered_kwargs = {
-                k: v for k, v in kwargs.items()
+                k: v
+                for k, v in kwargs.items()
                 if v is not None and not is_placeholder(v)
             }
-            logger.info(f"[TOOL CALL] Instance {instance_id} - Filtered kwargs (removed None/placeholders): {list(filtered_kwargs.keys())}")
-            logger.info(f"[TOOL CALL] Instance {instance_id} - Pre-configured defaults: workspace_id={self._default_config.get('workspace_id', 'NOT SET')[:20] if self._default_config.get('workspace_id') else 'NOT SET'}...")
+            logger.info(
+                f"[TOOL CALL] Instance {instance_id} - Filtered kwargs (removed None/placeholders): {list(filtered_kwargs.keys())}"
+            )
+            logger.info(
+                f"[TOOL CALL] Instance {instance_id} - Pre-configured defaults: workspace_id={self._default_config.get('workspace_id', 'NOT SET')[:20] if self._default_config.get('workspace_id') else 'NOT SET'}..."
+            )
 
             # Pre-configured values take precedence over agent-provided placeholders
             # IMPORTANT: default_config must be second to override filtered_kwargs
@@ -466,10 +528,14 @@ class MqueryConversionPipelineTool(BaseTool):
 
             # DYNAMIC PARAMETER RESOLUTION
             if execution_inputs:
-                logger.info(f"[PARAM RESOLUTION] Resolving parameters with execution_inputs")
+                logger.info(
+                    f"[PARAM RESOLUTION] Resolving parameters with execution_inputs"
+                )
                 resolved_kwargs = {}
                 for key, value in merged_kwargs.items():
-                    resolved_kwargs[key] = self._resolve_parameter(value, execution_inputs)
+                    resolved_kwargs[key] = self._resolve_parameter(
+                        value, execution_inputs
+                    )
                 merged_kwargs = resolved_kwargs
 
             # Extract parameters
@@ -493,11 +559,19 @@ class MqueryConversionPipelineTool(BaseTool):
             logger.info("=" * 80)
             logger.info(f"  tenant_id: {auth_config.get('tenant_id')}")
             logger.info(f"  client_id: {auth_config.get('client_id')}")
-            logger.info(f"  client_secret: {'*' * len(auth_config.get('client_secret') or '') if auth_config.get('client_secret') else 'None'}")
+            logger.info(
+                f"  client_secret: {'*' * len(auth_config.get('client_secret') or '') if auth_config.get('client_secret') else 'None'}"
+            )
             logger.info(f"  username: {auth_config.get('username')}")
-            logger.info(f"  password: {'*' * len(auth_config.get('password') or '') if auth_config.get('password') else 'None'}")
-            logger.info(f"  auth_method: {auth_config.get('auth_method')} (type: {type(auth_config.get('auth_method'))})")
-            logger.info(f"  access_token: {'*' * 10 if auth_config.get('access_token') else 'None'}")
+            logger.info(
+                f"  password: {'*' * len(auth_config.get('password') or '') if auth_config.get('password') else 'None'}"
+            )
+            logger.info(
+                f"  auth_method: {auth_config.get('auth_method')} (type: {type(auth_config.get('auth_method'))})"
+            )
+            logger.info(
+                f"  access_token: {'*' * 10 if auth_config.get('access_token') else 'None'}"
+            )
             logger.info("=" * 80)
 
             # Validate required parameters
@@ -506,22 +580,35 @@ class MqueryConversionPipelineTool(BaseTool):
 
             # Validate authentication using shared utility
             from src.services.tools.powerbi_auth_utils import validate_auth_config
+
             is_valid, error_msg = validate_auth_config(auth_config)
             if not is_valid:
                 return f"Error: {error_msg}"
 
-            logger.info(f"[TOOL CALL] Instance {instance_id} - Executing M-Query extraction for workspace: {workspace_id}")
+            logger.info(
+                f"[TOOL CALL] Instance {instance_id} - Executing M-Query extraction for workspace: {workspace_id}"
+            )
 
             # ── Same-day cache check ─────────────────────────────────────────
-            _cache_dataset_key = workspace_id + ("__" + dataset_id if dataset_id else "__all")
+            _cache_dataset_key = workspace_id + (
+                "__" + dataset_id if dataset_id else "__all"
+            )
             try:
-                cached_output = run_sync(self._get_mquery_cache(_cache_dataset_key, workspace_id))
+                cached_output = run_sync(
+                    self._get_mquery_cache(_cache_dataset_key, workspace_id)
+                )
                 if cached_output:
-                    logger.info(f"[CACHE HIT] M-Query conversion for workspace {workspace_id} — returning cached result")
+                    logger.info(
+                        f"[CACHE HIT] M-Query conversion for workspace {workspace_id} — returning cached result"
+                    )
                     return cached_output
-                logger.info(f"[CACHE MISS] Running fresh M-Query conversion for workspace {workspace_id}")
+                logger.info(
+                    f"[CACHE MISS] Running fresh M-Query conversion for workspace {workspace_id}"
+                )
             except Exception as _cache_err:
-                logger.warning(f"[Cache] Cache check failed (continuing without cache): {_cache_err}")
+                logger.warning(
+                    f"[Cache] Cache check failed (continuing without cache): {_cache_err}"
+                )
             # ────────────────────────────────────────────────────────────────
 
             # ── DBSQL validation path ────────────────────────────────────────
@@ -531,23 +618,34 @@ class MqueryConversionPipelineTool(BaseTool):
             _sql_endpoint = merged_kwargs.get("databricks_sql_endpoint")
             _dbsql_pat = merged_kwargs.get("databricks_pat")
             if _sql_endpoint and _dbsql_pat:
-                logger.info(f"[TOOL CALL] DBSQL validation configured — running classify-first validation flow")
+                logger.info(
+                    f"[TOOL CALL] DBSQL validation configured — running classify-first validation flow"
+                )
                 output = run_sync(self._execute_with_validation(merged_kwargs))
                 # Cache the validation output too
                 try:
-                    run_sync(self._save_mquery_cache(_cache_dataset_key, workspace_id, {
-                        "formatted_output": output,
-                        "workspace_id": workspace_id,
-                        "dataset_id": dataset_id,
-                        "validation": True,
-                    }))
+                    run_sync(
+                        self._save_mquery_cache(
+                            _cache_dataset_key,
+                            workspace_id,
+                            {
+                                "formatted_output": output,
+                                "workspace_id": workspace_id,
+                                "dataset_id": dataset_id,
+                                "validation": True,
+                            },
+                        )
+                    )
                 except Exception as _ce:
                     logger.warning(f"[Cache] Failed to save validation output: {_ce}")
                 return output
             # ────────────────────────────────────────────────────────────────
 
             # Import M-Query converter (lazy import to avoid circular dependencies)
-            from src.services.converters.formats.mquery import MQueryConnector, MQueryConversionConfig
+            from src.services.converters.formats.mquery import (
+                MQueryConnector,
+                MQueryConversionConfig,
+            )
 
             # Get LLM configuration - auto-detect from environment if not provided
             llm_workspace_url = merged_kwargs.get("llm_workspace_url")
@@ -556,27 +654,42 @@ class MqueryConversionPipelineTool(BaseTool):
             # Auto-detect Databricks credentials for LLM if not provided
             if not llm_workspace_url or not llm_token:
                 import os
+
                 # Try to get from environment
-                env_workspace_url = os.environ.get("DATABRICKS_HOST") or os.environ.get("DATABRICKS_WORKSPACE_URL")
-                env_token = os.environ.get("DATABRICKS_TOKEN") or os.environ.get("DATABRICKS_API_KEY")
+                env_workspace_url = os.environ.get("DATABRICKS_HOST") or os.environ.get(
+                    "DATABRICKS_WORKSPACE_URL"
+                )
+                env_token = os.environ.get("DATABRICKS_TOKEN") or os.environ.get(
+                    "DATABRICKS_API_KEY"
+                )
 
                 if env_workspace_url and env_token:
                     llm_workspace_url = llm_workspace_url or env_workspace_url
                     llm_token = llm_token or env_token
-                    logger.info(f"[TOOL CALL] Auto-detected Databricks credentials for LLM from environment")
+                    logger.info(
+                        f"[TOOL CALL] Auto-detected Databricks credentials for LLM from environment"
+                    )
                 else:
-                    logger.warning(f"[TOOL CALL] LLM credentials not provided and not found in environment. Complex M-Query expressions may not convert properly.")
+                    logger.warning(
+                        f"[TOOL CALL] LLM credentials not provided and not found in environment. Complex M-Query expressions may not convert properly."
+                    )
 
             # Ensure workspace URL has https:// prefix
             if llm_workspace_url and not llm_workspace_url.startswith("http"):
                 llm_workspace_url = f"https://{llm_workspace_url}"
 
-            use_llm = merged_kwargs.get("use_llm", True) and bool(llm_workspace_url) and bool(llm_token)
+            use_llm = (
+                merged_kwargs.get("use_llm", True)
+                and bool(llm_workspace_url)
+                and bool(llm_token)
+            )
             logger.info(f"[TOOL CALL] LLM conversion enabled: {use_llm}")
 
             # Create configuration based on authentication method
             has_token_auth = bool(auth_config.get("access_token"))
-            logger.info(f"[TOOL CALL] Creating config with auth_method: {'access_token' if has_token_auth else 'service_principal/service_account'}")
+            logger.info(
+                f"[TOOL CALL] Creating config with auth_method: {'access_token' if has_token_auth else 'service_principal/service_account'}"
+            )
 
             config = MQueryConversionConfig(
                 # Authentication - pass all auth params, let the config handle it
@@ -593,15 +706,23 @@ class MqueryConversionPipelineTool(BaseTool):
                 # LLM Configuration
                 llm_workspace_url=llm_workspace_url if llm_workspace_url else None,
                 llm_token=llm_token if llm_token else None,
-                llm_model=merged_kwargs.get("llm_model", "databricks-claude-sonnet-4-5"),
+                llm_model=merged_kwargs.get(
+                    "llm_model", "databricks-claude-sonnet-4-5"
+                ),
                 # Target Configuration
                 target_catalog=merged_kwargs.get("target_catalog", "main"),
                 target_schema=merged_kwargs.get("target_schema", "default"),
                 # Scan Options
                 include_lineage=merged_kwargs.get("include_lineage", True),
-                include_datasource_details=merged_kwargs.get("include_datasource_details", True),
-                include_dataset_schema=merged_kwargs.get("include_dataset_schema", True),
-                include_dataset_expressions=merged_kwargs.get("include_dataset_expressions", True),
+                include_datasource_details=merged_kwargs.get(
+                    "include_datasource_details", True
+                ),
+                include_dataset_schema=merged_kwargs.get(
+                    "include_dataset_schema", True
+                ),
+                include_dataset_expressions=merged_kwargs.get(
+                    "include_dataset_expressions", True
+                ),
                 include_hidden_tables=merged_kwargs.get("include_hidden_tables", False),
                 skip_static_tables=merged_kwargs.get("skip_static_tables", True),
             )
@@ -612,17 +733,26 @@ class MqueryConversionPipelineTool(BaseTool):
                 # Replicate AadService._determine_auth_method() logic
                 if auth_config.get("access_token"):
                     detected_auth_method = "user_oauth (pre-obtained token)"
-                elif (auth_config.get("client_id") and auth_config.get("client_secret") and
-                      auth_config.get("tenant_id")):
+                elif (
+                    auth_config.get("client_id")
+                    and auth_config.get("client_secret")
+                    and auth_config.get("tenant_id")
+                ):
                     detected_auth_method = "service_principal (auto-detected)"
-                elif (auth_config.get("username") and auth_config.get("password") and
-                      auth_config.get("client_id") and auth_config.get("tenant_id")):
+                elif (
+                    auth_config.get("username")
+                    and auth_config.get("password")
+                    and auth_config.get("client_id")
+                    and auth_config.get("tenant_id")
+                ):
                     detected_auth_method = "service_account (auto-detected)"
                 else:
                     detected_auth_method = "UNKNOWN - insufficient credentials"
 
             logger.info("=" * 80)
-            logger.info("[MQueryConversionPipelineTool] 🔑 AUTHENTICATION METHOD DETECTION")
+            logger.info(
+                "[MQueryConversionPipelineTool] 🔑 AUTHENTICATION METHOD DETECTION"
+            )
             logger.info("=" * 80)
             logger.info(f"  Detected auth method: {detected_auth_method}")
             logger.info("=" * 80)
@@ -634,41 +764,55 @@ class MqueryConversionPipelineTool(BaseTool):
             result = run_sync(self._execute_conversion(config, use_llm))
 
             if not result["success"]:
-                return f"Error: Conversion failed - {result.get('error', 'Unknown error')}"
+                return (
+                    f"Error: Conversion failed - {result.get('error', 'Unknown error')}"
+                )
 
             # Format output
             formatted_output = self._format_output(
                 result=result,
                 workspace_id=workspace_id,
                 dataset_id=dataset_id,
-                include_summary=include_summary
+                include_summary=include_summary,
             )
 
             # ── Save to same-day cache ───────────────────────────────────────
             try:
-                run_sync(self._save_mquery_cache(_cache_dataset_key, workspace_id, {
-                    "formatted_output": formatted_output,
-                    "workspace_id": workspace_id,
-                    "dataset_id": dataset_id,
-                    "model_count": result.get("model_count", 0),
-                }))
-                logger.info(f"[CACHE SAVED] M-Query conversion cached for workspace {workspace_id}")
+                run_sync(
+                    self._save_mquery_cache(
+                        _cache_dataset_key,
+                        workspace_id,
+                        {
+                            "formatted_output": formatted_output,
+                            "workspace_id": workspace_id,
+                            "dataset_id": dataset_id,
+                            "model_count": result.get("model_count", 0),
+                        },
+                    )
+                )
+                logger.info(
+                    f"[CACHE SAVED] M-Query conversion cached for workspace {workspace_id}"
+                )
             except Exception as _save_err:
                 logger.warning(f"[Cache] Failed to save M-Query cache: {_save_err}")
             # ────────────────────────────────────────────────────────────────
 
             # ── Durable raw M-Query persistence (Lakebase / conversion_history) ─
             try:
-                run_sync(self._save_to_conversion_history(
-                    raw_extract=self._build_raw_mquery_extract(result),
-                    formatted_output=formatted_output,
-                    workspace_id=workspace_id,
-                    dataset_id=dataset_id,
-                    status="success",
-                    model_count=result.get("model_count", 0),
-                ))
+                run_sync(
+                    self._save_to_conversion_history(
+                        raw_extract=self._build_raw_mquery_extract(result),
+                        formatted_output=formatted_output,
+                        workspace_id=workspace_id,
+                        dataset_id=dataset_id,
+                        status="success",
+                        model_count=result.get("model_count", 0),
+                    )
+                )
             except Exception as _hist_err:
-                logger.warning(f"[MQueryTool] conversion_history persistence skipped: {_hist_err}")
+                logger.warning(
+                    f"[MQueryTool] conversion_history persistence skipped: {_hist_err}"
+                )
             # ────────────────────────────────────────────────────────────────
 
             return formatted_output
@@ -678,9 +822,7 @@ class MqueryConversionPipelineTool(BaseTool):
             return f"Error: {str(e)}"
 
     async def _execute_conversion(
-        self,
-        config: Any,  # MQueryConversionConfig type
-        use_llm: bool
+        self, config: Any, use_llm: bool  # MQueryConversionConfig type
     ) -> Dict[str, Any]:
         """Execute the async M-Query conversion."""
         try:
@@ -694,16 +836,14 @@ class MqueryConversionPipelineTool(BaseTool):
                 if not models:
                     return {
                         "success": False,
-                        "error": "No semantic models found in workspace"
+                        "error": "No semantic models found in workspace",
                     }
 
                 # Convert all tables
                 all_results = {}
                 for model in models:
                     results = await connector.convert_all_tables(model, use_llm=use_llm)
-                    all_results[model.name] = {
-                        "tables": results
-                    }
+                    all_results[model.name] = {"tables": results}
 
                 # Generate summary
                 summary = connector.generate_summary_report()
@@ -712,21 +852,20 @@ class MqueryConversionPipelineTool(BaseTool):
                     "success": True,
                     "models": all_results,
                     "summary": summary,
-                    "model_count": len(models)
+                    "model_count": len(models),
                 }
 
         except Exception as e:
             logger.error(f"Conversion execution error: {e}", exc_info=True)
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     # ── Cache helpers ────────────────────────────────────────────────────────
 
     _CACHE_GROUP = "mquery_conversion"
 
-    async def _get_mquery_cache(self, dataset_key: str, workspace_id: str) -> Optional[str]:
+    async def _get_mquery_cache(
+        self, dataset_key: str, workspace_id: str
+    ) -> Optional[str]:
         """Return today's cached formatted output, or None on miss."""
         async with ToolSessionProvider.cache_service() as svc:
             cached = await svc.get_cached_metadata(
@@ -739,7 +878,9 @@ class MqueryConversionPipelineTool(BaseTool):
             return str(cached["formatted_output"])
         return None
 
-    async def _save_mquery_cache(self, dataset_key: str, workspace_id: str, metadata: Dict[str, Any]) -> None:
+    async def _save_mquery_cache(
+        self, dataset_key: str, workspace_id: str, metadata: Dict[str, Any]
+    ) -> None:
         """Persist the conversion result so same-day reruns are instant."""
         async with ToolSessionProvider.cache_service() as svc:
             await svc.save_metadata(
@@ -765,20 +906,27 @@ class MqueryConversionPipelineTool(BaseTool):
             for table_name, conversions in (model_data.get("tables") or {}).items():
                 for conv in conversions or []:
                     expr_type = getattr(conv, "expression_type", None)
-                    extract.append({
-                        "model": model_name,
-                        "table": table_name,
-                        "expression_type": (
-                            expr_type.value if hasattr(expr_type, "value")
-                            else (str(expr_type) if expr_type else "")
-                        ),
-                        "success": bool(getattr(conv, "success", False)),
-                        "original_mquery": getattr(conv, "original_expression", None) or "",
-                        "databricks_sql": (
-                            getattr(conv, "databricks_sql", None)
-                            or getattr(conv, "create_view_sql", None) or ""
-                        ),
-                    })
+                    extract.append(
+                        {
+                            "model": model_name,
+                            "table": table_name,
+                            "expression_type": (
+                                expr_type.value
+                                if hasattr(expr_type, "value")
+                                else (str(expr_type) if expr_type else "")
+                            ),
+                            "success": bool(getattr(conv, "success", False)),
+                            "original_mquery": getattr(
+                                conv, "original_expression", None
+                            )
+                            or "",
+                            "databricks_sql": (
+                                getattr(conv, "databricks_sql", None)
+                                or getattr(conv, "create_view_sql", None)
+                                or ""
+                            ),
+                        }
+                    )
         return extract
 
     async def _save_to_conversion_history(
@@ -838,7 +986,9 @@ class MqueryConversionPipelineTool(BaseTool):
                 if group_context:
                     group_id = getattr(group_context, "primary_group_id", None)
             except Exception as _gc_err:
-                logger.debug(f"[MQueryTool] Could not resolve group_id for history: {_gc_err}")
+                logger.debug(
+                    f"[MQueryTool] Could not resolve group_id for history: {_gc_err}"
+                )
 
             async with ToolSessionProvider.conversion_repo() as repo:
                 record = await repo.create(history_data.model_dump())
@@ -850,7 +1000,9 @@ class MqueryConversionPipelineTool(BaseTool):
                     f"(source_format=powerbi_mquery, tables={table_count}, status={status})"
                 )
         except Exception as e:
-            logger.warning(f"[MQueryTool] Failed to save conversion_history (non-fatal): {e}")
+            logger.warning(
+                f"[MQueryTool] Failed to save conversion_history (non-fatal): {e}"
+            )
 
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -859,7 +1011,7 @@ class MqueryConversionPipelineTool(BaseTool):
         result: Dict[str, Any],
         workspace_id: str,
         dataset_id: Optional[str],
-        include_summary: bool
+        include_summary: bool,
     ) -> str:
         """Format the conversion output."""
         output = []
@@ -882,7 +1034,9 @@ class MqueryConversionPipelineTool(BaseTool):
 
                 for conv in conversions:
                     if conv.success:
-                        output.append(f"**Expression Type**: {conv.expression_type.value}\n")
+                        output.append(
+                            f"**Expression Type**: {conv.expression_type.value}\n"
+                        )
 
                         # Show original M-Query expression if available
                         if conv.original_expression:
@@ -909,7 +1063,9 @@ class MqueryConversionPipelineTool(BaseTool):
                         if conv.parameters:
                             output.append("**Parameters**:")
                             for param in conv.parameters:
-                                output.append(f"  - {param.get('name', 'unknown')}: {param.get('type', 'STRING')}")
+                                output.append(
+                                    f"  - {param.get('name', 'unknown')}: {param.get('type', 'STRING')}"
+                                )
 
                         if conv.notes:
                             output.append(f"\n*{conv.notes}*\n")
@@ -922,8 +1078,12 @@ class MqueryConversionPipelineTool(BaseTool):
             if summary and "error" not in summary:
                 output.append("\n## Summary Report\n")
                 output.append(f"- **Total Tables**: {summary.get('total_tables', 0)}")
-                output.append(f"- **Total Measures**: {summary.get('total_measures', 0)}")
-                output.append(f"- **Relationships**: {summary.get('relationships_count', 0)}")
+                output.append(
+                    f"- **Total Measures**: {summary.get('total_measures', 0)}"
+                )
+                output.append(
+                    f"- **Relationships**: {summary.get('relationships_count', 0)}"
+                )
 
                 expr_types = summary.get("expression_types", {})
                 if expr_types:
@@ -942,27 +1102,38 @@ class MqueryConversionPipelineTool(BaseTool):
     # ── Source classification ─────────────────────────────────────────────────
 
     _DATABRICKS_KW = [
-        "databricksmulticloud.catalogs", "databricks.catalogs",
-        "value.nativequery", "spark.databricks",
+        "databricksmulticloud.catalogs",
+        "databricks.catalogs",
+        "value.nativequery",
+        "spark.databricks",
     ]
     _STATIC_KW = [
-        "excel.workbook", "json.document", "csv.document", "yaml.document",
-        "xml.document", "web.page", "table.fromrows", "table.fromrecords",
-        "table.fromvalue", "table.fromlist",
+        "excel.workbook",
+        "json.document",
+        "csv.document",
+        "yaml.document",
+        "xml.document",
+        "web.page",
+        "table.fromrows",
+        "table.fromrecords",
+        "table.fromvalue",
+        "table.fromlist",
     ]
     _SKIP_REASONS: Dict[str, str] = {
         "sql_database": "Azure SQL / Synapse — use Lakehouse Federation or ETL",
-        "odbc":         "ODBC connection — no direct Databricks equivalent",
-        "oracle":       "Oracle Database — use Federation or ETL migration",
-        "snowflake":    "Snowflake — use Lakehouse Federation or Delta Sharing",
-        "other":        "Source type not recognised — manual rewrite required",
+        "odbc": "ODBC connection — no direct Databricks equivalent",
+        "oracle": "Oracle Database — use Federation or ETL migration",
+        "snowflake": "Snowflake — use Lakehouse Federation or Delta Sharing",
+        "other": "Source type not recognised — manual rewrite required",
     }
 
     def _classify_table(self, expr_type_str: str, raw_expr: str) -> str:
         """Return 'databricks' | 'static' | 'non_transpilable'."""
         et = expr_type_str.lower()
         orig = raw_expr.lower()
-        if et in ("native_query", "databricks_catalog") or any(k in orig for k in self._DATABRICKS_KW):
+        if et in ("native_query", "databricks_catalog") or any(
+            k in orig for k in self._DATABRICKS_KW
+        ):
             return "databricks"
         if et == "table_from_rows" or any(k in orig for k in self._STATIC_KW):
             return "static"
@@ -977,7 +1148,10 @@ class MqueryConversionPipelineTool(BaseTool):
           Static      → EVALUATE <TableName> via PBI → CREATE TABLE + INSERT on DBSQL
           Other       → flag as NOT TRANSPILABLE (no LLM called)
         """
-        from src.services.converters.formats.mquery import MQueryConnector, MQueryConversionConfig
+        from src.services.converters.formats.mquery import (
+            MQueryConnector,
+            MQueryConversionConfig,
+        )
         from src.services.tools.powerbi_auth_utils import get_powerbi_access_token
 
         workspace_id = cfg.get("workspace_id", "")
@@ -988,8 +1162,12 @@ class MqueryConversionPipelineTool(BaseTool):
         try:
             workspace_url, warehouse_id = await self._resolve_dbsql(sql_endpoint, pat)
         except Exception as e:
-            return f"Error resolving DBSQL connection from endpoint '{sql_endpoint}': {e}"
-        target = f"{cfg.get('target_catalog','main')}.{cfg.get('target_schema','default')}"
+            return (
+                f"Error resolving DBSQL connection from endpoint '{sql_endpoint}': {e}"
+            )
+        target = (
+            f"{cfg.get('target_catalog','main')}.{cfg.get('target_schema','default')}"
+        )
         max_iter = int(cfg.get("max_iterations", 10))
 
         # PBI auth token for Admin API (scan / convert)
@@ -1015,11 +1193,17 @@ class MqueryConversionPipelineTool(BaseTool):
                     client_id=cfg.get("exec_client_id"),
                     client_secret=cfg.get("exec_client_secret"),
                     access_token=cfg.get("exec_access_token"),
-                    auth_method="service_principal" if cfg.get("exec_client_id") else None,
+                    auth_method=(
+                        "service_principal" if cfg.get("exec_client_id") else None
+                    ),
                 )
-                logger.info("[Validation] Using separate data retrieval credentials for Execute Queries")
+                logger.info(
+                    "[Validation] Using separate data retrieval credentials for Execute Queries"
+                )
             except Exception as e:
-                logger.warning(f"[Validation] Data retrieval token failed, falling back to main token: {e}")
+                logger.warning(
+                    f"[Validation] Data retrieval token failed, falling back to main token: {e}"
+                )
                 exec_token = pbi_token
 
         mq_cfg = MQueryConversionConfig(
@@ -1040,7 +1224,11 @@ class MqueryConversionPipelineTool(BaseTool):
             include_hidden_tables=cfg.get("include_hidden_tables", False),
             skip_static_tables=False,
         )
-        use_llm = bool(cfg.get("use_llm", True)) and bool(cfg.get("llm_workspace_url")) and bool(cfg.get("llm_token"))
+        use_llm = (
+            bool(cfg.get("use_llm", True))
+            and bool(cfg.get("llm_workspace_url"))
+            and bool(cfg.get("llm_token"))
+        )
 
         validated: list = []
         inserted: list = []
@@ -1062,48 +1250,82 @@ class MqueryConversionPipelineTool(BaseTool):
                             se = table.source_expressions[0]
                             raw_expr = getattr(se, "raw_expression", "") or ""
                             et = getattr(se, "expression_type", None)
-                            expr_type_str = (et.value if hasattr(et, "value") else str(et)) if et else "other"
+                            expr_type_str = (
+                                (et.value if hasattr(et, "value") else str(et))
+                                if et
+                                else "other"
+                            )
 
                         lane = self._classify_table(expr_type_str, raw_expr)
 
                         # Capture the full, untruncated original M-Query for durable persistence.
-                        raw_extract.append({
-                            "model": model.name,
-                            "table": tname,
-                            "expression_type": expr_type_str,
-                            "lane": lane,
-                            "original_mquery": raw_expr,
-                        })
+                        raw_extract.append(
+                            {
+                                "model": model.name,
+                                "table": tname,
+                                "expression_type": expr_type_str,
+                                "lane": lane,
+                                "original_mquery": raw_expr,
+                            }
+                        )
 
                         if lane == "databricks":
                             logger.info(f"[Validation] Databricks table: {tname}")
                             try:
-                                convs = await connector.convert_table(table, use_llm=use_llm)
+                                convs = await connector.convert_table(
+                                    table, use_llm=use_llm
+                                )
                             except Exception as ce:
-                                validated.append({"table": tname, "status": "conversion_error", "error": str(ce)})
+                                validated.append(
+                                    {
+                                        "table": tname,
+                                        "status": "conversion_error",
+                                        "error": str(ce),
+                                    }
+                                )
                                 continue
                             for conv in convs:
                                 r = await self._validate_databricks_table(
-                                    tname, conv, workspace_id, dataset_id, exec_token,
-                                    workspace_url, warehouse_id, pat, max_iter, cfg
+                                    tname,
+                                    conv,
+                                    workspace_id,
+                                    dataset_id,
+                                    exec_token,
+                                    workspace_url,
+                                    warehouse_id,
+                                    pat,
+                                    max_iter,
+                                    cfg,
                                 )
                                 validated.append(r)
 
                         elif lane == "static":
                             logger.info(f"[Validation] Static table: {tname}")
                             r = await self._insert_static_table(
-                                tname, workspace_id, dataset_id, exec_token,
-                                warehouse_id, pat, workspace_url, target, cfg
+                                tname,
+                                workspace_id,
+                                dataset_id,
+                                exec_token,
+                                warehouse_id,
+                                pat,
+                                workspace_url,
+                                target,
+                                cfg,
                             )
                             inserted.append(r)
 
                         else:
-                            skipped.append({
-                                "table": tname, "model": model.name,
-                                "source_type": expr_type_str,
-                                "reason": self._SKIP_REASONS.get(expr_type_str, "Manual rewrite required"),
-                                "mquery_preview": raw_expr[:300],
-                            })
+                            skipped.append(
+                                {
+                                    "table": tname,
+                                    "model": model.name,
+                                    "source_type": expr_type_str,
+                                    "reason": self._SKIP_REASONS.get(
+                                        expr_type_str, "Manual rewrite required"
+                                    ),
+                                    "mquery_preview": raw_expr[:300],
+                                }
+                            )
 
         except Exception as e:
             logger.error(f"[Validation] Error: {e}", exc_info=True)
@@ -1122,29 +1344,45 @@ class MqueryConversionPipelineTool(BaseTool):
                 model_count=len(models),
             )
         except Exception as _hist_err:
-            logger.warning(f"[MQueryTool] conversion_history persistence skipped: {_hist_err}")
+            logger.warning(
+                f"[MQueryTool] conversion_history persistence skipped: {_hist_err}"
+            )
 
         return report
 
     # ── Databricks table: convert + validate ──────────────────────────────────
 
     async def _validate_databricks_table(
-        self, tname: str, conv: Any, workspace_id: str, dataset_id: Optional[str],
-        pbi_token: str, workspace_url: str, warehouse_id: str, pat: str,
-        max_iter: int, cfg: Dict[str, Any]
+        self,
+        tname: str,
+        conv: Any,
+        workspace_id: str,
+        dataset_id: Optional[str],
+        pbi_token: str,
+        workspace_url: str,
+        warehouse_id: str,
+        pat: str,
+        max_iter: int,
+        cfg: Dict[str, Any],
     ) -> Dict[str, Any]:
         sql = conv.databricks_sql or conv.create_view_sql or ""
         if not sql:
             return {"table": tname, "status": "skipped", "reason": "No SQL generated"}
         if not (warehouse_id and pat):
-            return {"table": tname, "status": "skipped", "reason": "DBSQL not configured"}
+            return {
+                "table": tname,
+                "status": "skipped",
+                "reason": "DBSQL not configured",
+            }
 
         # Extract SELECT body from CREATE VIEW wrapper
         select_sql = self._extract_select_body(sql, cfg, tname)
 
         dax = f'EVALUATE ROW("_cnt", COUNTROWS({tname}))'
         last_diff = None
-        last_missing_table: Optional[str] = None  # track TABLE_OR_VIEW_NOT_FOUND repeats
+        last_missing_table: Optional[str] = (
+            None  # track TABLE_OR_VIEW_NOT_FOUND repeats
+        )
 
         for iteration in range(max_iter):
             agg_sql = self._build_count_sql(select_sql)
@@ -1162,53 +1400,95 @@ class MqueryConversionPipelineTool(BaseTool):
                 # missing table recurs on the next iteration the table simply doesn't
                 # exist and LLM cannot fix it → give up immediately.
                 import re as _tvre
-                _tvm = _tvre.search(r'`([^`]+)`\.`([^`]+)`', sql_error)
+
+                _tvm = _tvre.search(r"`([^`]+)`\.`([^`]+)`", sql_error)
                 _missing = _tvm.group(0) if _tvm else sql_error[:80]
                 if "TABLE_OR_VIEW_NOT_FOUND" in str(sql_error):
                     if _missing == last_missing_table:
-                        logger.warning(f"[Validation] [{tname}] same missing table on 2 consecutive iterations — giving up")
-                        return {"table": tname, "status": "table_not_found",
-                                "error": sql_error, "sql": select_sql, "dax": dax}
+                        logger.warning(
+                            f"[Validation] [{tname}] same missing table on 2 consecutive iterations — giving up"
+                        )
+                        return {
+                            "table": tname,
+                            "status": "table_not_found",
+                            "error": sql_error,
+                            "sql": select_sql,
+                            "dax": dax,
+                        }
                     last_missing_table = _missing
 
                 # SQL syntax/runtime error — try LLM correction
                 if iteration < max_iter - 1:
                     fixed = await self._llm_correct_sql(
-                        select_sql, f"SQL execution error: {sql_error}",
-                        getattr(conv, "original_expression", "") or "", cfg
+                        select_sql,
+                        f"SQL execution error: {sql_error}",
+                        getattr(conv, "original_expression", "") or "",
+                        cfg,
                     )
                     if fixed and fixed.strip() != select_sql.strip():
                         select_sql = fixed
                         continue
-                return {"table": tname, "status": "dbsql_error", "error": sql_error,
-                        "sql": select_sql, "dax": dax}
+                return {
+                    "table": tname,
+                    "status": "dbsql_error",
+                    "error": sql_error,
+                    "sql": select_sql,
+                    "dax": dax,
+                }
 
-            dax_res = await self._run_pbi_query(dax, workspace_id, dataset_id or "", pbi_token)
+            dax_res = await self._run_pbi_query(
+                dax, workspace_id, dataset_id or "", pbi_token
+            )
             if not dax_res["success"]:
-                logger.warning(f"[Validation] [{tname}] DAX error: {dax_res.get('error')}")
-                return {"table": tname, "status": "dax_error", "error": dax_res.get("error"),
-                        "sql": select_sql, "dax": dax}
+                logger.warning(
+                    f"[Validation] [{tname}] DAX error: {dax_res.get('error')}"
+                )
+                return {
+                    "table": tname,
+                    "status": "dax_error",
+                    "error": dax_res.get("error"),
+                    "sql": select_sql,
+                    "dax": dax,
+                }
 
             diff = self._diff_counts(sql_res, dax_res)
             if diff is None:
-                logger.info(f"[Validation] [{tname}] ✅ VERIFIED after {iteration+1} iteration(s)")
-                return {"table": tname, "status": "validated", "iterations": iteration + 1,
-                        "sql": select_sql, "dax": dax}
+                logger.info(
+                    f"[Validation] [{tname}] ✅ VERIFIED after {iteration+1} iteration(s)"
+                )
+                return {
+                    "table": tname,
+                    "status": "validated",
+                    "iterations": iteration + 1,
+                    "sql": select_sql,
+                    "dax": dax,
+                }
 
             logger.warning(f"[Validation] [{tname}] ❌ diff detected: {diff}")
             last_diff = diff
             if iteration < max_iter - 1:
                 fixed = await self._llm_correct_sql(
-                    select_sql, diff, getattr(conv, "original_expression", "") or "", cfg
+                    select_sql,
+                    diff,
+                    getattr(conv, "original_expression", "") or "",
+                    cfg,
                 )
                 if fixed and fixed.strip() != select_sql.strip():
                     select_sql = fixed
                 else:
                     break
 
-        logger.warning(f"[Validation] [{tname}] validation_failed after {max_iter} iterations — diff: {last_diff}")
-        return {"table": tname, "status": "validation_failed", "iterations": max_iter,
-                "diff": last_diff, "sql": select_sql, "dax": dax}
+        logger.warning(
+            f"[Validation] [{tname}] validation_failed after {max_iter} iterations — diff: {last_diff}"
+        )
+        return {
+            "table": tname,
+            "status": "validation_failed",
+            "iterations": max_iter,
+            "diff": last_diff,
+            "sql": select_sql,
+            "dax": dax,
+        }
 
     def _build_count_sql(self, select_sql: str) -> str:
         """
@@ -1222,6 +1502,7 @@ class MqueryConversionPipelineTool(BaseTool):
         the final SELECT in the count subquery.
         """
         import re as _re
+
         stripped = select_sql.strip()
         if not stripped.upper().startswith("WITH"):
             return f"SELECT COUNT(*) AS _cnt FROM ({stripped}) _t"
@@ -1233,11 +1514,11 @@ class MqueryConversionPipelineTool(BaseTool):
         i = 0
         while i < len(stripped):
             ch = stripped[i]
-            if ch == '(':
+            if ch == "(":
                 depth += 1
-            elif ch == ')':
+            elif ch == ")":
                 depth -= 1
-            elif depth == 0 and upper[i:i + 7] == "SELECT ":
+            elif depth == 0 and upper[i : i + 7] == "SELECT ":
                 last_top_select = i
             i += 1
 
@@ -1249,12 +1530,20 @@ class MqueryConversionPipelineTool(BaseTool):
         final_select = stripped[last_top_select:].strip()
 
         # Remove trailing ORDER BY / LIMIT — not needed for COUNT
-        final_select = _re.sub(r'\s+ORDER\s+BY\s+.*$', '', final_select, flags=_re.IGNORECASE | _re.DOTALL)
-        final_select = _re.sub(r'\s+LIMIT\s+\S+.*$', '', final_select, flags=_re.IGNORECASE)
+        final_select = _re.sub(
+            r"\s+ORDER\s+BY\s+.*$", "", final_select, flags=_re.IGNORECASE | _re.DOTALL
+        )
+        final_select = _re.sub(
+            r"\s+LIMIT\s+\S+.*$", "", final_select, flags=_re.IGNORECASE
+        )
 
-        return f"{cte_part}SELECT COUNT(*) AS _cnt FROM ({final_select.strip()}) _cnt_agg"
+        return (
+            f"{cte_part}SELECT COUNT(*) AS _cnt FROM ({final_select.strip()}) _cnt_agg"
+        )
 
-    def _extract_select_body(self, sql: str, config: Dict[str, Any], table_name: str) -> str:
+    def _extract_select_body(
+        self, sql: str, config: Dict[str, Any], table_name: str
+    ) -> str:
         """
         Robustly extract the SELECT body from a SQL string that may or may not
         be wrapped in CREATE VIEW ... AS <body>.
@@ -1263,22 +1552,28 @@ class MqueryConversionPipelineTool(BaseTool):
         in the SQL body (e.g. 'fiscyear AS Year') instead of the CREATE VIEW boundary.
         """
         import re as _re
+
         stripped = sql.strip()
         upper = stripped.upper()
 
         # Already a bare SELECT or subquery / CTE
-        if upper.startswith("SELECT") or upper.startswith("(") or upper.startswith("WITH"):
+        if (
+            upper.startswith("SELECT")
+            or upper.startswith("(")
+            or upper.startswith("WITH")
+        ):
             return stripped
 
         # CREATE VIEW ... AS <body>
         if "CREATE" in upper and "VIEW" in upper:
             # Match up to and including the AS keyword at the end of the view header
             m = _re.search(
-                r'CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?\S+\s+AS\s*',
-                stripped, _re.IGNORECASE
+                r"CREATE\s+(?:OR\s+REPLACE\s+)?VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?\S+\s+AS\s*",
+                stripped,
+                _re.IGNORECASE,
             )
             if m:
-                body = stripped[m.end():].strip()
+                body = stripped[m.end() :].strip()
                 # Body should now start with SELECT, (, or WITH
                 if body.upper().startswith(("SELECT", "(", "WITH")):
                     return body
@@ -1304,22 +1599,31 @@ class MqueryConversionPipelineTool(BaseTool):
                 row = dax_rows[0]
                 for v in (row.values() if isinstance(row, dict) else row):
                     try:
-                        dax_cnt = int(float(str(v))); break
+                        dax_cnt = int(float(str(v)))
+                        break
                     except (ValueError, TypeError):
                         pass
             if dax_cnt is None or (sql_cnt == 0 and dax_cnt == 0):
                 return None
             rel = abs(sql_cnt - dax_cnt) / max(dax_cnt, 1)
-            return None if rel < 0.001 else f"SQL={sql_cnt}, DAX={dax_cnt} (delta={rel:.1%})"
+            return (
+                None
+                if rel < 0.001
+                else f"SQL={sql_cnt}, DAX={dax_cnt} (delta={rel:.1%})"
+            )
         except Exception:
             return None
 
-    async def _llm_correct_sql(self, sql: str, diff: str, mquery: str, cfg: Dict) -> Optional[str]:
+    async def _llm_correct_sql(
+        self, sql: str, diff: str, mquery: str, cfg: Dict
+    ) -> Optional[str]:
         """Ask LLM to fix SQL given the row-count diff vs DAX."""
         import re as _re
+
         try:
             from src.services.llm.manager import LLMManager
-            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            from src.utils.telemetry import KasalProduct, get_user_agent_header
+
             model = cfg.get("llm_model", "databricks-claude-sonnet-4-5")
             prompt = (
                 f"You are a Databricks SQL expert. This SQL was transpiled from a Power BI M-Query "
@@ -1340,12 +1644,14 @@ class MqueryConversionPipelineTool(BaseTool):
             # prompt-injection before the LLM call (fail-open + log).
             try:
                 from src.services.security.scanner_pipeline import security_scanner
+
                 _inj = security_scanner.scan_injection(mquery or "")
                 if getattr(_inj, "detected", False):
                     logger.warning(
                         "[Validation] Possible prompt-injection in PBI M-query fed to "
                         "SQL-correction LLM (severity=%s) — proceeding.",
-                        getattr(_inj, "severity", "?"))
+                        getattr(_inj, "severity", "?"),
+                    )
             except Exception as _e:  # noqa: BLE001 — advisory only
                 logger.debug(f"[Validation] injection scan skipped: {_e}")
             response = await LLMManager.completion(
@@ -1356,7 +1662,9 @@ class MqueryConversionPipelineTool(BaseTool):
                 extra_headers=get_user_agent_header(KasalProduct.POWERBI),
             )
             if isinstance(response, str):
-                m = _re.search(r"```(?:sql)?\s*(.*?)```", response, _re.DOTALL | _re.IGNORECASE)
+                m = _re.search(
+                    r"```(?:sql)?\s*(.*?)```", response, _re.DOTALL | _re.IGNORECASE
+                )
                 return m.group(1).strip() if m else response.strip()
         except Exception as e:
             logger.warning(f"[Validation] LLM SQL fix failed: {e}")
@@ -1365,12 +1673,23 @@ class MqueryConversionPipelineTool(BaseTool):
     # ── Static table: EVALUATE → CREATE TABLE + INSERT ────────────────────────
 
     async def _insert_static_table(
-        self, tname: str, workspace_id: str, dataset_id: Optional[str],
-        pbi_token: str, warehouse_id: str, pat: str, workspace_url: str,
-        target_prefix: str, cfg: Optional[Dict[str, Any]] = None
+        self,
+        tname: str,
+        workspace_id: str,
+        dataset_id: Optional[str],
+        pbi_token: str,
+        warehouse_id: str,
+        pat: str,
+        workspace_url: str,
+        target_prefix: str,
+        cfg: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if not (warehouse_id and pat):
-            return {"table": tname, "status": "skipped", "reason": "DBSQL not configured"}
+            return {
+                "table": tname,
+                "status": "skipped",
+                "reason": "DBSQL not configured",
+            }
 
         # 1. Fetch all rows from PBI via EVALUATE (DAX)
         pbi = await self._run_pbi_query(
@@ -1405,11 +1724,21 @@ class MqueryConversionPipelineTool(BaseTool):
         # 3. Execute CREATE TABLE
         cr = await self._run_dbsql(create_sql, workspace_url, warehouse_id, pat)
         if not cr["success"]:
-            return {"table": tname, "status": "create_failed", "error": cr["error"], "sql": create_sql}
+            return {
+                "table": tname,
+                "status": "create_failed",
+                "error": cr["error"],
+                "sql": create_sql,
+            }
 
         if not insert_sqls:
-            return {"table": tname, "status": "inserted", "target": full_target,
-                    "rows_inserted": 0, "sql": create_sql}
+            return {
+                "table": tname,
+                "status": "inserted",
+                "target": full_target,
+                "rows_inserted": 0,
+                "sql": create_sql,
+            }
 
         # 4. Execute INSERT statements in batches
         total = 0
@@ -1418,17 +1747,26 @@ class MqueryConversionPipelineTool(BaseTool):
             if ir["success"]:
                 total += ins.count("),(") + 1
             else:
-                logger.warning(f"[Validation] Batch insert error for {tname}: {ir['error']}")
+                logger.warning(
+                    f"[Validation] Batch insert error for {tname}: {ir['error']}"
+                )
 
         return {
-            "table": tname, "status": "inserted", "target": full_target,
+            "table": tname,
+            "status": "inserted",
+            "target": full_target,
             "rows_inserted": total,
-            "sql": "\n\n".join([create_sql] + insert_sqls[:2]) + (" ..." if len(insert_sqls) > 2 else ""),
+            "sql": "\n\n".join([create_sql] + insert_sqls[:2])
+            + (" ..." if len(insert_sqls) > 2 else ""),
         }
 
     async def _llm_generate_insert_sql(
-        self, tname: str, full_target: str, columns: List[str],
-        rows: list, cfg: Dict[str, Any]
+        self,
+        tname: str,
+        full_target: str,
+        columns: List[str],
+        rows: list,
+        cfg: Dict[str, Any],
     ) -> Tuple[str, List[str]]:
         """
         Use LLM to generate CREATE TABLE + INSERT statements from PBI data.
@@ -1446,7 +1784,8 @@ class MqueryConversionPipelineTool(BaseTool):
         # but with the correct types from the LLM-generated schema.
         try:
             from src.services.llm.manager import LLMManager
-            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            from src.utils.telemetry import KasalProduct, get_user_agent_header
+
             model = cfg.get("llm_model", "databricks-claude-sonnet-4-5")
             prompt = (
                 f"You are a Databricks SQL expert. A Power BI table called '{tname}' "
@@ -1465,14 +1804,18 @@ class MqueryConversionPipelineTool(BaseTool):
                 extra_headers=get_user_agent_header(KasalProduct.POWERBI),
             )
             if isinstance(response, str):
-                m = _re.search(r"```(?:sql)?\s*(.*?)```", response, _re.DOTALL | _re.IGNORECASE)
+                m = _re.search(
+                    r"```(?:sql)?\s*(.*?)```", response, _re.DOTALL | _re.IGNORECASE
+                )
                 llm_sql = m.group(1).strip() if m else response.strip()
                 # Use the LLM output ONLY to infer column types — never execute it.
                 type_map = self._parse_types_from_create(llm_sql, columns)
             else:
                 raise ValueError("LLM returned non-string response")
         except Exception as e:
-            logger.warning(f"[Validation] LLM schema generation failed for {tname}, using fallback: {e}")
+            logger.warning(
+                f"[Validation] LLM schema generation failed for {tname}, using fallback: {e}"
+            )
             type_map = self._infer_schema_types(columns, rows[:10])
 
         # SECURITY: build the executed CREATE TABLE deterministically from the
@@ -1491,7 +1834,7 @@ class MqueryConversionPipelineTool(BaseTool):
         col_list = ", ".join(_quote_sql_column(c) for c in columns)
         insert_sqls = []
         for i in range(0, len(rows), 500):
-            batch = rows[i:i + 500]
+            batch = rows[i : i + 500]
             vals = []
             for row in batch:
                 items = list(row.values()) if isinstance(row, dict) else list(row)
@@ -1506,13 +1849,21 @@ class MqueryConversionPipelineTool(BaseTool):
                             escaped.append(str(int(float(str(v)))))
                         except (ValueError, TypeError):
                             escaped.append("NULL")
-                    elif "DOUBLE" in col_type or "FLOAT" in col_type or "DECIMAL" in col_type:
+                    elif (
+                        "DOUBLE" in col_type
+                        or "FLOAT" in col_type
+                        or "DECIMAL" in col_type
+                    ):
                         try:
                             escaped.append(str(float(str(v))))
                         except (ValueError, TypeError):
                             escaped.append("NULL")
                     elif "BOOLEAN" in col_type:
-                        escaped.append("TRUE" if str(v).lower() in ("true", "1", "yes") else "FALSE")
+                        escaped.append(
+                            "TRUE"
+                            if str(v).lower() in ("true", "1", "yes")
+                            else "FALSE"
+                        )
                     elif "DATE" in col_type and "TIME" not in col_type:
                         escaped.append(f"DATE '{str(v)[:10]}'")
                     elif "TIMESTAMP" in col_type:
@@ -1521,13 +1872,18 @@ class MqueryConversionPipelineTool(BaseTool):
                         escaped.append("'" + str(v).replace("'", "''") + "'")
                 vals.append(f"({', '.join(escaped)})")
             if vals:
-                insert_sqls.append(f"INSERT INTO {full_target} ({col_list}) VALUES {', '.join(vals)}")
+                insert_sqls.append(
+                    f"INSERT INTO {full_target} ({col_list}) VALUES {', '.join(vals)}"
+                )
 
         return create_sql, insert_sqls
 
-    def _parse_types_from_create(self, create_sql: str, columns: List[str]) -> Dict[str, str]:
+    def _parse_types_from_create(
+        self, create_sql: str, columns: List[str]
+    ) -> Dict[str, str]:
         """Extract column→type mapping from a CREATE TABLE SQL string."""
         import re as _re
+
         type_map: Dict[str, str] = {}
         # Match backtick or plain column names followed by a type
         for col in columns:
@@ -1539,6 +1895,7 @@ class MqueryConversionPipelineTool(BaseTool):
     def _infer_schema_types(self, cols: list, sample_rows: list) -> Dict[str, str]:
         """Fallback: infer types mechanically from sample values."""
         import re as _re
+
         types: Dict[str, str] = {c: "STRING" for c in cols}
         for row in sample_rows:
             vals = list(row.values()) if isinstance(row, dict) else list(row)
@@ -1546,11 +1903,15 @@ class MqueryConversionPipelineTool(BaseTool):
                 if i >= len(cols) or v is None or types[cols[i]] != "STRING":
                     continue
                 try:
-                    int(v); types[cols[i]] = "BIGINT"; continue
+                    int(v)
+                    types[cols[i]] = "BIGINT"
+                    continue
                 except (ValueError, TypeError):
                     pass
                 try:
-                    float(v); types[cols[i]] = "DOUBLE"; continue
+                    float(v)
+                    types[cols[i]] = "DOUBLE"
+                    continue
                 except (ValueError, TypeError):
                     pass
                 if _re.match(r"^\d{4}-\d{2}-\d{2}T", str(v)):
@@ -1561,6 +1922,7 @@ class MqueryConversionPipelineTool(BaseTool):
 
     def _infer_schema(self, cols: list, sample_rows: list) -> str:
         import re as _re
+
         types: Dict[str, str] = {c: "STRING" for c in cols}
         for row in sample_rows:
             vals = list(row.values()) if isinstance(row, dict) else list(row)
@@ -1568,11 +1930,15 @@ class MqueryConversionPipelineTool(BaseTool):
                 if i >= len(cols) or v is None or types[cols[i]] != "STRING":
                     continue
                 try:
-                    int(v); types[cols[i]] = "BIGINT"; continue
+                    int(v)
+                    types[cols[i]] = "BIGINT"
+                    continue
                 except (ValueError, TypeError):
                     pass
                 try:
-                    float(v); types[cols[i]] = "DOUBLE"; continue
+                    float(v)
+                    types[cols[i]] = "DOUBLE"
+                    continue
                 except (ValueError, TypeError):
                     pass
                 if _re.match(r"^\d{4}-\d{2}-\d{2}", str(v)):
@@ -1595,6 +1961,7 @@ class MqueryConversionPipelineTool(BaseTool):
         """
         import re as _re
         from urllib.parse import urlparse
+
         import httpx as _httpx
 
         parsed = urlparse(sql_endpoint)
@@ -1606,10 +1973,16 @@ class MqueryConversionPipelineTool(BaseTool):
             return workspace_url, m.group(1)
 
         # Auto-detect: list warehouses and pick best running one
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
-        headers = {"Authorization": f"Bearer {pat}", **get_user_agent_header(KasalProduct.POWERBI)}
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
+
+        headers = {
+            "Authorization": f"Bearer {pat}",
+            **get_user_agent_header(KasalProduct.POWERBI),
+        }
         async with _httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(f"{workspace_url}/api/2.0/sql/warehouses", headers=headers)
+            resp = await client.get(
+                f"{workspace_url}/api/2.0/sql/warehouses", headers=headers
+            )
             resp.raise_for_status()
             warehouses = resp.json().get("warehouses", [])
 
@@ -1624,15 +1997,31 @@ class MqueryConversionPipelineTool(BaseTool):
 
     # ── DBSQL Statement API ───────────────────────────────────────────────────
 
-    async def _run_dbsql(self, sql: str, workspace_url: str, warehouse_id: str, pat: str) -> Dict[str, Any]:
+    async def _run_dbsql(
+        self, sql: str, workspace_url: str, warehouse_id: str, pat: str
+    ) -> Dict[str, Any]:
         import httpx as _httpx
+
         base = workspace_url.rstrip("/")
         if not base:
-            return {"success": False, "error": "databricks_workspace_url not configured — set llm_workspace_url"}
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
+            return {
+                "success": False,
+                "error": "databricks_workspace_url not configured — set llm_workspace_url",
+            }
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
+
         url = f"{base}/api/2.0/sql/statements"
-        headers = {"Authorization": f"Bearer {pat}", "Content-Type": "application/json", **get_user_agent_header(KasalProduct.POWERBI)}
-        payload = {"statement": sql, "warehouse_id": warehouse_id, "wait_timeout": "50s", "on_wait_timeout": "CONTINUE"}
+        headers = {
+            "Authorization": f"Bearer {pat}",
+            "Content-Type": "application/json",
+            **get_user_agent_header(KasalProduct.POWERBI),
+        }
+        payload = {
+            "statement": sql,
+            "warehouse_id": warehouse_id,
+            "wait_timeout": "50s",
+            "on_wait_timeout": "CONTINUE",
+        }
         try:
             async with _httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(url, headers=headers, json=payload)
@@ -1644,35 +2033,62 @@ class MqueryConversionPipelineTool(BaseTool):
                 while state in ("RUNNING", "PENDING") and polls < 30:
                     await asyncio.sleep(2)
                     pr = await client.get(f"{url}/{sid}", headers=headers)
-                    data = pr.json(); state = data.get("status", {}).get("state", ""); polls += 1
+                    data = pr.json()
+                    state = data.get("status", {}).get("state", "")
+                    polls += 1
                 if state == "SUCCEEDED":
                     result = data.get("result", {})
                     manifest = data.get("manifest", {})
-                    cols = [c["name"] for c in manifest.get("schema", {}).get("columns", [])]
-                    return {"success": True, "columns": cols, "rows": result.get("data_array", [])}
+                    cols = [
+                        c["name"] for c in manifest.get("schema", {}).get("columns", [])
+                    ]
+                    return {
+                        "success": True,
+                        "columns": cols,
+                        "rows": result.get("data_array", []),
+                    }
                 err = data.get("status", {}).get("error", {})
-                return {"success": False, "error": err.get("message", f"State: {state}")}
+                return {
+                    "success": False,
+                    "error": err.get("message", f"State: {state}"),
+                }
         except Exception as e:
             return {"success": False, "error": str(e)}
 
     # ── PBI Execute Queries API ───────────────────────────────────────────────
 
-    async def _run_pbi_query(self, dax: str, workspace_id: str, dataset_id: str, token: str) -> Dict[str, Any]:
+    async def _run_pbi_query(
+        self, dax: str, workspace_id: str, dataset_id: str, token: str
+    ) -> Dict[str, Any]:
         import httpx as _httpx
+
         url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
-        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-        payload = {"queries": [{"query": dax}], "serializerSettings": {"includeNulls": True}}
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "queries": [{"query": dax}],
+            "serializerSettings": {"includeNulls": True},
+        }
         try:
             async with _httpx.AsyncClient(timeout=120.0) as client:
                 resp = await client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
                 if "error" in data:
-                    return {"success": False, "error": data["error"].get("message", str(data["error"]))}
+                    return {
+                        "success": False,
+                        "error": data["error"].get("message", str(data["error"])),
+                    }
                 tables = data.get("results", [{}])[0].get("tables", [])
                 if tables:
                     rows = tables[0].get("rows", [])
-                    return {"success": True, "data": rows, "columns": list(rows[0].keys()) if rows else []}
+                    return {
+                        "success": True,
+                        "data": rows,
+                        "columns": list(rows[0].keys()) if rows else [],
+                    }
                 return {"success": True, "data": [], "columns": []}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -1694,7 +2110,15 @@ class MqueryConversionPipelineTool(BaseTool):
             lines.append("---\n## Databricks Tables — SQL vs DAX Validation\n")
             for r in validated:
                 status = r.get("status", "unknown")
-                icon = "✅" if status == "validated" else ("🔷" if status == "table_not_found" else ("⚠️" if status == "validation_failed" else "❌"))
+                icon = (
+                    "✅"
+                    if status == "validated"
+                    else (
+                        "🔷"
+                        if status == "table_not_found"
+                        else ("⚠️" if status == "validation_failed" else "❌")
+                    )
+                )
                 badge = {
                     "validated": "**✅ VERIFIED**",
                     "table_not_found": "**🔷 TABLE NOT MIGRATED YET** — SQL correct but target table missing",
@@ -1711,7 +2135,9 @@ class MqueryConversionPipelineTool(BaseTool):
                     lines.append(f"- Note: {r['reason']}")
                 if r.get("sql"):
                     preview = r["sql"][:400] + ("..." if len(r["sql"]) > 400 else "")
-                    lines.append(f"\n**Translated SQL (M-Query → Databricks SQL):**\n```sql\n{preview}\n```")
+                    lines.append(
+                        f"\n**Translated SQL (M-Query → Databricks SQL):**\n```sql\n{preview}\n```"
+                    )
                 if r.get("dax"):
                     lines.append(f"\n**DAX executed on PBI:**\n```dax\n{r['dax']}\n```")
                 lines.append("")
@@ -1727,7 +2153,9 @@ class MqueryConversionPipelineTool(BaseTool):
                     lines.append(f"- **Error**: {r['error']}")
                 if r.get("sql"):
                     preview = r["sql"][:400] + ("..." if len(r["sql"]) > 400 else "")
-                    lines.append(f"\n**Generated SQL (CREATE TABLE + INSERT):**\n```sql\n{preview}\n```")
+                    lines.append(
+                        f"\n**Generated SQL (CREATE TABLE + INSERT):**\n```sql\n{preview}\n```"
+                    )
                 lines.append("")
 
         if skipped:

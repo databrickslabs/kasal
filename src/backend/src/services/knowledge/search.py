@@ -99,7 +99,9 @@ class KnowledgeSearch:
                 timeout=SEARCH_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError:
-            logger.warning(f"[knowledge] search timed out after {SEARCH_TIMEOUT_SECONDS}s: {query!r}")
+            logger.warning(
+                f"[knowledge] search timed out after {SEARCH_TIMEOUT_SECONDS}s: {query!r}"
+            )
             return f"The knowledge search timed out after {SEARCH_TIMEOUT_SECONDS} seconds."
         except Exception as search_err:  # noqa: BLE001
             logger.error(f"[knowledge] search failed: {search_err}", exc_info=True)
@@ -130,7 +132,9 @@ class KnowledgeSearch:
         lines = [f"Found {len(kept)} relevant results:\n"]
         for index, result in enumerate(kept, 1):
             metadata = result.get("metadata", {}) or {}
-            lines.append(f"\n--- Result {index} (Score: {metadata.get('score', 0.0):.3f}) ---")
+            lines.append(
+                f"\n--- Result {index} (Score: {metadata.get('score', 0.0):.3f}) ---"
+            )
             lines.append(f"Source: {metadata.get('source', 'Unknown')}")
             lines.append(f"Content: {result.get('content', '')}")
             lines.append("---")

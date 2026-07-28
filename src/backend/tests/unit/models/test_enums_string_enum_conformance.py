@@ -3,12 +3,21 @@ Comprehensive unit tests for model enums.
 
 Tests all enum classes in enums.py including values and inheritance.
 """
-import pytest
+
 from enum import Enum
 
+import pytest
+
 from src.models.enums import (
-    UserRole, UserStatus, GroupStatus, GroupUserRole, GroupUserStatus,
-    TenantStatus, TenantUserRole, TenantUserStatus, IdentityProviderType
+    GroupStatus,
+    GroupUserRole,
+    GroupUserStatus,
+    IdentityProviderType,
+    TenantStatus,
+    TenantUserRole,
+    TenantUserStatus,
+    UserRole,
+    UserStatus,
 )
 
 

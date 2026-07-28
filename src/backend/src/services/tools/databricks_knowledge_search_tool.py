@@ -4,14 +4,16 @@ Databricks Knowledge Search Tool for CrewAI
 This is a lightweight wrapper around the DatabricksKnowledgeService
 that makes knowledge search available as a CrewAI tool.
 """
-from src.services.tools.base import BaseTool
-from typing import Optional, Type, Dict, Any, List
-from pydantic import BaseModel, Field, PrivateAttr
-import logging
+
 import asyncio
+import logging
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List, Optional, Type
+
+from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.knowledge import KnowledgeSearchBudget
+from src.services.tools.base import BaseTool
 
 #: Ceiling on one tool call, a little above the service's own search timeout so
 #: the service's message ("the search timed out") is what the agent sees.
@@ -20,23 +22,26 @@ SEARCH_CALL_TIMEOUT_SECONDS = 35
 # Configure logger
 logger = logging.getLogger(__name__)
 
+
 # Input schema for DatabricksKnowledgeSearchTool
 class DatabricksKnowledgeSearchInput(BaseModel):
     """Input schema for DatabricksKnowledgeSearchTool."""
+
     query: str = Field(
         ...,
-        description="The search query to find relevant information from uploaded knowledge documents."
+        description="The search query to find relevant information from uploaded knowledge documents.",
     )
     limit: Optional[int] = Field(
         default=10,  # Increased from 5 for better context coverage
         ge=1,
         le=20,
-        description="Maximum number of results to return (default: 10, max: 20)."
+        description="Maximum number of results to return (default: 10, max: 20).",
     )
     file_paths: Optional[List[str]] = Field(
         default=None,
-        description="Optional list of file paths to filter search results."
+        description="Optional list of file paths to filter search results.",
     )
+
 
 class DatabricksKnowledgeSearchTool(BaseTool):
     """
@@ -73,7 +78,7 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         file_paths: Optional[List[str]] = None,
         agent_id: Optional[str] = None,
         user_email: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ):
         """
         Initialize the Databricks Knowledge Search Tool.
@@ -95,7 +100,9 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         print(f"[TOOL __INIT__]   - execution_id: {execution_id}")
         print(f"[TOOL __INIT__]   - file_paths: {file_paths}")
         print(f"[TOOL __INIT__]   - agent_id: {agent_id}")
-        print(f"[TOOL __INIT__]   - kwargs keys: {list(kwargs.keys()) if kwargs else 'None'}")
+        print(
+            f"[TOOL __INIT__]   - kwargs keys: {list(kwargs.keys()) if kwargs else 'None'}"
+        )
         print(f"[TOOL __INIT__] ========================================")
 
         super().__init__(**kwargs)
@@ -104,7 +111,9 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         self._execution_id = execution_id
         self._user_token = user_token
         self._user_email = user_email  # Per-user knowledge isolation
-        self._configured_file_paths = file_paths  # Store configured file paths from tool_configs
+        self._configured_file_paths = (
+            file_paths  # Store configured file paths from tool_configs
+        )
         self._agent_id = agent_id  # Store agent ID for access control
         self._budget = KnowledgeSearchBudget()
 
@@ -153,26 +162,36 @@ class DatabricksKnowledgeSearchTool(BaseTool):
 
             # Try to match against configured paths
             # Match by filename only (last component of path)
-            agent_filename = agent_path.split("/")[-1] if "/" in agent_path else agent_path
+            agent_filename = (
+                agent_path.split("/")[-1] if "/" in agent_path else agent_path
+            )
 
             matched = False
             for configured_path in self._configured_file_paths:
                 configured_filename = configured_path.split("/")[-1]
                 if configured_filename == agent_filename:
                     resolved_paths.append(configured_path)
-                    logger.info(f"[TOOL] Resolved '{agent_path}' to '{configured_path}'")
+                    logger.info(
+                        f"[TOOL] Resolved '{agent_path}' to '{configured_path}'"
+                    )
                     matched = True
                     break
 
             if not matched:
-                logger.warning(f"[TOOL] Could not resolve '{agent_path}' to any configured path")
+                logger.warning(
+                    f"[TOOL] Could not resolve '{agent_path}' to any configured path"
+                )
                 # Still add it - let the search service handle it
                 resolved_paths.append(agent_path)
 
-        logger.info(f"[TOOL] Resolved {len(agent_file_paths)} paths to {len(resolved_paths)} full paths")
+        logger.info(
+            f"[TOOL] Resolved {len(agent_file_paths)} paths to {len(resolved_paths)} full paths"
+        )
         return resolved_paths if resolved_paths else None
 
-    def _run(self, query: str, limit: int = 10, file_paths: Optional[List[str]] = None) -> str:
+    def _run(
+        self, query: str, limit: int = 10, file_paths: Optional[List[str]] = None
+    ) -> str:
         """Answer one search for the agent (CrewAI calls this synchronously).
 
         Everything agent-specific happens HERE — the per-agent search budget,
@@ -187,7 +206,9 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         # kills the run. This is the agent's problem, so it stays on the tool.
         previous = self._budget.previous_answer(query)
         if previous is not None:
-            logger.info(f"[knowledge-tool] repeat search for '{query}' — returning the first answer")
+            logger.info(
+                f"[knowledge-tool] repeat search for '{query}' — returning the first answer"
+            )
             return self._budget.repeat_notice(query, previous)
         if self._budget.exhausted():
             logger.warning(
@@ -199,7 +220,9 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         # The agent's paths win when it named any (it knows what it wants);
         # otherwise the ones configured in tool_configs apply.
         effective_file_paths = (
-            self._resolve_file_paths(file_paths) if file_paths else self._configured_file_paths
+            self._resolve_file_paths(file_paths)
+            if file_paths
+            else self._configured_file_paths
         )
         logger.info(
             f"[knowledge-tool] query={query!r} limit={limit} "
@@ -238,4 +261,6 @@ class DatabricksKnowledgeSearchTool(BaseTool):
                 loop.close()
 
         with ThreadPoolExecutor() as executor:
-            return executor.submit(_run_search).result(timeout=SEARCH_CALL_TIMEOUT_SECONDS)
+            return executor.submit(_run_search).result(
+                timeout=SEARCH_CALL_TIMEOUT_SECONDS
+            )

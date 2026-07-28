@@ -4,9 +4,13 @@ Unit tests for converters/formats/uc_metrics/authentication.py
 Comprehensive tests for DatabricksAuthService class.
 """
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from src.services.converters.formats.uc_metrics.authentication import DatabricksAuthService
+
+from src.services.converters.formats.uc_metrics.authentication import (
+    DatabricksAuthService,
+)
 
 
 class TestDatabricksAuthServiceInit:
@@ -42,6 +46,7 @@ class TestDatabricksAuthServiceInit:
 
     def test_init_uses_provided_logger(self):
         import logging
+
         custom_logger = logging.getLogger("custom")
         svc = DatabricksAuthService(
             workspace_url="https://example.databricks.com",
@@ -78,7 +83,9 @@ class TestGetAccessToken:
             client_id="cid",
             client_secret="csecret",
         )
-        with patch.object(svc, "_acquire_token_with_service_principal", return_value="sp_token") as mock_sp:
+        with patch.object(
+            svc, "_acquire_token_with_service_principal", return_value="sp_token"
+        ) as mock_sp:
             result = svc.get_access_token()
         assert result == "sp_token"
         mock_sp.assert_called_once()
@@ -103,10 +110,13 @@ class TestAcquireTokenWithServicePrincipal:
     def test_raises_when_credentials_incomplete(self):
         svc = DatabricksAuthService(workspace_url="https://example.databricks.com")
         with pytest.raises(ValueError, match="Incomplete Service Principal"):
-            svc._acquire_token_with_service_principal(client_id=None, client_secret=None)
+            svc._acquire_token_with_service_principal(
+                client_id=None, client_secret=None
+            )
 
     def test_returns_token_on_success(self):
         import requests
+
         svc = DatabricksAuthService(
             workspace_url="https://example.databricks.com",
             client_id="cid",
@@ -136,12 +146,16 @@ class TestAcquireTokenWithServicePrincipal:
 
     def test_raises_on_request_exception(self):
         import requests
+
         svc = DatabricksAuthService(
             workspace_url="https://example.databricks.com",
             client_id="cid",
             client_secret="csecret",
         )
-        with patch("requests.post", side_effect=requests.exceptions.ConnectionError("conn refused")):
+        with patch(
+            "requests.post",
+            side_effect=requests.exceptions.ConnectionError("conn refused"),
+        ):
             with pytest.raises(Exception, match="Error retrieving access token"):
                 svc._acquire_token_with_service_principal()
 
@@ -234,7 +248,6 @@ class TestGetHeaders:
         """Test get_headers handles invalid input"""
         # TODO: Implement test
         pass
-
 
 
 # TODO: Add more comprehensive tests

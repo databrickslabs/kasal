@@ -2,19 +2,20 @@
 Comprehensive unit tests for services/mlflow_tracing_service.py
 """
 
-import gc
 import asyncio
+import gc
 import logging
-import pytest
 from contextlib import contextmanager
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 from src.services.mlflow.tracing import (
     _get_mlflow,
-    start_root_trace,
-    get_last_active_trace_id,
-    flush_async_logging,
     cleanup_async_db_connections,
+    flush_async_logging,
+    get_last_active_trace_id,
+    start_root_trace,
 )
 
 
@@ -31,7 +32,9 @@ class TestGetMlflow:
         with patch("builtins.__import__", side_effect=ImportError("no mlflow")):
             pass  # Can't easily unimport mlflow if already imported
         # Test by patching the import inside the function
-        with patch("src.services.mlflow.tracing._get_mlflow", return_value=None) as mock_fn:
+        with patch(
+            "src.services.mlflow.tracing._get_mlflow", return_value=None
+        ) as mock_fn:
             result = mock_fn()
         assert result is None
 
@@ -192,7 +195,9 @@ class TestGetLastActiveTraceId:
 
     def test_returns_none_on_exception(self):
         mock_mlflow = MagicMock()
-        mock_mlflow.tracing.get_last_active_trace_id = Mock(side_effect=RuntimeError("error"))
+        mock_mlflow.tracing.get_last_active_trace_id = Mock(
+            side_effect=RuntimeError("error")
+        )
 
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             result = get_last_active_trace_id()
@@ -239,7 +244,9 @@ class TestFlushAsyncLogging:
     @pytest.mark.asyncio
     async def test_handles_flush_exception(self):
         mock_mlflow = MagicMock()
-        mock_mlflow.flush_trace_async_logging = Mock(side_effect=RuntimeError("flush failed"))
+        mock_mlflow.flush_trace_async_logging = Mock(
+            side_effect=RuntimeError("flush failed")
+        )
 
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             await flush_async_logging()  # Should not raise
@@ -273,6 +280,7 @@ class TestCleanupAsyncDbConnections:
 
     def test_disposes_async_engine(self):
         from sqlalchemy.ext.asyncio import AsyncEngine
+
         mock_engine = MagicMock(spec=AsyncEngine)
         mock_engine.sync_engine = MagicMock()
 
@@ -283,8 +291,11 @@ class TestCleanupAsyncDbConnections:
 
     def test_handles_dispose_error_gracefully(self):
         from sqlalchemy.ext.asyncio import AsyncEngine
+
         mock_engine = MagicMock(spec=AsyncEngine)
-        mock_engine.sync_engine.dispose = Mock(side_effect=RuntimeError("dispose error"))
+        mock_engine.sync_engine.dispose = Mock(
+            side_effect=RuntimeError("dispose error")
+        )
 
         with patch("gc.get_objects", return_value=[mock_engine]):
             # Should not raise

@@ -12,8 +12,9 @@ Cached data includes:
 - Default filters (report-level filters)
 """
 
-from datetime import datetime, timezone, date, timedelta
-from sqlalchemy import Column, Integer, String, Date, DateTime, JSON, Index
+from datetime import date, datetime, timedelta, timezone
+
+from sqlalchemy import JSON, Column, Date, DateTime, Index, Integer, String
 from sqlalchemy.schema import UniqueConstraint
 
 from src.db.base import Base
@@ -30,7 +31,8 @@ class PowerBISemanticModelCache(Base):
     User-provided inputs (business_mappings, field_synonyms, active_filters) are NOT
     cached - they come fresh from user input each time.
     """
-    __tablename__ = 'powerbi_semantic_model_cache'
+
+    __tablename__ = "powerbi_semantic_model_cache"
 
     id = Column(Integer, primary_key=True)
 
@@ -66,15 +68,23 @@ class PowerBISemanticModelCache(Base):
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), default=datetime.now(timezone.utc),
-                       onupdate=datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=datetime.now(timezone.utc),
+        onupdate=datetime.now(timezone.utc),
+    )
 
     # Unique constraint: one cache per dataset per day per group (optional report_id)
     __table_args__ = (
-        UniqueConstraint('group_id', 'dataset_id', 'cached_date', 'report_id',
-                        name='uq_semantic_model_cache_daily'),
-        Index('idx_semantic_cache_group_dataset', 'group_id', 'dataset_id'),
-        Index('idx_semantic_cache_date', 'cached_date'),
+        UniqueConstraint(
+            "group_id",
+            "dataset_id",
+            "cached_date",
+            "report_id",
+            name="uq_semantic_model_cache_daily",
+        ),
+        Index("idx_semantic_cache_group_dataset", "group_id", "dataset_id"),
+        Index("idx_semantic_cache_date", "cached_date"),
     )
 
     def is_valid_for_today(self, cache_ttl_days: int = 1) -> bool:

@@ -4,15 +4,17 @@ Unit tests for SSEConnectionManager and SSE infrastructure.
 Tests the functionality of SSE event formatting, connection management,
 broadcasting, and event stream generation.
 """
-import pytest
+
 import asyncio
 import json
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.core.sse_manager import (
-    SSEEvent,
     SSEConnectionManager,
+    SSEEvent,
     event_stream_generator,
     sse_manager,
 )
@@ -33,10 +35,7 @@ class TestSSEEvent:
     def test_event_init_full(self):
         """Test SSEEvent initialization with all parameters."""
         event = SSEEvent(
-            data={"message": "test"},
-            event="test_event",
-            id="event-123",
-            retry=5000
+            data={"message": "test"}, event="test_event", id="event-123", retry=5000
         )
 
         assert event.data == {"message": "test"}
@@ -52,7 +51,9 @@ class TestSSEEvent:
         assert "data: " in formatted
         assert formatted.endswith("\n\n")
         # Verify JSON is properly embedded
-        data_line = [line for line in formatted.split("\n") if line.startswith("data: ")][0]
+        data_line = [
+            line for line in formatted.split("\n") if line.startswith("data: ")
+        ][0]
         json_data = json.loads(data_line.replace("data: ", ""))
         assert json_data == {"status": "running", "progress": 50}
 
@@ -61,7 +62,9 @@ class TestSSEEvent:
         event = SSEEvent(data=[1, 2, 3])
         formatted = event.format()
 
-        data_line = [line for line in formatted.split("\n") if line.startswith("data: ")][0]
+        data_line = [
+            line for line in formatted.split("\n") if line.startswith("data: ")
+        ][0]
         json_data = json.loads(data_line.replace("data: ", ""))
         assert json_data == [1, 2, 3]
 
@@ -99,7 +102,7 @@ class TestSSEEvent:
             data={"job_id": "123", "status": "completed"},
             event="execution_update",
             id="event-789",
-            retry=5000
+            retry=5000,
         )
         formatted = event.format()
 
@@ -254,7 +257,7 @@ class TestSSEConnectionManager:
 
         # Attempt to broadcast - should handle gracefully
         event = SSEEvent(data={"status": "new"})
-        with patch.object(manager, 'job_queues', {"job-123": {queue}}):
+        with patch.object(manager, "job_queues", {"job-123": {queue}}):
             sent_count = await manager.broadcast_to_job("job-123", event)
             # Count may be 0 or 1 depending on queue state
             assert sent_count >= 0
@@ -456,8 +459,12 @@ class TestGetTerminalEvent:
         """Only progress events buffered → no terminal event yet."""
         manager = SSEConnectionManager()
         manager.create_event_queue("gen-1")
-        await manager.broadcast_to_job("gen-1", SSEEvent(data={"step": "plan"}, event="plan_ready"))
-        await manager.broadcast_to_job("gen-1", SSEEvent(data={"id": "a"}, event="agent_detail"))
+        await manager.broadcast_to_job(
+            "gen-1", SSEEvent(data={"step": "plan"}, event="plan_ready")
+        )
+        await manager.broadcast_to_job(
+            "gen-1", SSEEvent(data={"id": "a"}, event="agent_detail")
+        )
 
         assert manager.get_terminal_event("gen-1") is None
 
@@ -466,9 +473,15 @@ class TestGetTerminalEvent:
         """The buffered generation_complete (carrying execution_id) is recoverable."""
         manager = SSEConnectionManager()
         manager.create_event_queue("gen-1")
-        await manager.broadcast_to_job("gen-1", SSEEvent(data={"step": "plan"}, event="plan_ready"))
+        await manager.broadcast_to_job(
+            "gen-1", SSEEvent(data={"step": "plan"}, event="plan_ready")
+        )
         complete = SSEEvent(
-            data={"status": "completed", "execution_id": "exec-123", "run_name": "Chat"},
+            data={
+                "status": "completed",
+                "execution_id": "exec-123",
+                "run_name": "Chat",
+            },
             event="generation_complete",
         )
         await manager.broadcast_to_job("gen-1", complete)
@@ -502,8 +515,14 @@ class TestGetTerminalEvent:
         """When multiple terminal events exist, the latest one wins."""
         manager = SSEConnectionManager()
         manager.create_event_queue("gen-1")
-        first = SSEEvent(data={"status": "completed", "execution_id": "exec-1"}, event="generation_complete")
-        second = SSEEvent(data={"status": "completed", "execution_id": "exec-2"}, event="generation_complete")
+        first = SSEEvent(
+            data={"status": "completed", "execution_id": "exec-1"},
+            event="generation_complete",
+        )
+        second = SSEEvent(
+            data={"status": "completed", "execution_id": "exec-2"},
+            event="generation_complete",
+        )
         await manager.broadcast_to_job("gen-1", first)
         await manager.broadcast_to_job("gen-1", second)
 
@@ -516,7 +535,7 @@ class TestEventStreamGenerator:
     @pytest.mark.asyncio
     async def test_generator_yields_connection_event(self):
         """Test that generator yields initial connection event."""
-        with patch('src.core.sse_manager.sse_manager') as mock_manager:
+        with patch("src.core.sse_manager.sse_manager") as mock_manager:
             mock_queue = asyncio.Queue()
             mock_manager.create_event_queue.return_value = mock_queue
 
@@ -531,7 +550,7 @@ class TestEventStreamGenerator:
     @pytest.mark.asyncio
     async def test_generator_yields_events_from_queue(self):
         """Test that generator yields events from queue."""
-        with patch('src.core.sse_manager.sse_manager') as mock_manager:
+        with patch("src.core.sse_manager.sse_manager") as mock_manager:
             mock_queue = asyncio.Queue()
             mock_manager.create_event_queue.return_value = mock_queue
 
@@ -554,14 +573,14 @@ class TestEventStreamGenerator:
     @pytest.mark.asyncio
     async def test_generator_closes_on_completed_status(self):
         """Test that generator closes when completed status received."""
-        with patch('src.core.sse_manager.sse_manager') as mock_manager:
+        with patch("src.core.sse_manager.sse_manager") as mock_manager:
             mock_queue = asyncio.Queue()
             mock_manager.create_event_queue.return_value = mock_queue
 
             # Put a completion event
             completion_event = SSEEvent(
                 data={"status": "completed", "job_id": "job-123"},
-                event="execution_update"
+                event="execution_update",
             )
             await mock_queue.put(completion_event)
 
@@ -580,13 +599,12 @@ class TestEventStreamGenerator:
     @pytest.mark.asyncio
     async def test_generator_closes_on_failed_status(self):
         """Test that generator closes when failed status received."""
-        with patch('src.core.sse_manager.sse_manager') as mock_manager:
+        with patch("src.core.sse_manager.sse_manager") as mock_manager:
             mock_queue = asyncio.Queue()
             mock_manager.create_event_queue.return_value = mock_queue
 
             failed_event = SSEEvent(
-                data={"status": "failed", "job_id": "job-123"},
-                event="execution_update"
+                data={"status": "failed", "job_id": "job-123"}, event="execution_update"
             )
             await mock_queue.put(failed_event)
 
@@ -603,13 +621,13 @@ class TestEventStreamGenerator:
     @pytest.mark.asyncio
     async def test_generator_closes_on_stopped_status(self):
         """Test that generator closes when stopped status received."""
-        with patch('src.core.sse_manager.sse_manager') as mock_manager:
+        with patch("src.core.sse_manager.sse_manager") as mock_manager:
             mock_queue = asyncio.Queue()
             mock_manager.create_event_queue.return_value = mock_queue
 
             stopped_event = SSEEvent(
                 data={"status": "stopped", "job_id": "job-123"},
-                event="execution_update"
+                event="execution_update",
             )
             await mock_queue.put(stopped_event)
 
@@ -626,23 +644,27 @@ class TestEventStreamGenerator:
     @pytest.mark.asyncio
     async def test_generator_replays_missed_events_on_reconnect(self):
         """Generator replays buffered events when last_event_id is provided."""
-        with patch('src.core.sse_manager.sse_manager') as mock_manager:
+        with patch("src.core.sse_manager.sse_manager") as mock_manager:
             mock_queue = asyncio.Queue()
             mock_manager.create_event_queue.return_value = mock_queue
 
             # Simulate 2 missed events
             missed_event_1 = SSEEvent(data={"status": "step1"}, event="update", id="3")
             missed_event_2 = SSEEvent(data={"status": "step2"}, event="update", id="4")
-            mock_manager.get_replay_events.return_value = [missed_event_1, missed_event_2]
+            mock_manager.get_replay_events.return_value = [
+                missed_event_1,
+                missed_event_2,
+            ]
 
             # Put a completion event so the stream ends
             completion = SSEEvent(
-                data={"status": "completed"},
-                event="execution_update"
+                data={"status": "completed"}, event="execution_update"
             )
             await mock_queue.put(completion)
 
-            gen = event_stream_generator("job-123", timeout=10, heartbeat_interval=30, last_event_id=2)
+            gen = event_stream_generator(
+                "job-123", timeout=10, heartbeat_interval=30, last_event_id=2
+            )
 
             events = []
             async for event in gen:
@@ -659,7 +681,7 @@ class TestEventStreamGenerator:
     @pytest.mark.asyncio
     async def test_generator_cleanup_on_exit(self):
         """Test that generator cleans up queue on exit."""
-        with patch('src.core.sse_manager.sse_manager') as mock_manager:
+        with patch("src.core.sse_manager.sse_manager") as mock_manager:
             mock_queue = asyncio.Queue()
             mock_manager.create_event_queue.return_value = mock_queue
 
@@ -684,11 +706,11 @@ class TestGlobalSSEManager:
 
     def test_global_manager_has_required_methods(self):
         """Test that global manager has all required methods."""
-        assert hasattr(sse_manager, 'create_event_queue')
-        assert hasattr(sse_manager, 'remove_event_queue')
-        assert hasattr(sse_manager, 'broadcast_to_job')
-        assert hasattr(sse_manager, 'get_connection_count')
-        assert hasattr(sse_manager, 'get_statistics')
+        assert hasattr(sse_manager, "create_event_queue")
+        assert hasattr(sse_manager, "remove_event_queue")
+        assert hasattr(sse_manager, "broadcast_to_job")
+        assert hasattr(sse_manager, "get_connection_count")
+        assert hasattr(sse_manager, "get_statistics")
 
         assert callable(sse_manager.create_event_queue)
         assert callable(sse_manager.remove_event_queue)

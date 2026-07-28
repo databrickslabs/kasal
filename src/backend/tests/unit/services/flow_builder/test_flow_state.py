@@ -1,8 +1,10 @@
 """
 Extended unit tests for FlowStateManager to improve coverage.
 """
+
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from src.services.flow_builder.modules.flow_state import FlowStateManager
 
@@ -91,7 +93,7 @@ class TestFlowStateManagerParseCrewOutput:
 
     def test_parse_json_array_not_dict(self):
         """parse_crew_output returns empty dict when output is a JSON array (not dict)."""
-        output = '[1, 2, 3]'
+        output = "[1, 2, 3]"
         with patch("src.services.security.scanner_pipeline.security_scanner"):
             result = FlowStateManager.parse_crew_output(output)
         assert result == {}
@@ -99,7 +101,9 @@ class TestFlowStateManagerParseCrewOutput:
     def test_security_scan_exception_is_suppressed(self):
         """Security scan errors do not bubble up."""
         output = '{"a": 1}'
-        with patch("src.services.security.scanner_pipeline.security_scanner") as mock_scanner:
+        with patch(
+            "src.services.security.scanner_pipeline.security_scanner"
+        ) as mock_scanner:
             mock_scanner.scan.side_effect = RuntimeError("scan failed")
             result = FlowStateManager.parse_crew_output(output)
         # Should still parse despite security scan failure
@@ -146,7 +150,9 @@ class TestFlowStateManagerEvaluateCondition:
     def test_condition_with_builtin_len(self):
         """evaluate_condition can use len() builtin."""
         state = {"items": [1, 2, 3]}
-        result = FlowStateManager.evaluate_condition(state, "len(state.get('items', [])) == 3")
+        result = FlowStateManager.evaluate_condition(
+            state, "len(state.get('items', [])) == 3"
+        )
         assert result is True
 
     def test_condition_with_bool_literals(self):

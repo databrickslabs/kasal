@@ -2,16 +2,17 @@
 Comprehensive unit tests for crew deployment service.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-from src.services.deployment.crew import CrewDeploymentService, CrewAIModelWrapper
+import pytest
+
 from src.schemas.crew_export import (
-    ModelServingConfig,
     DeploymentResponse,
     DeploymentStatus,
+    ModelServingConfig,
 )
+from src.services.deployment.crew import CrewAIModelWrapper, CrewDeploymentService
 
 
 class TestCrewDeploymentService:
@@ -47,7 +48,7 @@ class TestDeployToModelServing:
     @pytest.fixture
     def mock_group_context(self):
         context = MagicMock()
-        context.group_ids = ['test-group']
+        context.group_ids = ["test-group"]
         context.is_valid.return_value = True
         return context
 
@@ -65,18 +66,22 @@ class TestDeployToModelServing:
         crew_id = str(uuid4())
         mock_crew = MagicMock()
         mock_crew.id = crew_id
-        mock_crew.name = 'Test Crew'
+        mock_crew.name = "Test Crew"
         mock_crew.agent_ids = []
         mock_crew.task_ids = []
-        mock_crew.group_id = 'test-group'
+        mock_crew.group_id = "test-group"
 
         service.crew_repository.get = AsyncMock(return_value=mock_crew)
 
-        with patch.object(service, '_create_mlflow_model', new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = ('model-uri', '1')
-            with patch.object(service, '_deploy_to_endpoint', new_callable=AsyncMock) as mock_deploy:
+        with patch.object(
+            service, "_create_mlflow_model", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = ("model-uri", "1")
+            with patch.object(
+                service, "_deploy_to_endpoint", new_callable=AsyncMock
+            ) as mock_deploy:
                 mock_deploy.return_value = (
-                    'https://example.com/serving-endpoints/test-endpoint',
+                    "https://example.com/serving-endpoints/test-endpoint",
                     DeploymentStatus.PENDING,
                 )
                 result = await service.deploy_to_model_serving(
@@ -86,11 +91,13 @@ class TestDeployToModelServing:
                 )
 
         assert result.crew_id == crew_id
-        assert result.model_name == 'test-model'
+        assert result.model_name == "test-model"
         assert result.endpoint_status == DeploymentStatus.PENDING
 
     @pytest.mark.asyncio
-    async def test_deploy_crew_not_found(self, service, model_config, mock_group_context):
+    async def test_deploy_crew_not_found(
+        self, service, model_config, mock_group_context
+    ):
         crew_id = str(uuid4())
         service.crew_repository.get = AsyncMock(return_value=None)
 
@@ -106,15 +113,15 @@ class TestDeployToModelServing:
         crew_id = str(uuid4())
         mock_crew = MagicMock()
         mock_crew.id = crew_id
-        mock_crew.name = 'Test Crew'
+        mock_crew.name = "Test Crew"
         mock_crew.agent_ids = []
         mock_crew.task_ids = []
-        mock_crew.group_id = 'different-group'
+        mock_crew.group_id = "different-group"
 
         service.crew_repository.get = AsyncMock(return_value=mock_crew)
 
         context = MagicMock()
-        context.group_ids = ['my-group']
+        context.group_ids = ["my-group"]
         context.is_valid.return_value = True
 
         with pytest.raises(ValueError, match="not found"):
@@ -129,17 +136,24 @@ class TestDeployToModelServing:
         crew_id = str(uuid4())
         mock_crew = MagicMock()
         mock_crew.id = crew_id
-        mock_crew.name = 'Test Crew'
+        mock_crew.name = "Test Crew"
         mock_crew.agent_ids = []
         mock_crew.task_ids = []
-        mock_crew.group_id = 'any-group'
+        mock_crew.group_id = "any-group"
 
         service.crew_repository.get = AsyncMock(return_value=mock_crew)
 
-        with patch.object(service, '_create_mlflow_model', new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = ('uri', '1')
-            with patch.object(service, '_deploy_to_endpoint', new_callable=AsyncMock) as mock_deploy:
-                mock_deploy.return_value = ('https://example.com/ep', DeploymentStatus.PENDING)
+        with patch.object(
+            service, "_create_mlflow_model", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = ("uri", "1")
+            with patch.object(
+                service, "_deploy_to_endpoint", new_callable=AsyncMock
+            ) as mock_deploy:
+                mock_deploy.return_value = (
+                    "https://example.com/ep",
+                    DeploymentStatus.PENDING,
+                )
                 result = await service.deploy_to_model_serving(
                     crew_id=crew_id,
                     config=model_config,
@@ -149,33 +163,35 @@ class TestDeployToModelServing:
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_deploy_with_agents_and_tasks(self, service, model_config, mock_group_context):
+    async def test_deploy_with_agents_and_tasks(
+        self, service, model_config, mock_group_context
+    ):
         crew_id = str(uuid4())
         mock_crew = MagicMock()
         mock_crew.id = crew_id
-        mock_crew.name = 'Complex Crew'
-        mock_crew.agent_ids = ['agent-1']
-        mock_crew.task_ids = ['task-1']
-        mock_crew.group_id = 'test-group'
+        mock_crew.name = "Complex Crew"
+        mock_crew.agent_ids = ["agent-1"]
+        mock_crew.task_ids = ["task-1"]
+        mock_crew.group_id = "test-group"
 
         mock_agent = MagicMock()
-        mock_agent.id = 'agent-1'
-        mock_agent.name = 'Agent'
-        mock_agent.role = 'Role'
-        mock_agent.goal = 'Goal'
-        mock_agent.backstory = 'BS'
-        mock_agent.llm = 'gpt-4'
+        mock_agent.id = "agent-1"
+        mock_agent.name = "Agent"
+        mock_agent.role = "Role"
+        mock_agent.goal = "Goal"
+        mock_agent.backstory = "BS"
+        mock_agent.llm = "gpt-4"
         mock_agent.tools = []
         mock_agent.max_iter = 25
         mock_agent.verbose = False
         mock_agent.allow_delegation = False
 
         mock_task = MagicMock()
-        mock_task.id = 'task-1'
-        mock_task.name = 'Task'
-        mock_task.description = 'Desc'
-        mock_task.expected_output = 'Output'
-        mock_task.agent_id = 'agent-1'
+        mock_task.id = "task-1"
+        mock_task.name = "Task"
+        mock_task.description = "Desc"
+        mock_task.expected_output = "Output"
+        mock_task.agent_id = "agent-1"
         mock_task.tools = []
         mock_task.async_execution = False
         mock_task.context = []
@@ -184,18 +200,25 @@ class TestDeployToModelServing:
         service.agent_repository.get = AsyncMock(return_value=mock_agent)
         service.task_repository.get = AsyncMock(return_value=mock_task)
 
-        with patch.object(service, '_create_mlflow_model', new_callable=AsyncMock) as mock_create:
-            mock_create.return_value = ('uri', '2')
-            with patch.object(service, '_deploy_to_endpoint', new_callable=AsyncMock) as mock_deploy:
-                mock_deploy.return_value = ('https://example.com/ep', DeploymentStatus.PENDING)
+        with patch.object(
+            service, "_create_mlflow_model", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = ("uri", "2")
+            with patch.object(
+                service, "_deploy_to_endpoint", new_callable=AsyncMock
+            ) as mock_deploy:
+                mock_deploy.return_value = (
+                    "https://example.com/ep",
+                    DeploymentStatus.PENDING,
+                )
                 result = await service.deploy_to_model_serving(
                     crew_id=crew_id,
                     config=model_config,
                     group_context=mock_group_context,
                 )
 
-        assert result.metadata['agents_count'] == 1
-        assert result.metadata['tasks_count'] == 1
+        assert result.metadata["agents_count"] == 1
+        assert result.metadata["tasks_count"] == 1
 
 
 class TestConvertToolIdsToNames:
@@ -255,23 +278,28 @@ class TestAgentToDict:
     @pytest.mark.asyncio
     async def test_converts_agent_to_dict(self, service):
         mock_agent = MagicMock()
-        mock_agent.id = 'a-1'
-        mock_agent.name = 'Agent'
-        mock_agent.role = 'Researcher'
-        mock_agent.goal = 'Research'
-        mock_agent.backstory = 'Expert'
-        mock_agent.llm = 'gpt-4'
+        mock_agent.id = "a-1"
+        mock_agent.name = "Agent"
+        mock_agent.role = "Researcher"
+        mock_agent.goal = "Research"
+        mock_agent.backstory = "Expert"
+        mock_agent.llm = "gpt-4"
         mock_agent.tools = []
         mock_agent.max_iter = 25
         mock_agent.verbose = False
         mock_agent.allow_delegation = False
 
-        with patch.object(service, '_convert_tool_ids_to_names', new_callable=AsyncMock, return_value=[]):
+        with patch.object(
+            service,
+            "_convert_tool_ids_to_names",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
             result = await service._agent_to_dict(mock_agent)
 
-        assert result['role'] == 'Researcher'
-        assert result['id'] == 'a-1'
-        assert 'tools' in result
+        assert result["role"] == "Researcher"
+        assert result["id"] == "a-1"
+        assert "tools" in result
 
 
 class TestTaskToDict:
@@ -284,21 +312,26 @@ class TestTaskToDict:
     @pytest.mark.asyncio
     async def test_converts_task_to_dict(self, service):
         mock_task = MagicMock()
-        mock_task.id = 't-1'
-        mock_task.name = 'Task'
-        mock_task.description = 'Do stuff'
-        mock_task.expected_output = 'Result'
-        mock_task.agent_id = 'a-1'
+        mock_task.id = "t-1"
+        mock_task.name = "Task"
+        mock_task.description = "Do stuff"
+        mock_task.expected_output = "Result"
+        mock_task.agent_id = "a-1"
         mock_task.tools = []
         mock_task.async_execution = False
         mock_task.context = []
 
-        with patch.object(service, '_convert_tool_ids_to_names', new_callable=AsyncMock, return_value=[]):
+        with patch.object(
+            service,
+            "_convert_tool_ids_to_names",
+            new_callable=AsyncMock,
+            return_value=[],
+        ):
             result = await service._task_to_dict(mock_task)
 
-        assert result['name'] == 'Task'
-        assert result['description'] == 'Do stuff'
-        assert 'context' in result
+        assert result["name"] == "Task"
+        assert result["description"] == "Do stuff"
+        assert "context" in result
 
 
 class TestGenerateUsageExample:
@@ -310,8 +343,7 @@ class TestGenerateUsageExample:
 
     def test_returns_string(self, service):
         result = service._generate_usage_example(
-            "https://example.com/serving-endpoints/my-ep/invocations",
-            "my-ep"
+            "https://example.com/serving-endpoints/my-ep/invocations", "my-ep"
         )
         assert isinstance(result, str)
 
@@ -322,8 +354,7 @@ class TestGenerateUsageExample:
 
     def test_contains_endpoint_name(self, service):
         result = service._generate_usage_example(
-            "https://example.com/ep",
-            "my-endpoint-name"
+            "https://example.com/ep", "my-endpoint-name"
         )
         assert "my-endpoint-name" in result
 
@@ -348,17 +379,20 @@ class TestDeployToEndpoint:
         # Simulate endpoint not existing on first get, exists on second
         mock_ws.serving_endpoints.get.side_effect = [
             Exception("not found"),
-            MagicMock()  # second call after creation
+            MagicMock(),  # second call after creation
         ]
         mock_ws.config.host = "my-workspace.azuredatabricks.net"
 
         mock_wc_module = MagicMock()
         mock_wc_module.WorkspaceClient.return_value = mock_ws
 
-        with patch.dict("sys.modules", {
-            "databricks.sdk": mock_wc_module,
-            "databricks.sdk.service.serving": MagicMock(),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "databricks.sdk": mock_wc_module,
+                "databricks.sdk.service.serving": MagicMock(),
+            },
+        ):
             url, status = await service._deploy_to_endpoint("model", "1", config)
 
         assert status == DeploymentStatus.PENDING
@@ -380,10 +414,13 @@ class TestDeployToEndpoint:
         mock_wc_module = MagicMock()
         mock_wc_module.WorkspaceClient.return_value = mock_ws
 
-        with patch.dict("sys.modules", {
-            "databricks.sdk": mock_wc_module,
-            "databricks.sdk.service.serving": MagicMock(),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "databricks.sdk": mock_wc_module,
+                "databricks.sdk.service.serving": MagicMock(),
+            },
+        ):
             url, status = await service._deploy_to_endpoint("model", "2", config)
 
         assert status == DeploymentStatus.UPDATING
@@ -419,6 +456,7 @@ class TestCrewAIModelWrapper:
 
     def test_load_context_reads_config(self, tmp_path):
         import json
+
         config_file = tmp_path / "crew_config.json"
         config_data = {"id": "1", "name": "From File", "agents": [], "tasks": []}
         config_file.write_text(json.dumps(config_data))
@@ -445,7 +483,9 @@ class TestCrewAIModelWrapper:
         wrapper = CrewAIModelWrapper(config)
 
         # Patch _create_crew_from_config to raise
-        with patch.object(wrapper, "_create_crew_from_config", side_effect=RuntimeError("crew error")):
+        with patch.object(
+            wrapper, "_create_crew_from_config", side_effect=RuntimeError("crew error")
+        ):
             input_df = pd.DataFrame([{"inputs": '{"topic": "AI"}'}])
             result = wrapper.predict(MagicMock(), input_df)
 

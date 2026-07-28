@@ -110,31 +110,28 @@ from .dax_generator import DAXGenerator
 # from .dax_tree_parsing import TreeParsingDAXGenerator
 # from .dax_smart import SmartDAXGenerator
 
-from .dax_context import DAXBaseKBIContext, DAXKBIContextCache
-from .dax_syntax_converter import DaxSyntaxConverter
 from .dax_aggregations import (
-    AggregationType,
     AggregationDetector,
+    AggregationType,
     DAXAggregationBuilder,
     ExceptionAggregationHandler,
     detect_and_build_aggregation,
 )
+from .dax_context import DAXBaseKBIContext, DAXKBIContextCache
+from .dax_syntax_converter import DaxSyntaxConverter
 
 __all__ = [
     # Context
-    'DAXBaseKBIContext',
-    'DAXKBIContextCache',
-
+    "DAXBaseKBIContext",
+    "DAXKBIContextCache",
     # Syntax conversion
-    'DaxSyntaxConverter',
-
+    "DaxSyntaxConverter",
     # Aggregations
-    'AggregationType',
-    'AggregationDetector',
-    'DAXAggregationBuilder',
-    'ExceptionAggregationHandler',
-    'detect_and_build_aggregation',
-
+    "AggregationType",
+    "AggregationDetector",
+    "DAXAggregationBuilder",
+    "ExceptionAggregationHandler",
+    "detect_and_build_aggregation",
     # Note: TreeParsingDAXGenerator and SmartDAXGenerator should be imported directly:
     # from .helpers.dax_tree_parsing import TreeParsingDAXGenerator
     # from .helpers.dax_smart import SmartDAXGenerator

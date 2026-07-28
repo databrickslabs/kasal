@@ -8,12 +8,14 @@ Tests the process-based crew execution system including:
 - Error handling and recovery
 - Multi-tenant support
 """
-import pytest
+
 import asyncio
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from datetime import datetime, timezone
 import multiprocessing as mp
 import os
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 
 class TestProcessCrewExecutorInit:
@@ -21,10 +23,13 @@ class TestProcessCrewExecutorInit:
 
     def test_init_default_max_concurrent(self):
         """Test initialization with default max_concurrent."""
-        with patch('src.services.agent_builder.process_executor.mp.get_context') as mock_ctx:
+        with patch(
+            "src.services.agent_builder.process_executor.mp.get_context"
+        ) as mock_ctx:
             mock_ctx.return_value = MagicMock()
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
             executor = ProcessCrewExecutor()
 
             assert executor._max_concurrent == 4
@@ -34,48 +39,60 @@ class TestProcessCrewExecutorInit:
 
     def test_init_custom_max_concurrent(self):
         """Test initialization with custom max_concurrent."""
-        with patch('src.services.agent_builder.process_executor.mp.get_context') as mock_ctx:
+        with patch(
+            "src.services.agent_builder.process_executor.mp.get_context"
+        ) as mock_ctx:
             mock_ctx.return_value = MagicMock()
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
             executor = ProcessCrewExecutor(max_concurrent=8)
 
             assert executor._max_concurrent == 8
 
     def test_init_sets_environment_variables(self):
         """Test that initialization sets required environment variables."""
-        with patch('src.services.agent_builder.process_executor.mp.get_context') as mock_ctx:
+        with patch(
+            "src.services.agent_builder.process_executor.mp.get_context"
+        ) as mock_ctx:
             mock_ctx.return_value = MagicMock()
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
             executor = ProcessCrewExecutor()
 
-            assert os.environ.get('PYTHONUNBUFFERED') == '0'
-            assert os.environ.get('CREWAI_VERBOSE') == 'false'
+            assert os.environ.get("PYTHONUNBUFFERED") == "0"
+            assert os.environ.get("CREWAI_VERBOSE") == "false"
 
     def test_init_uses_spawn_context(self):
         """Test that spawn context is used for better isolation."""
-        with patch('src.services.agent_builder.process_executor.mp.get_context') as mock_ctx:
+        with patch(
+            "src.services.agent_builder.process_executor.mp.get_context"
+        ) as mock_ctx:
             mock_ctx.return_value = MagicMock()
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
             executor = ProcessCrewExecutor()
 
-            mock_ctx.assert_called_once_with('spawn')
+            mock_ctx.assert_called_once_with("spawn")
 
     def test_init_metrics_initialized(self):
         """Test that metrics are properly initialized."""
-        with patch('src.services.agent_builder.process_executor.mp.get_context') as mock_ctx:
+        with patch(
+            "src.services.agent_builder.process_executor.mp.get_context"
+        ) as mock_ctx:
             mock_ctx.return_value = MagicMock()
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
             executor = ProcessCrewExecutor()
 
-            assert executor._metrics['total_executions'] == 0
-            assert executor._metrics['active_executions'] == 0
-            assert executor._metrics['completed_executions'] == 0
-            assert executor._metrics['failed_executions'] == 0
-            assert executor._metrics['terminated_executions'] == 0
+            assert executor._metrics["total_executions"] == 0
+            assert executor._metrics["active_executions"] == 0
+            assert executor._metrics["completed_executions"] == 0
+            assert executor._metrics["failed_executions"] == 0
+            assert executor._metrics["terminated_executions"] == 0
 
 
 class TestProcessCrewExecutorSubprocessInitializer:
@@ -88,8 +105,8 @@ class TestProcessCrewExecutorSubprocessInitializer:
         # Call the initializer
         ProcessCrewExecutor._subprocess_initializer()
 
-        assert os.environ.get('PYTHONUNBUFFERED') == '0'
-        assert os.environ.get('CREWAI_VERBOSE') == 'false'
+        assert os.environ.get("PYTHONUNBUFFERED") == "0"
+        assert os.environ.get("CREWAI_VERBOSE") == "false"
 
 
 class TestRunCrewInProcess:
@@ -104,7 +121,7 @@ class TestRunCrewInProcess:
             crew_config=None,
             inputs=None,
             group_context=None,
-            log_queue=None
+            log_queue=None,
         )
 
         assert result["status"] == "FAILED"
@@ -120,7 +137,7 @@ class TestRunCrewInProcess:
             crew_config="not a dict",
             inputs=None,
             group_context=None,
-            log_queue=None
+            log_queue=None,
         )
 
         # String that's not JSON should fail
@@ -138,7 +155,7 @@ class TestRunCrewInProcess:
                 crew_config=None,
                 inputs=None,
                 group_context=None,
-                log_queue=None
+                log_queue=None,
             )
 
             # The function should have set KASAL_EXECUTION_ID
@@ -147,8 +164,9 @@ class TestRunCrewInProcess:
 
     def test_run_crew_in_process_with_json_string_config(self):
         """Test run_crew_in_process parses JSON string config."""
-        from src.services.agent_builder.process_executor import run_crew_in_process
         import json
+
+        from src.services.agent_builder.process_executor import run_crew_in_process
 
         # Valid JSON that will still fail later but tests JSON parsing
         config_json = json.dumps({"agents": [], "tasks": []})
@@ -159,7 +177,7 @@ class TestRunCrewInProcess:
             crew_config=config_json,
             inputs=None,
             group_context=None,
-            log_queue=None
+            log_queue=None,
         )
 
         # Should fail for other reasons, not JSON parsing
@@ -172,11 +190,14 @@ class TestRunCrewIsolated:
     @pytest.fixture
     def executor(self):
         """Create a ProcessCrewExecutor instance."""
-        with patch('src.services.agent_builder.process_executor.mp.get_context') as mock_ctx:
+        with patch(
+            "src.services.agent_builder.process_executor.mp.get_context"
+        ) as mock_ctx:
             mock_context = MagicMock()
             mock_ctx.return_value = mock_context
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
             return ProcessCrewExecutor()
 
     @pytest.mark.asyncio
@@ -200,14 +221,14 @@ class TestRunCrewIsolated:
 
         crew_config = {"agents": [], "tasks": []}
 
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+        with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
             result = await executor.run_crew_isolated(
                 execution_id="test-exec-1",
                 crew_config=crew_config,
-                group_context=mock_group_context
+                group_context=mock_group_context,
             )
 
-        assert executor._metrics['total_executions'] >= 1
+        assert executor._metrics["total_executions"] >= 1
 
     @pytest.mark.asyncio
     async def test_run_crew_isolated_adds_group_context_to_config(self, executor):
@@ -230,16 +251,16 @@ class TestRunCrewIsolated:
 
         crew_config = {"agents": [], "tasks": []}
 
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+        with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
             await executor.run_crew_isolated(
                 execution_id="test-exec-2",
                 crew_config=crew_config,
-                group_context=mock_group_context
+                group_context=mock_group_context,
             )
 
         # Check that group_id and user_token were added
-        assert crew_config.get('group_id') == "group-456"
-        assert crew_config.get('user_token') == "user-token"
+        assert crew_config.get("group_id") == "group-456"
+        assert crew_config.get("user_token") == "user-token"
 
     @pytest.mark.asyncio
     async def test_run_crew_isolated_handles_terminated_process(self, executor):
@@ -261,11 +282,11 @@ class TestRunCrewIsolated:
 
         crew_config = {"agents": [], "tasks": []}
 
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+        with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
             result = await executor.run_crew_isolated(
                 execution_id="test-exec-3",
                 crew_config=crew_config,
-                group_context=mock_group_context
+                group_context=mock_group_context,
             )
 
         assert result["status"] == "STOPPED"
@@ -288,11 +309,9 @@ class TestRunCrewIsolated:
 
         crew_config = {"agents": [], "tasks": []}
 
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+        with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
             result = await executor.run_crew_isolated(
-                execution_id="test-exec-4",
-                crew_config=crew_config,
-                group_context=None
+                execution_id="test-exec-4", crew_config=crew_config, group_context=None
             )
 
         assert result["status"] == "STOPPED"
@@ -317,11 +336,9 @@ class TestRunCrewIsolated:
 
         crew_config = {"agents": [], "tasks": []}
 
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+        with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
             result = await executor.run_crew_isolated(
-                execution_id="test-exec-5",
-                crew_config=crew_config,
-                group_context=None
+                execution_id="test-exec-5", crew_config=crew_config, group_context=None
             )
 
         assert result["status"] == "FAILED"
@@ -341,7 +358,7 @@ class TestRunCrewIsolated:
         mock_queue.get.return_value = {
             "status": "COMPLETED",
             "execution_id": "test-exec-6",
-            "result": "Test result"
+            "result": "Test result",
         }
 
         executor._ctx.Process.return_value = mock_process
@@ -349,11 +366,9 @@ class TestRunCrewIsolated:
 
         crew_config = {"agents": [], "tasks": []}
 
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+        with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
             result = await executor.run_crew_isolated(
-                execution_id="test-exec-6",
-                crew_config=crew_config,
-                group_context=None
+                execution_id="test-exec-6", crew_config=crew_config, group_context=None
             )
 
         assert result["status"] == "COMPLETED"
@@ -379,12 +394,10 @@ class TestRunCrewIsolated:
 
         crew_config = {"agents": [], "tasks": []}
 
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+        with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
             # The process should be tracked during execution
             await executor.run_crew_isolated(
-                execution_id="test-exec-8",
-                crew_config=crew_config,
-                group_context=None
+                execution_id="test-exec-8", crew_config=crew_config, group_context=None
             )
 
         # Process was added to tracking
@@ -397,11 +410,14 @@ class TestTerminateExecution:
     @pytest.fixture
     def executor_with_process(self):
         """Create executor with a running process."""
-        with patch('src.services.agent_builder.process_executor.mp.get_context') as mock_ctx:
+        with patch(
+            "src.services.agent_builder.process_executor.mp.get_context"
+        ) as mock_ctx:
             mock_context = MagicMock()
             mock_ctx.return_value = mock_context
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
             executor = ProcessCrewExecutor()
 
             # Add a mock running process
@@ -430,7 +446,9 @@ class TestTerminateExecution:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_terminate_execution_force_kills_stuck_process(self, executor_with_process):
+    async def test_terminate_execution_force_kills_stuck_process(
+        self, executor_with_process
+    ):
         """Test that terminate_execution force kills stuck processes."""
         executor, mock_process = executor_with_process
 
@@ -446,14 +464,19 @@ class TestTerminateExecution:
     @pytest.mark.asyncio
     async def test_terminate_execution_nonexistent_returns_false(self):
         """Test terminating non-existent execution returns False."""
-        with patch('src.services.agent_builder.process_executor.mp.get_context') as mock_ctx:
+        with patch(
+            "src.services.agent_builder.process_executor.mp.get_context"
+        ) as mock_ctx:
             mock_ctx.return_value = MagicMock()
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
             executor = ProcessCrewExecutor()
 
             # Mock _terminate_orphaned_process to return False
-            with patch.object(executor, '_terminate_orphaned_process', return_value=False):
+            with patch.object(
+                executor, "_terminate_orphaned_process", return_value=False
+            ):
                 result = await executor.terminate_execution("nonexistent")
 
             # Should return False for non-existent execution
@@ -466,10 +489,13 @@ class TestCleanupMethods:
     @pytest.fixture
     def executor(self):
         """Create a ProcessCrewExecutor instance."""
-        with patch('src.services.agent_builder.process_executor.mp.get_context') as mock_ctx:
+        with patch(
+            "src.services.agent_builder.process_executor.mp.get_context"
+        ) as mock_ctx:
             mock_ctx.return_value = MagicMock()
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
             return ProcessCrewExecutor()
 
     def test_shutdown_terminates_all_processes(self, executor):
@@ -502,10 +528,13 @@ class TestProcessTracking:
     @pytest.fixture
     def executor(self):
         """Create a ProcessCrewExecutor instance."""
-        with patch('src.services.agent_builder.process_executor.mp.get_context') as mock_ctx:
+        with patch(
+            "src.services.agent_builder.process_executor.mp.get_context"
+        ) as mock_ctx:
             mock_ctx.return_value = MagicMock()
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
             return ProcessCrewExecutor()
 
     def test_running_processes_dict_exists(self, executor):
@@ -540,10 +569,13 @@ class TestGetMetrics:
     @pytest.fixture
     def executor(self):
         """Create a ProcessCrewExecutor instance."""
-        with patch('src.services.agent_builder.process_executor.mp.get_context') as mock_ctx:
+        with patch(
+            "src.services.agent_builder.process_executor.mp.get_context"
+        ) as mock_ctx:
             mock_ctx.return_value = MagicMock()
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
             return ProcessCrewExecutor()
 
     def test_get_metrics_returns_copy(self, executor):
@@ -551,20 +583,20 @@ class TestGetMetrics:
         metrics = executor.get_metrics()
 
         # Modify returned metrics
-        metrics['total_executions'] = 999
+        metrics["total_executions"] = 999
 
         # Original should be unchanged
-        assert executor._metrics['total_executions'] == 0
+        assert executor._metrics["total_executions"] == 0
 
     def test_get_metrics_includes_all_fields(self, executor):
         """Test that all metric fields are present."""
         metrics = executor.get_metrics()
 
-        assert 'total_executions' in metrics
-        assert 'active_executions' in metrics
-        assert 'completed_executions' in metrics
-        assert 'failed_executions' in metrics
-        assert 'terminated_executions' in metrics
+        assert "total_executions" in metrics
+        assert "active_executions" in metrics
+        assert "completed_executions" in metrics
+        assert "failed_executions" in metrics
+        assert "terminated_executions" in metrics
 
 
 class TestProcessLogQueue:
@@ -573,10 +605,13 @@ class TestProcessLogQueue:
     @pytest.fixture
     def executor(self):
         """Create a ProcessCrewExecutor instance."""
-        with patch('src.services.agent_builder.process_executor.mp.get_context') as mock_ctx:
+        with patch(
+            "src.services.agent_builder.process_executor.mp.get_context"
+        ) as mock_ctx:
             mock_ctx.return_value = MagicMock()
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
             return ProcessCrewExecutor()
 
     @pytest.mark.asyncio
@@ -591,13 +626,14 @@ class TestProcessLogQueue:
     @pytest.mark.asyncio
     async def test_process_log_queue_method_exists(self, executor):
         """Test that _process_log_queue method exists and is callable."""
-        assert hasattr(executor, '_process_log_queue')
+        assert hasattr(executor, "_process_log_queue")
         assert callable(executor._process_log_queue)
 
         import inspect
+
         sig = inspect.signature(executor._process_log_queue)
         params = list(sig.parameters.keys())
-        assert 'log_queue' in params or len(params) >= 3
+        assert "log_queue" in params or len(params) >= 3
 
     @pytest.mark.asyncio
     async def test_process_log_queue_writes_via_smart_session(self, executor):
@@ -620,9 +656,17 @@ class TestProcessLogQueue:
         with patch.dict(os.environ, {"LOG_DIR": "/tmp/crew_logs"}):
             with patch("os.path.exists", return_value=True):
                 with patch("os.path.join", return_value="/tmp/crew_logs/crew.log"):
-                    with patch("builtins.open", MagicMock(return_value=StringIO(content))):
-                        with patch("src.db.database_router.get_smart_db_session", _fake_smart_session):
-                            with patch("src.repositories.execution_logs_repository.ExecutionLogsRepository", return_value=mock_repo):
+                    with patch(
+                        "builtins.open", MagicMock(return_value=StringIO(content))
+                    ):
+                        with patch(
+                            "src.db.database_router.get_smart_db_session",
+                            _fake_smart_session,
+                        ):
+                            with patch(
+                                "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                                return_value=mock_repo,
+                            ):
                                 await executor._process_log_queue(MagicMock(), eid, gc)
 
         # Header + 1 matching line = 2 create_log calls
@@ -634,7 +678,9 @@ class TestProcessLogQueue:
         """Test that _process_log_queue handles missing crew.log gracefully."""
         with patch.dict(os.environ, {"LOG_DIR": "/tmp/nope"}):
             with patch("os.path.exists", return_value=False):
-                await executor._process_log_queue(MagicMock(), "test-exec-12345678", None)
+                await executor._process_log_queue(
+                    MagicMock(), "test-exec-12345678", None
+                )
 
     @pytest.mark.asyncio
     async def test_process_log_queue_db_error(self, executor):
@@ -651,8 +697,13 @@ class TestProcessLogQueue:
         with patch.dict(os.environ, {"LOG_DIR": "/tmp/l"}):
             with patch("os.path.exists", return_value=True):
                 with patch("os.path.join", return_value="/tmp/l/crew.log"):
-                    with patch("builtins.open", MagicMock(return_value=StringIO(content))):
-                        with patch("src.db.database_router.get_smart_db_session", _broken_session):
+                    with patch(
+                        "builtins.open", MagicMock(return_value=StringIO(content))
+                    ):
+                        with patch(
+                            "src.db.database_router.get_smart_db_session",
+                            _broken_session,
+                        ):
                             # Should not raise
                             await executor._process_log_queue(MagicMock(), eid, None)
 
@@ -671,10 +722,21 @@ class TestProcessLogQueue:
         with patch.dict(os.environ, {"LOG_DIR": "/tmp/l"}):
             with patch("os.path.exists", return_value=True):
                 with patch("os.path.join", return_value="/tmp/l/crew.log"):
-                    with patch("builtins.open", MagicMock(return_value=StringIO("unrelated line\n"))):
-                        with patch("src.db.database_router.get_smart_db_session", _fake_smart_session):
-                            with patch("src.repositories.execution_logs_repository.ExecutionLogsRepository", return_value=mock_repo):
-                                await executor._process_log_queue(MagicMock(), "nomatch_12345678", None)
+                    with patch(
+                        "builtins.open",
+                        MagicMock(return_value=StringIO("unrelated line\n")),
+                    ):
+                        with patch(
+                            "src.db.database_router.get_smart_db_session",
+                            _fake_smart_session,
+                        ):
+                            with patch(
+                                "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                                return_value=mock_repo,
+                            ):
+                                await executor._process_log_queue(
+                                    MagicMock(), "nomatch_12345678", None
+                                )
 
         # Only the header log should be written
         assert mock_repo.create_log.await_count == 1
@@ -698,7 +760,7 @@ class TestRunCrewWrapper:
             inputs=None,
             group_context=None,
             result_queue=result_queue,
-            log_queue=log_queue
+            log_queue=log_queue,
         )
 
         # Result should be put in queue
@@ -718,16 +780,16 @@ class TestModuleLevelEnvironment:
         # Import triggers module-level setup
         import src.services.agent_builder.process_executor
 
-        assert os.environ.get('CREWAI_TRACING_ENABLED') == 'false'
-        assert os.environ.get('CREWAI_TELEMETRY_OPT_OUT') == '1'
-        assert os.environ.get('CREWAI_ANALYTICS_OPT_OUT') == '1'
+        assert os.environ.get("CREWAI_TRACING_ENABLED") == "false"
+        assert os.environ.get("CREWAI_TELEMETRY_OPT_OUT") == "1"
+        assert os.environ.get("CREWAI_ANALYTICS_OPT_OUT") == "1"
 
     def test_crewai_cloud_tracing_disabled(self):
         """Test that CrewAI cloud tracing is disabled."""
         import src.services.agent_builder.process_executor
 
-        assert os.environ.get('CREWAI_CLOUD_TRACING') == 'false'
-        assert os.environ.get('CREWAI_CLOUD_TRACING_ENABLED') == 'false'
+        assert os.environ.get("CREWAI_CLOUD_TRACING") == "false"
+        assert os.environ.get("CREWAI_CLOUD_TRACING_ENABLED") == "false"
 
 
 class TestSignalHandling:
@@ -748,10 +810,13 @@ class TestGroupContextHandling:
     @pytest.fixture
     def executor(self):
         """Create a ProcessCrewExecutor instance."""
-        with patch('src.services.agent_builder.process_executor.mp.get_context') as mock_ctx:
+        with patch(
+            "src.services.agent_builder.process_executor.mp.get_context"
+        ) as mock_ctx:
             mock_ctx.return_value = MagicMock()
 
             from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
             return ProcessCrewExecutor()
 
     @pytest.mark.asyncio
@@ -776,16 +841,16 @@ class TestGroupContextHandling:
 
         crew_config = {"agents": [], "tasks": []}
 
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
+        with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
             await executor.run_crew_isolated(
                 execution_id="test-no-token",
                 crew_config=crew_config,
-                group_context=mock_group_context
+                group_context=mock_group_context,
             )
 
         # group_id should be added, user_token should not
-        assert crew_config.get('group_id') == "group-no-token"
-        assert crew_config.get('user_token') is None
+        assert crew_config.get("group_id") == "group-no-token"
+        assert crew_config.get("user_token") is None
 
     @pytest.mark.asyncio
     async def test_no_group_context_logs_warning(self, executor):
@@ -804,12 +869,14 @@ class TestGroupContextHandling:
 
         crew_config = {"agents": [], "tasks": []}
 
-        with patch.object(executor, '_process_log_queue', new_callable=AsyncMock):
-            with patch('src.services.agent_builder.process_executor.logger') as mock_logger:
+        with patch.object(executor, "_process_log_queue", new_callable=AsyncMock):
+            with patch(
+                "src.services.agent_builder.process_executor.logger"
+            ) as mock_logger:
                 await executor.run_crew_isolated(
                     execution_id="test-no-context",
                     crew_config=crew_config,
-                    group_context=None
+                    group_context=None,
                 )
 
                 # Should log error about missing group context

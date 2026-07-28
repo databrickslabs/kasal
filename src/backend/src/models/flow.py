@@ -1,7 +1,8 @@
-from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, JSON, ForeignKey, DateTime
-from sqlalchemy.dialects.postgresql import UUID
 import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy.dialects.postgresql import UUID
 
 from src.db.base import Base
 
@@ -11,23 +12,26 @@ class Flow(Base):
     Flow model representing a workflow definition with nodes and edges.
     Enhanced with group isolation for multi-group deployments.
     """
+
     __tablename__ = "flows"
-    
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=False)
-    crew_id = Column(UUID(as_uuid=True), ForeignKey("crews.id", ondelete="CASCADE"), nullable=True)
+    crew_id = Column(
+        UUID(as_uuid=True), ForeignKey("crews.id", ondelete="CASCADE"), nullable=True
+    )
     nodes = Column(JSON, default=list)
     edges = Column(JSON, default=list)
     flow_config = Column(JSON, default=dict)
-    
+
     # Multi-group fields
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation
     created_by_email = Column(String(255), nullable=True)  # Creator email for audit
-    
+
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     def __init__(self, **kwargs):
         super(Flow, self).__init__(**kwargs)
         if self.id is None:
@@ -43,4 +47,4 @@ class Flow(Base):
         if self.created_at is None:
             self.created_at = datetime.utcnow()
         if self.updated_at is None:
-            self.updated_at = datetime.utcnow() 
+            self.updated_at = datetime.utcnow()

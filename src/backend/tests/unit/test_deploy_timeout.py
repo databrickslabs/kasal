@@ -5,14 +5,17 @@ Regression coverage for the case where the Databricks SDK waiter
 is still downloading source / building server-side. The deploy should poll the
 deployment status instead of reporting a false failure.
 """
-import sys
+
 import os
-from unittest.mock import patch, MagicMock
+import sys
+from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src"))
+sys.path.insert(
+    0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "src")
+)
 
-from deploy import wait_for_deployment
 from databricks.sdk.service.apps import AppDeploymentState
+from deploy import wait_for_deployment
 
 
 def _deployment(state, message=""):
@@ -48,9 +51,7 @@ def test_wait_for_deployment_fails_on_failed_state():
 def test_wait_for_deployment_fails_on_cancelled_state():
     """A CANCELLED deployment returns False."""
     client = MagicMock()
-    client.apps.get_deployment.return_value = _deployment(
-        AppDeploymentState.CANCELLED
-    )
+    client.apps.get_deployment.return_value = _deployment(AppDeploymentState.CANCELLED)
     with patch("deploy.time.sleep"):
         assert wait_for_deployment(client, "kasal", "dep-1") is False
 
@@ -88,6 +89,4 @@ def test_wait_for_deployment_times_out():
     # timeout_seconds=0 → the deadline has already passed, so the loop never
     # runs and the function reports the non-terminal deployment as a failure.
     with patch("deploy.time.sleep"):
-        assert wait_for_deployment(
-            client, "kasal", "dep-1", timeout_seconds=0
-        ) is False
+        assert wait_for_deployment(client, "kasal", "dep-1", timeout_seconds=0) is False

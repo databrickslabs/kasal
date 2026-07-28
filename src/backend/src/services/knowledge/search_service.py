@@ -4,9 +4,11 @@ Knowledge Search Service
 Handles searching knowledge files in vector storage.
 Separated from DatabricksKnowledgeService for clean architecture.
 """
-from typing import Dict, Any, List, Optional
-import logging
+
 import asyncio
+import logging
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.repositories.documentation_embedding_repository import SIMILARITY_ATTR
@@ -56,24 +58,32 @@ class KnowledgeSearchService:
         Returns:
             List of search results with content and metadata
         """
-        logger.info(f"Knowledge search: query='{query}', group={self.group_id}, agent={agent_id}, user={created_by}, limit={limit}")
+        logger.info(
+            f"Knowledge search: query='{query}', group={self.group_id}, agent={agent_id}, user={created_by}, limit={limit}"
+        )
         logger.info(f"File paths parameter: {file_paths}")
 
         try:
-            from src.services.llm.manager import LLMManager
-            from src.services.knowledge.documentation_embedding import DocumentationEmbeddingService
+            from src.services.knowledge.documentation_embedding import (
+                DocumentationEmbeddingService,
+            )
 
             # Generate the query embedding with the SAME embedder used at ingest
             # time (resolved through the shared resolver: Databricks in prod, local
             # Ollama in dev — both 1024 dims) so it matches the stored vectors in
             # the documentation_embeddings pgvector table.
-            from src.services.knowledge.embedder import resolve_knowledge_embedder_config
+            from src.services.knowledge.embedder import (
+                resolve_knowledge_embedder_config,
+            )
+            from src.services.llm.manager import LLMManager
 
             embedder_config = await resolve_knowledge_embedder_config(
                 user_token=user_token, group_id=self.group_id
             )
             try:
-                query_embedding = await LLMManager.get_embedding(query, embedder_config=embedder_config)
+                query_embedding = await LLMManager.get_embedding(
+                    query, embedder_config=embedder_config
+                )
                 if not query_embedding:
                     logger.error("Failed to generate query embedding")
                     return []
@@ -85,17 +95,22 @@ class KnowledgeSearchService:
             # isolation) and optionally file_paths. When the active memory backend
             # is Lakebase, that's the Lakebase memory instance; otherwise the app
             # DB. Read from the same place ingest writes.
-            from src.services.knowledge.embedding_session import knowledge_embedding_session
+            from src.models.documentation_embedding import KnowledgeEmbedding
             from src.repositories.documentation_embedding_repository import (
                 DocumentationEmbeddingRepository,
             )
-            from src.models.documentation_embedding import KnowledgeEmbedding
+            from src.services.knowledge.embedding_session import (
+                knowledge_embedding_session,
+            )
+
             formatted_results = []
             try:
                 async with knowledge_embedding_session(
                     self.session, self.group_id, user_token
                 ) as (search_session, _is_lakebase):
-                    repo = DocumentationEmbeddingRepository(search_session, model=KnowledgeEmbedding)
+                    repo = DocumentationEmbeddingRepository(
+                        search_session, model=KnowledgeEmbedding
+                    )
                     # Compare basenames under NFC normalization: an uploaded path
                     # from a macOS filesystem is NFD (decomposed — "ä" = a + ¨),
                     # while the same name arriving via JSON/HTTP may be NFC, so a
@@ -104,11 +119,14 @@ class KnowledgeSearchService:
                     import unicodedata
 
                     def _basename_nfc(path: Optional[str]) -> str:
-                        return unicodedata.normalize('NFC', (path or '').rsplit('/', 1)[-1])
+                        return unicodedata.normalize(
+                            "NFC", (path or "").rsplit("/", 1)[-1]
+                        )
 
                     wanted = (
                         {_basename_nfc(fp) for fp in file_paths if fp}
-                        if file_paths else set()
+                        if file_paths
+                        else set()
                     )
 
                     if wanted:
@@ -133,8 +151,7 @@ class KnowledgeSearchService:
                         # than returning nothing).
                         group_paths = await repo.list_group_file_paths(self.group_id)
                         scoped_paths = [
-                            p for p in group_paths
-                            if _basename_nfc(p) in wanted
+                            p for p in group_paths if _basename_nfc(p) in wanted
                         ]
                         if not scoped_paths:
                             logger.warning(
@@ -144,21 +161,27 @@ class KnowledgeSearchService:
                             )
                             rows = []
                         else:
-                            rows = await repo.search_similar(
-                                query_embedding,
-                                limit=limit,
-                                group_id=self.group_id,
-                                file_paths=scoped_paths,
-                            ) or []
+                            rows = (
+                                await repo.search_similar(
+                                    query_embedding,
+                                    limit=limit,
+                                    group_id=self.group_id,
+                                    file_paths=scoped_paths,
+                                )
+                                or []
+                            )
                     else:
                         # No specific file requested: rank across all of the group's
                         # uploaded chunks.
-                        rows = await repo.search_similar(
-                            query_embedding,
-                            limit=limit,
-                            group_id=self.group_id,
-                            file_paths=None,
-                        ) or []
+                        rows = (
+                            await repo.search_similar(
+                                query_embedding,
+                                limit=limit,
+                                group_id=self.group_id,
+                                file_paths=None,
+                            )
+                            or []
+                        )
                     total_group_rows = len(rows)
 
                     # Per-user isolation: only chunks uploaded by the requesting
@@ -166,21 +189,27 @@ class KnowledgeSearchService:
                     # built-in — stay group-shared).
                     if created_by:
                         rows = [
-                            r for r in rows
-                            if (owner := getattr(r, 'created_by', None)) is None
+                            r
+                            for r in rows
+                            if (owner := getattr(r, "created_by", None)) is None
                             or owner == created_by
                         ]
 
                     # TTL: expired chunks are excluded immediately, even before
                     # the next upload-time purge sweeps them out of the table.
-                    from src.services.knowledge.embedding_service import KNOWLEDGE_TTL_DAYS
+                    from src.services.knowledge.embedding_service import (
+                        KNOWLEDGE_TTL_DAYS,
+                    )
+
                     if KNOWLEDGE_TTL_DAYS > 0:
                         from datetime import datetime, timedelta, timezone
 
-                        cutoff = datetime.now(timezone.utc) - timedelta(days=KNOWLEDGE_TTL_DAYS)
+                        cutoff = datetime.now(timezone.utc) - timedelta(
+                            days=KNOWLEDGE_TTL_DAYS
+                        )
 
                         def _fresh(r) -> bool:
-                            created = getattr(r, 'created_at', None)
+                            created = getattr(r, "created_at", None)
                             if not created:
                                 return True
                             if created.tzinfo is None:
@@ -199,7 +228,10 @@ class KnowledgeSearchService:
                     # otel_spans — so this is what makes a deployed run's search
                     # routing + row counts observable (lakebase store vs empty
                     # app-DB fallback, group_rows before per-user/TTL filters).
-                    from src.services.knowledge.embedding_session import emit_knowledge_span
+                    from src.services.knowledge.embedding_session import (
+                        emit_knowledge_span,
+                    )
+
                     emit_knowledge_span(
                         "knowledge_search",
                         {
@@ -216,28 +248,35 @@ class KnowledgeSearchService:
                     for row in rows or []:
                         try:
                             metadata = getattr(row, "doc_metadata", None) or {}
-                            source = getattr(row, "file_path", None) or getattr(row, "source", "") or ""
-                            formatted_results.append({
-                                "content": getattr(row, "content", "") or "",
-                                "metadata": {
-                                    "source": source,
-                                    "title": getattr(row, "title", "") or "",
-                                    "chunk_index": metadata.get("chunk_index", 0),
-                                    # The similarity the search itself computed
-                                    # (SIMILARITY_ATTR), falling back to any score
-                                    # already on the chunk's metadata. This used to
-                                    # be hardcoded to whatever metadata carried —
-                                    # nothing — so every result reported 0.000 and
-                                    # an agent could not tell a match from noise.
-                                    "score": float(
-                                        getattr(row, SIMILARITY_ATTR, None)
-                                        or metadata.get("score", 0.0)
-                                        or 0.0
-                                    ),
-                                    "group_id": getattr(row, "group_id", None) or self.group_id,
-                                    "execution_id": execution_id,
-                                },
-                            })
+                            source = (
+                                getattr(row, "file_path", None)
+                                or getattr(row, "source", "")
+                                or ""
+                            )
+                            formatted_results.append(
+                                {
+                                    "content": getattr(row, "content", "") or "",
+                                    "metadata": {
+                                        "source": source,
+                                        "title": getattr(row, "title", "") or "",
+                                        "chunk_index": metadata.get("chunk_index", 0),
+                                        # The similarity the search itself computed
+                                        # (SIMILARITY_ATTR), falling back to any score
+                                        # already on the chunk's metadata. This used to
+                                        # be hardcoded to whatever metadata carried —
+                                        # nothing — so every result reported 0.000 and
+                                        # an agent could not tell a match from noise.
+                                        "score": float(
+                                            getattr(row, SIMILARITY_ATTR, None)
+                                            or metadata.get("score", 0.0)
+                                            or 0.0
+                                        ),
+                                        "group_id": getattr(row, "group_id", None)
+                                        or self.group_id,
+                                        "execution_id": execution_id,
+                                    },
+                                }
+                            )
                         except Exception as fmt_err:
                             logger.error(f"Error formatting result: {fmt_err}")
                             continue
@@ -249,6 +288,7 @@ class KnowledgeSearchService:
                 # "vector <=> text" cast bug) is otherwise invisible. Spans DO
                 # reach otel_spans.
                 from src.services.knowledge.embedding_session import emit_knowledge_span
+
                 emit_knowledge_span(
                     "knowledge_search_error",
                     {
@@ -273,7 +313,7 @@ class KnowledgeSearchService:
         endpoint_name: str,
         query_embedding: List[float],
         search_columns: List[str],
-        user_token: Optional[str] = None
+        user_token: Optional[str] = None,
     ) -> Optional[List[str]]:
         """
         Resolve filenames to full volume paths by querying the index.
@@ -327,29 +367,32 @@ class KnowledgeSearchService:
                     columns=search_columns,
                     filters={"group_id": self.group_id},  # Only filter by group_id
                     num_results=100,  # Get more results to find all unique files
-                    user_token=user_token
+                    user_token=user_token,
                 ),
-                timeout=5
+                timeout=5,
             )
 
             # Repository returns {'success': bool, 'results': {...}, 'message': str}
-            if not all_sources_results or not all_sources_results.get('success'):
-                logger.warning(f"No results from index to resolve filenames: {all_sources_results.get('message') if all_sources_results else 'None'}")
+            if not all_sources_results or not all_sources_results.get("success"):
+                logger.warning(
+                    f"No results from index to resolve filenames: {all_sources_results.get('message') if all_sources_results else 'None'}"
+                )
                 return None
 
             # Extract the actual results from the repository response
-            results = all_sources_results.get('results', {})
+            results = all_sources_results.get("results", {})
             if not results:
                 logger.warning("No 'results' key in repository response")
                 return None
 
             # Extract unique source paths from results
             from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
+
             positions = DatabricksIndexSchemas.get_column_positions("document")
             source_position = positions["source"]
 
             # The 'results' key contains the search response with 'result' -> 'data_array'
-            data_array = results.get('result', {}).get('data_array', [])
+            data_array = results.get("result", {}).get("data_array", [])
 
             unique_sources = set()
             for result in data_array:
@@ -358,7 +401,9 @@ class KnowledgeSearchService:
                     if source:
                         unique_sources.add(source)
 
-            logger.info(f"Found {len(unique_sources)} unique sources in index for group {self.group_id}")
+            logger.info(
+                f"Found {len(unique_sources)} unique sources in index for group {self.group_id}"
+            )
 
             # Match filenames to full paths
             resolved = []
@@ -373,7 +418,9 @@ class KnowledgeSearchService:
                         break
 
                 if not matched:
-                    logger.warning(f"Could not resolve filename '{filename}' to any indexed path")
+                    logger.warning(
+                        f"Could not resolve filename '{filename}' to any indexed path"
+                    )
 
             # Combine resolved paths with any full paths that were already provided
             all_resolved = full_paths + resolved
@@ -395,20 +442,29 @@ class KnowledgeSearchService:
             DatabricksVectorStorage instance or None
         """
         try:
-            from src.services.memory.databricks_vector_storage import DatabricksVectorStorage
-            from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
+            from src.schemas.memory_backend import (
+                MemoryBackendConfig,
+                MemoryBackendType,
+            )
+            from src.services.memory.databricks_vector_storage import (
+                DatabricksVectorStorage,
+            )
 
             # Lazy initialization of memory backend service
             if self._memory_backend_service is None:
                 from src.services.memory.backend_service import MemoryBackendService
+
                 self._memory_backend_service = MemoryBackendService(self.session)
 
             # Get memory backends for this group
-            group_backends = await self._memory_backend_service.get_memory_backends(self.group_id)
+            group_backends = await self._memory_backend_service.get_memory_backends(
+                self.group_id
+            )
 
             # Filter active Databricks backends
             databricks_backends = [
-                b for b in group_backends
+                b
+                for b in group_backends
                 if b.is_active and b.backend_type == MemoryBackendType.DATABRICKS
             ]
 
@@ -435,30 +491,41 @@ class KnowledgeSearchService:
 
             # Get document index
             document_index = None
-            if hasattr(db_config, 'document_index'):
+            if hasattr(db_config, "document_index"):
                 document_index = db_config.document_index
             elif isinstance(db_config, dict):
-                document_index = db_config.get('document_index')
+                document_index = db_config.get("document_index")
 
             if not document_index:
                 logger.warning("Document index not configured")
                 return None
 
             # Extract configuration
-            if hasattr(db_config, 'endpoint_name'):
-                endpoint_name = getattr(db_config, 'document_endpoint_name', None) or db_config.endpoint_name
+            if hasattr(db_config, "endpoint_name"):
+                endpoint_name = (
+                    getattr(db_config, "document_endpoint_name", None)
+                    or db_config.endpoint_name
+                )
                 workspace_url = db_config.workspace_url
                 embedding_dimension = db_config.embedding_dimension or 1024
                 personal_access_token = db_config.personal_access_token
                 service_principal_client_id = db_config.service_principal_client_id
-                service_principal_client_secret = db_config.service_principal_client_secret
+                service_principal_client_secret = (
+                    db_config.service_principal_client_secret
+                )
             elif isinstance(db_config, dict):
-                endpoint_name = db_config.get('document_endpoint_name') or db_config.get('endpoint_name')
-                workspace_url = db_config.get('workspace_url')
-                embedding_dimension = db_config.get('embedding_dimension', 1024)
-                personal_access_token = db_config.get('personal_access_token')
-                service_principal_client_id = db_config.get('service_principal_client_id')
-                service_principal_client_secret = db_config.get('service_principal_client_secret')
+                endpoint_name = db_config.get(
+                    "document_endpoint_name"
+                ) or db_config.get("endpoint_name")
+                workspace_url = db_config.get("workspace_url")
+                embedding_dimension = db_config.get("embedding_dimension", 1024)
+                personal_access_token = db_config.get("personal_access_token")
+                service_principal_client_id = db_config.get(
+                    "service_principal_client_id"
+                )
+                service_principal_client_secret = db_config.get(
+                    "service_principal_client_secret"
+                )
             else:
                 logger.error(f"Unexpected databricks_config type: {type(db_config)}")
                 return None
@@ -474,7 +541,7 @@ class KnowledgeSearchService:
                 personal_access_token=personal_access_token,
                 service_principal_client_id=service_principal_client_id,
                 service_principal_client_secret=service_principal_client_secret,
-                user_token=user_token
+                user_token=user_token,
             )
 
             return storage

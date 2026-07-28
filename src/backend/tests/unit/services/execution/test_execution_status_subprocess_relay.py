@@ -10,8 +10,10 @@ showed up for runs the client was not separately polling (e.g. a crew launched
 by prompt optimization); a canvas run masked it because its own status poll
 refreshed the badge anyway.
 """
-import pytest
+
 from types import SimpleNamespace
+
+import pytest
 
 
 def _fake_db(monkeypatch, module):
@@ -31,19 +33,19 @@ def _fake_db(monkeypatch, module):
             return SimpleNamespace(**fields)
 
     async def fake_exec(op):
-        return await op(
-            SimpleNamespace(
-                flush=_anoop, commit=_anoop, rollback=_anoop
-            )
-        )
+        return await op(SimpleNamespace(flush=_anoop, commit=_anoop, rollback=_anoop))
 
     async def _noop_broadcast(*a, **k):
         return 0
 
     monkeypatch.setattr(module, "ExecutionRepository", FakeRepo, raising=True)
-    monkeypatch.setattr(module, "execute_db_operation_with_fresh_engine", fake_exec, raising=True)
+    monkeypatch.setattr(
+        module, "execute_db_operation_with_fresh_engine", fake_exec, raising=True
+    )
     monkeypatch.setattr(module, "execute_db_operation_smart", fake_exec, raising=True)
-    monkeypatch.setattr(module.sse_manager, "broadcast_to_job", _noop_broadcast, raising=True)
+    monkeypatch.setattr(
+        module.sse_manager, "broadcast_to_job", _noop_broadcast, raising=True
+    )
 
 
 async def _anoop(*a, **k):
@@ -62,8 +64,8 @@ class _CapturingWriter:
 
 @pytest.mark.asyncio
 async def test_subprocess_status_change_is_relayed_to_the_parent(monkeypatch):
-    from src.services.execution import status as module
     from src.services.execution import event_pipe as execution_event_pipe
+    from src.services.execution import status as module
 
     _fake_db(monkeypatch, module)
     writer = _CapturingWriter()
@@ -89,8 +91,8 @@ async def test_subprocess_status_change_is_relayed_to_the_parent(monkeypatch):
 async def test_relayed_frame_omits_the_result_blob(monkeypatch):
     """Terminal results can be large and the pipe drops frames when full, so the
     payload stays small — clients fetch the result over REST."""
-    from src.services.execution import status as module
     from src.services.execution import event_pipe as execution_event_pipe
+    from src.services.execution import status as module
 
     _fake_db(monkeypatch, module)
     writer = _CapturingWriter()
@@ -112,8 +114,8 @@ async def test_relayed_frame_omits_the_result_blob(monkeypatch):
 async def test_missing_pipe_writer_does_not_fail_the_status_update(monkeypatch):
     """No writer (or a broken pipe) must never turn a successful DB update into
     a failed one — the status is already committed at that point."""
-    from src.services.execution import status as module
     from src.services.execution import event_pipe as execution_event_pipe
+    from src.services.execution import status as module
 
     _fake_db(monkeypatch, module)
     monkeypatch.setattr(execution_event_pipe, "_active_writer", None, raising=False)
@@ -129,8 +131,8 @@ async def test_missing_pipe_writer_does_not_fail_the_status_update(monkeypatch):
 async def test_parent_process_still_broadcasts_directly(monkeypatch):
     """Outside the subprocess nothing changes: the event goes straight to SSE
     and no pipe frame is written."""
-    from src.services.execution import status as module
     from src.services.execution import event_pipe as execution_event_pipe
+    from src.services.execution import status as module
 
     _fake_db(monkeypatch, module)
     writer = _CapturingWriter()

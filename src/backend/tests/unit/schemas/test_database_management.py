@@ -3,22 +3,24 @@ Comprehensive unit tests for Database Management schemas.
 
 Tests all Pydantic models for validation, serialization, and edge cases.
 """
+
+from typing import Any, Dict, List, Optional
+
 import pytest
-from typing import Dict, Any, List, Optional
 from pydantic import ValidationError
 
 from src.schemas.database_management import (
-    ExportRequest,
-    ImportRequest,
-    ListBackupsRequest,
     BackupInfo,
-    ExportResponse,
-    ImportResponse,
-    ListBackupsResponse,
-    MemoryBackendInfo,
     DatabaseInfoResponse,
     DeleteBackupRequest,
-    DeleteBackupResponse
+    DeleteBackupResponse,
+    ExportRequest,
+    ExportResponse,
+    ImportRequest,
+    ImportResponse,
+    ListBackupsRequest,
+    ListBackupsResponse,
+    MemoryBackendInfo,
 )
 
 
@@ -76,15 +78,13 @@ class TestExportRequest:
             ExportRequest(volume_name="")
         assert "Name cannot be empty" in str(exc_info.value)
 
-
-
     def test_export_request_custom_values(self):
         """Test ExportRequest with custom values."""
         request = ExportRequest(
             catalog="test_catalog",
             schema="test_schema",
             volume_name="test_volume",
-            export_format="sql"
+            export_format="sql",
         )
 
         assert request.catalog == "test_catalog"
@@ -95,34 +95,34 @@ class TestExportRequest:
     def test_export_request_schema_alias(self):
         """Test ExportRequest with schema alias."""
         request = ExportRequest(schema="test_schema")
-        
+
         assert request.schema_name == "test_schema"
 
     def test_export_request_invalid_catalog_empty(self):
         """Test ExportRequest validation error for empty catalog."""
         with pytest.raises(ValidationError) as exc_info:
             ExportRequest(catalog="")
-        
+
         assert "Name cannot be empty" in str(exc_info.value)
 
     def test_export_request_invalid_catalog_path_traversal(self):
         """Test ExportRequest validation error for path traversal in catalog."""
         with pytest.raises(ValidationError) as exc_info:
             ExportRequest(catalog="../test")
-        
+
         assert "Invalid name: contains illegal characters" in str(exc_info.value)
 
     def test_export_request_invalid_export_format(self):
         """Test ExportRequest validation error for invalid export format."""
         with pytest.raises(ValidationError) as exc_info:
             ExportRequest(export_format="invalid")
-        
+
         assert "Invalid export format" in str(exc_info.value)
 
     def test_export_request_export_format_case_insensitive(self):
         """Test ExportRequest export format is case insensitive."""
         request = ExportRequest(export_format="SQL")
-        
+
         assert request.export_format == "sql"
 
 
@@ -135,7 +135,7 @@ class TestImportRequest:
             catalog="test_catalog",
             schema="test_schema",
             volume_name="test_volume",
-            backup_filename="backup.db"
+            backup_filename="backup.db",
         )
 
         assert request.catalog == "test_catalog"
@@ -149,16 +149,16 @@ class TestImportRequest:
             catalog="test",
             schema="test_schema",
             volume_name="test_volume",
-            backup_filename="backup.json"
+            backup_filename="backup.json",
         )
-        
+
         assert request.schema_name == "test_schema"
 
     def test_import_request_missing_required_fields(self):
         """Test ImportRequest validation error when required fields missing."""
         with pytest.raises(ValidationError) as exc_info:
             ImportRequest()
-        
+
         error_str = str(exc_info.value)
         assert "catalog" in error_str
         assert "schema" in error_str
@@ -172,19 +172,16 @@ class TestImportRequest:
                 catalog="test",
                 schema="test",
                 volume_name="test",
-                backup_filename="backup.txt"
+                backup_filename="backup.txt",
             )
-        
+
         assert "Invalid backup file extension" in str(exc_info.value)
 
     def test_import_request_validate_filename_empty(self):
         """Test ImportRequest validation with empty backup_filename."""
         with pytest.raises(ValidationError) as exc_info:
             ImportRequest(
-                catalog="test",
-                schema="test",
-                volume_name="test",
-                backup_filename=""
+                catalog="test", schema="test", volume_name="test", backup_filename=""
             )
         assert "Filename cannot be empty" in str(exc_info.value)
 
@@ -192,10 +189,7 @@ class TestImportRequest:
         """Test ImportRequest validation with whitespace-only backup_filename."""
         with pytest.raises(ValidationError) as exc_info:
             ImportRequest(
-                catalog="test",
-                schema="test",
-                volume_name="test",
-                backup_filename="   "
+                catalog="test", schema="test", volume_name="test", backup_filename="   "
             )
         assert "Filename cannot be empty" in str(exc_info.value)
 
@@ -206,7 +200,7 @@ class TestImportRequest:
                 catalog="test",
                 schema="test",
                 volume_name="test",
-                backup_filename="../malicious.db"
+                backup_filename="../malicious.db",
             )
         assert "Invalid filename: contains illegal characters" in str(exc_info.value)
 
@@ -217,7 +211,7 @@ class TestImportRequest:
                 catalog="test",
                 schema="test",
                 volume_name="test",
-                backup_filename="path/file.db"
+                backup_filename="path/file.db",
             )
         assert "Invalid filename: contains illegal characters" in str(exc_info.value)
 
@@ -228,20 +222,20 @@ class TestImportRequest:
                 catalog="test",
                 schema="test",
                 volume_name="test",
-                backup_filename="path\\file.db"
+                backup_filename="path\\file.db",
             )
         assert "Invalid filename: contains illegal characters" in str(exc_info.value)
 
     def test_import_request_valid_filename_extensions(self):
         """Test ImportRequest with valid filename extensions."""
         valid_extensions = [".db", ".json", ".sql"]
-        
+
         for ext in valid_extensions:
             request = ImportRequest(
                 catalog="test",
                 schema="test",
                 volume_name="test",
-                backup_filename=f"backup{ext}"
+                backup_filename=f"backup{ext}",
             )
             assert request.backup_filename == f"backup{ext}"
 
@@ -252,7 +246,7 @@ class TestListBackupsRequest:
     def test_list_backups_request_defaults(self):
         """Test ListBackupsRequest with default values."""
         request = ListBackupsRequest()
-        
+
         assert request.catalog == "users"
         assert request.schema_name == "default"
         assert request.volume_name == "kasal_backups"
@@ -262,7 +256,7 @@ class TestListBackupsRequest:
         request = ListBackupsRequest(
             catalog="custom_catalog",
             schema="custom_schema",
-            volume_name="custom_volume"
+            volume_name="custom_volume",
         )
 
         assert request.catalog == "custom_catalog"
@@ -273,7 +267,7 @@ class TestListBackupsRequest:
         """Test ListBackupsRequest validation error for invalid names."""
         with pytest.raises(ValidationError) as exc_info:
             ListBackupsRequest(catalog="test/path")
-        
+
         assert "Invalid name: contains illegal characters" in str(exc_info.value)
 
 
@@ -283,11 +277,9 @@ class TestBackupInfo:
     def test_backup_info_minimal(self):
         """Test BackupInfo with minimal data."""
         backup = BackupInfo(
-            filename="backup.db",
-            size_mb=10.5,
-            created_at="2023-01-01T00:00:00Z"
+            filename="backup.db", size_mb=10.5, created_at="2023-01-01T00:00:00Z"
         )
-        
+
         assert backup.filename == "backup.db"
         assert backup.size_mb == 10.5
         assert backup.created_at == "2023-01-01T00:00:00Z"
@@ -301,9 +293,9 @@ class TestBackupInfo:
             size_mb=10.5,
             created_at="2023-01-01T00:00:00Z",
             databricks_url="https://databricks.com/volume/path",
-            backup_type="sqlite"
+            backup_type="sqlite",
         )
-        
+
         assert backup.filename == "backup.db"
         assert backup.size_mb == 10.5
         assert backup.created_at == "2023-01-01T00:00:00Z"
@@ -317,7 +309,7 @@ class TestExportResponse:
     def test_export_response_minimal(self):
         """Test ExportResponse with minimal data."""
         response = ExportResponse(success=True)
-        
+
         assert response.success is True
         assert response.backup_path is None
         assert response.error is None
@@ -331,9 +323,9 @@ class TestExportResponse:
             size_mb=15.2,
             timestamp="2023-01-01T00:00:00Z",
             catalog="test_catalog",
-            schema="test_schema"
+            schema="test_schema",
         )
-        
+
         assert response.success is True
         assert response.backup_path == "/volume/path/backup.db"
         assert response.backup_filename == "backup.db"
@@ -345,7 +337,7 @@ class TestExportResponse:
     def test_export_response_error(self):
         """Test ExportResponse with error."""
         response = ExportResponse(success=False, error="Export failed")
-        
+
         assert response.success is False
         assert response.error == "Export failed"
 
@@ -356,7 +348,7 @@ class TestImportResponse:
     def test_import_response_minimal(self):
         """Test ImportResponse with minimal data."""
         response = ImportResponse(success=True)
-        
+
         assert response.success is True
         assert response.imported_from is None
         assert response.error is None
@@ -370,9 +362,9 @@ class TestImportResponse:
             size_mb=20.5,
             timestamp="2023-01-01T00:00:00Z",
             database_type="sqlite",
-            restored_tables=["table1", "table2"]
+            restored_tables=["table1", "table2"],
         )
-        
+
         assert response.success is True
         assert response.imported_from == "/volume/path/backup.db"
         assert response.backup_filename == "backup.db"
@@ -384,7 +376,7 @@ class TestImportResponse:
     def test_import_response_error(self):
         """Test ImportResponse with error."""
         response = ImportResponse(success=False, error="Import failed")
-        
+
         assert response.success is False
         assert response.error == "Import failed"
 
@@ -395,7 +387,7 @@ class TestListBackupsResponse:
     def test_list_backups_response_minimal(self):
         """Test ListBackupsResponse with minimal data."""
         response = ListBackupsResponse(success=True)
-        
+
         assert response.success is True
         assert response.backups is None
         assert response.error is None
@@ -403,16 +395,17 @@ class TestListBackupsResponse:
     def test_list_backups_response_with_backups(self):
         """Test ListBackupsResponse with backup list."""
         backups = [
-            BackupInfo(filename="backup1.db", size_mb=10.0, created_at="2023-01-01T00:00:00Z"),
-            BackupInfo(filename="backup2.db", size_mb=15.0, created_at="2023-01-02T00:00:00Z")
+            BackupInfo(
+                filename="backup1.db", size_mb=10.0, created_at="2023-01-01T00:00:00Z"
+            ),
+            BackupInfo(
+                filename="backup2.db", size_mb=15.0, created_at="2023-01-02T00:00:00Z"
+            ),
         ]
         response = ListBackupsResponse(
-            success=True,
-            backups=backups,
-            total_backups=2,
-            volume_path="/volume/path"
+            success=True, backups=backups, total_backups=2, volume_path="/volume/path"
         )
-        
+
         assert response.success is True
         assert len(response.backups) == 2
         assert response.total_backups == 2
@@ -429,9 +422,9 @@ class TestMemoryBackendInfo:
             name="Test Backend",
             backend_type="chroma",
             is_default=True,
-            created_at="2023-01-01T00:00:00Z"
+            created_at="2023-01-01T00:00:00Z",
         )
-        
+
         assert backend.id == "backend-1"
         assert backend.name == "Test Backend"
         assert backend.backend_type == "chroma"
@@ -447,9 +440,9 @@ class TestMemoryBackendInfo:
             backend_type="databricks",
             is_default=False,
             created_at="2023-01-01T00:00:00Z",
-            group_id="group-123"
+            group_id="group-123",
         )
-        
+
         assert backend.group_id == "group-123"
 
 
@@ -495,7 +488,10 @@ class TestDatabaseInfoResponse:
         assert response.success is True
         assert response.database_type == "lakebase"
         assert response.lakebase_enabled is True
-        assert response.connection_error == "Lakebase is configured but the connection failed."
+        assert (
+            response.connection_error
+            == "Lakebase is configured but the connection failed."
+        )
         assert response.tables == {}
         assert response.total_tables == 0
 
@@ -522,7 +518,7 @@ class TestDeleteBackupRequest:
             catalog="test_catalog",
             schema="test_schema",
             volume_name="test_volume",
-            backup_filename="backup.db"
+            backup_filename="backup.db",
         )
 
         assert request.catalog == "test_catalog"
@@ -537,9 +533,9 @@ class TestDeleteBackupRequest:
                 catalog="test",
                 schema="test",
                 volume_name="test",
-                backup_filename="../backup.db"
+                backup_filename="../backup.db",
             )
-        
+
         assert "Invalid filename: contains illegal characters" in str(exc_info.value)
 
 
@@ -549,21 +545,17 @@ class TestDeleteBackupResponse:
     def test_delete_backup_response_success(self):
         """Test DeleteBackupResponse with success."""
         response = DeleteBackupResponse(
-            success=True,
-            message="Backup deleted successfully"
+            success=True, message="Backup deleted successfully"
         )
-        
+
         assert response.success is True
         assert response.message == "Backup deleted successfully"
         assert response.error is None
 
     def test_delete_backup_response_error(self):
         """Test DeleteBackupResponse with error."""
-        response = DeleteBackupResponse(
-            success=False,
-            error="Failed to delete backup"
-        )
-        
+        response = DeleteBackupResponse(success=False, error="Failed to delete backup")
+
         assert response.success is False
         assert response.error == "Failed to delete backup"
 

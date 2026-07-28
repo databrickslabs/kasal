@@ -4,16 +4,18 @@ Unit tests for billing models.
 Tests the functionality of the LLMUsageBilling, BillingPeriod, and BillingAlert
 database models including field validation, relationships, and data integrity.
 """
-import pytest
+
 from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock
 
+import pytest
+
 from src.models.billing import (
-    LLMUsageBilling, 
-    BillingPeriod, 
-    BillingAlert, 
-    generate_billing_id
+    BillingAlert,
+    BillingPeriod,
+    LLMUsageBilling,
+    generate_billing_id,
 )
 
 
@@ -30,7 +32,7 @@ class TestLLMUsageBilling:
         prompt_tokens = 100
         completion_tokens = 50
         cost_usd = Decimal("0.002500")
-        
+
         # Act
         billing = LLMUsageBilling(
             execution_id=execution_id,
@@ -39,9 +41,9 @@ class TestLLMUsageBilling:
             model_provider=model_provider,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            cost_usd=cost_usd
+            cost_usd=cost_usd,
         )
-        
+
         # Assert
         assert billing.execution_id == execution_id
         assert billing.execution_type == execution_type
@@ -52,9 +54,9 @@ class TestLLMUsageBilling:
         assert billing.cost_usd == cost_usd
         # Note: SQLAlchemy defaults are applied when saved to database
         # Here we test the column default configurations
-        assert LLMUsageBilling.__table__.columns['total_tokens'].default.arg == 0
-        assert LLMUsageBilling.__table__.columns['status'].default.arg == "success"
-        assert LLMUsageBilling.__table__.columns['request_count'].default.arg == 1
+        assert LLMUsageBilling.__table__.columns["total_tokens"].default.arg == 0
+        assert LLMUsageBilling.__table__.columns["status"].default.arg == "success"
+        assert LLMUsageBilling.__table__.columns["request_count"].default.arg == 1
 
     def test_llm_usage_billing_with_all_fields(self):
         """Test LLMUsageBilling model creation with all fields."""
@@ -76,7 +78,7 @@ class TestLLMUsageBilling:
         group_id = "group-789"
         user_email = "user@example.com"
         billing_metadata = {"project": "test", "tag": "production"}
-        
+
         # Act
         billing = LLMUsageBilling(
             execution_id=execution_id,
@@ -95,9 +97,9 @@ class TestLLMUsageBilling:
             status=status,
             group_id=group_id,
             user_email=user_email,
-            billing_metadata=billing_metadata
+            billing_metadata=billing_metadata,
         )
-        
+
         # Assert
         assert billing.execution_name == execution_name
         assert billing.total_tokens == total_tokens
@@ -119,7 +121,7 @@ class TestLLMUsageBilling:
         model_provider = "openai"
         status = "error"
         error_message = "API rate limit exceeded"
-        
+
         # Act
         billing = LLMUsageBilling(
             execution_id=execution_id,
@@ -127,9 +129,9 @@ class TestLLMUsageBilling:
             model_name=model_name,
             model_provider=model_provider,
             status=status,
-            error_message=error_message
+            error_message=error_message,
         )
-        
+
         # Assert
         assert billing.status == status
         assert billing.error_message == error_message
@@ -143,20 +145,25 @@ class TestLLMUsageBilling:
             execution_id="exec-123",
             execution_type="crew",
             model_name="gpt-4",
-            model_provider="openai"
+            model_provider="openai",
         )
-        
+
         # Assert
         # Note: SQLAlchemy defaults are applied when saved to database
         # Here we test that the column defaults are configured correctly
-        assert LLMUsageBilling.__table__.columns['prompt_tokens'].default.arg == 0
-        assert LLMUsageBilling.__table__.columns['completion_tokens'].default.arg == 0
-        assert LLMUsageBilling.__table__.columns['total_tokens'].default.arg == 0
-        assert LLMUsageBilling.__table__.columns['request_count'].default.arg == 1
-        assert LLMUsageBilling.__table__.columns['status'].default.arg == "success"
+        assert LLMUsageBilling.__table__.columns["prompt_tokens"].default.arg == 0
+        assert LLMUsageBilling.__table__.columns["completion_tokens"].default.arg == 0
+        assert LLMUsageBilling.__table__.columns["total_tokens"].default.arg == 0
+        assert LLMUsageBilling.__table__.columns["request_count"].default.arg == 1
+        assert LLMUsageBilling.__table__.columns["status"].default.arg == "success"
         # Check that billing_metadata default is callable (the dict function)
-        assert callable(LLMUsageBilling.__table__.columns['billing_metadata'].default.arg)
-        assert LLMUsageBilling.__table__.columns['billing_metadata'].default.arg.__name__ == 'dict'
+        assert callable(
+            LLMUsageBilling.__table__.columns["billing_metadata"].default.arg
+        )
+        assert (
+            LLMUsageBilling.__table__.columns["billing_metadata"].default.arg.__name__
+            == "dict"
+        )
 
     def test_llm_usage_billing_table_name(self):
         """Test that the table name is correctly set."""
@@ -167,19 +174,19 @@ class TestLLMUsageBilling:
         """Test that the model has the expected database indexes."""
         # Act
         indexes = LLMUsageBilling.__table_args__
-        
+
         # Assert
         assert len(indexes) == 4
-        
+
         # Check index names
-        index_names = [index.name for index in indexes if hasattr(index, 'name')]
+        index_names = [index.name for index in indexes if hasattr(index, "name")]
         expected_indexes = [
-            'idx_billing_group_date',
-            'idx_billing_user_date',
-            'idx_billing_execution_model',
-            'idx_billing_provider_date'
+            "idx_billing_group_date",
+            "idx_billing_user_date",
+            "idx_billing_execution_model",
+            "idx_billing_provider_date",
         ]
-        
+
         for expected_index in expected_indexes:
             assert expected_index in index_names
 
@@ -194,23 +201,23 @@ class TestBillingPeriod:
         period_end = datetime(2023, 1, 31, tzinfo=timezone.utc)
         period_type = "monthly"
         group_id = "group-123"
-        
+
         # Act
         period = BillingPeriod(
             period_start=period_start,
             period_end=period_end,
             period_type=period_type,
-            group_id=group_id
+            group_id=group_id,
         )
-        
+
         # Assert
         assert period.period_start == period_start
         assert period.period_end == period_end
         assert period.period_type == period_type
         assert period.group_id == group_id
         # Note: SQLAlchemy defaults are applied when saved to database
-        assert BillingPeriod.__table__.columns['status'].default.arg == "active"
-        assert BillingPeriod.__table__.columns['total_cost_usd'].default.arg == 0.00
+        assert BillingPeriod.__table__.columns["status"].default.arg == "active"
+        assert BillingPeriod.__table__.columns["total_cost_usd"].default.arg == 0.00
 
     def test_billing_period_with_aggregated_data(self):
         """Test BillingPeriod model with aggregated billing data."""
@@ -224,9 +231,9 @@ class TestBillingPeriod:
         total_requests = 100
         model_breakdown = {
             "gpt-4": {"cost": 100.00, "tokens": 30000},
-            "gpt-3.5-turbo": {"cost": 25.50, "tokens": 20000}
+            "gpt-3.5-turbo": {"cost": 25.50, "tokens": 20000},
         }
-        
+
         # Act
         period = BillingPeriod(
             period_start=period_start,
@@ -236,9 +243,9 @@ class TestBillingPeriod:
             total_prompt_tokens=total_prompt_tokens,
             total_completion_tokens=total_completion_tokens,
             total_requests=total_requests,
-            model_breakdown=model_breakdown
+            model_breakdown=model_breakdown,
         )
-        
+
         # Assert
         assert period.total_cost_usd == total_cost_usd
         assert period.total_tokens == total_tokens
@@ -253,15 +260,15 @@ class TestBillingPeriod:
         period_start = datetime(2023, 1, 1, tzinfo=timezone.utc)
         period_end = datetime(2023, 1, 31, tzinfo=timezone.utc)
         closed_at = datetime(2023, 2, 1, tzinfo=timezone.utc)
-        
+
         # Act - Create closed period
         period = BillingPeriod(
             period_start=period_start,
             period_end=period_end,
             status="closed",
-            closed_at=closed_at
+            closed_at=closed_at,
         )
-        
+
         # Assert
         assert period.status == "closed"
         assert period.closed_at == closed_at
@@ -270,13 +277,13 @@ class TestBillingPeriod:
         """Test different billing period types."""
         period_start = datetime(2023, 1, 1, tzinfo=timezone.utc)
         period_end = datetime(2023, 1, 31, tzinfo=timezone.utc)
-        
+
         # Test different period types
         for period_type in ["daily", "weekly", "monthly", "custom"]:
             period = BillingPeriod(
                 period_start=period_start,
                 period_end=period_end,
-                period_type=period_type
+                period_type=period_type,
             )
             assert period.period_type == period_type
 
@@ -289,17 +296,14 @@ class TestBillingPeriod:
         """Test that the model has the expected database indexes."""
         # Act
         indexes = BillingPeriod.__table_args__
-        
+
         # Assert
         assert len(indexes) == 2
-        
+
         # Check index names
-        index_names = [index.name for index in indexes if hasattr(index, 'name')]
-        expected_indexes = [
-            'idx_period_group_dates',
-            'idx_period_status_date'
-        ]
-        
+        index_names = [index.name for index in indexes if hasattr(index, "name")]
+        expected_indexes = ["idx_period_group_dates", "idx_period_status_date"]
+
         for expected_index in expected_indexes:
             assert expected_index in index_names
 
@@ -315,16 +319,16 @@ class TestBillingAlert:
         threshold_value = Decimal("100.00")
         threshold_period = "monthly"
         group_id = "group-123"
-        
+
         # Act
         alert = BillingAlert(
             alert_name=alert_name,
             alert_type=alert_type,
             threshold_value=threshold_value,
             threshold_period=threshold_period,
-            group_id=group_id
+            group_id=group_id,
         )
-        
+
         # Assert
         assert alert.alert_name == alert_name
         assert alert.alert_type == alert_type
@@ -332,8 +336,8 @@ class TestBillingAlert:
         assert alert.threshold_period == threshold_period
         assert alert.group_id == group_id
         # Note: SQLAlchemy defaults are applied when saved to database
-        assert BillingAlert.__table__.columns['is_active'].default.arg == "true"
-        assert BillingAlert.__table__.columns['current_value'].default.arg == 0.00
+        assert BillingAlert.__table__.columns["is_active"].default.arg == "true"
+        assert BillingAlert.__table__.columns["current_value"].default.arg == 0.00
 
     def test_billing_alert_with_notifications(self):
         """Test BillingAlert model with notification settings."""
@@ -345,7 +349,7 @@ class TestBillingAlert:
         user_email = "user@company.com"
         current_value = Decimal("750000")
         last_triggered = datetime(2023, 1, 15, tzinfo=timezone.utc)
-        
+
         # Act
         alert = BillingAlert(
             alert_name=alert_name,
@@ -354,9 +358,9 @@ class TestBillingAlert:
             notification_emails=notification_emails,
             user_email=user_email,
             current_value=current_value,
-            last_triggered=last_triggered
+            last_triggered=last_triggered,
         )
-        
+
         # Assert
         assert alert.notification_emails == notification_emails
         assert alert.user_email == user_email
@@ -366,13 +370,13 @@ class TestBillingAlert:
     def test_billing_alert_types(self):
         """Test different billing alert types."""
         threshold_value = Decimal("100.00")
-        
+
         # Test different alert types
         for alert_type in ["cost_threshold", "token_threshold", "usage_spike"]:
             alert = BillingAlert(
                 alert_name=f"Test {alert_type}",
                 alert_type=alert_type,
-                threshold_value=threshold_value
+                threshold_value=threshold_value,
             )
             assert alert.alert_type == alert_type
 
@@ -380,14 +384,14 @@ class TestBillingAlert:
         """Test different billing alert periods."""
         alert_name = "Test Alert"
         threshold_value = Decimal("50.00")
-        
+
         # Test different periods
         for period in ["daily", "weekly", "monthly"]:
             alert = BillingAlert(
                 alert_name=alert_name,
                 alert_type="cost_threshold",
                 threshold_value=threshold_value,
-                threshold_period=period
+                threshold_period=period,
             )
             assert alert.threshold_period == period
 
@@ -398,9 +402,9 @@ class TestBillingAlert:
             alert_name="Inactive Alert",
             alert_type="cost_threshold",
             threshold_value=Decimal("200.00"),
-            is_active="false"
+            is_active="false",
         )
-        
+
         # Assert
         assert alert.is_active == "false"
 
@@ -410,17 +414,17 @@ class TestBillingAlert:
         alert_metadata = {
             "description": "Alert for production environment",
             "slack_webhook": "https://hooks.slack.com/webhook",
-            "escalation_level": "high"
+            "escalation_level": "high",
         }
-        
+
         # Act
         alert = BillingAlert(
             alert_name="Production Alert",
             alert_type="cost_threshold",
             threshold_value=Decimal("500.00"),
-            alert_metadata=alert_metadata
+            alert_metadata=alert_metadata,
         )
-        
+
         # Assert
         assert alert.alert_metadata == alert_metadata
         assert alert.alert_metadata["escalation_level"] == "high"
@@ -439,7 +443,7 @@ class TestGenerateBillingId:
         # Act
         id1 = generate_billing_id()
         id2 = generate_billing_id()
-        
+
         # Assert
         assert id1 is not None
         assert id2 is not None
@@ -453,7 +457,7 @@ class TestGenerateBillingId:
         """Test that generate_billing_id generates unique IDs."""
         # Act
         ids = [generate_billing_id() for _ in range(10)]
-        
+
         # Assert
         assert len(set(ids)) == 10  # All IDs should be unique
 
@@ -465,24 +469,24 @@ class TestBillingModelsIntegration:
         """Test that billing models can reference the same execution."""
         # Arrange
         execution_id = "exec-integration-test"
-        
+
         # Act - Create billing records for the same execution
         billing1 = LLMUsageBilling(
             execution_id=execution_id,
             execution_type="crew",
             model_name="gpt-4",
             model_provider="openai",
-            cost_usd=Decimal("0.10")
+            cost_usd=Decimal("0.10"),
         )
-        
+
         billing2 = LLMUsageBilling(
             execution_id=execution_id,
             execution_type="crew",
             model_name="claude-3-sonnet",
             model_provider="anthropic",
-            cost_usd=Decimal("0.08")
+            cost_usd=Decimal("0.08"),
         )
-        
+
         # Assert
         assert billing1.execution_id == billing2.execution_id
         assert billing1.model_name != billing2.model_name
@@ -493,15 +497,15 @@ class TestBillingModelsIntegration:
         # Arrange
         period_start = datetime(2023, 3, 1, tzinfo=timezone.utc)
         period_end = datetime(2023, 3, 31, tzinfo=timezone.utc)
-        
+
         # Simulate aggregated data from multiple billing records
         total_cost = Decimal("245.75")
         model_costs = {
             "gpt-4": {"cost": 150.00, "requests": 50, "tokens": 75000},
             "gpt-3.5-turbo": {"cost": 75.25, "requests": 100, "tokens": 150000},
-            "claude-3-sonnet": {"cost": 20.50, "requests": 25, "tokens": 30000}
+            "claude-3-sonnet": {"cost": 20.50, "requests": 25, "tokens": 30000},
         }
-        
+
         # Act
         period = BillingPeriod(
             period_start=period_start,
@@ -511,9 +515,9 @@ class TestBillingModelsIntegration:
             total_tokens=255000,
             total_requests=175,
             model_breakdown=model_costs,
-            group_id="production-group"
+            group_id="production-group",
         )
-        
+
         # Assert
         assert period.total_cost_usd == total_cost
         assert period.total_tokens == 255000
@@ -530,9 +534,9 @@ class TestBillingModelsIntegration:
             threshold_value=Decimal("500.00"),
             threshold_period="monthly",
             current_value=Decimal("450.00"),
-            group_id="production"
+            group_id="production",
         )
-        
+
         # Test token threshold alert
         token_alert = BillingAlert(
             alert_name="Token Usage Alert",
@@ -540,9 +544,9 @@ class TestBillingModelsIntegration:
             threshold_value=Decimal("1000000"),
             threshold_period="weekly",
             current_value=Decimal("850000"),
-            user_email="heavy-user@company.com"
+            user_email="heavy-user@company.com",
         )
-        
+
         # Assert
         assert cost_alert.current_value < cost_alert.threshold_value
         assert token_alert.current_value < token_alert.threshold_value

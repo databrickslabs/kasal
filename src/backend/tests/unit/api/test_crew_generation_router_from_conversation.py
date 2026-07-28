@@ -1,6 +1,7 @@
 """Smoke tests for the answer-mode "Save to catalog" endpoint:
 POST /crew/from-conversation -> CrewGenerationService.synthesize_crew_from_conversation.
 """
+
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -25,7 +26,9 @@ async def test_returns_synthesized_agents_and_tasks():
     svc = Mock()
     svc.synthesize_crew_from_conversation = AsyncMock(return_value=created)
 
-    with patch("src.api.crew_generation_router.CrewGenerationService", return_value=svc):
+    with patch(
+        "src.api.crew_generation_router.CrewGenerationService", return_value=svc
+    ):
         resp = await create_crew_from_conversation(
             request=CrewFromConversationRequest(session_id="sess-1", model="m1"),
             group_context=_gc(),
@@ -48,7 +51,9 @@ async def test_empty_result_yields_empty_lists():
     svc = Mock()
     svc.synthesize_crew_from_conversation = AsyncMock(return_value={})
 
-    with patch("src.api.crew_generation_router.CrewGenerationService", return_value=svc):
+    with patch(
+        "src.api.crew_generation_router.CrewGenerationService", return_value=svc
+    ):
         resp = await create_crew_from_conversation(
             request=CrewFromConversationRequest(session_id="sess-1"),
             group_context=_gc(),

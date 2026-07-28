@@ -3,14 +3,13 @@ Unit tests for schemas seeding module.
 
 Tests the functionality of seeding schema definitions into the database.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 from datetime import datetime
-from src.seeds.schemas import (
-    SAMPLE_SCHEMAS,
-    seed_async,
-    seed
-)
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
+
+from src.seeds.schemas import SAMPLE_SCHEMAS, seed, seed_async
 
 
 @pytest.fixture
@@ -46,11 +45,9 @@ def sample_schema_data():
         "schema_type": "schema",
         "schema_definition": {
             "type": "object",
-            "properties": {
-                "title": {"type": "string"}
-            },
-            "required": ["title"]
-        }
+            "properties": {"title": {"type": "string"}},
+            "required": ["title"],
+        },
     }
 
 
@@ -78,14 +75,14 @@ class TestSampleSchemas:
             definition = schema["schema_definition"]
             properties = definition.get("properties", {})
             for field in definition.get("required", []):
-                assert field in properties, \
-                    f"'{schema['name']}' requires undeclared field '{field}'"
+                assert (
+                    field in properties
+                ), f"'{schema['name']}' requires undeclared field '{field}'"
 
     def test_operation_result_schema(self):
         """Test OperationResult schema definition (action outcomes)."""
         op_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "OperationResult"),
-            None
+            (s for s in SAMPLE_SCHEMAS if s["name"] == "OperationResult"), None
         )
 
         assert op_schema is not None
@@ -98,8 +95,7 @@ class TestSampleSchemas:
     def test_data_load_result_schema(self):
         """Test DataLoadResult schema definition (ETL row counts)."""
         load_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "DataLoadResult"),
-            None
+            (s for s in SAMPLE_SCHEMAS if s["name"] == "DataLoadResult"), None
         )
 
         assert load_schema is not None
@@ -111,8 +107,7 @@ class TestSampleSchemas:
     def test_support_ticket_triage_schema(self):
         """Test SupportTicketTriage schema definition (classification/routing)."""
         triage_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "SupportTicketTriage"),
-            None
+            (s for s in SAMPLE_SCHEMAS if s["name"] == "SupportTicketTriage"), None
         )
 
         assert triage_schema is not None
@@ -124,8 +119,7 @@ class TestSampleSchemas:
     def test_sentiment_analysis_schema(self):
         """Test SentimentAnalysis schema definition."""
         sentiment_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "SentimentAnalysis"),
-            None
+            (s for s in SAMPLE_SCHEMAS if s["name"] == "SentimentAnalysis"), None
         )
 
         assert sentiment_schema is not None
@@ -137,8 +131,7 @@ class TestSampleSchemas:
     def test_intent_classification_schema(self):
         """Test IntentClassification schema definition."""
         intent_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "IntentClassification"),
-            None
+            (s for s in SAMPLE_SCHEMAS if s["name"] == "IntentClassification"), None
         )
 
         assert intent_schema is not None
@@ -150,8 +143,7 @@ class TestSampleSchemas:
     def test_evaluation_schema(self):
         """Test Evaluation schema definition."""
         eval_schema = next(
-            (s for s in SAMPLE_SCHEMAS if s["name"] == "Evaluation"),
-            None
+            (s for s in SAMPLE_SCHEMAS if s["name"] == "Evaluation"), None
         )
 
         assert eval_schema is not None
@@ -163,11 +155,22 @@ class TestSampleSchemas:
     def test_all_schema_names(self):
         """Test all expected schema names are present."""
         expected_names = [
-            "OperationResult", "DataLoadResult", "SupportTicketTriage",
-            "SentimentAnalysis", "IntentClassification", "CustomerFeedback",
-            "WebSearchResult", "ApprovalDecision", "LeadQualification",
-            "ResumeScreening", "Evaluation", "RiskAssessment",
-            "ContentModeration", "FraudCheck", "ExpenseApproval", "InvoiceData",
+            "OperationResult",
+            "DataLoadResult",
+            "SupportTicketTriage",
+            "SentimentAnalysis",
+            "IntentClassification",
+            "CustomerFeedback",
+            "WebSearchResult",
+            "ApprovalDecision",
+            "LeadQualification",
+            "ResumeScreening",
+            "Evaluation",
+            "RiskAssessment",
+            "ContentModeration",
+            "FraudCheck",
+            "ExpenseApproval",
+            "InvoiceData",
         ]
 
         actual_names = [s["name"] for s in SAMPLE_SCHEMAS]
@@ -180,11 +183,19 @@ class TestAsyncSeeding:
     """Test async schema seeding functionality."""
 
     @pytest.mark.asyncio
-    @patch('src.seeds.schemas.async_session_factory')
-    @patch('src.seeds.schemas.select')
-    @patch('src.seeds.schemas.Schema')
-    @patch('src.seeds.schemas.datetime')
-    async def test_seed_async_new_schemas(self, mock_datetime, mock_schema_class, mock_select, mock_session_factory, mock_session, sample_schema_data):
+    @patch("src.seeds.schemas.async_session_factory")
+    @patch("src.seeds.schemas.select")
+    @patch("src.seeds.schemas.Schema")
+    @patch("src.seeds.schemas.datetime")
+    async def test_seed_async_new_schemas(
+        self,
+        mock_datetime,
+        mock_schema_class,
+        mock_select,
+        mock_session_factory,
+        mock_session,
+        sample_schema_data,
+    ):
         """Test async seeding with new schemas."""
         # Mock datetime
         mock_now = datetime(2023, 1, 1, 12, 0, 0)
@@ -206,7 +217,7 @@ class TestAsyncSeeding:
         mock_schema_class.return_value = mock_schema_instance
 
         # Patch SAMPLE_SCHEMAS with our test data
-        with patch('src.seeds.schemas.SAMPLE_SCHEMAS', [sample_schema_data]):
+        with patch("src.seeds.schemas.SAMPLE_SCHEMAS", [sample_schema_data]):
             await seed_async()
 
         # Verify schema was added
@@ -214,9 +225,16 @@ class TestAsyncSeeding:
         mock_session.commit.assert_called()
 
     @pytest.mark.asyncio
-    @patch('src.seeds.schemas.async_session_factory')
-    @patch('src.seeds.schemas.select')
-    async def test_seed_async_existing_schemas(self, mock_select, mock_session_factory, mock_session, mock_schema_model, sample_schema_data):
+    @patch("src.seeds.schemas.async_session_factory")
+    @patch("src.seeds.schemas.select")
+    async def test_seed_async_existing_schemas(
+        self,
+        mock_select,
+        mock_session_factory,
+        mock_session,
+        mock_schema_model,
+        sample_schema_data,
+    ):
         """Test async seeding with existing schemas."""
         # Mock session factory context manager
         mock_context = AsyncMock()
@@ -230,7 +248,7 @@ class TestAsyncSeeding:
         mock_session.execute.return_value = mock_result
 
         # Patch SAMPLE_SCHEMAS with our test data
-        with patch('src.seeds.schemas.SAMPLE_SCHEMAS', [sample_schema_data]):
+        with patch("src.seeds.schemas.SAMPLE_SCHEMAS", [sample_schema_data]):
             await seed_async()
 
         # Verify schema was updated (not added)
@@ -240,9 +258,11 @@ class TestAsyncSeeding:
         mock_session.commit.assert_called()
 
     @pytest.mark.asyncio
-    @patch('src.seeds.schemas.async_session_factory')
-    @patch('src.seeds.schemas.select')
-    async def test_seed_async_error_handling(self, mock_select, mock_session_factory, mock_session, sample_schema_data):
+    @patch("src.seeds.schemas.async_session_factory")
+    @patch("src.seeds.schemas.select")
+    async def test_seed_async_error_handling(
+        self, mock_select, mock_session_factory, mock_session, sample_schema_data
+    ):
         """Test async seeding with error handling."""
         # Mock session factory context manager
         mock_context = AsyncMock()
@@ -254,7 +274,7 @@ class TestAsyncSeeding:
         mock_session.execute.side_effect = Exception("Database error")
 
         # Patch SAMPLE_SCHEMAS with our test data
-        with patch('src.seeds.schemas.SAMPLE_SCHEMAS', [sample_schema_data]):
+        with patch("src.seeds.schemas.SAMPLE_SCHEMAS", [sample_schema_data]):
             # Should not raise - errors are logged
             await seed_async()
 
@@ -265,7 +285,7 @@ class TestMainSeedFunction:
     """Test main seed function."""
 
     @pytest.mark.asyncio
-    @patch('src.seeds.schemas.seed_async')
+    @patch("src.seeds.schemas.seed_async")
     async def test_seed_success(self, mock_seed_async):
         """Test successful seed execution."""
         mock_seed_async.return_value = None
@@ -275,7 +295,7 @@ class TestMainSeedFunction:
         mock_seed_async.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch('src.seeds.schemas.seed_async')
+    @patch("src.seeds.schemas.seed_async")
     async def test_seed_error(self, mock_seed_async):
         """Test seed execution with error."""
         mock_seed_async.side_effect = Exception("Seeding error")
@@ -295,7 +315,9 @@ class TestSchemaValidation:
 
         for schema in SAMPLE_SCHEMAS:
             for field in required_fields:
-                assert field in schema, f"Schema '{schema.get('name', 'unknown')}' missing required field '{field}'"
+                assert (
+                    field in schema
+                ), f"Schema '{schema.get('name', 'unknown')}' missing required field '{field}'"
 
     def test_schema_definitions_are_valid_json_schema(self):
         """Test that schema definitions are valid JSON schema format."""
@@ -303,23 +325,33 @@ class TestSchemaValidation:
             schema_def = schema["schema_definition"]
 
             # Must have type
-            assert "type" in schema_def, f"Schema '{schema['name']}' definition missing 'type'"
+            assert (
+                "type" in schema_def
+            ), f"Schema '{schema['name']}' definition missing 'type'"
 
             # Must be object type
-            assert schema_def["type"] == "object", f"Schema '{schema['name']}' must be object type"
+            assert (
+                schema_def["type"] == "object"
+            ), f"Schema '{schema['name']}' must be object type"
 
             # Must have properties
-            assert "properties" in schema_def, f"Schema '{schema['name']}' missing 'properties'"
+            assert (
+                "properties" in schema_def
+            ), f"Schema '{schema['name']}' missing 'properties'"
             assert isinstance(schema_def["properties"], dict)
 
             # Each property should have a type
             for prop_name, prop_def in schema_def["properties"].items():
-                assert "type" in prop_def, f"Property '{prop_name}' in schema '{schema['name']}' missing type"
+                assert (
+                    "type" in prop_def
+                ), f"Property '{prop_name}' in schema '{schema['name']}' missing type"
 
     def test_schema_types_are_valid(self):
         """Test that all schema types are 'schema'."""
         for schema in SAMPLE_SCHEMAS:
-            assert schema["schema_type"] == "schema", f"Schema '{schema['name']}' should have type 'schema'"
+            assert (
+                schema["schema_type"] == "schema"
+            ), f"Schema '{schema['name']}' should have type 'schema'"
 
     def test_required_fields_exist_in_properties(self):
         """Test that required fields exist in properties."""
@@ -328,8 +360,9 @@ class TestSchemaValidation:
             if "required" in schema_def:
                 properties = schema_def.get("properties", {})
                 for required_field in schema_def["required"]:
-                    assert required_field in properties, \
-                        f"Required field '{required_field}' not in properties of '{schema['name']}'"
+                    assert (
+                        required_field in properties
+                    ), f"Required field '{required_field}' not in properties of '{schema['name']}'"
 
     def test_array_properties_have_items(self):
         """Test that array properties have items definition."""
@@ -339,8 +372,9 @@ class TestSchemaValidation:
 
             for prop_name, prop_def in properties.items():
                 if prop_def.get("type") == "array":
-                    assert "items" in prop_def, \
-                        f"Array property '{prop_name}' in '{schema['name']}' missing 'items'"
+                    assert (
+                        "items" in prop_def
+                    ), f"Array property '{prop_name}' in '{schema['name']}' missing 'items'"
 
 
 class TestSchemaCount:
@@ -358,5 +392,9 @@ class TestSchemaCount:
     def test_schema_descriptions_not_empty(self):
         """Test that all schemas have non-empty descriptions."""
         for schema in SAMPLE_SCHEMAS:
-            assert schema["description"], f"Schema '{schema['name']}' has empty description"
-            assert len(schema["description"]) > 10, f"Schema '{schema['name']}' description too short"
+            assert schema[
+                "description"
+            ], f"Schema '{schema['name']}' has empty description"
+            assert (
+                len(schema["description"]) > 10
+            ), f"Schema '{schema['name']}' description too short"

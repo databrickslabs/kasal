@@ -3,32 +3,34 @@ Extended tests for databricks_secrets_router.py to cover missing branches.
 Focuses on: create success, update failure, delete success, scopes endpoints,
 legacy endpoints, set_databricks_token, and get_databricks_secrets with auth.
 """
-import pytest
-from unittest.mock import AsyncMock, patch
+
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from src.api.databricks_secrets_router import (
-    get_databricks_secrets,
     create_databricks_secret,
-    update_databricks_secret,
-    delete_databricks_secret,
     create_databricks_secret_scope,
-    get_secrets,
-    set_secret,
-    delete_secret_endpoint,
-    create_secret_scope_endpoint,
-    set_databricks_token,
-    get_legacy_api_keys,
     create_legacy_api_key,
-    update_legacy_api_key,
+    create_secret_scope_endpoint,
+    delete_databricks_secret,
     delete_legacy_api_key,
+    delete_secret_endpoint,
+    get_databricks_secrets,
+    get_legacy_api_keys,
+    get_secrets,
+    set_databricks_token,
+    set_secret,
+    update_databricks_secret,
+    update_legacy_api_key,
 )
+from src.core.exceptions import BadRequestError, KasalError, NotFoundError
 from src.schemas.databricks_secret import (
     DatabricksTokenRequest,
     SecretCreate,
     SecretUpdate,
 )
-from src.core.exceptions import BadRequestError, KasalError, NotFoundError
 
 
 class Ctx:
@@ -46,14 +48,13 @@ def make_config(enabled=True, workspace_url="https://w", scope="sc"):
 
 # ── get_databricks_secrets: enabled config with auth ─────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_get_databricks_secrets_returns_list_when_configured():
     """Returns secrets list when Databricks is configured and auth succeeds."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
     svc.get_databricks_secrets = AsyncMock(
         return_value=[{"name": "key1", "value": "v1"}]
     )
@@ -73,9 +74,7 @@ async def test_get_databricks_secrets_returns_empty_when_auth_fails():
     """Returns empty list when unified auth raises exception."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
 
     with patch(
         "src.utils.databricks_auth.get_auth_context",
@@ -90,9 +89,7 @@ async def test_get_databricks_secrets_returns_empty_when_no_token():
     """Returns empty list when auth context has no token."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
 
     fake_auth = SimpleNamespace(token=None)
     with patch(
@@ -105,14 +102,13 @@ async def test_get_databricks_secrets_returns_empty_when_no_token():
 
 # ── create_databricks_secret ──────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_create_secret_success():
     """create_databricks_secret returns secret dict on success."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
     svc.set_databricks_secret_value = AsyncMock(return_value=True)
 
     out = await create_databricks_secret(
@@ -127,9 +123,7 @@ async def test_create_secret_set_fails_raises_kasal_error():
     """create_databricks_secret raises KasalError when set returns False."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
     svc.set_databricks_secret_value = AsyncMock(return_value=False)
 
     with pytest.raises(KasalError):
@@ -140,14 +134,13 @@ async def test_create_secret_set_fails_raises_kasal_error():
 
 # ── update_databricks_secret ──────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_update_secret_failure_raises_kasal_error():
     """update_databricks_secret raises KasalError when set returns False."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
     svc.set_databricks_secret_value = AsyncMock(return_value=False)
 
     with pytest.raises(KasalError):
@@ -171,14 +164,13 @@ async def test_update_secret_not_configured_raises_bad_request():
 
 # ── delete_databricks_secret ──────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_delete_secret_success():
     """delete_databricks_secret succeeds silently when found."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
     svc.delete_databricks_secret = AsyncMock(return_value=True)
 
     # Should not raise
@@ -187,6 +179,7 @@ async def test_delete_secret_success():
 
 
 # ── create_databricks_secret_scope ────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_create_scope_not_configured_raises_bad_request():
@@ -204,9 +197,7 @@ async def test_create_scope_no_auth_raises_bad_request():
     """create_databricks_secret_scope raises BadRequestError when no auth available."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
 
     with patch(
         "src.utils.databricks_auth.get_auth_context",
@@ -221,9 +212,7 @@ async def test_create_scope_success():
     """create_databricks_secret_scope returns success dict."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
     svc.create_databricks_secret_scope = AsyncMock(return_value=True)
 
     fake_auth = SimpleNamespace(token="tok")
@@ -240,9 +229,7 @@ async def test_create_scope_failure_raises_kasal_error():
     """create_databricks_secret_scope raises KasalError when creation fails."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
     svc.create_databricks_secret_scope = AsyncMock(return_value=False)
 
     fake_auth = SimpleNamespace(token="tok")
@@ -256,14 +243,13 @@ async def test_create_scope_failure_raises_kasal_error():
 
 # ── legacy get_secrets endpoint ───────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_get_secrets_returns_empty_on_exception():
     """get_secrets returns empty list on exception."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.validate_databricks_config = AsyncMock(
-        side_effect=Exception("config error")
-    )
+    svc.validate_databricks_config = AsyncMock(side_effect=Exception("config error"))
 
     out = await get_secrets(group_context=ctx, service=svc)
     assert out == []
@@ -295,6 +281,7 @@ async def test_get_secrets_returns_empty_when_none():
 
 # ── set_secret legacy ─────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_set_secret_success():
     """set_secret returns success dict."""
@@ -303,7 +290,9 @@ async def test_set_secret_success():
     svc.validate_databricks_config = AsyncMock(return_value=("https://w", "sc"))
     svc.set_databricks_secret_value = AsyncMock(return_value=True)
 
-    out = await set_secret("mykey", SecretUpdate(value="v"), group_context=ctx, service=svc)
+    out = await set_secret(
+        "mykey", SecretUpdate(value="v"), group_context=ctx, service=svc
+    )
     assert out["status"] == "success"
 
 
@@ -320,6 +309,7 @@ async def test_set_secret_failure_raises_kasal_error():
 
 
 # ── delete_secret_endpoint legacy ────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_delete_secret_endpoint_success():
@@ -345,6 +335,7 @@ async def test_delete_secret_endpoint_not_found_raises():
 
 
 # ── create_secret_scope_endpoint legacy ──────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_create_secret_scope_endpoint_success():
@@ -397,18 +388,19 @@ async def test_create_secret_scope_endpoint_failure_raises():
 
 # ── set_databricks_token ──────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_set_databricks_token_success():
     """set_databricks_token returns success dict."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
     svc.set_databricks_token = AsyncMock(return_value=True)
 
     out = await set_databricks_token(
-        DatabricksTokenRequest(workspace_url="https://w", token="mytoken"), group_context=ctx, service=svc
+        DatabricksTokenRequest(workspace_url="https://w", token="mytoken"),
+        group_context=ctx,
+        service=svc,
     )
     assert out["status"] == "success"
 
@@ -422,7 +414,9 @@ async def test_set_databricks_token_not_configured_raises():
 
     with pytest.raises(BadRequestError):
         await set_databricks_token(
-            DatabricksTokenRequest(workspace_url="https://w", token="tok"), group_context=ctx, service=svc
+            DatabricksTokenRequest(workspace_url="https://w", token="tok"),
+            group_context=ctx,
+            service=svc,
         )
 
 
@@ -431,18 +425,19 @@ async def test_set_databricks_token_failure_raises_kasal_error():
     """set_databricks_token raises KasalError when service fails."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
     svc.set_databricks_token = AsyncMock(return_value=False)
 
     with pytest.raises(KasalError):
         await set_databricks_token(
-            DatabricksTokenRequest(workspace_url="https://w", token="tok"), group_context=ctx, service=svc
+            DatabricksTokenRequest(workspace_url="https://w", token="tok"),
+            group_context=ctx,
+            service=svc,
         )
 
 
 # ── legacy API key endpoints ──────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_get_legacy_api_keys_delegates():
@@ -460,9 +455,7 @@ async def test_create_legacy_api_key_delegates():
     """create_legacy_api_key delegates to create_databricks_secret."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
     svc.set_databricks_secret_value = AsyncMock(return_value=True)
 
     out = await create_legacy_api_key(
@@ -476,9 +469,7 @@ async def test_update_legacy_api_key_delegates():
     """update_legacy_api_key delegates to update_databricks_secret."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
     svc.set_databricks_secret_value = AsyncMock(return_value=True)
 
     out = await update_legacy_api_key(
@@ -492,9 +483,7 @@ async def test_delete_legacy_api_key_delegates():
     """delete_legacy_api_key delegates to delete_databricks_secret."""
     ctx = Ctx()
     svc = AsyncMock()
-    svc.databricks_service.get_databricks_config = AsyncMock(
-        return_value=make_config()
-    )
+    svc.databricks_service.get_databricks_config = AsyncMock(return_value=make_config())
     svc.delete_databricks_secret = AsyncMock(return_value=True)
 
     await delete_legacy_api_key("mykey", group_context=ctx, service=svc)

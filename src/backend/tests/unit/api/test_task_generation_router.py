@@ -4,10 +4,11 @@ Unit tests for task generation API router.
 Tests the /task-generation/generate-task POST endpoint with mocked
 TaskGenerationService and dependency overrides.
 """
+
 import json
-import pytest
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -312,10 +313,13 @@ class TestSuggestGuardrail:
         app.dependency_overrides[get_smart_db_session] = override_session
         mock_task_service.suggest_guardrail.return_value = "Must be valid."
 
-        with patch(
-            "src.api.task_generation_router.TaskGenerationService",
-            return_value=mock_task_service,
-        ), patch("src.utils.user_context.UserContext") as MockUC:
+        with (
+            patch(
+                "src.api.task_generation_router.TaskGenerationService",
+                return_value=mock_task_service,
+            ),
+            patch("src.utils.user_context.UserContext") as MockUC,
+        ):
             resp = TestClient(app).post(
                 "/task-generation/suggest-guardrail", json={"description": "d"}
             )

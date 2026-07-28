@@ -1,20 +1,23 @@
 """Tests for LakebaseConnectionService.generate_credentials - provisioned + autoscaling fallback."""
-import sys
+
 import os
+import sys
 import uuid
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 
 @pytest.fixture
 def service():
     from src.services.databricks.lakebase.connection import LakebaseConnectionService
+
     svc = LakebaseConnectionService(user_token="tok", user_email="u@example.com")
     return svc
 
 
 # ---- generate_credentials ----
+
 
 @pytest.mark.asyncio
 async def test_generate_credentials_provisioned_success(service):
@@ -35,7 +38,9 @@ async def test_generate_credentials_fallback_to_autoscaling(service):
     """generate_credentials falls back to PostgresAPI when provisioned not found."""
     mock_w = MagicMock()
     # Provisioned raises 'not found'
-    mock_w.database.generate_database_credential.side_effect = Exception("instance not found")
+    mock_w.database.generate_database_credential.side_effect = Exception(
+        "instance not found"
+    )
 
     # Autoscaling endpoint and credential
     ep = MagicMock()
@@ -59,7 +64,9 @@ async def test_generate_credentials_fallback_to_autoscaling(service):
 async def test_generate_credentials_provisioned_non_not_found_error(service):
     """generate_credentials raises if provisioned error is not 'not found'."""
     mock_w = MagicMock()
-    mock_w.database.generate_database_credential.side_effect = RuntimeError("server error 500")
+    mock_w.database.generate_database_credential.side_effect = RuntimeError(
+        "server error 500"
+    )
     service.get_workspace_client = AsyncMock(return_value=mock_w)
 
     with pytest.raises(RuntimeError, match="server error 500"):
@@ -87,7 +94,9 @@ async def test_generate_credentials_autoscaling_failure(service):
     ep = MagicMock()
     ep.name = "projects/proj/branches/production/endpoints/ep1"
     mock_w.postgres.list_endpoints.return_value = [ep]
-    mock_w.postgres.generate_database_credential.side_effect = RuntimeError("auth failure")
+    mock_w.postgres.generate_database_credential.side_effect = RuntimeError(
+        "auth failure"
+    )
 
     service.get_workspace_client = AsyncMock(return_value=mock_w)
 
@@ -99,7 +108,9 @@ async def test_generate_credentials_autoscaling_failure(service):
 async def test_generate_credentials_not_found_case_insensitive(service):
     """generate_credentials treats 'NOT_FOUND' (uppercase) as fallback trigger."""
     mock_w = MagicMock()
-    mock_w.database.generate_database_credential.side_effect = Exception("NOT_FOUND: instance xyz")
+    mock_w.database.generate_database_credential.side_effect = Exception(
+        "NOT_FOUND: instance xyz"
+    )
 
     ep = MagicMock()
     ep.name = "projects/xyz/branches/production/endpoints/ep1"

@@ -4,19 +4,21 @@ Unit tests for execution workflow functionality.
 Tests the core execution workflow components including
 service methods, status management, and execution logic.
 """
-import pytest
-import uuid
+
 import asyncio
 import json
-from datetime import datetime, UTC
-from unittest.mock import AsyncMock, MagicMock, patch, call
-from typing import Dict, Any, List
+import uuid
+from datetime import UTC, datetime
+from typing import Any, Dict, List
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
-from src.services.execution.service import ExecutionService
-from src.schemas.execution import ExecutionStatus, CrewConfig, ExecutionCreateResponse
+import pytest
+
+from src.schemas.execution import CrewConfig, ExecutionCreateResponse, ExecutionStatus
 from src.services.execution.kasal_service import KasalExecutionService
-from src.services.execution.status import ExecutionStatusService
 from src.services.execution.naming import ExecutionNameService
+from src.services.execution.service import ExecutionService
+from src.services.execution.status import ExecutionStatusService
 from src.utils.user_context import GroupContext
 
 
@@ -41,20 +43,20 @@ def sample_crew_config():
                 "role": "Senior Research Analyst",
                 "goal": "Find and analyze relevant information",
                 "backstory": "You are an expert research analyst",
-                "tools": ["web_search"]
+                "tools": ["web_search"],
             }
         },
         tasks_yaml={
             "research_task": {
                 "description": "Research the latest trends in AI",
                 "agent": "researcher",
-                "expected_output": "A comprehensive report"
+                "expected_output": "A comprehensive report",
             }
         },
         model="gpt-4o-mini",
         execution_type="crew",
         inputs={"topic": "artificial intelligence"},
-        schema_detection_enabled=True
+        schema_detection_enabled=True,
     )
 
 
@@ -68,25 +70,33 @@ def sample_flow_config():
         model="gpt-4o-mini",
         execution_type="flow",
         inputs={"flow_id": str(flow_id)},
-        schema_detection_enabled=False
+        schema_detection_enabled=False,
     )
     # Add flow-specific attributes dynamically
-    setattr(config, 'flow_id', flow_id)
-    setattr(config, 'nodes', [
-        {"id": "start", "type": "agent", "data": {"name": "Start Agent"}},
-        {"id": "task1", "type": "task", "data": {"name": "Process Data"}}
-    ])
-    setattr(config, 'edges', [
-        {"source": "start", "target": "task1", "data": {}}
-    ])
+    setattr(config, "flow_id", flow_id)
+    setattr(
+        config,
+        "nodes",
+        [
+            {"id": "start", "type": "agent", "data": {"name": "Start Agent"}},
+            {"id": "task1", "type": "task", "data": {"name": "Process Data"}},
+        ],
+    )
+    setattr(config, "edges", [{"source": "start", "target": "task1", "data": {}}])
     return config
 
 
 @pytest.fixture
 def execution_service():
     """Create ExecutionService instance for testing."""
-    with patch('src.services.execution.service.ExecutionNameService.create') as mock_name_service, \
-         patch('src.services.execution.service.KasalExecutionService') as mock_crew_service:
+    with (
+        patch(
+            "src.services.execution.service.ExecutionNameService.create"
+        ) as mock_name_service,
+        patch(
+            "src.services.execution.service.KasalExecutionService"
+        ) as mock_crew_service,
+    ):
 
         mock_name_service.return_value = MagicMock(spec=ExecutionNameService)
         mock_crew_service.return_value = MagicMock(spec=KasalExecutionService)
@@ -151,7 +161,10 @@ class TestExecutionService:
     async def test_execute_flow_kasal_error_passthrough(self, execution_service):
         """Test that KasalErrors are re-raised in execute_flow."""
         from src.core.exceptions import KasalError
-        with patch.object(execution_service.kasal_execution_service, 'run_flow_execution') as mock_run_flow:
+
+        with patch.object(
+            execution_service.kasal_execution_service, "run_flow_execution"
+        ) as mock_run_flow:
             mock_run_flow.side_effect = KasalError(detail="Bad request")
 
             with pytest.raises(KasalError):
@@ -163,7 +176,9 @@ class TestExecutionService:
         from src.core.exceptions import KasalError
 
         flow_id = uuid.uuid4()
-        with patch.object(execution_service.kasal_execution_service, 'get_flow_executions_by_flow') as mock_get_executions:
+        with patch.object(
+            execution_service.kasal_execution_service, "get_flow_executions_by_flow"
+        ) as mock_get_executions:
             mock_get_executions.side_effect = Exception("Database error")
 
             with pytest.raises(KasalError) as exc_info:
@@ -181,7 +196,7 @@ class TestExecutionService:
             "none_field": None,
             "bool_field": True,
             "uuid_field": test_uuid,
-            "non_serializable": object()  # This should be converted to string
+            "non_serializable": object(),  # This should be converted to string
         }
 
         sanitized = ExecutionService.sanitize_for_database(test_data)
@@ -208,11 +223,19 @@ class TestExecutionService:
         assert sanitized["bool_field"] is True
 
     @pytest.mark.asyncio
-    async def test_create_execution_success(self, execution_service, sample_crew_config, mock_group_context):
+    async def test_create_execution_success(
+        self, execution_service, sample_crew_config, mock_group_context
+    ):
         """Test successful execution creation."""
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
-             patch.object(execution_service, '_check_for_running_jobs') as mock_check_jobs, \
-             patch('asyncio.create_task') as mock_create_task:
+        with (
+            patch(
+                "src.services.execution.status.ExecutionStatusService"
+            ) as mock_status_service,
+            patch.object(
+                execution_service, "_check_for_running_jobs"
+            ) as mock_check_jobs,
+            patch("asyncio.create_task") as mock_create_task,
+        ):
 
             # Setup mocks
             mock_status_service.create_execution = AsyncMock(return_value=True)
@@ -222,7 +245,9 @@ class TestExecutionService:
             # Mock the execution name service response
             mock_name_response = MagicMock()
             mock_name_response.name = "Test Execution Name"
-            execution_service.execution_name_service.generate_execution_name = AsyncMock(return_value=mock_name_response)
+            execution_service.execution_name_service.generate_execution_name = (
+                AsyncMock(return_value=mock_name_response)
+            )
 
             # Test execution creation
             result = await execution_service.create_execution(
@@ -252,11 +277,19 @@ class TestExecutionService:
             assert mock_create_task.called
 
     @pytest.mark.asyncio
-    async def test_create_execution_with_flow_id(self, execution_service, sample_flow_config, mock_group_context):
+    async def test_create_execution_with_flow_id(
+        self, execution_service, sample_flow_config, mock_group_context
+    ):
         """Test execution creation with flow ID."""
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
-             patch.object(execution_service, '_check_for_running_jobs') as mock_check_jobs, \
-             patch('asyncio.create_task') as mock_create_task:
+        with (
+            patch(
+                "src.services.execution.status.ExecutionStatusService"
+            ) as mock_status_service,
+            patch.object(
+                execution_service, "_check_for_running_jobs"
+            ) as mock_check_jobs,
+            patch("asyncio.create_task") as mock_create_task,
+        ):
 
             mock_status_service.create_execution = AsyncMock(return_value=True)
             mock_check_jobs.return_value = None
@@ -265,7 +298,9 @@ class TestExecutionService:
             # Mock the execution name service response
             mock_name_response = MagicMock()
             mock_name_response.name = "Flow Execution Name"
-            execution_service.execution_name_service.generate_execution_name = AsyncMock(return_value=mock_name_response)
+            execution_service.execution_name_service.generate_execution_name = (
+                AsyncMock(return_value=mock_name_response)
+            )
 
             result = await execution_service.create_execution(
                 sample_flow_config, group_context=mock_group_context
@@ -276,20 +311,28 @@ class TestExecutionService:
             uuid.UUID(result["execution_id"])
 
     @pytest.mark.asyncio
-    async def test_create_execution_no_flow_id_error(self, execution_service, mock_group_context):
+    async def test_create_execution_no_flow_id_error(
+        self, execution_service, mock_group_context
+    ):
         """Test execution creation fails when no flow_id and no flows in DB."""
         flow_config = CrewConfig(
             agents_yaml={},
             tasks_yaml={},
             model="gpt-4o-mini",
-                execution_type="flow",
+            execution_type="flow",
             inputs={},
-            schema_detection_enabled=False
+            schema_detection_enabled=False,
         )
 
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
-             patch.object(execution_service, '_check_for_running_jobs') as mock_check_jobs, \
-             patch('src.db.session.async_session_factory') as mock_session_factory:
+        with (
+            patch(
+                "src.services.execution.status.ExecutionStatusService"
+            ) as mock_status_service,
+            patch.object(
+                execution_service, "_check_for_running_jobs"
+            ) as mock_check_jobs,
+            patch("src.db.session.async_session_factory") as mock_session_factory,
+        ):
 
             mock_status_service.create_execution.return_value = True
             mock_check_jobs.return_value = None
@@ -304,29 +347,40 @@ class TestExecutionService:
             # Mock the execution name service response
             mock_name_response = MagicMock()
             mock_name_response.name = "Flow Execution Name"
-            execution_service.execution_name_service.generate_execution_name = AsyncMock(return_value=mock_name_response)
+            execution_service.execution_name_service.generate_execution_name = (
+                AsyncMock(return_value=mock_name_response)
+            )
 
             from src.core.exceptions import KasalError
+
             with pytest.raises(KasalError):
                 await execution_service.create_execution(
                     flow_config, group_context=mock_group_context
                 )
 
     @pytest.mark.asyncio
-    async def test_create_execution_with_model_none(self, execution_service, mock_group_context):
+    async def test_create_execution_with_model_none(
+        self, execution_service, mock_group_context
+    ):
         """Test execution creation with None model."""
         config = CrewConfig(
             agents_yaml={"agent": {"role": "test"}},
             tasks_yaml={"task": {"description": "test"}},
             model=None,  # None model
-                execution_type="crew",
+            execution_type="crew",
             inputs={},
-            schema_detection_enabled=True
+            schema_detection_enabled=True,
         )
 
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
-             patch.object(execution_service, '_check_for_running_jobs') as mock_check_jobs, \
-             patch('asyncio.create_task') as mock_create_task:
+        with (
+            patch(
+                "src.services.execution.status.ExecutionStatusService"
+            ) as mock_status_service,
+            patch.object(
+                execution_service, "_check_for_running_jobs"
+            ) as mock_check_jobs,
+            patch("asyncio.create_task") as mock_create_task,
+        ):
 
             mock_status_service.create_execution = AsyncMock(return_value=True)
             mock_check_jobs.return_value = None
@@ -335,7 +389,9 @@ class TestExecutionService:
             # Mock the execution name service response
             mock_name_response = MagicMock()
             mock_name_response.name = "Test None Model"
-            execution_service.execution_name_service.generate_execution_name = AsyncMock(return_value=mock_name_response)
+            execution_service.execution_name_service.generate_execution_name = (
+                AsyncMock(return_value=mock_name_response)
+            )
 
             result = await execution_service.create_execution(
                 config, group_context=mock_group_context
@@ -346,13 +402,22 @@ class TestExecutionService:
             assert result["status"] == ExecutionStatus.RUNNING.value
 
     @pytest.mark.asyncio
-    async def test_run_crew_execution_crew_type(self, sample_crew_config, mock_group_context):
+    async def test_run_crew_execution_crew_type(
+        self, sample_crew_config, mock_group_context
+    ):
         """Test crew execution with crew type."""
         execution_id = "test-crew-exec"
 
-        with patch('src.services.execution.service.KasalExecutionService') as mock_crew_service_class:
+        with patch(
+            "src.services.execution.service.KasalExecutionService"
+        ) as mock_crew_service_class:
             mock_crew_service = MagicMock()
-            mock_crew_service.run_crew_execution = AsyncMock(return_value={"status": "completed", "result": {"output": "crew success"}})
+            mock_crew_service.run_crew_execution = AsyncMock(
+                return_value={
+                    "status": "completed",
+                    "result": {"output": "crew success"},
+                }
+            )
             mock_crew_service_class.return_value = mock_crew_service
 
             result = await ExecutionService.run_crew_execution(
@@ -364,13 +429,22 @@ class TestExecutionService:
             mock_crew_service.run_crew_execution.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_run_crew_execution_flow_type(self, sample_flow_config, mock_group_context):
+    async def test_run_crew_execution_flow_type(
+        self, sample_flow_config, mock_group_context
+    ):
         """Test crew execution with flow type."""
         execution_id = "test-flow-exec"
 
-        with patch('src.services.execution.service.KasalExecutionService') as mock_crew_service_class:
+        with patch(
+            "src.services.execution.service.KasalExecutionService"
+        ) as mock_crew_service_class:
             mock_crew_service = MagicMock()
-            mock_crew_service.run_flow_execution = AsyncMock(return_value={"status": "completed", "result": {"output": "flow success"}})
+            mock_crew_service.run_flow_execution = AsyncMock(
+                return_value={
+                    "status": "completed",
+                    "result": {"output": "flow success"},
+                }
+            )
             mock_crew_service_class.return_value = mock_crew_service
 
             result = await ExecutionService.run_crew_execution(
@@ -382,7 +456,9 @@ class TestExecutionService:
             mock_crew_service.run_flow_execution.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_run_crew_execution_other_type(self, sample_crew_config, mock_group_context):
+    async def test_run_crew_execution_other_type(
+        self, sample_crew_config, mock_group_context
+    ):
         """Test crew execution with other execution type."""
         execution_id = "test-other-exec"
 
@@ -412,15 +488,25 @@ class TestExecutionService:
                 pass
 
     @pytest.mark.asyncio
-    async def test_run_crew_execution_with_error_handling(self, sample_crew_config, mock_group_context):
+    async def test_run_crew_execution_with_error_handling(
+        self, sample_crew_config, mock_group_context
+    ):
         """Test crew execution with error handling."""
         execution_id = "test-error-exec"
 
-        with patch('src.services.execution.service.KasalExecutionService') as mock_crew_service_class, \
-             patch('src.services.execution.status.ExecutionStatusService.update_status') as mock_update_status:
+        with (
+            patch(
+                "src.services.execution.service.KasalExecutionService"
+            ) as mock_crew_service_class,
+            patch(
+                "src.services.execution.status.ExecutionStatusService.update_status"
+            ) as mock_update_status,
+        ):
 
             mock_crew_service = MagicMock()
-            mock_crew_service.run_crew_execution = AsyncMock(side_effect=Exception("Execution failed"))
+            mock_crew_service.run_crew_execution = AsyncMock(
+                side_effect=Exception("Execution failed")
+            )
             mock_crew_service_class.return_value = mock_crew_service
             mock_update_status.return_value = True
 
@@ -433,16 +519,29 @@ class TestExecutionService:
             mock_update_status.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_run_crew_execution_with_status_update_failure(self, sample_crew_config, mock_group_context):
+    async def test_run_crew_execution_with_status_update_failure(
+        self, sample_crew_config, mock_group_context
+    ):
         """Test crew execution when status update fails after error."""
         execution_id = "test-status-fail-exec"
 
-        with patch('src.services.execution.service.KasalExecutionService') as mock_crew_service_class, \
-             patch('src.services.execution.status.ExecutionStatusService.update_status', new_callable=AsyncMock) as mock_update_status, \
-             patch('src.services.execution.service.LoggerManager.get_instance') as mock_logger_manager:
+        with (
+            patch(
+                "src.services.execution.service.KasalExecutionService"
+            ) as mock_crew_service_class,
+            patch(
+                "src.services.execution.status.ExecutionStatusService.update_status",
+                new_callable=AsyncMock,
+            ) as mock_update_status,
+            patch(
+                "src.services.execution.service.LoggerManager.get_instance"
+            ) as mock_logger_manager,
+        ):
 
             mock_crew_service = MagicMock()
-            mock_crew_service.run_crew_execution = AsyncMock(side_effect=Exception("Execution failed"))
+            mock_crew_service.run_crew_execution = AsyncMock(
+                side_effect=Exception("Execution failed")
+            )
             mock_crew_service_class.return_value = mock_crew_service
 
             # Create mock logger with critical method
@@ -487,9 +586,13 @@ class TestExecutionService:
         # test used to, left the summary call returning a bare MagicMock: awaiting
         # it raised TypeError, the method's except caught it, and the assertion
         # blew up on `None[...]` rather than reporting the real mismatch.
-        with patch('src.repositories.execution_history_repository.ExecutionHistoryRepository') as mock_repo_class:
+        with patch(
+            "src.repositories.execution_history_repository.ExecutionHistoryRepository"
+        ) as mock_repo_class:
             mock_repo = MagicMock()
-            mock_repo.get_execution_summary_by_job_id = AsyncMock(return_value=mock_execution)
+            mock_repo.get_execution_summary_by_job_id = AsyncMock(
+                return_value=mock_execution
+            )
             mock_repo.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
             mock_repo_class.return_value = mock_repo
 
@@ -507,7 +610,9 @@ class TestExecutionService:
             mock_repo.get_execution_by_job_id.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_get_execution_status_running_skips_full_row_fetch(self, mock_group_context):
+    async def test_get_execution_status_running_skips_full_row_fetch(
+        self, mock_group_context
+    ):
         """An in-flight run is answered from the summary row alone.
 
         This is the point of the two-step read: polling a RUNNING execution must
@@ -524,9 +629,13 @@ class TestExecutionService:
         mock_execution.mlflow_experiment_name = None
         mock_execution.mlflow_evaluation_run_id = None
 
-        with patch('src.repositories.execution_history_repository.ExecutionHistoryRepository') as mock_repo_class:
+        with patch(
+            "src.repositories.execution_history_repository.ExecutionHistoryRepository"
+        ) as mock_repo_class:
             mock_repo = MagicMock()
-            mock_repo.get_execution_summary_by_job_id = AsyncMock(return_value=mock_execution)
+            mock_repo.get_execution_summary_by_job_id = AsyncMock(
+                return_value=mock_execution
+            )
             mock_repo.get_execution_by_job_id = AsyncMock()
             mock_repo_class.return_value = mock_repo
 
@@ -544,7 +653,9 @@ class TestExecutionService:
         execution_id = "non-existent"
         mock_session = AsyncMock()
 
-        with patch('src.repositories.execution_history_repository.ExecutionHistoryRepository') as mock_repo_class:
+        with patch(
+            "src.repositories.execution_history_repository.ExecutionHistoryRepository"
+        ) as mock_repo_class:
             mock_repo = MagicMock()
             mock_repo.get_execution_by_job_id = AsyncMock(return_value=None)
             mock_repo_class.return_value = mock_repo
@@ -567,9 +678,13 @@ class TestExecutionService:
         execution_id = "error-exec"
         mock_session = AsyncMock()
 
-        with patch('src.repositories.execution_history_repository.ExecutionHistoryRepository') as mock_repo_class:
+        with patch(
+            "src.repositories.execution_history_repository.ExecutionHistoryRepository"
+        ) as mock_repo_class:
             mock_repo = MagicMock()
-            mock_repo.get_execution_by_job_id = AsyncMock(side_effect=Exception("Database error"))
+            mock_repo.get_execution_by_job_id = AsyncMock(
+                side_effect=Exception("Database error")
+            )
             mock_repo_class.return_value = mock_repo
 
             service = ExecutionService(session=mock_session)
@@ -607,9 +722,13 @@ class TestExecutionService:
         mock_executions[1].inputs = {}
         mock_executions[1].flow_id = None
 
-        with patch('src.repositories.execution_repository.ExecutionRepository') as mock_repo_class:
+        with patch(
+            "src.repositories.execution_repository.ExecutionRepository"
+        ) as mock_repo_class:
             mock_repo = MagicMock()
-            mock_repo.get_execution_history = AsyncMock(return_value=(mock_executions, len(mock_executions)))
+            mock_repo.get_execution_history = AsyncMock(
+                return_value=(mock_executions, len(mock_executions))
+            )
             mock_repo_class.return_value = mock_repo
 
             service = ExecutionService(session=mock_session)
@@ -632,7 +751,7 @@ class TestExecutionService:
             "status": "RUNNING",
             "created_at": datetime.now(),
             "run_name": "Memory Exec",
-            "output": ""
+            "output": "",
         }
 
         mock_db_execution = MagicMock()
@@ -647,9 +766,13 @@ class TestExecutionService:
         mock_db_execution.inputs = {}
         mock_db_execution.flow_id = None
 
-        with patch('src.repositories.execution_repository.ExecutionRepository') as mock_repo_class:
+        with patch(
+            "src.repositories.execution_repository.ExecutionRepository"
+        ) as mock_repo_class:
             mock_repo = MagicMock()
-            mock_repo.get_execution_history = AsyncMock(return_value=([mock_db_execution], 1))
+            mock_repo.get_execution_history = AsyncMock(
+                return_value=([mock_db_execution], 1)
+            )
             mock_repo_class.return_value = mock_repo
 
             service = ExecutionService(session=mock_session)
@@ -673,7 +796,7 @@ class TestExecutionService:
             "status": "RUNNING",
             "created_at": datetime.now(),
             "run_name": "Memory Only",
-            "output": ""
+            "output": "",
         }
 
         service = ExecutionService(session=None)
@@ -690,11 +813,15 @@ class TestExecutionService:
         execution_id = "test-sync-exec"
         execution_type = "crew"
 
-        with patch('src.services.execution.service.create_and_run_loop') as mock_create_loop:
+        with patch(
+            "src.services.execution.service.create_and_run_loop"
+        ) as mock_create_loop:
             mock_create_loop.return_value = None
 
             # Test crew execution
-            ExecutionService._execute_crew(execution_id, sample_crew_config, execution_type)
+            ExecutionService._execute_crew(
+                execution_id, sample_crew_config, execution_type
+            )
 
             # Verify the loop was created for status update
             mock_create_loop.assert_called_once()
@@ -704,10 +831,14 @@ class TestExecutionService:
         execution_id = "test-sync-flow"
         execution_type = "flow"
 
-        with patch('src.services.execution.service.create_and_run_loop') as mock_create_loop:
+        with patch(
+            "src.services.execution.service.create_and_run_loop"
+        ) as mock_create_loop:
             mock_create_loop.return_value = None
 
-            ExecutionService._execute_crew(execution_id, sample_flow_config, execution_type)
+            ExecutionService._execute_crew(
+                execution_id, sample_flow_config, execution_type
+            )
 
             mock_create_loop.assert_called_once()
 
@@ -716,12 +847,16 @@ class TestExecutionService:
         execution_id = "test-sync-error"
         execution_type = "crew"
 
-        with patch('src.services.execution.service.create_and_run_loop') as mock_create_loop:
+        with patch(
+            "src.services.execution.service.create_and_run_loop"
+        ) as mock_create_loop:
             # create_and_run_loop raises - should be handled gracefully
             mock_create_loop.side_effect = Exception("Loop error")
 
             # Should not raise exception, should handle gracefully
-            ExecutionService._execute_crew(execution_id, sample_crew_config, execution_type)
+            ExecutionService._execute_crew(
+                execution_id, sample_crew_config, execution_type
+            )
 
             mock_create_loop.assert_called_once()
 
@@ -732,16 +867,20 @@ class TestExecutionService:
         status = "COMPLETED"
         result = {"output": "success"}
 
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service:
+        with patch(
+            "src.services.execution.status.ExecutionStatusService"
+        ) as mock_status_service:
             mock_status_service.update_status = AsyncMock(return_value=True)
 
-            await ExecutionService._update_execution_status(execution_id, status, result)
+            await ExecutionService._update_execution_status(
+                execution_id, status, result
+            )
 
             mock_status_service.update_status.assert_called_once_with(
                 job_id=execution_id,
                 status=status,
                 message=f"Status updated to {status}",
-                result=result
+                result=result,
             )
 
     @pytest.mark.asyncio
@@ -750,7 +889,9 @@ class TestExecutionService:
         execution_id = "test-update-fail"
         status = "FAILED"
 
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service:
+        with patch(
+            "src.services.execution.status.ExecutionStatusService"
+        ) as mock_status_service:
             mock_status_service.update_status = AsyncMock(return_value=False)
 
             await ExecutionService._update_execution_status(execution_id, status)
@@ -763,18 +904,26 @@ class TestExecutionService:
         execution_id = "test-update-exception"
         status = "COMPLETED"
 
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service:
-            mock_status_service.update_status = AsyncMock(side_effect=Exception("Update failed"))
+        with patch(
+            "src.services.execution.status.ExecutionStatusService"
+        ) as mock_status_service:
+            mock_status_service.update_status = AsyncMock(
+                side_effect=Exception("Update failed")
+            )
 
             # Should not raise exception, should handle gracefully
             await ExecutionService._update_execution_status(execution_id, status)
 
     @pytest.mark.asyncio
-    async def test_run_in_background_method(self, sample_crew_config, mock_group_context):
+    async def test_run_in_background_method(
+        self, sample_crew_config, mock_group_context
+    ):
         """Test run in background method."""
         execution_id = "test-bg-exec"
 
-        with patch('src.services.execution.service.ExecutionService.run_crew_execution') as mock_run_crew:
+        with patch(
+            "src.services.execution.service.ExecutionService.run_crew_execution"
+        ) as mock_run_crew:
             mock_run_crew.return_value = {"status": "completed"}
 
             await ExecutionService._run_in_background(
@@ -786,15 +935,19 @@ class TestExecutionService:
                 config=sample_crew_config,
                 execution_type="crew",
                 group_context=mock_group_context,
-                session=None
+                session=None,
             )
 
     @pytest.mark.asyncio
-    async def test_run_in_background_with_error(self, sample_crew_config, mock_group_context):
+    async def test_run_in_background_with_error(
+        self, sample_crew_config, mock_group_context
+    ):
         """Test run in background method with error handling."""
         execution_id = "test-bg-error"
 
-        with patch('src.services.execution.service.ExecutionService.run_crew_execution') as mock_run_crew:
+        with patch(
+            "src.services.execution.service.ExecutionService.run_crew_execution"
+        ) as mock_run_crew:
             mock_run_crew.side_effect = Exception("Background execution failed")
 
             # Should handle error gracefully without raising
@@ -803,9 +956,11 @@ class TestExecutionService:
             )
 
     @pytest.mark.asyncio
-    async def test_check_for_running_jobs_success(self, execution_service, mock_group_context):
+    async def test_check_for_running_jobs_success(
+        self, execution_service, mock_group_context
+    ):
         """Test check for running jobs when none are running."""
-        with patch('src.db.session.async_session_factory') as mock_session_factory:
+        with patch("src.db.session.async_session_factory") as mock_session_factory:
             mock_session = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_session
 
@@ -813,16 +968,21 @@ class TestExecutionService:
             # Return empty list - no active executions
             mock_repo.get_execution_history = AsyncMock(return_value=([], 0))
 
-            with patch('src.repositories.execution_repository.ExecutionRepository', return_value=mock_repo):
+            with patch(
+                "src.repositories.execution_repository.ExecutionRepository",
+                return_value=mock_repo,
+            ):
                 # Should not raise any exception
                 await execution_service._check_for_running_jobs(mock_group_context)
 
                 mock_repo.get_execution_history.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_check_for_running_jobs_with_active_job(self, execution_service, mock_group_context):
+    async def test_check_for_running_jobs_with_active_job(
+        self, execution_service, mock_group_context
+    ):
         """Test check for running jobs when there is an active job."""
-        with patch('src.db.session.async_session_factory') as mock_session_factory:
+        with patch("src.db.session.async_session_factory") as mock_session_factory:
             mock_session = AsyncMock()
             mock_session_factory.return_value.__aenter__.return_value = mock_session
 
@@ -832,9 +992,14 @@ class TestExecutionService:
             mock_active_execution.status = "RUNNING"
 
             mock_repo = MagicMock()
-            mock_repo.get_execution_history = AsyncMock(return_value=([mock_active_execution], 1))
+            mock_repo.get_execution_history = AsyncMock(
+                return_value=([mock_active_execution], 1)
+            )
 
-            with patch('src.repositories.execution_repository.ExecutionRepository', return_value=mock_repo):
+            with patch(
+                "src.repositories.execution_repository.ExecutionRepository",
+                return_value=mock_repo,
+            ):
                 with pytest.raises(ValueError) as exc_info:
                     await execution_service._check_for_running_jobs(mock_group_context)
 
@@ -842,9 +1007,11 @@ class TestExecutionService:
                 assert "Active Job" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_check_for_running_jobs_database_error(self, execution_service, mock_group_context):
+    async def test_check_for_running_jobs_database_error(
+        self, execution_service, mock_group_context
+    ):
         """Test check for running jobs with database error."""
-        with patch('src.db.session.async_session_factory') as mock_session_factory:
+        with patch("src.db.session.async_session_factory") as mock_session_factory:
             mock_session_factory.side_effect = Exception("Database connection failed")
 
             # Should not raise exception, should handle gracefully
@@ -871,20 +1038,32 @@ class TestExecutionService:
         del ExecutionService.executions[execution_id]
 
     @pytest.mark.asyncio
-    async def test_create_execution_status_service_error(self, execution_service, sample_crew_config, mock_group_context):
+    async def test_create_execution_status_service_error(
+        self, execution_service, sample_crew_config, mock_group_context
+    ):
         """Test create_execution when ExecutionStatusService.create_execution fails."""
         from src.core.exceptions import KasalError
 
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
-             patch.object(execution_service, '_check_for_running_jobs') as mock_check_jobs:
+        with (
+            patch(
+                "src.services.execution.status.ExecutionStatusService"
+            ) as mock_status_service,
+            patch.object(
+                execution_service, "_check_for_running_jobs"
+            ) as mock_check_jobs,
+        ):
 
-            mock_status_service.create_execution = AsyncMock(return_value=False)  # Fails
+            mock_status_service.create_execution = AsyncMock(
+                return_value=False
+            )  # Fails
             mock_check_jobs.return_value = None
 
             # Mock the execution name service response
             mock_name_response = MagicMock()
             mock_name_response.name = "Test Execution"
-            execution_service.execution_name_service.generate_execution_name = AsyncMock(return_value=mock_name_response)
+            execution_service.execution_name_service.generate_execution_name = (
+                AsyncMock(return_value=mock_name_response)
+            )
 
             with pytest.raises(KasalError) as exc_info:
                 await execution_service.create_execution(
@@ -894,14 +1073,22 @@ class TestExecutionService:
             assert "Failed to create execution" in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
-    async def test_create_execution_background_tasks_branch(self, execution_service, sample_crew_config, mock_group_context):
+    async def test_create_execution_background_tasks_branch(
+        self, execution_service, sample_crew_config, mock_group_context
+    ):
         """Test create_execution with background_tasks provided."""
         from fastapi import BackgroundTasks
 
         mock_background_tasks = MagicMock(spec=BackgroundTasks)
 
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
-             patch.object(execution_service, '_check_for_running_jobs') as mock_check_jobs:
+        with (
+            patch(
+                "src.services.execution.status.ExecutionStatusService"
+            ) as mock_status_service,
+            patch.object(
+                execution_service, "_check_for_running_jobs"
+            ) as mock_check_jobs,
+        ):
 
             mock_status_service.create_execution = AsyncMock(return_value=True)
             mock_check_jobs.return_value = None
@@ -909,12 +1096,14 @@ class TestExecutionService:
             # Mock the execution name service response
             mock_name_response = MagicMock()
             mock_name_response.name = "Background Task Test"
-            execution_service.execution_name_service.generate_execution_name = AsyncMock(return_value=mock_name_response)
+            execution_service.execution_name_service.generate_execution_name = (
+                AsyncMock(return_value=mock_name_response)
+            )
 
             result = await execution_service.create_execution(
                 sample_crew_config,
                 background_tasks=mock_background_tasks,
-                group_context=mock_group_context
+                group_context=mock_group_context,
             )
 
             assert isinstance(result, dict)
@@ -929,13 +1118,13 @@ class TestExecutionService:
         job_id = "test-job-123"
         config = {"key": "value"}
 
-        with patch.object(execution_service.kasal_execution_service, 'run_flow_execution') as mock_run_flow:
+        with patch.object(
+            execution_service.kasal_execution_service, "run_flow_execution"
+        ) as mock_run_flow:
             mock_run_flow.return_value = {"status": "started", "execution_id": job_id}
 
             result = await execution_service.execute_flow(
-                flow_id=flow_id,
-                job_id=job_id,
-                config=config
+                flow_id=flow_id, job_id=job_id, config=config
             )
 
             assert result["status"] == "started"
@@ -946,7 +1135,7 @@ class TestExecutionService:
                 nodes=None,
                 edges=None,
                 job_id=job_id,
-                config=config
+                config=config,
             )
 
     @pytest.mark.asyncio
@@ -955,13 +1144,12 @@ class TestExecutionService:
         nodes = [{"id": "node1", "type": "agent"}]
         edges = [{"source": "node1", "target": "node2"}]
 
-        with patch.object(execution_service.kasal_execution_service, 'run_flow_execution') as mock_run_flow:
+        with patch.object(
+            execution_service.kasal_execution_service, "run_flow_execution"
+        ) as mock_run_flow:
             mock_run_flow.return_value = {"status": "started"}
 
-            result = await execution_service.execute_flow(
-                nodes=nodes,
-                edges=edges
-            )
+            result = await execution_service.execute_flow(nodes=nodes, edges=edges)
 
             assert result["status"] == "started"
 
@@ -975,7 +1163,9 @@ class TestExecutionService:
         """Test execute_flow exception handling."""
         from src.core.exceptions import KasalError
 
-        with patch.object(execution_service.kasal_execution_service, 'run_flow_execution') as mock_run_flow:
+        with patch.object(
+            execution_service.kasal_execution_service, "run_flow_execution"
+        ) as mock_run_flow:
             mock_run_flow.side_effect = Exception("Flow execution failed")
 
             with pytest.raises(KasalError) as exc_info:
@@ -989,7 +1179,9 @@ class TestExecutionService:
         flow_id = uuid.uuid4()
         expected_result = {"executions": [{"id": 1}, {"id": 2}]}
 
-        with patch.object(execution_service.kasal_execution_service, 'get_flow_executions_by_flow') as mock_get_executions:
+        with patch.object(
+            execution_service.kasal_execution_service, "get_flow_executions_by_flow"
+        ) as mock_get_executions:
             mock_get_executions.return_value = expected_result
 
             result = await execution_service.get_executions_by_flow(flow_id)
@@ -1005,20 +1197,26 @@ class TestExecutionService:
         request = ExecutionNameGenerationRequest(
             agents_yaml={"agent1": {"role": "test"}},
             tasks_yaml={"task1": {"description": "test"}},
-            model="gpt-4"
+            model="gpt-4",
         )
 
         mock_response = MagicMock()
         mock_response.name = "Generated Execution Name"
-        execution_service.execution_name_service.generate_execution_name = AsyncMock(return_value=mock_response)
+        execution_service.execution_name_service.generate_execution_name = AsyncMock(
+            return_value=mock_response
+        )
 
         result = await execution_service.generate_execution_name(request)
 
         assert result == {"name": "Generated Execution Name"}
-        execution_service.execution_name_service.generate_execution_name.assert_called_once_with(request)
+        execution_service.execution_name_service.generate_execution_name.assert_called_once_with(
+            request
+        )
 
     @pytest.mark.asyncio
-    async def test_run_crew_execution_flow_with_flow_id_in_inputs(self, mock_group_context):
+    async def test_run_crew_execution_flow_with_flow_id_in_inputs(
+        self, mock_group_context
+    ):
         """Test run_crew_execution flow with flow_id in inputs dict."""
         execution_id = "test-flow-id-inputs"
         flow_id = uuid.uuid4()
@@ -1028,9 +1226,13 @@ class TestExecutionService:
         mock_config.inputs = {"flow_id": str(flow_id)}
         mock_config.flow_id = None  # No direct flow_id attribute
 
-        with patch('src.services.execution.service.KasalExecutionService') as mock_crew_service_class:
+        with patch(
+            "src.services.execution.service.KasalExecutionService"
+        ) as mock_crew_service_class:
             mock_crew_service = MagicMock()
-            mock_crew_service.run_flow_execution = AsyncMock(return_value={"status": "completed"})
+            mock_crew_service.run_flow_execution = AsyncMock(
+                return_value={"status": "completed"}
+            )
             mock_crew_service_class.return_value = mock_crew_service
 
             result = await ExecutionService.run_crew_execution(
@@ -1047,24 +1249,39 @@ class TestExecutionWorkflowIntegration:
     """Integration-style unit tests for execution workflow components."""
 
     @pytest.mark.asyncio
-    async def test_complete_crew_execution_workflow(self, execution_service, sample_crew_config, mock_group_context):
+    async def test_complete_crew_execution_workflow(
+        self, execution_service, sample_crew_config, mock_group_context
+    ):
         """Test complete crew execution workflow from creation to completion."""
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
-             patch('src.services.execution.service.ExecutionService.run_crew_execution') as mock_run_crew, \
-             patch.object(execution_service, '_check_for_running_jobs') as mock_check_jobs, \
-             patch('asyncio.create_task') as mock_create_task:
+        with (
+            patch(
+                "src.services.execution.status.ExecutionStatusService"
+            ) as mock_status_service,
+            patch(
+                "src.services.execution.service.ExecutionService.run_crew_execution"
+            ) as mock_run_crew,
+            patch.object(
+                execution_service, "_check_for_running_jobs"
+            ) as mock_check_jobs,
+            patch("asyncio.create_task") as mock_create_task,
+        ):
 
             # Setup mocks
             mock_status_service.create_execution = AsyncMock(return_value=True)
             mock_status_service.update_status = AsyncMock(return_value=True)
-            mock_run_crew.return_value = {"status": "completed", "result": {"output": "workflow success"}}
+            mock_run_crew.return_value = {
+                "status": "completed",
+                "result": {"output": "workflow success"},
+            }
             mock_check_jobs.return_value = None
             mock_create_task.return_value = MagicMock()
 
             # Mock the execution name service response
             mock_name_response = MagicMock()
             mock_name_response.name = "Test Workflow"
-            execution_service.execution_name_service.generate_execution_name = AsyncMock(return_value=mock_name_response)
+            execution_service.execution_name_service.generate_execution_name = (
+                AsyncMock(return_value=mock_name_response)
+            )
 
             # Step 1: Create execution
             create_result = await execution_service.create_execution(
@@ -1084,12 +1301,22 @@ class TestExecutionWorkflowIntegration:
             mock_run_crew.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_execution_workflow_with_error_recovery(self, execution_service, sample_crew_config, mock_group_context):
+    async def test_execution_workflow_with_error_recovery(
+        self, execution_service, sample_crew_config, mock_group_context
+    ):
         """Test execution workflow with error handling and recovery."""
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
-             patch('src.services.execution.service.ExecutionService.run_crew_execution') as mock_run_crew, \
-             patch.object(execution_service, '_check_for_running_jobs') as mock_check_jobs, \
-             patch('asyncio.create_task') as mock_create_task:
+        with (
+            patch(
+                "src.services.execution.status.ExecutionStatusService"
+            ) as mock_status_service,
+            patch(
+                "src.services.execution.service.ExecutionService.run_crew_execution"
+            ) as mock_run_crew,
+            patch.object(
+                execution_service, "_check_for_running_jobs"
+            ) as mock_check_jobs,
+            patch("asyncio.create_task") as mock_create_task,
+        ):
 
             # Setup mocks
             mock_status_service.create_execution = AsyncMock(return_value=True)
@@ -1101,7 +1328,9 @@ class TestExecutionWorkflowIntegration:
             # Mock the execution name service response
             mock_name_response = MagicMock()
             mock_name_response.name = "Error Workflow"
-            execution_service.execution_name_service.generate_execution_name = AsyncMock(return_value=mock_name_response)
+            execution_service.execution_name_service.generate_execution_name = (
+                AsyncMock(return_value=mock_name_response)
+            )
 
             # Create and run execution
             create_result = await execution_service.create_execution(
@@ -1134,9 +1363,13 @@ class TestExecutionWorkflowIntegration:
         # Test listing executions includes both DB and memory
         mock_session = AsyncMock()
 
-        with patch('src.repositories.execution_repository.ExecutionRepository') as mock_repo_class:
+        with patch(
+            "src.repositories.execution_repository.ExecutionRepository"
+        ) as mock_repo_class:
             mock_repo = MagicMock()
-            mock_repo.get_execution_history = AsyncMock(return_value=([], 0))  # Empty DB
+            mock_repo.get_execution_history = AsyncMock(
+                return_value=([], 0)
+            )  # Empty DB
             mock_repo_class.return_value = mock_repo
 
             service = ExecutionService(session=mock_session)
@@ -1150,21 +1383,29 @@ class TestExecutionWorkflowIntegration:
         del ExecutionService.executions[execution_id]
 
     @pytest.mark.asyncio
-    async def test_create_execution_flow_with_most_recent_flow(self, execution_service, mock_group_context):
+    async def test_create_execution_flow_with_most_recent_flow(
+        self, execution_service, mock_group_context
+    ):
         """Test flow execution creation that finds most recent flow."""
         config = CrewConfig(
             agents_yaml={},
             tasks_yaml={},
             model="gpt-4o-mini",
-                execution_type="flow",
+            execution_type="flow",
             inputs={},  # No flow_id
-            schema_detection_enabled=False
+            schema_detection_enabled=False,
         )
 
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service, \
-             patch.object(execution_service, '_check_for_running_jobs') as mock_check_jobs, \
-             patch('src.db.session.async_session_factory') as mock_session_factory, \
-             patch('asyncio.create_task') as mock_create_task:
+        with (
+            patch(
+                "src.services.execution.status.ExecutionStatusService"
+            ) as mock_status_service,
+            patch.object(
+                execution_service, "_check_for_running_jobs"
+            ) as mock_check_jobs,
+            patch("src.db.session.async_session_factory") as mock_session_factory,
+            patch("asyncio.create_task") as mock_create_task,
+        ):
 
             mock_status_service.create_execution = AsyncMock(return_value=True)
             mock_check_jobs.return_value = None
@@ -1182,7 +1423,9 @@ class TestExecutionWorkflowIntegration:
             # Mock the execution name service response
             mock_name_response = MagicMock()
             mock_name_response.name = "Flow Most Recent"
-            execution_service.execution_name_service.generate_execution_name = AsyncMock(return_value=mock_name_response)
+            execution_service.execution_name_service.generate_execution_name = (
+                AsyncMock(return_value=mock_name_response)
+            )
 
             result = await execution_service.create_execution(
                 config, group_context=mock_group_context

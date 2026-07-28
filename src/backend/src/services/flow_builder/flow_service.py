@@ -1,16 +1,22 @@
 import json
 import logging
 import uuid
-from typing import List, Dict, Any, Optional, Union
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
 
-from src.core.exceptions import KasalError, NotFoundError, BadRequestError, ForbiddenError, ConflictError
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import (
+    BadRequestError,
+    ConflictError,
+    ForbiddenError,
+    KasalError,
+    NotFoundError,
+)
 from src.models.flow import Flow
 from src.repositories.flow_repository import FlowRepository
-from src.schemas.flow import FlowCreate, FlowUpdate, FlowResponse
+from src.schemas.flow import FlowCreate, FlowResponse, FlowUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +25,11 @@ class FlowService:
     """
     Service for Flow model with business logic.
     """
-    
+
     def __init__(self, session: AsyncSession):
         """
         Initialize the service with a database session.
-        
+
         Args:
             session: Database session for operations
         """
@@ -54,7 +60,9 @@ class FlowService:
 
             # Log details for debugging
             logger.info(f"Creating flow with group isolation: {flow_in.name}")
-            logger.info(f"Group context: {group_context.group_ids if group_context else 'None'}")
+            logger.info(
+                f"Group context: {group_context.group_ids if group_context else 'None'}"
+            )
 
             # Validate and normalize flow configuration
             flow_config = flow_in.flow_config or {}
@@ -69,7 +77,7 @@ class FlowService:
                 "type": flow_config.get("type", "default"),
                 "listeners": flow_config.get("listeners", []),
                 "actions": flow_config.get("actions", []),
-                "startingPoints": flow_config.get("startingPoints", [])
+                "startingPoints": flow_config.get("startingPoints", []),
             }
 
             # Validate listeners (allow empty for visual editor)
@@ -87,13 +95,16 @@ class FlowService:
             validated_crew_id = None
             if flow_in.crew_id:
                 from src.repositories.crew_repository import CrewRepository
+
                 crew_repo = CrewRepository(self.session)
                 existing_crew = await crew_repo.get(flow_in.crew_id)
                 if existing_crew:
                     validated_crew_id = flow_in.crew_id
                     logger.info(f"Validated crew_id: {validated_crew_id}")
                 else:
-                    logger.warning(f"crew_id {flow_in.crew_id} not found in database, setting to None for multi-crew flow")
+                    logger.warning(
+                        f"crew_id {flow_in.crew_id} not found in database, setting to None for multi-crew flow"
+                    )
 
             # Create flow dictionary with validated data and group info
             flow_dict = {
@@ -103,14 +114,22 @@ class FlowService:
                 "edges": [edge.model_dump() for edge in flow_in.edges],
                 "flow_config": flow_config,
                 # Add group isolation fields
-                "group_id": group_context.group_ids[0] if group_context and group_context.group_ids else None,
-                "created_by_email": group_context.group_email if group_context else None
+                "group_id": (
+                    group_context.group_ids[0]
+                    if group_context and group_context.group_ids
+                    else None
+                ),
+                "created_by_email": (
+                    group_context.group_email if group_context else None
+                ),
             }
 
             repository = FlowRepository(self.session)
             flow = await repository.create(flow_dict)
 
-            logger.info(f"Successfully created flow with ID: {flow.id}, group: {flow.group_id}")
+            logger.info(
+                f"Successfully created flow with ID: {flow.id}, group: {flow.group_id}"
+            )
             return flow
 
         except ValueError as ve:
@@ -140,7 +159,9 @@ class FlowService:
 
         return flow
 
-    async def get_flow_with_group_check(self, flow_id: uuid.UUID, group_context) -> Flow:
+    async def get_flow_with_group_check(
+        self, flow_id: uuid.UUID, group_context
+    ) -> Flow:
         """
         Get a flow by ID with group authorization check.
 
@@ -177,21 +198,25 @@ class FlowService:
         Returns:
             List of flows belonging to user's groups
         """
-        from sqlalchemy import select, or_
+        from sqlalchemy import or_, select
 
         # If user has no groups, return empty list
         if not group_context or not group_context.group_ids:
             return []
 
         # Query flows where group_id matches any of the user's groups
-        query = select(Flow).where(
-            or_(*[Flow.group_id == gid for gid in group_context.group_ids])
-        ).order_by(Flow.updated_at.desc())
+        query = (
+            select(Flow)
+            .where(or_(*[Flow.group_id == gid for gid in group_context.group_ids]))
+            .order_by(Flow.updated_at.desc())
+        )
 
         result = await self.session.execute(query)
         return list(result.scalars().all())
-    
-    async def update_flow_with_group_check(self, flow_id: uuid.UUID, flow_in: FlowUpdate, group_context) -> Flow:
+
+    async def update_flow_with_group_check(
+        self, flow_id: uuid.UUID, flow_in: FlowUpdate, group_context
+    ) -> Flow:
         """
         Update a flow with group authorization check and name uniqueness validation.
 
@@ -220,7 +245,12 @@ class FlowService:
                 raise ForbiddenError(detail="Access denied to this flow")
 
         # Check for duplicate name within the group (if name is being changed)
-        if flow_in.name and flow_in.name != flow.name and group_context and group_context.group_ids:
+        if (
+            flow_in.name
+            and flow_in.name != flow.name
+            and group_context
+            and group_context.group_ids
+        ):
             duplicate = await repository.find_by_name_and_group(
                 flow_in.name, group_context.group_ids, exclude_id=flow_id
             )
@@ -242,7 +272,8 @@ class FlowService:
         if not group_context or not group_context.group_ids:
             return
 
-        from sqlalchemy import select, or_, delete as sql_delete
+        from sqlalchemy import delete as sql_delete
+        from sqlalchemy import or_, select
 
         # First delete execution history for these flows
         flows = await self.get_all_flows_for_group(group_context)
@@ -255,10 +286,10 @@ class FlowService:
     async def get_flows_by_crew(self, crew_id: Union[uuid.UUID, str]) -> List[Flow]:
         """
         Get all flows for a specific crew.
-        
+
         Args:
             crew_id: ID of the crew (UUID)
-            
+
         Returns:
             List of flows for the crew
         """
@@ -269,45 +300,42 @@ class FlowService:
             except ValueError:
                 # Return empty list if the UUID is invalid
                 return []
-                
+
         repository = FlowRepository(self.session)
         return await repository.find_by_crew_id(crew_id)
-    
+
     async def update_flow(self, flow_id: uuid.UUID, flow_in: FlowUpdate) -> Flow:
         """
         Update a flow.
-        
+
         Args:
             flow_id: UUID of the flow to update
             flow_in: Flow data for update
-            
+
         Returns:
             Updated flow if found, else raises HTTPException
         """
         try:
             repository = FlowRepository(self.session)
             flow = await repository.get(flow_id)
-            
+
             if not flow:
                 raise NotFoundError(detail="Flow not found")
 
             # Log the incoming flow data for debugging
             logger.info(f"Updating flow {flow_id} with name: {flow_in.name}")
-            
+
             # Process flow_config if provided
             if flow_in.flow_config is not None:
                 logger.info(f"Flow config provided: {type(flow_in.flow_config)}")
-                
+
                 # Check for actions specifically
-                if 'actions' not in flow_in.flow_config:
+                if "actions" not in flow_in.flow_config:
                     logger.info("Adding empty actions array to flow_config")
-                    flow_in.flow_config['actions'] = []
-            
+                    flow_in.flow_config["actions"] = []
+
             # Create update data
-            update_data = {
-                "name": flow_in.name,
-                "updated_at": datetime.now()
-            }
+            update_data = {"name": flow_in.name, "updated_at": datetime.now()}
 
             if flow_in.flow_config is not None:
                 update_data["flow_config"] = flow_in.flow_config
@@ -331,7 +359,9 @@ class FlowService:
             logger.error(f"Error updating flow: {str(e)}")
             raise KasalError(detail=f"Error updating flow: {str(e)}")
 
-    async def _delete_execution_children(self, execution_ids: list, job_ids: list) -> None:
+    async def _delete_execution_children(
+        self, execution_ids: list, job_ids: list
+    ) -> None:
         """Delete every row that FK-references the given executionhistory rows.
 
         Must run before deleting from executionhistory, otherwise SQLite raises
@@ -343,7 +373,7 @@ class FlowService:
 
         Table/column names are hardcoded constants (no injection surface).
         """
-        from sqlalchemy import text, bindparam
+        from sqlalchemy import bindparam, text
 
         # Children keyed by executionhistory.id
         if execution_ids:
@@ -371,16 +401,16 @@ class FlowService:
         """
         Force delete a flow by first removing any associated flow executions.
         This handles the foreign key constraint issue.
-        
+
         Args:
             flow_id: UUID of the flow to delete
-            
+
         Returns:
             True if deleted, raises HTTPException if not found
         """
         try:
             # Use direct SQL queries instead of the repository to avoid transaction issues
-            from sqlalchemy import text, bindparam
+            from sqlalchemy import bindparam, text
             from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
             # Coerce to a UUID object and bind it with the column's UUID type so
@@ -388,11 +418,15 @@ class FlowService:
             # Postgres, dashless hex on SQLite). Passing a raw str/UUID into text()
             # fails: SQLite can't bind UUID, and str() yields the dashed form that
             # doesn't match SQLite's stored hex.
-            flow_id = flow_id if isinstance(flow_id, uuid.UUID) else uuid.UUID(str(flow_id))
+            flow_id = (
+                flow_id if isinstance(flow_id, uuid.UUID) else uuid.UUID(str(flow_id))
+            )
             flow_id_param = bindparam("flow_id", type_=PGUUID(as_uuid=True))
 
             # First check if the flow exists
-            check_query = text("SELECT id FROM flows WHERE id = :flow_id").bindparams(flow_id_param)
+            check_query = text("SELECT id FROM flows WHERE id = :flow_id").bindparams(
+                flow_id_param
+            )
             result = await self.session.execute(check_query, {"flow_id": flow_id})
             if not result.first():
                 raise NotFoundError(detail="Flow not found")
@@ -404,7 +438,9 @@ class FlowService:
                 SELECT id, job_id FROM executionhistory
                 WHERE flow_id = :flow_id AND execution_type = 'flow'
             """).bindparams(flow_id_param)
-            result = await self.session.execute(find_executions_query, {"flow_id": flow_id})
+            result = await self.session.execute(
+                find_executions_query, {"flow_id": flow_id}
+            )
             rows = result.fetchall()
             execution_ids = [row[0] for row in rows]
             job_ids = [row[1] for row in rows]
@@ -418,13 +454,19 @@ class FlowService:
                 DELETE FROM executionhistory
                 WHERE flow_id = :flow_id AND execution_type = 'flow'
             """).bindparams(flow_id_param)
-            result = await self.session.execute(execution_delete_query, {"flow_id": flow_id})
+            result = await self.session.execute(
+                execution_delete_query, {"flow_id": flow_id}
+            )
             deleted_count = result.rowcount
             if deleted_count > 0:
-                logger.info(f"Deleted {deleted_count} flow executions for flow {flow_id}")
+                logger.info(
+                    f"Deleted {deleted_count} flow executions for flow {flow_id}"
+                )
 
             # Delete the flow itself
-            flow_delete_query = text("DELETE FROM flows WHERE id = :flow_id").bindparams(flow_id_param)
+            flow_delete_query = text(
+                "DELETE FROM flows WHERE id = :flow_id"
+            ).bindparams(flow_id_param)
             result = await self.session.execute(flow_delete_query, {"flow_id": flow_id})
 
             logger.info(f"Successfully deleted flow {flow_id} with all its executions")
@@ -436,27 +478,31 @@ class FlowService:
         except Exception as e:
             await self.session.rollback()
             logger.error(f"Error force deleting flow with executions: {str(e)}")
-            raise KasalError(detail=f"Error force deleting flow with executions: {str(e)}")
+            raise KasalError(
+                detail=f"Error force deleting flow with executions: {str(e)}"
+            )
 
-    async def force_delete_flow_with_executions_with_group_check(self, flow_id: uuid.UUID, group_context) -> bool:
+    async def force_delete_flow_with_executions_with_group_check(
+        self, flow_id: uuid.UUID, group_context
+    ) -> bool:
         """
         Force delete a flow with group authorization check.
-        First verifies the user has access to the flow, then removes associated 
+        First verifies the user has access to the flow, then removes associated
         flow executions before deleting the flow itself.
-        
+
         Args:
             flow_id: UUID of the flow to delete
             group_context: Group context with group_ids list
-            
+
         Returns:
             True if deleted
-            
+
         Raises:
             HTTPException: If flow not found or user doesn't have access
         """
         try:
             # Use direct SQL queries instead of the repository to avoid transaction issues
-            from sqlalchemy import text, bindparam
+            from sqlalchemy import bindparam, text
             from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
             # Coerce to a UUID object and bind it with the column's UUID type so
@@ -464,11 +510,15 @@ class FlowService:
             # Postgres, dashless hex on SQLite). Passing a raw str/UUID into text()
             # fails: SQLite can't bind UUID, and str() yields the dashed form that
             # doesn't match SQLite's stored hex.
-            flow_id = flow_id if isinstance(flow_id, uuid.UUID) else uuid.UUID(str(flow_id))
+            flow_id = (
+                flow_id if isinstance(flow_id, uuid.UUID) else uuid.UUID(str(flow_id))
+            )
             flow_id_param = bindparam("flow_id", type_=PGUUID(as_uuid=True))
 
             # First check if the flow exists and user has access
-            check_query = text("SELECT id, group_id FROM flows WHERE id = :flow_id").bindparams(flow_id_param)
+            check_query = text(
+                "SELECT id, group_id FROM flows WHERE id = :flow_id"
+            ).bindparams(flow_id_param)
             result = await self.session.execute(check_query, {"flow_id": flow_id})
             row = result.first()
 
@@ -489,7 +539,9 @@ class FlowService:
                 SELECT id, job_id FROM executionhistory
                 WHERE flow_id = :flow_id AND execution_type = 'flow'
             """).bindparams(flow_id_param)
-            result = await self.session.execute(find_executions_query, {"flow_id": flow_id})
+            result = await self.session.execute(
+                find_executions_query, {"flow_id": flow_id}
+            )
             rows = result.fetchall()
             execution_ids = [row[0] for row in rows]
             job_ids = [row[1] for row in rows]
@@ -509,10 +561,14 @@ class FlowService:
             await self.session.execute(execution_delete_query, {"flow_id": flow_id})
 
             # Delete the flow itself
-            flow_delete_query = text("DELETE FROM flows WHERE id = :flow_id").bindparams(flow_id_param)
+            flow_delete_query = text(
+                "DELETE FROM flows WHERE id = :flow_id"
+            ).bindparams(flow_id_param)
             result = await self.session.execute(flow_delete_query, {"flow_id": flow_id})
 
-            logger.info(f"Successfully deleted flow {flow_id} with all its executions (group verified)")
+            logger.info(
+                f"Successfully deleted flow {flow_id} with all its executions (group verified)"
+            )
             return True
 
         except KasalError:
@@ -520,8 +576,12 @@ class FlowService:
             raise
         except Exception as e:
             await self.session.rollback()
-            logger.error(f"Error force deleting flow with executions and group check: {str(e)}")
-            raise KasalError(detail=f"Error force deleting flow with executions: {str(e)}")
+            logger.error(
+                f"Error force deleting flow with executions and group check: {str(e)}"
+            )
+            raise KasalError(
+                detail=f"Error force deleting flow with executions: {str(e)}"
+            )
 
     # Backward compatibility methods (no group isolation)
 
@@ -545,7 +605,9 @@ class FlowService:
                     raise BadRequestError(detail=f"Invalid listener format: {listener}")
                 # Check for required fields in listener (only if listener is not empty)
                 if listener and not all(key in listener for key in ["name", "crewId"]):
-                    raise BadRequestError(detail=f"Missing required fields in listener: {listener}")
+                    raise BadRequestError(
+                        detail=f"Missing required fields in listener: {listener}"
+                    )
 
             # Validate actions format
             for action in flow_config.get("actions", []):
@@ -553,7 +615,9 @@ class FlowService:
                     raise BadRequestError(detail=f"Invalid action format: {action}")
                 # Check for required fields in action (only if action is not empty)
                 if action and not all(key in action for key in ["crewId", "taskId"]):
-                    raise BadRequestError(detail=f"Missing required fields in action: {action}")
+                    raise BadRequestError(
+                        detail=f"Missing required fields in action: {action}"
+                    )
 
             # Generate a new UUID for the flow
             flow_uuid = str(uuid.uuid4())
@@ -565,7 +629,7 @@ class FlowService:
                 "type": flow_config.get("type", "default"),
                 "listeners": flow_config.get("listeners", []),
                 "actions": flow_config.get("actions", []),
-                "startingPoints": flow_config.get("startingPoints", [])
+                "startingPoints": flow_config.get("startingPoints", []),
             }
 
             # Create flow dictionary
@@ -575,8 +639,12 @@ class FlowService:
                 "nodes": [node.model_dump() for node in flow_in.nodes],
                 "edges": [edge.model_dump() for edge in flow_in.edges],
                 "flow_config": flow_config,
-                "group_id": flow_in.group_id if hasattr(flow_in, 'group_id') else None,
-                "created_by_email": flow_in.created_by_email if hasattr(flow_in, 'created_by_email') else None
+                "group_id": flow_in.group_id if hasattr(flow_in, "group_id") else None,
+                "created_by_email": (
+                    flow_in.created_by_email
+                    if hasattr(flow_in, "created_by_email")
+                    else None
+                ),
             }
 
             repository = FlowRepository(self.session)
@@ -624,11 +692,14 @@ class FlowService:
             raise NotFoundError(detail="Flow not found")
 
         # Check for execution records
-        from src.models.execution_history import ExecutionHistory
-        from sqlalchemy import select, func
+        from sqlalchemy import func, select
 
-        count_query = select(func.count()).select_from(ExecutionHistory).where(
-            ExecutionHistory.flow_id == flow_id
+        from src.models.execution_history import ExecutionHistory
+
+        count_query = (
+            select(func.count())
+            .select_from(ExecutionHistory)
+            .where(ExecutionHistory.flow_id == flow_id)
         )
         result = await self.session.execute(count_query)
         execution_count = result.scalar_one()
@@ -654,10 +725,10 @@ class FlowService:
     async def validate_flow_data(self, flow_in: FlowCreate) -> Dict[str, Any]:
         """
         Validate flow data without creating it.
-        
+
         Args:
             flow_in: Flow data to validate
-            
+
         Returns:
             Validation result
         """
@@ -669,24 +740,23 @@ class FlowService:
             logger.info(f"Crew ID: {data_dict['crew_id']}")
             logger.info(f"Number of nodes: {len(data_dict['nodes'])}")
             logger.info(f"Number of edges: {len(data_dict['edges'])}")
-            
-            if data_dict.get('flow_config'):
-                logger.info(f"Flow config details: {json.dumps(data_dict['flow_config'], indent=2)}")
-            
+
+            if data_dict.get("flow_config"):
+                logger.info(
+                    f"Flow config details: {json.dumps(data_dict['flow_config'], indent=2)}"
+                )
+
             return {
                 "status": "success",
                 "message": "Data validation successful",
                 "data": {
-                    "name": data_dict['name'],
-                    "crew_id": data_dict['crew_id'],
-                    "node_count": len(data_dict['nodes']),
-                    "edge_count": len(data_dict['edges']),
-                    "has_flow_config": data_dict.get('flow_config') is not None
-                }
+                    "name": data_dict["name"],
+                    "crew_id": data_dict["crew_id"],
+                    "node_count": len(data_dict["nodes"]),
+                    "edge_count": len(data_dict["edges"]),
+                    "has_flow_config": data_dict.get("flow_config") is not None,
+                },
             }
         except Exception as e:
             logger.error(f"Validation error: {str(e)}")
-            return {
-                "status": "error",
-                "message": f"Validation failed: {str(e)}"
-            } 
+            return {"status": "error", "message": f"Validation failed: {str(e)}"}

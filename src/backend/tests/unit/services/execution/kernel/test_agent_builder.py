@@ -1,14 +1,16 @@
 """Shared agent-build logic (build_agent_llm + build_agent_kwargs) used by BOTH
 the crew path (agent_helpers.create_agent) and the flow path (agent_config).
 These pin the canonical behavior so the two paths can never diverge."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.services.execution.kernel.agent_builder import (
+    DEFAULT_REASONING_EFFORT,
     build_agent,
     build_agent_kwargs,
     build_agent_llm,
-    DEFAULT_REASONING_EFFORT,
 )
 
 
@@ -51,7 +53,9 @@ class TestBuildAgentKwargs:
 
     def test_overrides_and_tools(self):
         kw = build_agent_kwargs(
-            self._spec(verbose=False, cache=True, max_retry_limit=7, allow_delegation=True),
+            self._spec(
+                verbose=False, cache=True, max_retry_limit=7, allow_delegation=True
+            ),
             ["t1"],
             None,
         )
@@ -62,7 +66,9 @@ class TestBuildAgentKwargs:
         assert kw["tools"] == ["t1"]
 
     def test_additional_params_only_when_set(self):
-        kw = build_agent_kwargs(self._spec(max_iter=5, max_execution_time=120, max_rpm=None), [], None)
+        kw = build_agent_kwargs(
+            self._spec(max_iter=5, max_execution_time=120, max_rpm=None), [], None
+        )
         assert kw["max_iter"] == 5
         assert kw["max_execution_time"] == 120
         # None values are not propagated
@@ -102,7 +108,9 @@ class TestBuildAgentKwargs:
 
     def test_explicit_prompt_template_kept(self):
         kw = build_agent_kwargs(
-            self._spec(system_template="SYS", prompt_template="P", response_template="RESP"),
+            self._spec(
+                system_template="SYS", prompt_template="P", response_template="RESP"
+            ),
             [],
             None,
         )
@@ -151,7 +159,9 @@ class TestBuildAgentLlm:
     async def test_no_llm_uses_default_model_without_temperature(self):
         with patch("src.services.llm.manager.LLMManager") as MockLM:
             MockLM.configure_kasal_llm = AsyncMock(return_value="LLM")
-            await build_agent_llm({}, group_id="grp", default_model="databricks-llama-4-maverick")
+            await build_agent_llm(
+                {}, group_id="grp", default_model="databricks-llama-4-maverick"
+            )
             MockLM.configure_kasal_llm.assert_awaited_once_with(
                 "databricks-llama-4-maverick", "grp"
             )
@@ -235,7 +245,9 @@ class TestReasoningEffortReachesTheLLM:
     @pytest.mark.asyncio
     async def test_unknown_effort_value_is_ignored(self):
         llm = await self._build(
-            "databricks-gpt-5-2", reasoning=True, reasoning_config={"reasoning_effort": "turbo"}
+            "databricks-gpt-5-2",
+            reasoning=True,
+            reasoning_config={"reasoning_effort": "turbo"},
         )
         assert not hasattr(llm, "reasoning_effort")
 
@@ -271,11 +283,19 @@ class TestReasoningEffortReachesTheLLM:
 class TestBuildAgent:
     @pytest.mark.asyncio
     async def test_builds_llm_kwargs_preamble_construction_and_custom_attrs(self):
-        with patch("src.services.execution.kernel.agent_builder.Agent") as MockAgent, \
-             patch("src.services.llm.manager.LLMManager") as MockLM:
+        with (
+            patch("src.services.execution.kernel.agent_builder.Agent") as MockAgent,
+            patch("src.services.llm.manager.LLMManager") as MockLM,
+        ):
             MockLM.configure_kasal_llm = AsyncMock(return_value="LLM-OBJ")
             MockAgent.return_value = MagicMock()
-            spec = {"role": "R", "goal": "G", "backstory": "B", "llm": "m", "temperature": 50}
+            spec = {
+                "role": "R",
+                "goal": "G",
+                "backstory": "B",
+                "llm": "m",
+                "temperature": 50,
+            }
             agent = await build_agent(
                 spec,
                 ["t"],
@@ -296,8 +316,10 @@ class TestBuildAgent:
 
     @pytest.mark.asyncio
     async def test_no_extra_kwargs_or_custom_attrs(self):
-        with patch("src.services.execution.kernel.agent_builder.Agent") as MockAgent, \
-             patch("src.services.llm.manager.LLMManager") as MockLM:
+        with (
+            patch("src.services.execution.kernel.agent_builder.Agent") as MockAgent,
+            patch("src.services.llm.manager.LLMManager") as MockLM,
+        ):
             MockLM.configure_kasal_llm = AsyncMock(return_value="LLM")
             MockAgent.return_value = MagicMock()
             await build_agent(

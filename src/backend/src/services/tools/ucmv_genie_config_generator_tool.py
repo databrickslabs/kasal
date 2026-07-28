@@ -14,36 +14,47 @@ is skipped and the override is returned as-is (merged with connection params).
 The output JSON keys match the GenieSpaceGeneratorTool schema fields so they
 are automatically injected by the flow engine into the next crew step.
 """
+
 import asyncio
 import json
 import logging
 import re
 from typing import Any, Optional, Type
 
-from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
+
+from src.services.tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
 
 
 class UCMVGenieConfigGeneratorSchema(BaseModel):
     """Input schema."""
+
     ucmv_output: Optional[str] = Field(
         None,
-        description="Full UCMV Generator / Validator output JSON (auto-injected by flow)"
+        description="Full UCMV Generator / Validator output JSON (auto-injected by flow)",
     )
     genie_config_override: Optional[str] = Field(
         None,
-        description="Manually uploaded GenieSpaceConfig JSON — skips auto-generation when provided"
+        description="Manually uploaded GenieSpaceConfig JSON — skips auto-generation when provided",
     )
     space_title: Optional[str] = Field(None, description="Genie space display name")
-    catalog: Optional[str] = Field(None, description="UC catalog where metric views are deployed")
-    schema_name: Optional[str] = Field(None, description="UC schema where metric views are deployed")
-    warehouse_id: Optional[str] = Field(None, description="SQL warehouse ID for the Genie space")
-    databricks_host: Optional[str] = Field(None, description="Override workspace URL (optional)")
+    catalog: Optional[str] = Field(
+        None, description="UC catalog where metric views are deployed"
+    )
+    schema_name: Optional[str] = Field(
+        None, description="UC schema where metric views are deployed"
+    )
+    warehouse_id: Optional[str] = Field(
+        None, description="SQL warehouse ID for the Genie space"
+    )
+    databricks_host: Optional[str] = Field(
+        None, description="Override workspace URL (optional)"
+    )
     llm_model: Optional[str] = Field(
         None,
-        description="LLM model for config generation (defaults to configured Databricks model)"
+        description="LLM model for config generation (defaults to configured Databricks model)",
     )
 
 
@@ -66,11 +77,16 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
 
     def __init__(self, **kwargs: Any) -> None:
         config_keys = (
-            'ucmv_output', 'genie_config_override',
-            'space_title', 'catalog', 'schema_name', 'warehouse_id',
-            'databricks_host', 'llm_model',
+            "ucmv_output",
+            "genie_config_override",
+            "space_title",
+            "catalog",
+            "schema_name",
+            "warehouse_id",
+            "databricks_host",
+            "llm_model",
         )
-        default_config: dict = {'ucmv_output': None}
+        default_config: dict = {"ucmv_output": None}
         for key in config_keys:
             val = kwargs.pop(key, None)
             if val is not None:
@@ -81,6 +97,7 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
     def _authenticate(self, host_override: Optional[str] = None):
         """Obtain AuthContext synchronously."""
         import concurrent.futures
+
         from src.utils.databricks_auth import get_auth_context
 
         def _run_in_thread():
@@ -96,9 +113,9 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
             auth = executor.submit(_run_in_thread).result(timeout=30)
 
         if auth is not None and host_override:
-            url = host_override.strip().rstrip('/')
-            if not url.startswith('https://'):
-                url = f'https://{url}'
+            url = host_override.strip().rstrip("/")
+            if not url.startswith("https://"):
+                url = f"https://{url}"
             auth.workspace_url = url
         return auth
 
@@ -111,7 +128,7 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
         """Return {table_key: yaml_str} from ucmv_output."""
         try:
             data = json.loads(ucmv_raw) if isinstance(ucmv_raw, str) else ucmv_raw
-            return data.get('yaml', {}) if isinstance(data, dict) else {}
+            return data.get("yaml", {}) if isinstance(data, dict) else {}
         except Exception:
             return {}
 
@@ -120,6 +137,7 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
         """Parse a single YAML spec string into a structured dict."""
         try:
             import yaml as _yaml
+
             return _yaml.safe_load(yaml_str) or {}
         except Exception:
             return {}
@@ -131,25 +149,27 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
             if not yaml_str or not yaml_str.strip():
                 continue
             spec = self._parse_yaml_spec(yaml_str)
-            safe_key = re.sub(r'[^a-zA-Z0-9_]', '_', key.lower())
+            safe_key = re.sub(r"[^a-zA-Z0-9_]", "_", key.lower())
             view_name = f"{catalog}.{schema}.{safe_key}"
             dims = [
                 f"  - {d.get('name','')} ({d.get('comment') or d.get('display_name','')}) = {d.get('expr','')}"
-                for d in (spec.get('dimensions') or [])[:15]
+                for d in (spec.get("dimensions") or [])[:15]
             ]
             meas = [
                 f"  - {m.get('name','')} ({m.get('comment') or m.get('display_name','')}) = {m.get('expr','')}"
-                for m in (spec.get('measures') or [])[:15]
+                for m in (spec.get("measures") or [])[:15]
             ]
-            comment = spec.get('comment', '').split('\n')[0]  # first line only
-            summaries.append({
-                'view_name': view_name,
-                'key': key,
-                'comment': comment,
-                'dimensions': dims,
-                'measures': meas,
-                'joins': spec.get('joins', []),
-            })
+            comment = spec.get("comment", "").split("\n")[0]  # first line only
+            summaries.append(
+                {
+                    "view_name": view_name,
+                    "key": key,
+                    "comment": comment,
+                    "dimensions": dims,
+                    "measures": meas,
+                    "joins": spec.get("joins", []),
+                }
+            )
         return summaries
 
     def _extract_dimension_tables(self, yaml_specs: dict) -> list:
@@ -159,9 +179,9 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
             if not yaml_str:
                 continue
             spec = self._parse_yaml_spec(yaml_str)
-            for join in (spec.get('joins') or []):
-                src = join.get('source', '')
-                if isinstance(src, str) and '.' in src and 'SELECT' not in src.upper():
+            for join in spec.get("joins") or []:
+                src = join.get("source", "")
+                if isinstance(src, str) and "." in src and "SELECT" not in src.upper():
                     tables.add(src.strip())
         return sorted(tables)
 
@@ -173,7 +193,7 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
         """Call the LLM and return the response text."""
         from src.services.llm.manager import LLMManager
         from src.services.tools.async_bridge import run_async_with_context
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
 
         async def _run():
             return await LLMManager.completion(
@@ -185,9 +205,9 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
                             "Genie allows business users to ask natural language questions about data. "
                             "Your job is to generate clear, business-friendly configuration based on "
                             "UC Metric View definitions."
-                        )
+                        ),
                     },
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
                 model=model,
                 temperature=0.3,
@@ -204,12 +224,12 @@ class UCMVGenieConfigGeneratorTool(BaseTool):
         mv_text = ""
         for s in summaries[:10]:  # limit to avoid token overflow
             mv_text += f"\n### Metric View: {s['view_name']}\n"
-            if s['comment']:
+            if s["comment"]:
                 mv_text += f"Description: {s['comment']}\n"
-            if s['dimensions']:
-                mv_text += "Dimensions:\n" + "\n".join(s['dimensions'][:10]) + "\n"
-            if s['measures']:
-                mv_text += "Measures:\n" + "\n".join(s['measures'][:10]) + "\n"
+            if s["dimensions"]:
+                mv_text += "Dimensions:\n" + "\n".join(s["dimensions"][:10]) + "\n"
+            if s["measures"]:
+                mv_text += "Measures:\n" + "\n".join(s["measures"][:10]) + "\n"
 
         return f"""I have the following UC Metric Views deployed as a Genie Space called "{space_title}":
 
@@ -236,14 +256,14 @@ Rules:
         """Extract JSON from LLM response."""
         text = response_text.strip()
         # Strip markdown code blocks if present
-        text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
-        text = re.sub(r'\s*```$', '', text, flags=re.MULTILINE)
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
+        text = re.sub(r"\s*```$", "", text, flags=re.MULTILINE)
         text = text.strip()
         try:
             return json.loads(text)
         except json.JSONDecodeError:
             # Try to extract JSON object
-            match = re.search(r'\{[\s\S]+\}', text)
+            match = re.search(r"\{[\s\S]+\}", text)
             if match:
                 try:
                     return json.loads(match.group())
@@ -262,51 +282,72 @@ Rules:
                 return val
             return self._default_config.get(key)
 
-        catalog = _get('catalog') or 'main'
-        schema = _get('schema_name') or 'default'
-        warehouse_id = _get('warehouse_id') or ''
-        databricks_host = _get('databricks_host') or None
-        space_title = _get('space_title') or 'Genie Space'
-        llm_model = _get('llm_model') or 'databricks/databricks-claude-sonnet-4-5'
-        genie_config_override = _get('genie_config_override')
+        catalog = _get("catalog") or "main"
+        schema = _get("schema_name") or "default"
+        warehouse_id = _get("warehouse_id") or ""
+        databricks_host = _get("databricks_host") or None
+        space_title = _get("space_title") or "Genie Space"
+        llm_model = _get("llm_model") or "databricks/databricks-claude-sonnet-4-5"
+        genie_config_override = _get("genie_config_override")
 
         # ── 1. Manual override — skip auto-generation ────────────────────────
-        if genie_config_override and genie_config_override.strip() not in ('{}', ''):
+        if genie_config_override and genie_config_override.strip() not in ("{}", ""):
             try:
-                override = json.loads(genie_config_override) if isinstance(genie_config_override, str) else genie_config_override
+                override = (
+                    json.loads(genie_config_override)
+                    if isinstance(genie_config_override, str)
+                    else genie_config_override
+                )
                 # Merge connection params if not already set
-                override.setdefault('catalog', catalog)
-                override.setdefault('schema_name', schema)
-                override.setdefault('warehouse_id', warehouse_id)
-                override.setdefault('space_title', space_title)
+                override.setdefault("catalog", catalog)
+                override.setdefault("schema_name", schema)
+                override.setdefault("warehouse_id", warehouse_id)
+                override.setdefault("space_title", space_title)
                 if databricks_host:
-                    override.setdefault('databricks_host', databricks_host)
+                    override.setdefault("databricks_host", databricks_host)
                 logger.info("[GenieConfigGen] Using manual genie_config_override")
                 return json.dumps(override, indent=2)
             except Exception as e:
-                logger.warning(f"[GenieConfigGen] Could not parse genie_config_override: {e}")
+                logger.warning(
+                    f"[GenieConfigGen] Could not parse genie_config_override: {e}"
+                )
 
         # ── 2. Parse ucmv_output ─────────────────────────────────────────────
-        ucmv_raw = _get('ucmv_output')
+        ucmv_raw = _get("ucmv_output")
         if not ucmv_raw:
             # DB fallback (same as the UCMV Validator): allows running the
             # Genie-space flow standalone after a previous UCMV Generator run.
             try:
-                from src.services.tools.metric_view_validator_tool import MetricViewValidatorTool
+                from src.services.tools.metric_view_validator_tool import (
+                    MetricViewValidatorTool,
+                )
+
                 latest = MetricViewValidatorTool._fetch_latest_ucmv_from_db()
-                if isinstance(latest, dict) and latest.get('yaml'):
-                    logger.info("[GenieConfigGen] ucmv_output not injected — using latest UCMV Generator output from DB")
+                if isinstance(latest, dict) and latest.get("yaml"):
+                    logger.info(
+                        "[GenieConfigGen] ucmv_output not injected — using latest UCMV Generator output from DB"
+                    )
                     ucmv_raw = json.dumps(latest)
             except Exception as e:
-                logger.warning(f"[GenieConfigGen] DB fallback for ucmv_output failed: {e}")
+                logger.warning(
+                    f"[GenieConfigGen] DB fallback for ucmv_output failed: {e}"
+                )
         if not ucmv_raw:
-            return json.dumps({"error": "No ucmv_output available — run the UC Metric View Generator first (flow injection or a prior run in this workspace)"})
+            return json.dumps(
+                {
+                    "error": "No ucmv_output available — run the UC Metric View Generator first (flow injection or a prior run in this workspace)"
+                }
+            )
 
         yaml_specs = self._extract_yaml_specs(ucmv_raw)
         if not yaml_specs:
-            return json.dumps({"error": "Could not extract YAML specs from ucmv_output"})
+            return json.dumps(
+                {"error": "Could not extract YAML specs from ucmv_output"}
+            )
 
-        logger.info(f"[GenieConfigGen] Generating config for {len(yaml_specs)} metric views")
+        logger.info(
+            f"[GenieConfigGen] Generating config for {len(yaml_specs)} metric views"
+        )
 
         # ── 3. Build metric view summaries ───────────────────────────────────
         summaries = self._build_mv_summaries(yaml_specs, catalog, schema)
@@ -323,14 +364,18 @@ Rules:
         # ── 5. Call LLM ──────────────────────────────────────────────────────
         try:
             # Resolve LLM model from workspace config if needed
-            if not llm_model.startswith('databricks/'):
+            if not llm_model.startswith("databricks/"):
                 llm_model = f"databricks/{llm_model}"
 
             prompt = self._build_prompt(summaries, space_title)
-            logger.info(f"[GenieConfigGen] Calling LLM ({llm_model}) for config generation")
+            logger.info(
+                f"[GenieConfigGen] Calling LLM ({llm_model}) for config generation"
+            )
             llm_response = self._call_llm(prompt, llm_model)
             generated = self._parse_llm_response(llm_response)
-            logger.info(f"[GenieConfigGen] LLM generation complete — keys: {list(generated.keys())}")
+            logger.info(
+                f"[GenieConfigGen] LLM generation complete — keys: {list(generated.keys())}"
+            )
         except Exception as e:
             logger.error(f"[GenieConfigGen] LLM call failed: {e}")
             # Fall back to structural-only config (no natural language)
@@ -338,24 +383,34 @@ Rules:
 
         # ── 6. Assemble output config ─────────────────────────────────────────
         # Build view names list for the Genie space
-        view_names = [s['view_name'] for s in summaries]
+        view_names = [s["view_name"] for s in summaries]
 
         # Extract join specs from UCMV YAMLs
         join_specs = []
         for s in summaries:
-            for j in s.get('joins', []):
-                if isinstance(j.get('source'), str) and '.' in j.get('source', '') and 'SELECT' not in j.get('source', '').upper():
-                    join_specs.append({
-                        "left_table": j['source'].strip(),
-                        "right_table": s['view_name'],
-                        "join_condition": j.get('on', '')
-                    })
+            for j in s.get("joins", []):
+                if (
+                    isinstance(j.get("source"), str)
+                    and "." in j.get("source", "")
+                    and "SELECT" not in j.get("source", "").upper()
+                ):
+                    join_specs.append(
+                        {
+                            "left_table": j["source"].strip(),
+                            "right_table": s["view_name"],
+                            "join_condition": j.get("on", ""),
+                        }
+                    )
 
         # Dimension tables from joins — exclude any that look like sanitised UCMV table names
         # (those are already embedded in the metric view definition, not extra tables)
         real_dim_tables = [
-            t for t in dim_tables
-            if not any(skip in t for skip in ['dc_datalake_prod_001__', 'udm_cchbc', 'udm_datamart'])
+            t
+            for t in dim_tables
+            if not any(
+                skip in t
+                for skip in ["dc_datalake_prod_001__", "udm_cchbc", "udm_datamart"]
+            )
         ]
 
         output = {
@@ -364,16 +419,13 @@ Rules:
             "catalog": catalog,
             "schema_name": schema,
             "warehouse_id": warehouse_id,
-
             # LLM-generated content (with fallbacks)
             "text_instructions": generated.get("text_instructions", ""),
             "sample_questions": generated.get("sample_questions", ""),
             "example_sqls_json": generated.get("example_sqls_json", "[]"),
-
             # Structural content derived from UCMVs
             "join_specs_json": json.dumps(join_specs) if join_specs else "[]",
             "additional_tables": "\n".join(real_dim_tables) if real_dim_tables else "",
-
             # Pass ucmv_output through so the Genie Space Generator knows
             # which metric views to add to the space
             "ucmv_output": ucmv_raw,

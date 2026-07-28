@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 
 from src.db.base import Base
 
@@ -39,7 +39,9 @@ class UIConfig(Base):
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation
     created_by_email = Column(String(255), index=True, nullable=True)  # Audit
 
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
     updated_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

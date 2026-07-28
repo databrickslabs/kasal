@@ -2,30 +2,31 @@
 Test suite for GenieService
 """
 
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
-from src.services.databricks.genie.service import GenieService
+import pytest
+
 from src.repositories.genie_repository import GenieRepository
 from src.schemas.genie import (
     GenieAuthConfig,
-    GenieSpace,
-    GenieSpacesRequest,
-    GenieSpacesResponse,
     GenieConversation,
+    GenieExecutionRequest,
+    GenieExecutionResponse,
+    GenieGetMessageStatusRequest,
+    GenieGetQueryResultRequest,
     GenieMessage,
     GenieMessageStatus,
     GenieQueryResult,
     GenieQueryStatus,
-    GenieStartConversationRequest,
-    GenieStartConversationResponse,
     GenieSendMessageRequest,
     GenieSendMessageResponse,
-    GenieGetMessageStatusRequest,
-    GenieGetQueryResultRequest,
-    GenieExecutionRequest,
-    GenieExecutionResponse
+    GenieSpace,
+    GenieSpacesRequest,
+    GenieSpacesResponse,
+    GenieStartConversationRequest,
+    GenieStartConversationResponse,
 )
+from src.services.databricks.genie.service import GenieService
 
 
 class TestGenieService:
@@ -37,7 +38,7 @@ class TestGenieService:
         return GenieAuthConfig(
             workspace_url="https://test-workspace.cloud.databricks.com",
             token="test-token",
-            user_token="test-user-token"
+            user_token="test-user-token",
         )
 
     @pytest.fixture
@@ -75,12 +76,10 @@ class TestGenieService:
         # Setup mock data
         mock_spaces = [
             GenieSpace(id="space1", name="Test Space 1", description="Description 1"),
-            GenieSpace(id="space2", name="Test Space 2", description="Description 2")
+            GenieSpace(id="space2", name="Test Space 2", description="Description 2"),
         ]
         mock_response = GenieSpacesResponse(
-            spaces=mock_spaces,
-            next_page_token=None,
-            total_fetched=2
+            spaces=mock_spaces, next_page_token=None, total_fetched=2
         )
         mock_repository.get_spaces = AsyncMock(return_value=mock_response)
 
@@ -106,20 +105,17 @@ class TestGenieService:
         )
 
     @pytest.mark.asyncio
-    async def test_get_spaces_with_pagination(self, service_with_mock_repo, mock_repository):
+    async def test_get_spaces_with_pagination(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test get_spaces with pagination"""
         mock_response = GenieSpacesResponse(
-            spaces=[],
-            next_page_token="next-token",
-            total_fetched=100
+            spaces=[], next_page_token="next-token", total_fetched=100
         )
         mock_repository.get_spaces = AsyncMock(return_value=mock_response)
 
         # Create request with pagination
-        request = GenieSpacesRequest(
-            page_token="current-token",
-            page_size=25
-        )
+        request = GenieSpacesRequest(page_token="current-token", page_size=25)
 
         result = await service_with_mock_repo.get_spaces(request)
 
@@ -140,9 +136,7 @@ class TestGenieService:
             GenieSpace(id="space1", name="Development Space", description="Dev space")
         ]
         mock_response = GenieSpacesResponse(
-            spaces=mock_spaces,
-            next_page_token=None,
-            total_fetched=1
+            spaces=mock_spaces, next_page_token=None, total_fetched=1
         )
         mock_repository.get_spaces = AsyncMock(return_value=mock_response)
 
@@ -162,19 +156,18 @@ class TestGenieService:
         )
 
     @pytest.mark.asyncio
-    async def test_start_conversation_success(self, service_with_mock_repo, mock_repository):
+    async def test_start_conversation_success(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test successful start_conversation call"""
         mock_response = GenieStartConversationResponse(
-            conversation_id="conv-123",
-            message_id="msg-456",
-            space_id="space1"
+            conversation_id="conv-123", message_id="msg-456", space_id="space1"
         )
         mock_repository.start_conversation = AsyncMock(return_value=mock_response)
 
         # Call service method with individual parameters
         result = await service_with_mock_repo.start_conversation(
-            space_id="space1",
-            initial_message="Hello, what data do we have?"
+            space_id="space1", initial_message="Hello, what data do we have?"
         )
 
         # Assertions
@@ -195,7 +188,7 @@ class TestGenieService:
         mock_response = GenieSendMessageResponse(
             message_id="msg-789",
             conversation_id="conv-123",
-            status=GenieMessageStatus.RUNNING
+            status=GenieMessageStatus.RUNNING,
         )
         mock_repository.send_message = AsyncMock(return_value=mock_response)
 
@@ -203,7 +196,7 @@ class TestGenieService:
         result = await service_with_mock_repo.send_message(
             space_id="space1",
             message="Can you show me more details?",
-            conversation_id="conv-123"
+            conversation_id="conv-123",
         )
 
         # Assertions
@@ -220,7 +213,9 @@ class TestGenieService:
         assert called_request.conversation_id == "conv-123"
 
     @pytest.mark.asyncio
-    async def test_get_message_status_success(self, service_with_mock_repo, mock_repository):
+    async def test_get_message_status_success(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test successful get_message_status call"""
         mock_response = Mock()
         mock_response.status = "COMPLETED"
@@ -230,9 +225,7 @@ class TestGenieService:
         # Create request
         # Call service method directly with parameters
         result = await service_with_mock_repo.get_message_status(
-            space_id="space1",
-            conversation_id="conv-123", 
-            message_id="msg-456"
+            space_id="space1", conversation_id="conv-123", message_id="msg-456"
         )
 
         # Assertions
@@ -244,21 +237,21 @@ class TestGenieService:
         mock_repository.get_message_status.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_query_result_success(self, service_with_mock_repo, mock_repository):
+    async def test_get_query_result_success(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test successful get_query_result call"""
         mock_result = GenieQueryResult(
             status=GenieQueryStatus.COMPLETED,
             data=[{"col1": "value1", "col2": "value2"}],
             columns=["col1", "col2"],
-            row_count=1
+            row_count=1,
         )
         mock_repository.get_query_result = AsyncMock(return_value=mock_result)
 
         # Call service method with individual parameters
         result = await service_with_mock_repo.get_query_result(
-            space_id="space1",
-            conversation_id="conv-123",
-            message_id="msg-456"
+            space_id="space1", conversation_id="conv-123", message_id="msg-456"
         )
 
         # Assertions
@@ -282,23 +275,22 @@ class TestGenieService:
             status=GenieQueryStatus.COMPLETED,
             data=[
                 {"column1": "result1", "column2": "result2"},
-                {"column1": "result3", "column2": "result4"}
+                {"column1": "result3", "column2": "result4"},
             ],
             columns=["column1", "column2"],
-            row_count=2
+            row_count=2,
         )
         mock_response = GenieExecutionResponse(
             conversation_id="conv-123",
             message_id="msg-456",
             status=GenieQueryStatus.COMPLETED,
-            query_result=mock_query_result
+            query_result=mock_query_result,
         )
         mock_repository.execute_query = AsyncMock(return_value=mock_response)
 
         # Call service method with individual parameters
         result = await service_with_mock_repo.execute_query(
-            space_id="space1",
-            question="SELECT * FROM users LIMIT 10"
+            space_id="space1", question="SELECT * FROM users LIMIT 10"
         )
 
         # Assertions
@@ -317,9 +309,13 @@ class TestGenieService:
         assert called_request.question == "SELECT * FROM users LIMIT 10"
 
     @pytest.mark.asyncio
-    async def test_get_spaces_repository_error(self, service_with_mock_repo, mock_repository):
+    async def test_get_spaces_repository_error(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test get_spaces when repository raises an error"""
-        mock_repository.get_spaces = AsyncMock(side_effect=Exception("Repository error"))
+        mock_repository.get_spaces = AsyncMock(
+            side_effect=Exception("Repository error")
+        )
 
         request = GenieSpacesRequest(page_size=50)
 
@@ -328,7 +324,9 @@ class TestGenieService:
         assert result.spaces == []
 
     @pytest.mark.asyncio
-    async def test_search_spaces_repository_error(self, service_with_mock_repo, mock_repository):
+    async def test_search_spaces_repository_error(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test search_spaces when repository raises an error"""
         mock_repository.get_spaces = AsyncMock(side_effect=Exception("Search failed"))
 
@@ -337,39 +335,47 @@ class TestGenieService:
         assert result.spaces == []
 
     @pytest.mark.asyncio
-    async def test_start_conversation_repository_error(self, service_with_mock_repo, mock_repository):
+    async def test_start_conversation_repository_error(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test start_conversation when repository raises an error"""
-        mock_repository.start_conversation = AsyncMock(side_effect=Exception("Conversation start failed"))
+        mock_repository.start_conversation = AsyncMock(
+            side_effect=Exception("Conversation start failed")
+        )
 
         # start_conversation returns None on error
         result = await service_with_mock_repo.start_conversation(
-            space_id="space1",
-            initial_message="Test message"
+            space_id="space1", initial_message="Test message"
         )
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_send_message_repository_error(self, service_with_mock_repo, mock_repository):
+    async def test_send_message_repository_error(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test send_message when repository raises an error"""
-        mock_repository.send_message = AsyncMock(side_effect=Exception("Message send failed"))
+        mock_repository.send_message = AsyncMock(
+            side_effect=Exception("Message send failed")
+        )
 
         # send_message returns None on error
         result = await service_with_mock_repo.send_message(
-            space_id="space1",
-            conversation_id="conv-123",
-            message="Test message"
+            space_id="space1", conversation_id="conv-123", message="Test message"
         )
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_execute_query_repository_error(self, service_with_mock_repo, mock_repository):
+    async def test_execute_query_repository_error(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test execute_query when repository raises an error"""
-        mock_repository.execute_query = AsyncMock(side_effect=Exception("Query execution failed"))
+        mock_repository.execute_query = AsyncMock(
+            side_effect=Exception("Query execution failed")
+        )
 
         # execute_query returns a failed response on error
         result = await service_with_mock_repo.execute_query(
-            space_id="space1",
-            question="SELECT * FROM table"
+            space_id="space1", question="SELECT * FROM table"
         )
         assert isinstance(result, GenieExecutionResponse)
         assert result.status == "FAILED"
@@ -378,13 +384,13 @@ class TestGenieService:
     def test_service_provides_consistent_interface(self, service):
         """Test that service provides all expected methods"""
         # Check that all expected async methods exist
-        assert hasattr(service, 'get_spaces')
-        assert hasattr(service, 'search_spaces')
-        assert hasattr(service, 'start_conversation')
-        assert hasattr(service, 'send_message')
-        assert hasattr(service, 'get_message_status')
-        assert hasattr(service, 'get_query_result')
-        assert hasattr(service, 'execute_query')
+        assert hasattr(service, "get_spaces")
+        assert hasattr(service, "search_spaces")
+        assert hasattr(service, "start_conversation")
+        assert hasattr(service, "send_message")
+        assert hasattr(service, "get_message_status")
+        assert hasattr(service, "get_query_result")
+        assert hasattr(service, "execute_query")
 
         # Check that methods are callable
         assert callable(service.get_spaces)
@@ -396,7 +402,9 @@ class TestGenieService:
         assert callable(service.execute_query)
 
     @pytest.mark.asyncio
-    async def test_service_request_validation(self, service_with_mock_repo, mock_repository):
+    async def test_service_request_validation(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test that service validates requests properly"""
         mock_repository.get_spaces = AsyncMock()
 
@@ -405,9 +413,13 @@ class TestGenieService:
         assert result.spaces == []
 
     @pytest.mark.asyncio
-    async def test_search_spaces_empty_query(self, service_with_mock_repo, mock_repository):
+    async def test_search_spaces_empty_query(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test search_spaces with empty query falls back to get_spaces"""
-        mock_response = GenieSpacesResponse(spaces=[], next_page_token=None, total_fetched=0)
+        mock_response = GenieSpacesResponse(
+            spaces=[], next_page_token=None, total_fetched=0
+        )
         mock_repository.get_spaces = AsyncMock(return_value=mock_response)
 
         result = await service_with_mock_repo.search_spaces("", page_size=50)
@@ -425,20 +437,22 @@ class TestGenieService:
     async def test_service_with_default_repository_creation(self, auth_config):
         """Test that service creates repository correctly"""
         service = GenieService(auth_config)
-        
+
         # Repository should be created with same auth config
         assert service.repository.auth_config == auth_config
 
     def test_service_logging_integration(self, service_with_mock_repo, caplog):
         """Test that service logs appropriately"""
         import logging
-        
+
         # Set logger level to capture logs
-        logging.getLogger("src.services.databricks.genie.service").setLevel(logging.INFO)
+        logging.getLogger("src.services.databricks.genie.service").setLevel(
+            logging.INFO
+        )
 
         # Create service (this should log something during initialization)
         service = GenieService()
-        
+
         # For now, just verify that service can be created without logging errors
         assert service is not None
 
@@ -447,20 +461,22 @@ class TestGenieService:
         """Test that service handles concurrent requests properly"""
         import asyncio
 
-        mock_response = GenieSpacesResponse(spaces=[], next_page_token=None, total_fetched=0)
+        mock_response = GenieSpacesResponse(
+            spaces=[], next_page_token=None, total_fetched=0
+        )
         mock_repository.get_spaces = AsyncMock(return_value=mock_response)
 
         # Create multiple concurrent requests
         requests = [
             GenieSpacesRequest(page_size=10),
             GenieSpacesRequest(page_size=20),
-            GenieSpacesRequest(page_size=30)
+            GenieSpacesRequest(page_size=30),
         ]
 
         # Execute concurrently
-        results = await asyncio.gather(*[
-            service_with_mock_repo.get_spaces(req) for req in requests
-        ])
+        results = await asyncio.gather(
+            *[service_with_mock_repo.get_spaces(req) for req in requests]
+        )
 
         # All should complete successfully
         assert len(results) == 3
@@ -470,7 +486,9 @@ class TestGenieService:
         assert mock_repository.get_spaces.call_count == 3
 
     @pytest.mark.asyncio
-    async def test_get_spaces_none_request_uses_default(self, service_with_mock_repo, mock_repository):
+    async def test_get_spaces_none_request_uses_default(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test get_spaces with None request creates default GenieSpacesRequest"""
         mock_response = GenieSpacesResponse(spaces=[], total_fetched=0)
         mock_repository.get_spaces = AsyncMock(return_value=mock_response)
@@ -488,7 +506,9 @@ class TestGenieService:
         )
 
     @pytest.mark.asyncio
-    async def test_search_spaces_with_page_token(self, service_with_mock_repo, mock_repository):
+    async def test_search_spaces_with_page_token(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test search_spaces passes page_token correctly"""
         mock_response = GenieSpacesResponse(spaces=[], total_fetched=0)
         mock_repository.get_spaces = AsyncMock(return_value=mock_response)
@@ -507,7 +527,9 @@ class TestGenieService:
         )
 
     @pytest.mark.asyncio
-    async def test_search_spaces_no_args_uses_defaults(self, service_with_mock_repo, mock_repository):
+    async def test_search_spaces_no_args_uses_defaults(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test search_spaces with no args uses default page_size from schema"""
         mock_response = GenieSpacesResponse(spaces=[], total_fetched=0)
         mock_repository.get_spaces = AsyncMock(return_value=mock_response)
@@ -524,7 +546,9 @@ class TestGenieService:
         )
 
     @pytest.mark.asyncio
-    async def test_get_space_details_success(self, service_with_mock_repo, mock_repository):
+    async def test_get_space_details_success(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test successful get_space_details call"""
         mock_space = GenieSpace(id="space1", name="Test Space", description="Desc")
         mock_repository.get_space_details = AsyncMock(return_value=mock_space)
@@ -537,7 +561,9 @@ class TestGenieService:
         mock_repository.get_space_details.assert_called_once_with("space1")
 
     @pytest.mark.asyncio
-    async def test_get_space_details_not_found(self, service_with_mock_repo, mock_repository):
+    async def test_get_space_details_not_found(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test get_space_details when space is not found"""
         mock_repository.get_space_details = AsyncMock(return_value=None)
 
@@ -547,7 +573,9 @@ class TestGenieService:
         mock_repository.get_space_details.assert_called_once_with("nonexistent")
 
     @pytest.mark.asyncio
-    async def test_get_space_details_repository_error(self, service_with_mock_repo, mock_repository):
+    async def test_get_space_details_repository_error(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test get_space_details when repository raises an error"""
         mock_repository.get_space_details = AsyncMock(
             side_effect=Exception("Details fetch failed")
@@ -558,100 +586,105 @@ class TestGenieService:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_start_conversation_returns_none(self, service_with_mock_repo, mock_repository):
+    async def test_start_conversation_returns_none(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test start_conversation when repository returns None"""
         mock_repository.start_conversation = AsyncMock(return_value=None)
 
         result = await service_with_mock_repo.start_conversation(
-            space_id="space1",
-            initial_message="Hello"
+            space_id="space1", initial_message="Hello"
         )
 
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_send_message_returns_none(self, service_with_mock_repo, mock_repository):
+    async def test_send_message_returns_none(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test send_message when repository returns None"""
         mock_repository.send_message = AsyncMock(return_value=None)
 
         result = await service_with_mock_repo.send_message(
-            space_id="space1",
-            message="Test message",
-            conversation_id="conv-123"
+            space_id="space1", message="Test message", conversation_id="conv-123"
         )
 
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_message_status_repository_error(self, service_with_mock_repo, mock_repository):
+    async def test_get_message_status_repository_error(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test get_message_status when repository raises an error"""
         mock_repository.get_message_status = AsyncMock(
             side_effect=Exception("Status fetch failed")
         )
 
         result = await service_with_mock_repo.get_message_status(
-            space_id="space1",
-            conversation_id="conv-123",
-            message_id="msg-456"
+            space_id="space1", conversation_id="conv-123", message_id="msg-456"
         )
 
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_query_result_repository_error(self, service_with_mock_repo, mock_repository):
+    async def test_get_query_result_repository_error(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test get_query_result when repository raises an error"""
         mock_repository.get_query_result = AsyncMock(
             side_effect=Exception("Query result fetch failed")
         )
 
         result = await service_with_mock_repo.get_query_result(
-            space_id="space1",
-            conversation_id="conv-123",
-            message_id="msg-456"
+            space_id="space1", conversation_id="conv-123", message_id="msg-456"
         )
 
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_execute_query_success_status(self, service_with_mock_repo, mock_repository):
+    async def test_execute_query_success_status(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test execute_query when response has SUCCESS status"""
         mock_response = GenieExecutionResponse(
             conversation_id="conv-123",
             message_id="msg-456",
             status=GenieQueryStatus.SUCCESS,
-            result="Query completed"
+            result="Query completed",
         )
         mock_repository.execute_query = AsyncMock(return_value=mock_response)
 
         result = await service_with_mock_repo.execute_query(
-            space_id="space1",
-            question="SELECT count(*) FROM users"
+            space_id="space1", question="SELECT count(*) FROM users"
         )
 
         assert result.status == "SUCCESS"
         assert result.conversation_id == "conv-123"
 
     @pytest.mark.asyncio
-    async def test_execute_query_failed_status(self, service_with_mock_repo, mock_repository):
+    async def test_execute_query_failed_status(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test execute_query when response has non-SUCCESS status"""
         mock_response = GenieExecutionResponse(
             conversation_id="conv-123",
             message_id="msg-456",
             status=GenieQueryStatus.FAILED,
-            error="Query timed out"
+            error="Query timed out",
         )
         mock_repository.execute_query = AsyncMock(return_value=mock_response)
 
         result = await service_with_mock_repo.execute_query(
-            space_id="space1",
-            question="SELECT * FROM huge_table"
+            space_id="space1", question="SELECT * FROM huge_table"
         )
 
         assert result.status == "FAILED"
         assert result.error == "Query timed out"
 
     @pytest.mark.asyncio
-    async def test_validate_space_access_success(self, service_with_mock_repo, mock_repository):
+    async def test_validate_space_access_success(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test validate_space_access when space exists"""
         mock_space = GenieSpace(id="space1", name="Test Space")
         mock_repository.get_space_details = AsyncMock(return_value=mock_space)
@@ -662,7 +695,9 @@ class TestGenieService:
         mock_repository.get_space_details.assert_called_once_with("space1")
 
     @pytest.mark.asyncio
-    async def test_validate_space_access_not_found(self, service_with_mock_repo, mock_repository):
+    async def test_validate_space_access_not_found(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test validate_space_access when space not found"""
         mock_repository.get_space_details = AsyncMock(return_value=None)
 
@@ -671,7 +706,9 @@ class TestGenieService:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_validate_space_access_with_auth_config(self, service_with_mock_repo, mock_repository):
+    async def test_validate_space_access_with_auth_config(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test validate_space_access with custom auth config"""
         mock_space = GenieSpace(id="space1", name="Test Space")
         mock_repository.get_space_details = AsyncMock(return_value=mock_space)
@@ -685,7 +722,9 @@ class TestGenieService:
         assert mock_repository.auth_config == custom_auth
 
     @pytest.mark.asyncio
-    async def test_validate_space_access_repository_error(self, service_with_mock_repo, mock_repository):
+    async def test_validate_space_access_repository_error(
+        self, service_with_mock_repo, mock_repository
+    ):
         """Test validate_space_access when repository raises an error"""
         mock_repository.get_space_details = AsyncMock(
             side_effect=Exception("Access check failed")

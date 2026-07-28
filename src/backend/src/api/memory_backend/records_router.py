@@ -93,7 +93,9 @@ async def list_memory_records(
         description="Optional hierarchical scope prefix to filter records.",
     ),
     limit: int = Query(
-        50, ge=1, le=5000,
+        50,
+        ge=1,
+        le=5000,
         description=(
             "Maximum number of records to return. The browser pages with a "
             "small limit for the card list, but the concept/graph views fetch "
@@ -101,7 +103,8 @@ async def list_memory_records(
         ),
     ),
     offset: int = Query(
-        0, ge=0,
+        0,
+        ge=0,
         description="Number of records to skip for pagination.",
     ),
 ) -> Dict[str, Any]:
@@ -134,8 +137,14 @@ async def list_memory_records(
     if backend_type == "databricks":
         databricks_cfg = active.databricks_config if active else None
         if not databricks_cfg or not databricks_cfg.memory_index:
-            return {"backend": backend_type, "records": [], "count": 0, "total": 0,
-                    "offset": offset, "limit": limit}
+            return {
+                "backend": backend_type,
+                "records": [],
+                "count": 0,
+                "total": 0,
+                "offset": offset,
+                "limit": limit,
+            }
         records, total = await _browse_databricks_records(
             databricks_cfg,
             group_id=group_id,
@@ -147,8 +156,14 @@ async def list_memory_records(
     elif backend_type == "lakebase":
         lakebase_cfg = active.lakebase_config if active else None
         if not lakebase_cfg or not lakebase_cfg.memory_table:
-            return {"backend": backend_type, "records": [], "count": 0, "total": 0,
-                    "offset": offset, "limit": limit}
+            return {
+                "backend": backend_type,
+                "records": [],
+                "count": 0,
+                "total": 0,
+                "offset": offset,
+                "limit": limit,
+            }
         records, total = await _browse_lakebase_records(
             lakebase_cfg,
             group_id=group_id,

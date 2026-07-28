@@ -7,12 +7,13 @@ into CREATE TABLE / INSERT executed on the SQL warehouse. These tests assert
 the table name is coerced to a safe identifier, config catalog/schema are
 validated, and column names are backtick-escaped.
 """
+
 import pytest
 
 from src.services.tools.mquery_conversion_pipeline_tool import (
+    _quote_sql_column,
     _sanitize_sql_identifier,
     _validate_sql_identifier,
-    _quote_sql_column,
 )
 
 
@@ -42,7 +43,9 @@ class TestValidateSqlIdentifier:
         assert _validate_sql_identifier("main") == "main"
         assert _validate_sql_identifier("my_schema") == "my_schema"
 
-    @pytest.mark.parametrize("bad", ["main; DROP TABLE x", "a b", "a-b", "", "1abc", "a.b"])
+    @pytest.mark.parametrize(
+        "bad", ["main; DROP TABLE x", "a b", "a-b", "", "1abc", "a.b"]
+    )
     def test_rejects_injection(self, bad):
         with pytest.raises(ValueError):
             _validate_sql_identifier(bad, "catalog/schema")
@@ -67,12 +70,14 @@ class TestSafeSqlType:
 
     def test_allows_known_types(self):
         from src.services.tools.mquery_conversion_pipeline_tool import _safe_sql_type
+
         assert _safe_sql_type("STRING") == "STRING"
         assert _safe_sql_type("bigint") == "BIGINT"
         assert _safe_sql_type("decimal(10,2)") == "DECIMAL(10,2)"
 
     def test_unknown_or_injected_type_defaults_to_string(self):
         from src.services.tools.mquery_conversion_pipeline_tool import _safe_sql_type
+
         assert _safe_sql_type("STRING) LOCATION 'abfss://evil' --") == "STRING"
         assert _safe_sql_type("EVILTYPE") == "STRING"
         assert _safe_sql_type("") == "STRING"

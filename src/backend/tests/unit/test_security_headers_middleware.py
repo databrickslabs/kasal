@@ -7,19 +7,20 @@ Tests verify that the middleware:
 - Preserves existing response headers
 - Works correctly with streaming/chunked responses (only modifies http.response.start)
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Import the middleware directly — avoids spinning up the full FastAPI app
 # ---------------------------------------------------------------------------
 from src.main import SecurityHeadersMiddleware
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_http_scope() -> dict:
     return {"type": "http", "method": "GET", "path": "/test"}
@@ -73,6 +74,7 @@ async def collect_sent_messages(middleware, scope, receive=None, initial_headers
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestSecurityHeadersMiddleware:
     """Test suite for SecurityHeadersMiddleware."""
@@ -201,7 +203,11 @@ class TestSecurityHeadersMiddleware:
         assert len(body_messages) == 1
         assert body_messages[0]["body"] == b"hello"
         # body frame must not have a 'headers' key added to it
-        assert "headers" not in body_messages[0] or body_messages[0].get("headers") is None or True
+        assert (
+            "headers" not in body_messages[0]
+            or body_messages[0].get("headers") is None
+            or True
+        )
 
     @pytest.mark.asyncio
     async def test_middleware_works_with_500_response(self):

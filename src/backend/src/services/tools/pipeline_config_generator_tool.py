@@ -3,6 +3,7 @@
 Wraps generate_config.py logic as a CrewAI tool so it can be used in the Kasal UI
 with its own config form (including both SP credential sets).
 """
+
 import json
 import logging
 import os
@@ -11,9 +12,9 @@ import sys
 from collections import defaultdict
 from typing import Any, Optional, Type
 
-from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
+from src.services.tools.base import BaseTool
 from src.services.tools.metric_view_utils.utils import run_async as _run_async
 
 logger = logging.getLogger(__name__)
@@ -29,49 +30,71 @@ class PipelineConfigGeneratorSchema(BaseModel):
     """Input schema — drives the Kasal UI form."""
 
     # ── PBI Configuration ──
-    workspace_id: Optional[str] = Field(
-        None, description="[PBI] Workspace ID (GUID)")
+    workspace_id: Optional[str] = Field(None, description="[PBI] Workspace ID (GUID)")
     dataset_id: Optional[str] = Field(
-        None, description="[PBI] Dataset / Semantic Model ID (GUID)")
+        None, description="[PBI] Dataset / Semantic Model ID (GUID)"
+    )
     report_id: Optional[str] = Field(
-        None, description="[PBI] Optional Report ID (GUID) for visual metadata")
+        None, description="[PBI] Optional Report ID (GUID) for visual metadata"
+    )
 
     # ── Non-Admin credentials (Execute Queries API — data / mapping extraction) ──
     # Provide EITHER a Service Principal (client_id + client_secret) OR a
     # Service Account (client_id + username + password). SA is used when
     # username + password are supplied.
     tenant_id: Optional[str] = Field(
-        None, description="[Auth] Azure AD Tenant ID (shared by all credentials)")
+        None, description="[Auth] Azure AD Tenant ID (shared by all credentials)"
+    )
     client_id: Optional[str] = Field(
-        None, description="[Auth - Non-Admin] Client ID (SP or SA app; workspace member, SemanticModel.ReadWrite.All)")
+        None,
+        description="[Auth - Non-Admin] Client ID (SP or SA app; workspace member, SemanticModel.ReadWrite.All)",
+    )
     client_secret: Optional[str] = Field(
-        None, description="[Auth - Non-Admin SP] Client Secret (Service Principal). Optional for a Service Account.")
+        None,
+        description="[Auth - Non-Admin SP] Client Secret (Service Principal). Optional for a Service Account.",
+    )
     username: Optional[str] = Field(
-        None, description="[Auth - Non-Admin SA] Service Account username/UPN (enables password grant)")
+        None,
+        description="[Auth - Non-Admin SA] Service Account username/UPN (enables password grant)",
+    )
     password: Optional[str] = Field(
-        None, description="[Auth - Non-Admin SA] Service Account password")
+        None, description="[Auth - Non-Admin SA] Service Account password"
+    )
     access_token: Optional[str] = Field(
-        None, description="[Auth - Non-Admin] Pre-obtained OAuth access token (bypasses SP/SA for the data path)")
+        None,
+        description="[Auth - Non-Admin] Pre-obtained OAuth access token (bypasses SP/SA for the data path)",
+    )
     auth_method: Optional[str] = Field(
-        None, description="[Auth] Optional explicit method: 'service_principal' or 'service_account'. Auto-detected from the fields provided when unset (SP-first, matching the shared AadService).")
+        None,
+        description="[Auth] Optional explicit method: 'service_principal' or 'service_account'. Auto-detected from the fields provided when unset (SP-first, matching the shared AadService).",
+    )
 
     # ── Admin credentials (Admin Scanner API) ──
     # Also accepts SP (admin_client_id + admin_client_secret) or SA
     # (admin_client_id + admin_username + admin_password).
     admin_client_id: Optional[str] = Field(
-        None, description="[Auth - Admin] Client ID (SP or SA app; Tenant.Read.All / Power BI Admin)")
+        None,
+        description="[Auth - Admin] Client ID (SP or SA app; Tenant.Read.All / Power BI Admin)",
+    )
     admin_client_secret: Optional[str] = Field(
-        None, description="[Auth - Admin SP] Client Secret (Service Principal). Optional for a Service Account.")
+        None,
+        description="[Auth - Admin SP] Client Secret (Service Principal). Optional for a Service Account.",
+    )
     admin_username: Optional[str] = Field(
-        None, description="[Auth - Admin SA] Service Account username/UPN (enables password grant)")
+        None,
+        description="[Auth - Admin SA] Service Account username/UPN (enables password grant)",
+    )
     admin_password: Optional[str] = Field(
-        None, description="[Auth - Admin SA] Service Account password")
+        None, description="[Auth - Admin SA] Service Account password"
+    )
 
     # ── Target UC Namespace ──
     catalog: Optional[str] = Field(
-        None, description="[Target] Unity Catalog name (default: main)")
+        None, description="[Target] Unity Catalog name (default: main)"
+    )
     schema_name: Optional[str] = Field(
-        None, description="[Target] UC Schema name (default: default)")
+        None, description="[Target] UC Schema name (default: default)"
+    )
 
     # ── Optional warehouse + LLM enrichment ──
     warehouse_id: Optional[str] = Field(
@@ -80,10 +103,13 @@ class PipelineConfigGeneratorSchema(BaseModel):
         "endpoint URL). When set, config-gen runs SELECT DISTINCT to resolve "
         "flag-column filter_sets and (for cross-fact merges) one LLM call to draft "
         "fact_join_map. Slower and consumes tokens. Omit to keep the fast, "
-        "deterministic, LLM-free default.")
+        "deterministic, LLM-free default.",
+    )
     databricks_host: Optional[str] = Field(
-        None, description="[Enrichment, optional] Workspace host override for the "
-        "warehouse queries (defaults to the authenticated workspace).")
+        None,
+        description="[Enrichment, optional] Workspace host override for the "
+        "warehouse queries (defaults to the authenticated workspace).",
+    )
 
 
 class PipelineConfigGeneratorTool(BaseTool):
@@ -108,16 +134,27 @@ class PipelineConfigGeneratorTool(BaseTool):
 
     def __init__(self, **kwargs: Any) -> None:
         config_keys = (
-            "workspace_id", "dataset_id", "report_id",
-            "tenant_id", "client_id", "client_secret",
-            "username", "password", "access_token", "auth_method",
-            "admin_client_id", "admin_client_secret",
-            "admin_username", "admin_password",
-            "catalog", "schema_name",
+            "workspace_id",
+            "dataset_id",
+            "report_id",
+            "tenant_id",
+            "client_id",
+            "client_secret",
+            "username",
+            "password",
+            "access_token",
+            "auth_method",
+            "admin_client_id",
+            "admin_client_secret",
+            "admin_username",
+            "admin_password",
+            "catalog",
+            "schema_name",
             # Optional warehouse-enrichment (P2/P3): when a warehouse_id is
             # supplied, config-gen runs SELECT DISTINCT / cross-fact probes to fill
             # keys the PBI APIs can't (filter-set values, fact-join strategy).
-            "warehouse_id", "databricks_host",
+            "warehouse_id",
+            "databricks_host",
         )
         default_config = {}
         for key in config_keys:
@@ -129,6 +166,7 @@ class PipelineConfigGeneratorTool(BaseTool):
 
     def _run(self, **kwargs: Any) -> str:
         """Execute the pipeline config generation."""
+
         def _get(key: str) -> Any:
             # A capable agent, told to "call the tool with all inputs", often
             # passes its OWN EMPTY placeholder for fields it doesn't have (e.g.
@@ -158,7 +196,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         admin_password = _get("admin_password")
         catalog = _get("catalog") or "main"
         schema = _get("schema_name") or "default"
-        warehouse_id = _get("warehouse_id")      # None → enrichment stays P1-only
+        warehouse_id = _get("warehouse_id")  # None → enrichment stays P1-only
         databricks_host = _get("databricks_host")  # optional host override
 
         # A credential set is valid as a Service Principal (client_id +
@@ -173,7 +211,11 @@ class PipelineConfigGeneratorTool(BaseTool):
         if not workspace_id or not dataset_id:
             return json.dumps({"error": "workspace_id and dataset_id are required."})
         if not access_token and not tenant_id:
-            return json.dumps({"error": "tenant_id is required (unless a pre-obtained access_token is supplied)."})
+            return json.dumps(
+                {
+                    "error": "tenant_id is required (unless a pre-obtained access_token is supplied)."
+                }
+            )
         # If a credential is missing, it may have been BLANKED by a decrypt failure
         # (encryption key changed across a redeploy) rather than never set — hint at
         # that so the user re-enters instead of hunting a non-existent config bug.
@@ -181,20 +223,32 @@ class PipelineConfigGeneratorTool(BaseTool):
             " If these worked before a redeploy, the stored value may have been "
             "cleared because the encryption key changed — please re-enter it."
         )
-        if not access_token and not _creds_ok(client_id, client_secret, username, password):
-            return json.dumps({"error": (
-                "Non-admin credentials required: a Service Principal "
-                "(client_id + client_secret), a Service Account "
-                "(client_id + username + password), or a pre-obtained access_token."
-                + _redeploy_hint
-            )})
-        if not _creds_ok(admin_client_id, admin_client_secret, admin_username, admin_password):
-            return json.dumps({"error": (
-                "Admin credentials required: either a Service Principal "
-                "(admin_client_id + admin_client_secret) or a Service Account "
-                "(admin_client_id + admin_username + admin_password)."
-                + _redeploy_hint
-            )})
+        if not access_token and not _creds_ok(
+            client_id, client_secret, username, password
+        ):
+            return json.dumps(
+                {
+                    "error": (
+                        "Non-admin credentials required: a Service Principal "
+                        "(client_id + client_secret), a Service Account "
+                        "(client_id + username + password), or a pre-obtained access_token."
+                        + _redeploy_hint
+                    )
+                }
+            )
+        if not _creds_ok(
+            admin_client_id, admin_client_secret, admin_username, admin_password
+        ):
+            return json.dumps(
+                {
+                    "error": (
+                        "Admin credentials required: either a Service Principal "
+                        "(admin_client_id + admin_client_secret) or a Service Account "
+                        "(admin_client_id + admin_username + admin_password)."
+                        + _redeploy_hint
+                    )
+                }
+            )
 
         try:
             # Import generate_config module
@@ -206,14 +260,24 @@ class PipelineConfigGeneratorTool(BaseTool):
             # OAuth, with explicit auth_method honoured and SP-first auto-detect.
             logger.info("[PipelineConfigGen] Acquiring tokens via shared AadService...")
             token = self._resolve_token(
-                tenant_id=tenant_id, client_id=client_id, client_secret=client_secret,
-                username=username, password=password, access_token=access_token,
-                auth_method=auth_method, label="non-admin",
+                tenant_id=tenant_id,
+                client_id=client_id,
+                client_secret=client_secret,
+                username=username,
+                password=password,
+                access_token=access_token,
+                auth_method=auth_method,
+                label="non-admin",
             )
             admin_token = self._resolve_token(
-                tenant_id=tenant_id, client_id=admin_client_id, client_secret=admin_client_secret,
-                username=admin_username, password=admin_password, access_token=None,
-                auth_method=auth_method, label="admin",
+                tenant_id=tenant_id,
+                client_id=admin_client_id,
+                client_secret=admin_client_secret,
+                username=admin_username,
+                password=admin_password,
+                access_token=None,
+                auth_method=auth_method,
+                label="admin",
             )
             warnings: list[str] = []
 
@@ -230,13 +294,19 @@ class PipelineConfigGeneratorTool(BaseTool):
                 if "tok" not in _sp_data_token_cache:
                     try:
                         _sp_data_token_cache["tok"] = self._resolve_token(
-                            tenant_id=tenant_id, client_id=client_id,
+                            tenant_id=tenant_id,
+                            client_id=client_id,
                             client_secret=client_secret,
-                            username=None, password=None, access_token=None,
-                            auth_method="service_principal", label="data-SP-fallback",
+                            username=None,
+                            password=None,
+                            access_token=None,
+                            auth_method="service_principal",
+                            label="data-SP-fallback",
                         )
                     except Exception as _e:
-                        logger.warning(f"[PipelineConfigGen] SP data-token fallback failed: {_e}")
+                        logger.warning(
+                            f"[PipelineConfigGen] SP data-token fallback failed: {_e}"
+                        )
                         _sp_data_token_cache["tok"] = None
                 return _sp_data_token_cache["tok"]
 
@@ -244,16 +314,26 @@ class PipelineConfigGeneratorTool(BaseTool):
             relationships: list[dict] = []
             try:
                 logger.info("[PipelineConfigGen] API 1: INFO.VIEW.RELATIONSHIPS()...")
-                relationships = gen.extract_relationships(token, workspace_id, dataset_id)
-                logger.info(f"[PipelineConfigGen]   → {len(relationships)} relationships")
+                relationships = gen.extract_relationships(
+                    token, workspace_id, dataset_id
+                )
+                logger.info(
+                    f"[PipelineConfigGen]   → {len(relationships)} relationships"
+                )
             except Exception as e:
                 logger.warning(f"[PipelineConfigGen] API 1 (Relationships) failed: {e}")
                 sp_tok = _sp_data_token()
                 if sp_tok:
                     try:
-                        logger.info("[PipelineConfigGen] API 1: retrying with Service Principal...")
-                        relationships = gen.extract_relationships(sp_tok, workspace_id, dataset_id)
-                        logger.info(f"[PipelineConfigGen]   → {len(relationships)} relationships (SP fallback)")
+                        logger.info(
+                            "[PipelineConfigGen] API 1: retrying with Service Principal..."
+                        )
+                        relationships = gen.extract_relationships(
+                            sp_tok, workspace_id, dataset_id
+                        )
+                        logger.info(
+                            f"[PipelineConfigGen]   → {len(relationships)} relationships (SP fallback)"
+                        )
                     except Exception as e2:
                         msg = f"API 1 (Relationships) failed (SA + SP): {e2}"
                         logger.warning(f"[PipelineConfigGen] {msg}")
@@ -274,9 +354,15 @@ class PipelineConfigGeneratorTool(BaseTool):
                 sp_tok = _sp_data_token()
                 if sp_tok:
                     try:
-                        logger.info("[PipelineConfigGen] API 2: retrying with Service Principal...")
-                        measures = gen.extract_measures(sp_tok, workspace_id, dataset_id)
-                        logger.info(f"[PipelineConfigGen]   → {len(measures)} measures (SP fallback)")
+                        logger.info(
+                            "[PipelineConfigGen] API 2: retrying with Service Principal..."
+                        )
+                        measures = gen.extract_measures(
+                            sp_tok, workspace_id, dataset_id
+                        )
+                        logger.info(
+                            f"[PipelineConfigGen]   → {len(measures)} measures (SP fallback)"
+                        )
                     except Exception as e2:
                         msg = f"API 2 (Measures) failed (SA + SP): {e2}"
                         logger.warning(f"[PipelineConfigGen] {msg}")
@@ -292,8 +378,12 @@ class PipelineConfigGeneratorTool(BaseTool):
             logger.info("[PipelineConfigGen] API 3: Admin Scanner (workspace scan)...")
             try:
                 scan_result = gen.trigger_admin_scan(admin_token, workspace_id)
-                admin_tables = gen.parse_admin_tables(scan_result, dataset_id=dataset_id)
-                logger.info(f"[PipelineConfigGen]   → {len(admin_tables)} tables (admin scanner)")
+                admin_tables = gen.parse_admin_tables(
+                    scan_result, dataset_id=dataset_id
+                )
+                logger.info(
+                    f"[PipelineConfigGen]   → {len(admin_tables)} tables (admin scanner)"
+                )
             except Exception as e:
                 msg = f"API 3 (Admin Scanner) failed: {e}"
                 logger.warning(f"[PipelineConfigGen] {msg}")
@@ -303,19 +393,34 @@ class PipelineConfigGeneratorTool(BaseTool):
             # Admin Scanner blocks). Uses whichever non-admin creds are present
             # (SA username/password OR SP client_secret) to mint a Fabric token.
             if not admin_tables:
-                logger.info("[PipelineConfigGen] Admin scan empty — trying Fabric TMDL fallback...")
+                logger.info(
+                    "[PipelineConfigGen] Admin scan empty — trying Fabric TMDL fallback..."
+                )
                 try:
                     fabric_token = gen.get_fabric_token(
-                        tenant_id, client_id, client_secret,
-                        username=username, password=password,
+                        tenant_id,
+                        client_id,
+                        client_secret,
+                        username=username,
+                        password=password,
                     )
-                    tmdl_parts = gen.fetch_tmdl_parts(fabric_token, workspace_id, dataset_id)
+                    tmdl_parts = gen.fetch_tmdl_parts(
+                        fabric_token, workspace_id, dataset_id
+                    )
                     if tmdl_parts:
-                        admin_tables = gen.parse_tmdl_to_admin_tables(tmdl_parts, dataset_id=dataset_id)
-                        logger.info(f"[PipelineConfigGen]   → {len(admin_tables)} tables (Fabric TMDL)")
+                        admin_tables = gen.parse_tmdl_to_admin_tables(
+                            tmdl_parts, dataset_id=dataset_id
+                        )
+                        logger.info(
+                            f"[PipelineConfigGen]   → {len(admin_tables)} tables (Fabric TMDL)"
+                        )
                     else:
-                        logger.warning("[PipelineConfigGen] Fabric TMDL returned no parts (workspace may not be Fabric-enabled)")
-                        warnings.append("Fabric TMDL fallback returned no data (workspace may not be Fabric-enabled).")
+                        logger.warning(
+                            "[PipelineConfigGen] Fabric TMDL returned no parts (workspace may not be Fabric-enabled)"
+                        )
+                        warnings.append(
+                            "Fabric TMDL fallback returned no data (workspace may not be Fabric-enabled)."
+                        )
                 except Exception as e:
                     msg = f"Fabric TMDL fallback failed: {e}"
                     logger.warning(f"[PipelineConfigGen] {msg}")
@@ -327,17 +432,27 @@ class PipelineConfigGeneratorTool(BaseTool):
             # and the SA cannot use the Admin Scanner — an SP with admin rights
             # still can. Only runs when a distinct SP secret is available.
             if not admin_tables and admin_client_secret:
-                logger.info("[PipelineConfigGen] TMDL empty — retrying Admin Scanner with Service Principal...")
+                logger.info(
+                    "[PipelineConfigGen] TMDL empty — retrying Admin Scanner with Service Principal..."
+                )
                 try:
                     sp_admin_token = self._resolve_token(
-                        tenant_id=tenant_id, client_id=admin_client_id,
+                        tenant_id=tenant_id,
+                        client_id=admin_client_id,
                         client_secret=admin_client_secret,
-                        username=None, password=None, access_token=None,
-                        auth_method="service_principal", label="admin-SP-fallback",
+                        username=None,
+                        password=None,
+                        access_token=None,
+                        auth_method="service_principal",
+                        label="admin-SP-fallback",
                     )
                     scan_result = gen.trigger_admin_scan(sp_admin_token, workspace_id)
-                    admin_tables = gen.parse_admin_tables(scan_result, dataset_id=dataset_id)
-                    logger.info(f"[PipelineConfigGen]   → {len(admin_tables)} tables (SP fallback)")
+                    admin_tables = gen.parse_admin_tables(
+                        scan_result, dataset_id=dataset_id
+                    )
+                    logger.info(
+                        f"[PipelineConfigGen]   → {len(admin_tables)} tables (SP fallback)"
+                    )
                 except Exception as e:
                     msg = f"Service Principal Admin Scanner fallback failed: {e}"
                     logger.warning(f"[PipelineConfigGen] {msg}")
@@ -345,16 +460,22 @@ class PipelineConfigGeneratorTool(BaseTool):
 
             # If API 1+2 failed but admin scan has measures, extract from scan
             if not measures and admin_tables:
-                logger.info("[PipelineConfigGen] Extracting measures from admin scan (XMLA fallback)...")
+                logger.info(
+                    "[PipelineConfigGen] Extracting measures from admin scan (XMLA fallback)..."
+                )
                 for tbl_name, tbl_info in admin_tables.items():
                     for m in tbl_info.get("measures", []):
-                        measures.append({
-                            "measure_name": m.get("name", ""),
-                            "table_name": tbl_name,
-                            "expression": m.get("expression", ""),
-                            "description": m.get("description", ""),
-                        })
-                logger.info(f"[PipelineConfigGen]   → {len(measures)} measures from admin scan")
+                        measures.append(
+                            {
+                                "measure_name": m.get("name", ""),
+                                "table_name": tbl_name,
+                                "expression": m.get("expression", ""),
+                                "description": m.get("description", ""),
+                            }
+                        )
+                logger.info(
+                    f"[PipelineConfigGen]   → {len(measures)} measures from admin scan"
+                )
 
             # ── DAX-quality guard ────────────────────────────────────────────
             # The most damaging silent failure: measure extraction "succeeds"
@@ -369,9 +490,12 @@ class PipelineConfigGeneratorTool(BaseTool):
             def _dax_quality(ms: list[dict]) -> tuple[int, int]:
                 total = len(ms)
                 with_real = sum(
-                    1 for m in ms
+                    1
+                    for m in ms
                     if len((m.get("expression") or "").strip()) > 20
-                    and not re.fullmatch(r'[\w ]+', (m.get("expression") or "").strip() or "x")
+                    and not re.fullmatch(
+                        r"[\w ]+", (m.get("expression") or "").strip() or "x"
+                    )
                 )
                 return with_real, total
 
@@ -380,7 +504,8 @@ class PipelineConfigGeneratorTool(BaseTool):
             if total >= 20 and with_real < max(1, total // 4):
                 logger.warning(
                     f"[PipelineConfigGen] DAX-quality guard: only {with_real}/{total} "
-                    f"measures have real DAX — attempting re-extraction via SP + DAX INFO path")
+                    f"measures have real DAX — attempting re-extraction via SP + DAX INFO path"
+                )
                 # Retry with the Service Principal data token (the DMV/Execute
                 # Queries path can return bare DAX for some token types / throttle).
                 retry_tok = _sp_data_token() or token
@@ -390,7 +515,8 @@ class PipelineConfigGeneratorTool(BaseTool):
                     if r_real > with_real:
                         logger.info(
                             f"[PipelineConfigGen]   → re-extraction improved DAX: "
-                            f"{r_real}/{r_total} (was {with_real}/{total})")
+                            f"{r_real}/{r_total} (was {with_real}/{total})"
+                        )
                         measures = retried
                         with_real, total = r_real, r_total
                 except Exception as e:
@@ -405,7 +531,8 @@ class PipelineConfigGeneratorTool(BaseTool):
                     f"upstream measure extraction (Execute Queries / DMV returned "
                     f"empty EXPRESSION, or admin-scan fallback). Do NOT treat this "
                     f"run as production-quality; re-run or check the non-admin SP's "
-                    f"Execute Queries access to this dataset.")
+                    f"Execute Queries access to this dataset."
+                )
                 logger.error(f"[PipelineConfigGen] {degraded_msg}")
                 warnings.append(degraded_msg)
                 self._dax_degraded = True
@@ -413,7 +540,8 @@ class PipelineConfigGeneratorTool(BaseTool):
                 self._dax_degraded = False
                 logger.info(
                     f"[PipelineConfigGen] DAX-quality OK: {with_real}/{total} "
-                    f"measures carry real DAX")
+                    f"measures carry real DAX"
+                )
 
             # API 4: Report Definition.
             # PROP-7: the report's visual bindings carry the full measure DAX —
@@ -427,26 +555,37 @@ class PipelineConfigGeneratorTool(BaseTool):
                     report_id = discovered
                     logger.info(
                         f"[PipelineConfigGen] Auto-discovered report_id={report_id} "
-                        f"bound to dataset {dataset_id}")
+                        f"bound to dataset {dataset_id}"
+                    )
                 else:
-                    msg = ("No report_id supplied and none auto-discovered for this "
-                           "dataset — measure DAX may be degraded (report visual "
-                           "bindings carry full measure expressions). Supply a "
-                           "report_id for best quality.")
+                    msg = (
+                        "No report_id supplied and none auto-discovered for this "
+                        "dataset — measure DAX may be degraded (report visual "
+                        "bindings carry full measure expressions). Supply a "
+                        "report_id for best quality."
+                    )
                     logger.warning(f"[PipelineConfigGen] {msg}")
                     warnings.append(msg)
             if report_id:
                 logger.info("[PipelineConfigGen] API 4: Report Definition...")
                 report_def = gen.extract_report_definition(
-                    token, workspace_id, report_id,
-                    tenant_id=tenant_id, client_id=client_id, client_secret=client_secret,
+                    token,
+                    workspace_id,
+                    report_id,
+                    tenant_id=tenant_id,
+                    client_id=client_id,
+                    client_secret=client_secret,
                 )
 
             # Build config
             logger.info("[PipelineConfigGen] Building config...")
             config = gen.build_config(
-                relationships, measures, admin_tables, report_def,
-                catalog=catalog, schema=schema,
+                relationships,
+                measures,
+                admin_tables,
+                report_def,
+                catalog=catalog,
+                schema=schema,
             )
 
             # ── Auto-enrich: scan DAX to populate filter_sets, switch_decompositions,
@@ -466,26 +605,41 @@ class PipelineConfigGeneratorTool(BaseTool):
             # P1 (below) is deterministic — no warehouse, no LLM. P2/P3 are gated on
             # `warehouse_id` and added in later phases.
             enrichment_log: list[dict] = []
-            enrichment_log += self._enrich_source_tables_from_mquery(config, admin_tables)
+            enrichment_log += self._enrich_source_tables_from_mquery(
+                config, admin_tables
+            )
 
             # P2 (warehouse): resolve flag-column filter_sets whose values live in
             # DB rows, not DAX. Gated on warehouse_id; uses run_async_with_context so
             # group_id/OBO propagate into the warehouse call.
             if warehouse_id:
                 from src.services.tools.async_bridge import run_async_with_context
+
                 try:
                     enrichment_log += run_async_with_context(
                         self._enrich_filter_sets_from_warehouse(
-                            config, admin_tables, measures,
-                            warehouse_id, databricks_host),
+                            config,
+                            admin_tables,
+                            measures,
+                            warehouse_id,
+                            databricks_host,
+                        ),
                         timeout=300,
                     )
-                except Exception as e:  # noqa: BLE001 — enrichment must never abort config-gen
-                    logger.warning(f"[PipelineConfigGen] Warehouse filter_sets enrichment failed: {e}")
-                    enrichment_log.append({
-                        "tier": "P2", "key": "filter_sets", "status": "error",
-                        "detail": f"warehouse enrichment failed: {e}",
-                    })
+                except (
+                    Exception
+                ) as e:  # noqa: BLE001 — enrichment must never abort config-gen
+                    logger.warning(
+                        f"[PipelineConfigGen] Warehouse filter_sets enrichment failed: {e}"
+                    )
+                    enrichment_log.append(
+                        {
+                            "tier": "P2",
+                            "key": "filter_sets",
+                            "status": "error",
+                            "detail": f"warehouse enrichment failed: {e}",
+                        }
+                    )
 
                 # P3 (warehouse + LLM): draft fact_join_map for cross-fact merges.
                 # DOUBLY gated — needs a warehouse (this branch) AND a detected
@@ -493,23 +647,35 @@ class PipelineConfigGeneratorTool(BaseTool):
                 involved = self._detect_cross_fact_merge(relationships)
                 if involved:
                     from src.services.tools.async_bridge import run_async_with_context
+
                     try:
                         enrichment_log += run_async_with_context(
                             self._enrich_fact_join_map_llm(
-                                config, involved, warehouse_id, databricks_host),
+                                config, involved, warehouse_id, databricks_host
+                            ),
                             timeout=300,
                         )
                     except Exception as e:  # noqa: BLE001
-                        logger.warning(f"[PipelineConfigGen] fact_join_map enrichment failed: {e}")
-                        enrichment_log.append({
-                            "tier": "P3", "key": "fact_join_map", "status": "error",
-                            "detail": f"cross-fact enrichment failed: {e}",
-                        })
+                        logger.warning(
+                            f"[PipelineConfigGen] fact_join_map enrichment failed: {e}"
+                        )
+                        enrichment_log.append(
+                            {
+                                "tier": "P3",
+                                "key": "fact_join_map",
+                                "status": "error",
+                                "detail": f"cross-fact enrichment failed: {e}",
+                            }
+                        )
                 else:
-                    enrichment_log.append({
-                        "tier": "P3", "key": "fact_join_map", "status": "skipped",
-                        "detail": "no cross-fact merge detected (no LLM call)",
-                    })
+                    enrichment_log.append(
+                        {
+                            "tier": "P3",
+                            "key": "fact_join_map",
+                            "status": "skipped",
+                            "detail": "no cross-fact merge detected (no LLM call)",
+                        }
+                    )
 
             # Summary stats
             config_json = json.dumps(config, default=str)
@@ -531,7 +697,8 @@ class PipelineConfigGeneratorTool(BaseTool):
             # receives only `proposed_config` → empty mapping → 0 views, even
             # though config extraction (measures + DAX) fully succeeded.
             ucmv_measures = self._build_ucmv_measures(
-                measures, admin_tables=admin_tables, config=config)
+                measures, admin_tables=admin_tables, config=config
+            )
             ucmv_mquery = self._build_ucmv_mquery(admin_tables)
 
             # ── Measure usage ranking (reviewer prioritization) ──────────────
@@ -544,13 +711,15 @@ class PipelineConfigGeneratorTool(BaseTool):
             usage_ranking = [
                 {"measure_name": name, "referenced_by": count}
                 for name, count in sorted(
-                    _usage.items(), key=lambda kv: kv[1], reverse=True)
+                    _usage.items(), key=lambda kv: kv[1], reverse=True
+                )
                 if count > 0
             ]
             # Carry the count into the UCMV handoff so the overview can show it.
             for _um in ucmv_measures:
                 _um["referenced_by"] = _usage.get(
-                    _um.get("original_name") or _um.get("measure_name"), 0)
+                    _um.get("original_name") or _um.get("measure_name"), 0
+                )
 
             output = {
                 "proposed_config": config,
@@ -592,16 +761,20 @@ class PipelineConfigGeneratorTool(BaseTool):
             # the fact — this is the observability that answers "did we actually
             # get the DAX, and were there SWITCH measures?" for every run.
             try:
-                _run_async(self._save_to_conversion_history(
-                    measures=measures,
-                    config=config,
-                    relationships=relationships,
-                    admin_tables=admin_tables,
-                    workspace_id=workspace_id,
-                    dataset_id=dataset_id,
-                ))
+                _run_async(
+                    self._save_to_conversion_history(
+                        measures=measures,
+                        config=config,
+                        relationships=relationships,
+                        admin_tables=admin_tables,
+                        workspace_id=workspace_id,
+                        dataset_id=dataset_id,
+                    )
+                )
             except Exception as _hist_err:
-                logger.warning(f"[PipelineConfigGen] conversion_history persistence skipped: {_hist_err}")
+                logger.warning(
+                    f"[PipelineConfigGen] conversion_history persistence skipped: {_hist_err}"
+                )
 
             # ── Raw-extraction persistence (powerbi_extraction table) ───────────
             # Store the FULL raw artifacts (relationship rows, measures+DAX, admin/
@@ -609,19 +782,23 @@ class PipelineConfigGeneratorTool(BaseTool):
             # SQL-queryable after the run — the conversion_history row only keeps
             # summaries/counts. Fail-open: never break the run over observability.
             try:
-                _run_async(self._save_powerbi_extraction(
-                    relationships=relationships,
-                    measures=measures,
-                    admin_tables=admin_tables,
-                    report_def=report_def,
-                    config=config,
-                    warnings=warnings,
-                    workspace_id=workspace_id,
-                    dataset_id=dataset_id,
-                    report_id=report_id,
-                ))
+                _run_async(
+                    self._save_powerbi_extraction(
+                        relationships=relationships,
+                        measures=measures,
+                        admin_tables=admin_tables,
+                        report_def=report_def,
+                        config=config,
+                        warnings=warnings,
+                        workspace_id=workspace_id,
+                        dataset_id=dataset_id,
+                        report_id=report_id,
+                    )
+                )
             except Exception as _ext_err:
-                logger.warning(f"[PipelineConfigGen] powerbi_extraction persistence skipped: {_ext_err}")
+                logger.warning(
+                    f"[PipelineConfigGen] powerbi_extraction persistence skipped: {_ext_err}"
+                )
 
             return json.dumps(output, indent=2, default=str)
 
@@ -698,7 +875,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         # (which use the raw PBI table name) resolve to mquery/admin keys.
         fact_tables: set = set((config or {}).get("fact_join_map", {}).keys())
         table_lookup: dict = {}
-        for key in (admin_tables or {}):
+        for key in admin_tables or {}:
             table_lookup[key] = key
             table_lookup[key.lower()] = key
         # fact_join_map keys are authoritative facts even if absent from admin_tables.
@@ -727,8 +904,11 @@ class PipelineConfigGeneratorTool(BaseTool):
             # from the DAX references against the known fact tables.
             all_allocations = m.get("all_allocations") or []
             if not all_allocations and fact_tables:
-                all_allocations = PipelineConfigGeneratorTool._resolve_measure_allocations(
-                    dax, home_table, fact_tables, table_lookup)
+                all_allocations = (
+                    PipelineConfigGeneratorTool._resolve_measure_allocations(
+                        dax, home_table, fact_tables, table_lookup
+                    )
+                )
                 if all_allocations:
                     primary = all_allocations[0]["table"]
                     if primary != home_table:
@@ -777,24 +957,34 @@ class PipelineConfigGeneratorTool(BaseTool):
         for tbl_name, tbl_info in (admin_tables or {}).items():
             if not isinstance(tbl_info, dict):
                 continue
-            sql = (tbl_info.get("mquery_expression") or tbl_info.get("mquery") or "").strip()
+            sql = (
+                tbl_info.get("mquery_expression") or tbl_info.get("mquery") or ""
+            ).strip()
             if not tbl_name or not sql:
                 continue
-            out.append({
-                "table_name": tbl_name,
-                "transpiled_sql": sql,
-                # MUST be "Yes": UCMV's MQueryParser.parse_json drops any entry
-                # whose validation_passed does not start with "Yes" (unless the
-                # SQL happens to contain both SUM( and GROUP BY). The source here
-                # is the authoritative partition expression from the Admin
-                # Scanner / Fabric TMDL, so mark it accepted — otherwise every
-                # table is silently skipped and UCMV emits 0 views.
-                "validation_passed": "Yes",
-            })
+            out.append(
+                {
+                    "table_name": tbl_name,
+                    "transpiled_sql": sql,
+                    # MUST be "Yes": UCMV's MQueryParser.parse_json drops any entry
+                    # whose validation_passed does not start with "Yes" (unless the
+                    # SQL happens to contain both SUM( and GROUP BY). The source here
+                    # is the authoritative partition expression from the Admin
+                    # Scanner / Fabric TMDL, so mark it accepted — otherwise every
+                    # table is silently skipped and UCMV emits 0 views.
+                    "validation_passed": "Yes",
+                }
+            )
         return out
 
     async def _save_to_conversion_history(
-        self, measures, config, relationships, admin_tables, workspace_id, dataset_id,
+        self,
+        measures,
+        config,
+        relationships,
+        admin_tables,
+        workspace_id,
+        dataset_id,
     ) -> None:
         """Persist the config-gen result to conversion_history (fail-open).
 
@@ -805,19 +995,23 @@ class PipelineConfigGeneratorTool(BaseTool):
         GET /conversion-history (filter source_format=powerbi_config).
         """
         try:
-            from src.services.tools.tool_session_provider import ToolSessionProvider
             from src.schemas.conversion import ConversionHistoryCreate
+            from src.services.tools.tool_session_provider import ToolSessionProvider
             from src.utils.user_context import UserContext
 
             measures = measures or []
             with_dax = sum(
-                1 for m in measures
+                1
+                for m in measures
                 if (m.get("expression") or m.get("dax_expression") or "").strip()
             )
             switch_cnt = sum(
-                1 for m in measures
-                if "SWITCH" in (m.get("expression") or m.get("dax_expression") or "").upper()
-                and "SELECTEDVALUE" in (m.get("expression") or m.get("dax_expression") or "").upper()
+                1
+                for m in measures
+                if "SWITCH"
+                in (m.get("expression") or m.get("dax_expression") or "").upper()
+                and "SELECTEDVALUE"
+                in (m.get("expression") or m.get("dax_expression") or "").upper()
             )
 
             history_data = ConversionHistoryCreate(
@@ -863,11 +1057,21 @@ class PipelineConfigGeneratorTool(BaseTool):
                     f"(measures={len(measures)}, with_dax={with_dax}, switch={switch_cnt})"
                 )
         except Exception as e:
-            logger.warning(f"[PipelineConfigGen] Failed to save conversion_history (non-fatal): {e}")
+            logger.warning(
+                f"[PipelineConfigGen] Failed to save conversion_history (non-fatal): {e}"
+            )
 
     async def _save_powerbi_extraction(
-        self, relationships, measures, admin_tables, report_def, config, warnings,
-        workspace_id, dataset_id, report_id,
+        self,
+        relationships,
+        measures,
+        admin_tables,
+        report_def,
+        config,
+        warnings,
+        workspace_id,
+        dataset_id,
+        report_id,
     ) -> None:
         """Persist the FULL raw extraction to the powerbi_extraction table (fail-open).
 
@@ -877,8 +1081,8 @@ class PipelineConfigGeneratorTool(BaseTool):
         SQL-queryable per run for BI review / debugging / model-graph lineage.
         """
         try:
-            from src.services.tools.tool_session_provider import ToolSessionProvider
             from src.schemas.powerbi_extraction import PowerBIExtractionCreate
+            from src.services.tools.tool_session_provider import ToolSessionProvider
             from src.utils.user_context import UserContext
 
             measures = measures or []
@@ -886,7 +1090,8 @@ class PipelineConfigGeneratorTool(BaseTool):
             admin_tables = admin_tables or {}
 
             with_dax = sum(
-                1 for m in measures
+                1
+                for m in measures
                 if (m.get("expression") or m.get("dax_expression") or "").strip()
             )
             summary = (
@@ -901,7 +1106,8 @@ class PipelineConfigGeneratorTool(BaseTool):
                 if gc:
                     group_id = getattr(gc, "primary_group_id", None)
                     created_by_email = getattr(gc, "group_email", None) or getattr(
-                        gc, "email", None)
+                        gc, "email", None
+                    )
             except Exception:
                 pass
 
@@ -938,7 +1144,9 @@ class PipelineConfigGeneratorTool(BaseTool):
             )
 
     @staticmethod
-    def _enrich_source_tables_from_mquery(config: dict, admin_tables: dict) -> list[dict]:
+    def _enrich_source_tables_from_mquery(
+        config: dict, admin_tables: dict
+    ) -> list[dict]:
         """P1 enrichment: fill ``join_key_map[dim].source_table`` from the dimension's
         Power Query M source (deterministic — no warehouse, no LLM).
 
@@ -950,8 +1158,10 @@ class PipelineConfigGeneratorTool(BaseTool):
         was filled vs. skipped (and why), for the Config Editor.
         """
         from src.services.tools.metric_view_utils.mquery_parser import (
-            classify_mquery_source, extract_source_table,
+            classify_mquery_source,
+            extract_source_table,
         )
+
         log: list[dict] = []
         join_key_map = config.get("join_key_map", {}) or {}
         for dim, entry in join_key_map.items():
@@ -965,24 +1175,40 @@ class PipelineConfigGeneratorTool(BaseTool):
             resolved = extract_source_table(mquery) if mquery else None
             if resolved:
                 entry["source_table"] = resolved
-                log.append({
-                    "tier": "P1", "key": "join_key_map", "target": dim,
-                    "status": "filled", "value": resolved,
-                    "detail": "parsed from connector M-query",
-                })
+                log.append(
+                    {
+                        "tier": "P1",
+                        "key": "join_key_map",
+                        "target": dim,
+                        "status": "filled",
+                        "value": resolved,
+                        "detail": "parsed from connector M-query",
+                    }
+                )
             else:
-                _, reason = classify_mquery_source(mquery) if mquery else (
-                    "unknown", "no M source expression available")
-                log.append({
-                    "tier": "P1", "key": "join_key_map", "target": dim,
-                    "status": "skipped", "detail": reason,
-                })
+                _, reason = (
+                    classify_mquery_source(mquery)
+                    if mquery
+                    else ("unknown", "no M source expression available")
+                )
+                log.append(
+                    {
+                        "tier": "P1",
+                        "key": "join_key_map",
+                        "target": dim,
+                        "status": "skipped",
+                        "detail": reason,
+                    }
+                )
         return log
 
     @staticmethod
     async def _enrich_filter_sets_from_warehouse(
-        config: dict, admin_tables: dict, measures: list[dict],
-        warehouse_id: str, host_override: Optional[str] = None,
+        config: dict,
+        admin_tables: dict,
+        measures: list[dict],
+        warehouse_id: str,
+        host_override: Optional[str] = None,
     ) -> list[dict]:
         """P2 enrichment: resolve flag-column ``filter_sets`` by querying the
         warehouse (values live in DB rows, not the DAX).
@@ -995,14 +1221,20 @@ class PipelineConfigGeneratorTool(BaseTool):
         additive — only writes a ``filter_sets`` key that's absent. Returns an audit
         log. Never raises (failures become skip notes).
         """
-        from src.services.tools.metric_view_utils import uc_query
         from src.services.tools import generate_config as _gc
+        from src.services.tools.metric_view_utils import uc_query
 
         log: list[dict] = []
         flag_col = _gc._detect_cwc_filter_column(measures, admin_tables)
         if not flag_col or str(flag_col).startswith("TODO"):
-            log.append({"tier": "P2", "key": "filter_sets", "status": "skipped",
-                        "detail": "no boolean flag column detected in DAX"})
+            log.append(
+                {
+                    "tier": "P2",
+                    "key": "filter_sets",
+                    "status": "skipped",
+                    "detail": "no boolean flag column detected in DAX",
+                }
+            )
             return log
 
         # Find the dimension that owns the flag column + its resolved source_table.
@@ -1021,48 +1253,87 @@ class PipelineConfigGeneratorTool(BaseTool):
                     target = (dim, src, value_col)
                     break
         if not target:
-            log.append({"tier": "P2", "key": "filter_sets", "status": "skipped",
-                        "detail": f"flag column '{flag_col}' has no resolved dimension "
-                                  "source_table + value column (run P1 / set source_table)"})
+            log.append(
+                {
+                    "tier": "P2",
+                    "key": "filter_sets",
+                    "status": "skipped",
+                    "detail": f"flag column '{flag_col}' has no resolved dimension "
+                    "source_table + value column (run P1 / set source_table)",
+                }
+            )
             return log
 
         dim, source_table, value_col = target
         # Resolve warehouse once, reuse for the query.
         try:
             resolved = await uc_query.resolve_workspace_and_warehouse(
-                warehouse_id, host_override)
+                warehouse_id, host_override
+            )
         except Exception as e:  # noqa: BLE001
-            log.append({"tier": "P2", "key": "filter_sets", "status": "error",
-                        "detail": f"warehouse resolve failed: {e}"})
+            log.append(
+                {
+                    "tier": "P2",
+                    "key": "filter_sets",
+                    "status": "error",
+                    "detail": f"warehouse resolve failed: {e}",
+                }
+            )
             return log
 
         # Structured params (not a raw WHERE string) so uc_query identifier-
         # validates flag_col — it derives from PBI-scan dim_columns (SEC #2).
         res = await uc_query.select_distinct(
-            source_table, value_col, flag_col=flag_col, flag_value=1,
-            _resolved=resolved)
+            source_table, value_col, flag_col=flag_col, flag_value=1, _resolved=resolved
+        )
         if not res.get("success"):
-            log.append({"tier": "P2", "key": "filter_sets", "status": "error",
-                        "detail": f"query failed: {res.get('error')}"})
+            log.append(
+                {
+                    "tier": "P2",
+                    "key": "filter_sets",
+                    "status": "error",
+                    "detail": f"query failed: {res.get('error')}",
+                }
+            )
             return log
 
         values = sorted(set(res.get("values", [])))
         if not values:
-            log.append({"tier": "P2", "key": "filter_sets", "status": "skipped",
-                        "detail": f"{flag_col}=1 returned no values"})
+            log.append(
+                {
+                    "tier": "P2",
+                    "key": "filter_sets",
+                    "status": "skipped",
+                    "detail": f"{flag_col}=1 returned no values",
+                }
+            )
             return log
 
         set_key = _gc.to_snake_case(flag_col).upper()
         filter_sets = config.setdefault("filter_sets", {})
         if set_key in filter_sets:
-            log.append({"tier": "P2", "key": "filter_sets", "target": set_key,
-                        "status": "skipped", "detail": "filter set already present (not overwritten)"})
+            log.append(
+                {
+                    "tier": "P2",
+                    "key": "filter_sets",
+                    "target": set_key,
+                    "status": "skipped",
+                    "detail": "filter set already present (not overwritten)",
+                }
+            )
         else:
             filter_sets[set_key] = values
-            log.append({"tier": "P2", "key": "filter_sets", "target": set_key,
-                        "status": "filled", "value": values,
-                        "detail": f"SELECT DISTINCT {value_col} FROM {source_table} "
-                                  f"WHERE {flag_col}=1 ({len(values)} values)"})
+            log.append(
+                {
+                    "tier": "P2",
+                    "key": "filter_sets",
+                    "target": set_key,
+                    "status": "filled",
+                    "value": values,
+                    "detail": f"SELECT DISTINCT {value_col} FROM {source_table} "
+                    f"WHERE {flag_col}=1 ({len(values)} values)",
+                }
+            )
         return log
 
     @staticmethod
@@ -1078,7 +1349,12 @@ class PipelineConfigGeneratorTool(BaseTool):
         skipped entirely — the cost/value gate.
         """
         from src.services.tools import generate_config as _gc
-        facts = _gc._identify_fact_tables(relationships, admin_tables={}) if relationships else set()
+
+        facts = (
+            _gc._identify_fact_tables(relationships, admin_tables={})
+            if relationships
+            else set()
+        )
         if len(facts) < 2:
             return []
         # fact → set(dims), mirroring _build_fact_join_map_skeleton's fact_dims.
@@ -1094,7 +1370,7 @@ class PipelineConfigGeneratorTool(BaseTool):
         involved: set[str] = set()
         fact_list = [f for f in facts if f in fact_dims]
         for i, a in enumerate(fact_list):
-            for b in fact_list[i + 1:]:
+            for b in fact_list[i + 1 :]:
                 if fact_dims[a] & fact_dims[b]:
                     involved.add(a)
                     involved.add(b)
@@ -1102,8 +1378,10 @@ class PipelineConfigGeneratorTool(BaseTool):
 
     @staticmethod
     async def _enrich_fact_join_map_llm(
-        config: dict, involved_facts: list,
-        warehouse_id: str, host_override: Optional[str] = None,
+        config: dict,
+        involved_facts: list,
+        warehouse_id: str,
+        host_override: Optional[str] = None,
     ) -> list[dict]:
         """P3 enrichment: draft ``fact_join_map`` join strategy for cross-fact merges
         via deterministic warehouse grain probes + ONE LLM call.
@@ -1114,44 +1392,72 @@ class PipelineConfigGeneratorTool(BaseTool):
         ``TODO: verify`` suffix (a wrong join produces silently-wrong numbers, so a
         human must confirm). Returns an audit log. Never raises.
         """
-        from src.services.tools.metric_view_utils import uc_query
         from src.services.tools import generate_config as _gc
+        from src.services.tools.metric_view_utils import uc_query
 
         log: list[dict] = []
         fact_join_map = config.get("fact_join_map", {}) or {}
 
         # ── Deterministic grain probes (no LLM): per involved fact, resolve row grain.
         try:
-            resolved = await uc_query.resolve_workspace_and_warehouse(warehouse_id, host_override)
+            resolved = await uc_query.resolve_workspace_and_warehouse(
+                warehouse_id, host_override
+            )
         except Exception as e:  # noqa: BLE001
-            log.append({"tier": "P3", "key": "fact_join_map", "status": "error",
-                        "detail": f"warehouse resolve failed: {e}"})
+            log.append(
+                {
+                    "tier": "P3",
+                    "key": "fact_join_map",
+                    "status": "error",
+                    "detail": f"warehouse resolve failed: {e}",
+                }
+            )
             return log
 
         facts_summary: list[dict] = []
         for fact in involved_facts:
             entry = fact_join_map.get(fact, {})
-            src = (config.get("join_key_map", {}).get(fact, {}) or {}).get("source_table")
-            summary = {"fact": fact, "alias": entry.get("alias", _gc.to_snake_case(fact)),
-                       "source_table": src}
+            src = (config.get("join_key_map", {}).get(fact, {}) or {}).get(
+                "source_table"
+            )
+            summary = {
+                "fact": fact,
+                "alias": entry.get("alias", _gc.to_snake_case(fact)),
+                "source_table": src,
+            }
             if src and not str(src).startswith("TODO"):
                 res = await uc_query.run_query(
                     f"SELECT COUNT(*) AS n FROM {uc_query._quote_ident(src)}",
-                    _resolved=resolved)
+                    _resolved=resolved,
+                )
                 if res.get("success") and res.get("rows"):
                     summary["row_count"] = res["rows"][0][0]
             facts_summary.append(summary)
 
         # ── ONE LLM call to assemble the merge strategy.
         try:
-            draft = await PipelineConfigGeneratorTool._call_llm_fact_join_map(facts_summary)
+            draft = await PipelineConfigGeneratorTool._call_llm_fact_join_map(
+                facts_summary
+            )
         except Exception as e:  # noqa: BLE001
-            log.append({"tier": "P3", "key": "fact_join_map", "status": "error",
-                        "detail": f"LLM assembly failed: {e}"})
+            log.append(
+                {
+                    "tier": "P3",
+                    "key": "fact_join_map",
+                    "status": "error",
+                    "detail": f"LLM assembly failed: {e}",
+                }
+            )
             return log
         if not isinstance(draft, dict):
-            log.append({"tier": "P3", "key": "fact_join_map", "status": "error",
-                        "detail": "LLM returned no usable draft"})
+            log.append(
+                {
+                    "tier": "P3",
+                    "key": "fact_join_map",
+                    "status": "error",
+                    "detail": "LLM returned no usable draft",
+                }
+            )
             return log
 
         # ── Merge additively: only replace TODO: join_key values; mark as draft.
@@ -1161,8 +1467,15 @@ class PipelineConfigGeneratorTool(BaseTool):
                 continue
             jk = entry.get("join_key", "")
             if not str(jk).startswith("TODO"):
-                log.append({"tier": "P3", "key": "fact_join_map", "target": fact,
-                            "status": "skipped", "detail": "non-TODO value preserved"})
+                log.append(
+                    {
+                        "tier": "P3",
+                        "key": "fact_join_map",
+                        "target": fact,
+                        "status": "skipped",
+                        "detail": "non-TODO value preserved",
+                    }
+                )
                 continue
             if not isinstance(drafted, dict) or not drafted.get("join_key"):
                 continue
@@ -1170,9 +1483,16 @@ class PipelineConfigGeneratorTool(BaseTool):
                 entry[k] = v
             # a drafted join is unverified — force human confirmation
             entry["join_key"] = f"{drafted['join_key']}  -- TODO: verify (LLM-drafted)"
-            log.append({"tier": "P3", "key": "fact_join_map", "target": fact,
-                        "status": "filled", "value": drafted,
-                        "detail": "LLM-drafted from warehouse grain probes — verify before deploy"})
+            log.append(
+                {
+                    "tier": "P3",
+                    "key": "fact_join_map",
+                    "target": fact,
+                    "status": "filled",
+                    "value": drafted,
+                    "detail": "LLM-drafted from warehouse grain probes — verify before deploy",
+                }
+            )
         config["fact_join_map"] = fact_join_map
         return log
 
@@ -1183,8 +1503,9 @@ class PipelineConfigGeneratorTool(BaseTool):
         ``{fact: {join_key, union_mode?, ...}}``. group_id/OBO derived from context;
         never pass them. Returns ``{}`` on any failure."""
         import json as _json
+
         from src.services.llm.manager import LLMManager
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
 
         prompt = (
             "You are drafting a cross-fact join strategy for a Databricks UC metric "
@@ -1198,13 +1519,17 @@ class PipelineConfigGeneratorTool(BaseTool):
         messages = [{"role": "user", "content": prompt}]
         headers = get_user_agent_header(KasalProduct.POWERBI)
         content = await LLMManager.completion(
-            messages=messages, model="databricks-claude-sonnet-4-5",
-            temperature=0.1, max_tokens=2000, extra_headers=headers)
+            messages=messages,
+            model="databricks-claude-sonnet-4-5",
+            temperature=0.1,
+            max_tokens=2000,
+            extra_headers=headers,
+        )
         if not content:
             return {}
         # Extract the JSON object (LLM may wrap in ```json fences).
         text = content.strip()
-        m = re.search(r'\{.*\}', text, re.DOTALL)
+        m = re.search(r"\{.*\}", text, re.DOTALL)
         if not m:
             return {}
         try:
@@ -1223,27 +1548,31 @@ class PipelineConfigGeneratorTool(BaseTool):
             return False
 
         changed = False
-        filter_sets: dict[str, list[str]] = config.get('filter_sets', {})
-        switch_decompositions: dict[str, dict] = config.get('switch_decompositions', {})
-        measure_resolutions: dict[str, dict] = config.get('measure_resolutions', {})
+        filter_sets: dict[str, list[str]] = config.get("filter_sets", {})
+        switch_decompositions: dict[str, dict] = config.get("switch_decompositions", {})
+        measure_resolutions: dict[str, dict] = config.get("measure_resolutions", {})
 
         # ── 1. Extract filter_sets from CALCULATE(..., Table[col] = "val") patterns ──
         # Collects all literal value sets used in filter conditions per column.
         col_values: dict[str, set[str]] = defaultdict(set)
         for m in measures:
-            dax = m.get('expression', '') or ''
+            dax = m.get("expression", "") or ""
             # Table[col] = "val" in CALCULATE filter arguments
             for hit in re.finditer(r'(\w+)\[(\w+)\]\s*=\s*"([^"]*)"', dax):
                 col_name = hit.group(2)
                 col_values[col_name].add(hit.group(3))
             # Table[col] IN {"a","b","c"}
-            for hit in re.finditer(r'(\w+)\[(\w+)\]\s+in\s+\{([^}]+)\}', dax, re.IGNORECASE):
+            for hit in re.finditer(
+                r"(\w+)\[(\w+)\]\s+in\s+\{([^}]+)\}", dax, re.IGNORECASE
+            ):
                 col_name = hit.group(2)
                 vals = re.findall(r'"([^"]*)"', hit.group(3))
                 for v in vals:
                     col_values[col_name].add(v)
             # var CWC_List = {"APET","CAN",...}
-            for hit in re.finditer(r'var\s+(\w+)\s*=\s*\{([^}]+)\}', dax, re.IGNORECASE):
+            for hit in re.finditer(
+                r"var\s+(\w+)\s*=\s*\{([^}]+)\}", dax, re.IGNORECASE
+            ):
                 var_name = hit.group(1)
                 vals = re.findall(r'"([^"]*)"', hit.group(2))
                 if vals and len(vals) >= 2:
@@ -1255,20 +1584,20 @@ class PipelineConfigGeneratorTool(BaseTool):
         # Promote column value sets into named filter sets when they have 3+ values
         for col, vals in col_values.items():
             if len(vals) >= 3:
-                fs_key = f'{col.upper()}_FILTER'
+                fs_key = f"{col.upper()}_FILTER"
                 if fs_key not in filter_sets:
                     filter_sets[fs_key] = sorted(vals)
                     changed = True
 
         # ── 2. Detect SWITCH(TRUE(), ...) decompositions ──
         switch_re = re.compile(
-            r'SWITCH\s*\(\s*TRUE\s*\(\s*\)\s*,\s*(.*?)\s*\)\s*$',
+            r"SWITCH\s*\(\s*TRUE\s*\(\s*\)\s*,\s*(.*?)\s*\)\s*$",
             re.IGNORECASE | re.DOTALL,
         )
         for m in measures:
-            dax = m.get('expression', '') or ''
-            table_name = m.get('table_name', '')
-            measure_name = m.get('measure_name', '')
+            dax = m.get("expression", "") or ""
+            table_name = m.get("table_name", "")
+            measure_name = m.get("measure_name", "")
             sm = switch_re.search(dax)
             if not sm:
                 continue
@@ -1281,29 +1610,33 @@ class PipelineConfigGeneratorTool(BaseTool):
             depth = 0
             buf: list[str] = []
             for ch in body:
-                if ch == '(':
+                if ch == "(":
                     depth += 1
-                elif ch == ')':
+                elif ch == ")":
                     depth -= 1
-                elif ch == ',' and depth == 0:
-                    parts.append(''.join(buf).strip())
+                elif ch == "," and depth == 0:
+                    parts.append("".join(buf).strip())
                     buf = []
                     continue
                 buf.append(ch)
             if buf:
-                parts.append(''.join(buf).strip())
+                parts.append("".join(buf).strip())
 
             # Pair up: (condition, expression), (condition, expression), ...
             for idx in range(0, len(parts) - 1, 2):
                 cond_text = parts[idx].strip()
                 expr_text = parts[idx + 1].strip()
                 # Extract a readable branch name from the condition
-                cond_match = re.search(r'SELECTEDVALUE\s*\(\s*\w+\[(\w+)\]\s*\)\s*=\s*"([^"]*)"', cond_text, re.IGNORECASE)
+                cond_match = re.search(
+                    r'SELECTEDVALUE\s*\(\s*\w+\[(\w+)\]\s*\)\s*=\s*"([^"]*)"',
+                    cond_text,
+                    re.IGNORECASE,
+                )
                 if cond_match:
                     branch_name = cond_match.group(2)
                     branches[branch_name] = {
-                        'condition': cond_text,
-                        'sql_expr': '',  # needs manual fill or further translation
+                        "condition": cond_text,
+                        "sql_expr": "",  # needs manual fill or further translation
                     }
 
             if branches:
@@ -1325,29 +1658,31 @@ class PipelineConfigGeneratorTool(BaseTool):
 
         # ── 3. Detect SELECTEDVALUE dimensions for measure_resolutions ──
         for m in measures:
-            dax = m.get('expression', '') or ''
-            table_name = m.get('table_name', '')
-            measure_name = m.get('measure_name', '')
-            for hit in re.finditer(r'SELECTEDVALUE\s*\(\s*(\w+)\[(\w+)\]\s*\)', dax, re.IGNORECASE):
+            dax = m.get("expression", "") or ""
+            table_name = m.get("table_name", "")
+            measure_name = m.get("measure_name", "")
+            for hit in re.finditer(
+                r"SELECTEDVALUE\s*\(\s*(\w+)\[(\w+)\]\s*\)", dax, re.IGNORECASE
+            ):
                 dim_table = hit.group(1)
                 dim_col = hit.group(2)
-                key = f'{dim_table}.{dim_col}'
+                key = f"{dim_table}.{dim_col}"
                 if key not in measure_resolutions:
                     measure_resolutions[key] = {
-                        'table': dim_table,
-                        'column': dim_col,
-                        'used_by': [],
+                        "table": dim_table,
+                        "column": dim_col,
+                        "used_by": [],
                     }
                     changed = True
-                users = measure_resolutions[key].get('used_by', [])
-                ref = f'{table_name}.{measure_name}'
+                users = measure_resolutions[key].get("used_by", [])
+                ref = f"{table_name}.{measure_name}"
                 if ref not in users:
                     users.append(ref)
 
         if changed:
-            config['filter_sets'] = filter_sets
-            config['switch_decompositions'] = switch_decompositions
-            config['measure_resolutions'] = measure_resolutions
+            config["filter_sets"] = filter_sets
+            config["switch_decompositions"] = switch_decompositions
+            config["measure_resolutions"] = measure_resolutions
         return changed
 
     @staticmethod
@@ -1380,7 +1715,9 @@ class PipelineConfigGeneratorTool(BaseTool):
             password=password,
             auth_method=auth_method,
         )
-        detected = service._determine_auth_method() if not access_token else "user_oauth"
+        detected = (
+            service._determine_auth_method() if not access_token else "user_oauth"
+        )
         logger.info(f"[PipelineConfigGen] {label} token via: {detected or 'UNKNOWN'}")
         return service.get_access_token()
 
@@ -1402,7 +1739,9 @@ class PipelineConfigGeneratorTool(BaseTool):
         project_root = os.path.abspath(
             os.path.join(this_dir, "..", "..", "..", "..", "..", "..", "..")
         )
-        candidates.append(os.path.join(project_root, "examples", "uc_metric_view_migration"))
+        candidates.append(
+            os.path.join(project_root, "examples", "uc_metric_view_migration")
+        )
 
         gen_config_dir = None
         for candidate in candidates:
@@ -1421,4 +1760,5 @@ class PipelineConfigGeneratorTool(BaseTool):
             sys.path.insert(0, gen_config_dir)
 
         import generate_config  # noqa: E402
+
         return generate_config

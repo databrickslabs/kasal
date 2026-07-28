@@ -1,20 +1,20 @@
-import logging
-import os
 import asyncio
-import json
 import base64
 import hashlib
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Type, Union
-from datetime import datetime
+import json
+import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Type, Union
 from urllib.parse import urlencode
 
 import aiohttp
-from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
-from src.utils.telemetry import get_user_agent_header, KasalProduct
+from src.services.tools.base import BaseTool
+from src.utils.telemetry import KasalProduct, get_user_agent_header
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +35,18 @@ _GLOBAL_CREATE_EXECUTIONS: Dict[str, str] = {}
 # could abuse them. The tool is read-mostly and may only trigger PRE-EXISTING
 # jobs by id ('run'); it cannot define or submit new code.
 VALID_ACTIONS = [
-    'list', 'list_my_jobs', 'get', 'get_notebook', 'run', 'monitor', 'get_output'
+    "list",
+    "list_my_jobs",
+    "get",
+    "get_notebook",
+    "run",
+    "monitor",
+    "get_output",
 ]
 
 # Actions permanently disabled (arbitrary code execution). Rejected at the schema
 # layer (not in VALID_ACTIONS) and again in _run as defense-in-depth.
-DISABLED_ACTIONS = ('create', 'submit')
+DISABLED_ACTIONS = ("create", "submit")
 
 
 def _run_async_in_sync_context(coro):
@@ -63,6 +69,7 @@ def _run_async_in_sync_context(coro):
         # ContextVars copied in (UserContext group/token must propagate).
         logger.debug("Detected running event loop, using ThreadPoolExecutor")
         import contextvars
+
         ctx = contextvars.copy_context()
         future = _EXECUTOR.submit(ctx.run, asyncio.run, coro)
         return future.result()
@@ -88,7 +95,7 @@ class DatabricksJobsToolSchema(BaseModel):
             "'run' (trigger an EXISTING job run by job_id), 'monitor' (get run status), "
             "'get_output' (get output/results of a completed run). "
             "Note: creating or submitting jobs is not supported (disabled for security)."
-        )
+        ),
     )
     job_id: Optional[int] = Field(
         None, description="Job ID for get, run, or create actions"
@@ -103,39 +110,44 @@ class DatabricksJobsToolSchema(BaseModel):
         20, description="Maximum number of jobs to list (default: 20)"
     )
     name_filter: Optional[str] = Field(
-        None, description="Filter jobs by name or ID substring (case-insensitive). Works with 'list' and 'list_my_jobs' actions"
+        None,
+        description="Filter jobs by name or ID substring (case-insensitive). Works with 'list' and 'list_my_jobs' actions",
     )
     job_params: Optional[Union[Dict[str, Any], List[str]]] = Field(
-        None, description="Custom parameters to pass when running a job or submitting a one-time run. The tool will automatically wrap dict parameters as {'job_params': '<json_string>'}. Your notebook should read dbutils.widgets.get('job_params') and parse the JSON. Use 'get_notebook' action first to analyze parameters. For Python tasks use list: ['--arg1', 'value1']."
+        None,
+        description="Custom parameters to pass when running a job or submitting a one-time run. The tool will automatically wrap dict parameters as {'job_params': '<json_string>'}. Your notebook should read dbutils.widgets.get('job_params') and parse the JSON. Use 'get_notebook' action first to analyze parameters. For Python tasks use list: ['--arg1', 'value1'].",
     )
     run_name: Optional[str] = Field(
-        None, description="Name for a submitted one-time run (used with 'submit' action)"
+        None,
+        description="Name for a submitted one-time run (used with 'submit' action)",
     )
     tasks: Optional[List[Dict[str, Any]]] = Field(
         None, description="Task definitions for 'submit' action (one-time runs)"
     )
 
-    @model_validator(mode='after')
-    def validate_input(self) -> 'DatabricksJobsToolSchema':
+    @model_validator(mode="after")
+    def validate_input(self) -> "DatabricksJobsToolSchema":
         """Validate the input parameters based on action."""
         action = self.action.lower()
 
         if action not in VALID_ACTIONS:
-            raise ValueError(f"Invalid action '{action}'. Must be one of: {', '.join(VALID_ACTIONS)}")
+            raise ValueError(
+                f"Invalid action '{action}'. Must be one of: {', '.join(VALID_ACTIONS)}"
+            )
 
-        if action in ['get', 'get_notebook', 'run'] and not self.job_id:
+        if action in ["get", "get_notebook", "run"] and not self.job_id:
             raise ValueError(f"job_id is required for action '{action}'")
 
-        if action in ['monitor', 'get_output'] and not self.run_id:
+        if action in ["monitor", "get_output"] and not self.run_id:
             raise ValueError(f"run_id is required for action '{action}'")
 
-        if action == 'create' and not self.job_config:
+        if action == "create" and not self.job_config:
             raise ValueError("job_config is required for action 'create'")
 
-        if action == 'submit' and not self.tasks:
+        if action == "submit" and not self.tasks:
             raise ValueError("tasks is required for action 'submit'")
 
-        if action == 'run' and self.job_params:
+        if action == "run" and self.job_params:
             # Validate job_params is a dictionary or list
             if not isinstance(self.job_params, (dict, list)):
                 raise ValueError("job_params must be a dictionary or list")
@@ -169,15 +181,15 @@ class DatabricksJobsTool(BaseTool):
 
     # Default action limits (can be overridden in __init__)
     DEFAULT_ACTION_LIMITS: ClassVar[Dict[str, Optional[int]]] = {
-        'run': 1,         # Limit job runs to prevent duplicates
-        'create': 1,      # Limit job creation to prevent duplicates
-        'submit': 1,      # Limit one-time submissions to prevent duplicates
-        'list': None,      # No limit for listing
-        'list_my_jobs': None,  # No limit for listing
-        'get': None,       # No limit for getting details
-        'get_notebook': None,  # No limit for notebook analysis
-        'monitor': None,   # No limit for monitoring
-        'get_output': None  # No limit for getting output
+        "run": 1,  # Limit job runs to prevent duplicates
+        "create": 1,  # Limit job creation to prevent duplicates
+        "submit": 1,  # Limit one-time submissions to prevent duplicates
+        "list": None,  # No limit for listing
+        "list_my_jobs": None,  # No limit for listing
+        "get": None,  # No limit for getting details
+        "get_notebook": None,  # No limit for notebook analysis
+        "monitor": None,  # No limit for monitoring
+        "get_output": None,  # No limit for getting output
     }
 
     @staticmethod
@@ -202,7 +214,7 @@ class DatabricksJobsTool(BaseTool):
         global _GLOBAL_RUN_EXECUTIONS, _GLOBAL_CREATE_EXECUTIONS
         return {
             "tracked_runs": len(_GLOBAL_RUN_EXECUTIONS),
-            "tracked_creates": len(_GLOBAL_CREATE_EXECUTIONS)
+            "tracked_creates": len(_GLOBAL_CREATE_EXECUTIONS),
         }
 
     name: str = "Databricks Jobs Manager"
@@ -224,7 +236,9 @@ class DatabricksJobsTool(BaseTool):
     _token: str = PrivateAttr(default=None)
     _action_limits: Dict[str, Optional[int]] = PrivateAttr(default=None)
     _action_usage_counts: Dict[str, int] = PrivateAttr(default_factory=dict)
-    _group_id: Optional[str] = PrivateAttr(default=None)  # SECURITY: Multi-tenant isolation
+    _group_id: Optional[str] = PrivateAttr(
+        default=None
+    )  # SECURITY: Multi-tenant isolation
 
     def __init__(
         self,
@@ -233,7 +247,9 @@ class DatabricksJobsTool(BaseTool):
         token_required: bool = True,
         action_limits: Optional[Dict[str, Optional[int]]] = None,
         group_id: Optional[str] = None,  # SECURITY: Required for multi-tenant isolation
-        user_token: Optional[str] = None,  # Note: Databricks Jobs API does NOT support OBO scopes; PAT is required
+        user_token: Optional[
+            str
+        ] = None,  # Note: Databricks Jobs API does NOT support OBO scopes; PAT is required
         **kwargs: Any,
     ) -> None:
         """
@@ -267,8 +283,7 @@ class DatabricksJobsTool(BaseTool):
 
         # SECURITY: Store group_id for multi-tenant isolation
         # Try to get from parameter first, then from tool_config
-        self._group_id = group_id or tool_config.get('group_id')
-
+        self._group_id = group_id or tool_config.get("group_id")
 
         # Initialize databricks_host from parameter if provided
         initial_databricks_host = databricks_host
@@ -277,11 +292,11 @@ class DatabricksJobsTool(BaseTool):
         # Get configuration from tool_config
         if tool_config:
             # Check if token is directly provided in config
-            if 'DATABRICKS_API_KEY' in tool_config:
-                self._token = tool_config['DATABRICKS_API_KEY']
+            if "DATABRICKS_API_KEY" in tool_config:
+                self._token = tool_config["DATABRICKS_API_KEY"]
                 logger.info("Using PAT token from tool_config")
-            elif 'token' in tool_config:
-                self._token = tool_config['token']
+            elif "token" in tool_config:
+                self._token = tool_config["token"]
                 logger.info("Using PAT token from config")
 
             # Handle different possible key formats for host
@@ -290,12 +305,12 @@ class DatabricksJobsTool(BaseTool):
                 logger.info(f"Using databricks_host from parameter: {databricks_host}")
             else:
                 # Check for the uppercase DATABRICKS_HOST (used in tool_factory.py)
-                if 'DATABRICKS_HOST' in tool_config:
-                    databricks_host = tool_config['DATABRICKS_HOST']
+                if "DATABRICKS_HOST" in tool_config:
+                    databricks_host = tool_config["DATABRICKS_HOST"]
                     logger.info(f"Found DATABRICKS_HOST in config: {databricks_host}")
                 # Also check for lowercase databricks_host as a fallback
-                elif 'databricks_host' in tool_config:
-                    databricks_host = tool_config['databricks_host']
+                elif "databricks_host" in tool_config:
+                    databricks_host = tool_config["databricks_host"]
                     logger.info(f"Found databricks_host in config: {databricks_host}")
                 else:
                     databricks_host = None
@@ -310,17 +325,23 @@ class DatabricksJobsTool(BaseTool):
             # Handle if databricks_host is a list
             if isinstance(databricks_host, list) and databricks_host:
                 databricks_host = databricks_host[0]
-                logger.info(f"Converting databricks_host from list to string: {databricks_host}")
+                logger.info(
+                    f"Converting databricks_host from list to string: {databricks_host}"
+                )
             # Strip https:// and trailing slash if present
             if isinstance(databricks_host, str):
                 original_host = databricks_host
-                if databricks_host.startswith('https://'):
+                if databricks_host.startswith("https://"):
                     databricks_host = databricks_host[8:]
-                    logger.info(f"Stripped https:// prefix from host: {original_host} -> {databricks_host}")
-                if databricks_host.startswith('http://'):
+                    logger.info(
+                        f"Stripped https:// prefix from host: {original_host} -> {databricks_host}"
+                    )
+                if databricks_host.startswith("http://"):
                     databricks_host = databricks_host[7:]
-                    logger.info(f"Stripped http:// prefix from host: {original_host} -> {databricks_host}")
-                if databricks_host.endswith('/'):
+                    logger.info(
+                        f"Stripped http:// prefix from host: {original_host} -> {databricks_host}"
+                    )
+                if databricks_host.endswith("/"):
                     databricks_host = databricks_host[:-1]
                     logger.info(f"Stripped trailing slash from host")
 
@@ -332,16 +353,20 @@ class DatabricksJobsTool(BaseTool):
             try:
                 # Use unified authentication system
                 logger.info("Getting authentication from unified auth system...")
-                from src.utils.databricks_auth import get_auth_context
                 import asyncio
+
+                from src.utils.databricks_auth import get_auth_context
+
                 loop = asyncio.new_event_loop()
                 try:
                     asyncio.set_event_loop(loop)
-                    auth = loop.run_until_complete(get_auth_context(user_token=user_token))
+                    auth = loop.run_until_complete(
+                        get_auth_context(user_token=user_token)
+                    )
                     if auth:
                         self._token = auth.token
                         if not self._host:
-                            self._host = auth.workspace_url.rstrip('/')
+                            self._host = auth.workspace_url.rstrip("/")
                         logger.info(f"✅ Using unified auth: {auth.auth_method}")
                 finally:
                     loop.close()
@@ -350,7 +375,9 @@ class DatabricksJobsTool(BaseTool):
 
                 if not self._token:
                     # Next try: API Keys Service
-                    logger.info("Attempting to get Databricks API key from API Keys Service...")
+                    logger.info(
+                        "Attempting to get Databricks API key from API Keys Service..."
+                    )
                     try:
                         from src.core.unit_of_work import UnitOfWork
                         from src.services.settings.api_keys import ApiKeysService
@@ -358,19 +385,33 @@ class DatabricksJobsTool(BaseTool):
                         async def get_databricks_token():
                             async with UnitOfWork() as uow:
                                 # SECURITY: Try both possible key names with group_id for multi-tenant isolation
-                                token = await ApiKeysService.get_provider_api_key("databricks", group_id=self._group_id) or \
-                                       await ApiKeysService.get_provider_api_key("DATABRICKS_API_KEY", group_id=self._group_id) or \
-                                       await ApiKeysService.get_provider_api_key("DATABRICKS_TOKEN", group_id=self._group_id)
+                                token = (
+                                    await ApiKeysService.get_provider_api_key(
+                                        "databricks", group_id=self._group_id
+                                    )
+                                    or await ApiKeysService.get_provider_api_key(
+                                        "DATABRICKS_API_KEY", group_id=self._group_id
+                                    )
+                                    or await ApiKeysService.get_provider_api_key(
+                                        "DATABRICKS_TOKEN", group_id=self._group_id
+                                    )
+                                )
                                 return token
 
                         # Use _run_async_in_sync_context which safely handles both async and sync contexts
                         self._token = _run_async_in_sync_context(get_databricks_token())
                         if self._token:
-                            logger.info("✅ Successfully retrieved Databricks API key from API Keys Service")
+                            logger.info(
+                                "✅ Successfully retrieved Databricks API key from API Keys Service"
+                            )
                         else:
-                            logger.warning("❌ No Databricks API key found in API Keys Service")
+                            logger.warning(
+                                "❌ No Databricks API key found in API Keys Service"
+                            )
                     except Exception as api_service_error:
-                        logger.warning(f"❌ Failed to get API key from service: {api_service_error}")
+                        logger.warning(
+                            f"❌ Failed to get API key from service: {api_service_error}"
+                        )
 
             except ImportError as e:
                 logger.debug(f"Enhanced auth not available: {e}")
@@ -384,22 +425,40 @@ class DatabricksJobsTool(BaseTool):
                         async def get_databricks_token_fallback():
                             async with UnitOfWork() as uow:
                                 # SECURITY: Try with group_id for multi-tenant isolation
-                                token = await ApiKeysService.get_provider_api_key("databricks", group_id=self._group_id) or \
-                                       await ApiKeysService.get_provider_api_key("DATABRICKS_API_KEY", group_id=self._group_id) or \
-                                       await ApiKeysService.get_provider_api_key("DATABRICKS_TOKEN", group_id=self._group_id)
+                                token = (
+                                    await ApiKeysService.get_provider_api_key(
+                                        "databricks", group_id=self._group_id
+                                    )
+                                    or await ApiKeysService.get_provider_api_key(
+                                        "DATABRICKS_API_KEY", group_id=self._group_id
+                                    )
+                                    or await ApiKeysService.get_provider_api_key(
+                                        "DATABRICKS_TOKEN", group_id=self._group_id
+                                    )
+                                )
                                 return token
 
                         # Use _run_async_in_sync_context which safely handles both async and sync contexts
-                        self._token = _run_async_in_sync_context(get_databricks_token_fallback())
+                        self._token = _run_async_in_sync_context(
+                            get_databricks_token_fallback()
+                        )
                         if self._token:
-                            logger.info("✅ Successfully retrieved Databricks API key from API Keys Service (fallback)")
+                            logger.info(
+                                "✅ Successfully retrieved Databricks API key from API Keys Service (fallback)"
+                            )
                         else:
-                            logger.warning("❌ No Databricks API key found in API Keys Service (fallback)")
+                            logger.warning(
+                                "❌ No Databricks API key found in API Keys Service (fallback)"
+                            )
                     except Exception as api_service_error:
-                        logger.warning(f"❌ Failed to get API key from service (fallback): {api_service_error}")
+                        logger.warning(
+                            f"❌ Failed to get API key from service (fallback): {api_service_error}"
+                        )
 
                 if not self._token:
-                    logger.error("❌ No authentication available: no user token, no API key in service, no environment variables")
+                    logger.error(
+                        "❌ No authentication available: no user token, no API key in service, no environment variables"
+                    )
 
         # Set default host if still not set
         if not self._host:
@@ -408,7 +467,9 @@ class DatabricksJobsTool(BaseTool):
 
         # Check authentication requirements
         if token_required and not self._token:
-            logger.warning("DATABRICKS_API_KEY is required but not provided. Tool will return an error when used.")
+            logger.warning(
+                "DATABRICKS_API_KEY is required but not provided. Tool will return an error when used."
+            )
 
         # Log configuration
         logger.info("DatabricksJobsTool Configuration:")
@@ -419,10 +480,16 @@ class DatabricksJobsTool(BaseTool):
 
         # Log token (masked)
         if self._token:
-            masked_token = f"{self._token[:4]}...{self._token[-4:]}" if len(self._token) > 8 else "***"
+            masked_token = (
+                f"{self._token[:4]}...{self._token[-4:]}"
+                if len(self._token) > 8
+                else "***"
+            )
             logger.info(f"PAT Token (masked): {masked_token}")
         else:
-            logger.warning("No token provided - will attempt to use enhanced authentication")
+            logger.warning(
+                "No token provided - will attempt to use enhanced authentication"
+            )
 
     def reset_execution_state(self) -> str:
         """
@@ -450,7 +517,9 @@ class DatabricksJobsTool(BaseTool):
         _GLOBAL_CREATE_EXECUTIONS.clear()
         self._action_usage_counts = {action: 0 for action in self._action_limits.keys()}
 
-        logger.info(f"[RESET_EXECUTION_STATE] Cleared {previous_run_executions} run executions and {previous_create_executions} create executions, reset all usage counts")
+        logger.info(
+            f"[RESET_EXECUTION_STATE] Cleared {previous_run_executions} run executions and {previous_create_executions} create executions, reset all usage counts"
+        )
 
         # Build detailed message
         output = f"🔄 EXECUTION STATE RESET\n\nCleared tracking for:\n"
@@ -481,41 +550,65 @@ class DatabricksJobsTool(BaseTool):
 
         # Second priority: Try to get token from API Keys Service at runtime
         else:
-            logger.warning("🚨 No authentication token available, attempting runtime API key retrieval")
+            logger.warning(
+                "🚨 No authentication token available, attempting runtime API key retrieval"
+            )
             try:
                 from src.core.unit_of_work import UnitOfWork
                 from src.services.settings.api_keys import ApiKeysService
 
                 async with UnitOfWork() as uow:
                     # SECURITY: Runtime retrieval with group_id for multi-tenant isolation
-                    runtime_token = await ApiKeysService.get_provider_api_key("databricks", group_id=self._group_id) or \
-                                   await ApiKeysService.get_provider_api_key("DATABRICKS_API_KEY", group_id=self._group_id) or \
-                                   await ApiKeysService.get_provider_api_key("DATABRICKS_TOKEN", group_id=self._group_id)
+                    runtime_token = (
+                        await ApiKeysService.get_provider_api_key(
+                            "databricks", group_id=self._group_id
+                        )
+                        or await ApiKeysService.get_provider_api_key(
+                            "DATABRICKS_API_KEY", group_id=self._group_id
+                        )
+                        or await ApiKeysService.get_provider_api_key(
+                            "DATABRICKS_TOKEN", group_id=self._group_id
+                        )
+                    )
 
                 if runtime_token:
-                    logger.info("✅ Successfully retrieved token from API Keys Service at runtime")
+                    logger.info(
+                        "✅ Successfully retrieved token from API Keys Service at runtime"
+                    )
                     auth_token = runtime_token
                     auth_method = "runtime_api_service"
                 else:
                     logger.error("❌ No token found in API Keys Service at runtime")
-                    raise Exception("🚨 AUTHENTICATION FAILURE: No authentication token available from any source (PAT, API service)")
+                    raise Exception(
+                        "🚨 AUTHENTICATION FAILURE: No authentication token available from any source (PAT, API service)"
+                    )
 
             except Exception as e:
                 logger.error(f"❌ Runtime API key retrieval failed: {e}")
-                raise Exception(f"🚨 AUTHENTICATION FAILURE: Cannot get authentication token - {str(e)}")
+                raise Exception(
+                    f"🚨 AUTHENTICATION FAILURE: Cannot get authentication token - {str(e)}"
+                )
 
         if not auth_token:
-            logger.error("🚨 CRITICAL: No authentication token available after all fallback attempts")
-            raise Exception("🚨 AUTHENTICATION FAILURE: No authentication token available")
+            logger.error(
+                "🚨 CRITICAL: No authentication token available after all fallback attempts"
+            )
+            raise Exception(
+                "🚨 AUTHENTICATION FAILURE: No authentication token available"
+            )
 
         # Log the authentication method being used (with masked token)
-        masked_token = f"{auth_token[:4]}...{auth_token[-4:]}" if len(auth_token) > 8 else "***"
-        logger.info(f"✅ Using authentication method: {auth_method} (token: {masked_token})")
+        masked_token = (
+            f"{auth_token[:4]}...{auth_token[-4:]}" if len(auth_token) > 8 else "***"
+        )
+        logger.info(
+            f"✅ Using authentication method: {auth_method} (token: {masked_token})"
+        )
 
         return {
             "Authorization": f"Bearer {auth_token}",
             "Content-Type": "application/json",
-            **get_user_agent_header(KasalProduct.JOBS)  # Kasal_jobs User-Agent
+            **get_user_agent_header(KasalProduct.JOBS),  # Kasal_jobs User-Agent
         }
 
     async def _make_api_call(
@@ -524,7 +617,7 @@ class DatabricksJobsTool(BaseTool):
         endpoint: str,
         data: Optional[Dict] = None,
         params: Optional[Dict] = None,
-        timeout: int = 30
+        timeout: int = 30,
     ) -> Dict[str, Any]:
         """
         Make a direct API call to Databricks REST API.
@@ -574,7 +667,11 @@ class DatabricksJobsTool(BaseTool):
         # Log authentication method being used
         auth_header = headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
-            token_preview = auth_header[7:11] + "..." + auth_header[-4:] if len(auth_header) > 15 else "***"
+            token_preview = (
+                auth_header[7:11] + "..." + auth_header[-4:]
+                if len(auth_header) > 15
+                else "***"
+            )
             logger.debug(f"🔐 Using auth token: {token_preview}")
 
         async with aiohttp.ClientSession() as session:
@@ -584,17 +681,21 @@ class DatabricksJobsTool(BaseTool):
                     url=url,
                     json=json_body,
                     headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=timeout)
+                    timeout=aiohttp.ClientTimeout(total=timeout),
                 ) as response:
                     api_time = time.time() - start_time
                     response_text = await response.text()
 
-                    logger.info(f"📥 API call completed in {api_time:.3f}s with status {response.status}")
+                    logger.info(
+                        f"📥 API call completed in {api_time:.3f}s with status {response.status}"
+                    )
 
                     if response.status == 200:
                         try:
                             json_response = await response.json()
-                            logger.info(f"✅ Successfully parsed JSON response ({len(response_text)} chars)")
+                            logger.info(
+                                f"✅ Successfully parsed JSON response ({len(response_text)} chars)"
+                            )
                             return json_response
                         except json.JSONDecodeError as e:
                             logger.error(f"❌ Failed to parse JSON response: {e}")
@@ -602,29 +703,41 @@ class DatabricksJobsTool(BaseTool):
                             raise Exception(f"Invalid JSON response: {e}")
                     else:
                         # Log detailed error information
-                        logger.error(f"❌ API call failed with status {response.status}")
+                        logger.error(
+                            f"❌ API call failed with status {response.status}"
+                        )
                         logger.error(f"📄 Response headers: {dict(response.headers)}")
                         logger.error(f"📄 Response body: {response_text}")
 
                         # Check for specific authentication errors
                         if response.status == 401:
-                            logger.error("🚨 AUTHENTICATION ERROR: 401 Unauthorized - Token may be invalid or expired")
+                            logger.error(
+                                "🚨 AUTHENTICATION ERROR: 401 Unauthorized - Token may be invalid or expired"
+                            )
                         elif response.status == 403:
-                            logger.error("🚨 AUTHORIZATION ERROR: 403 Forbidden - Token lacks required permissions")
+                            logger.error(
+                                "🚨 AUTHORIZATION ERROR: 403 Forbidden - Token lacks required permissions"
+                            )
                         elif response.status == 404:
-                            logger.error("🚨 NOT FOUND ERROR: 404 - Resource not found or workspace URL incorrect")
+                            logger.error(
+                                "🚨 NOT FOUND ERROR: 404 - Resource not found or workspace URL incorrect"
+                            )
 
                         error_msg = f"API call failed with status {response.status}: {response_text}"
 
                         # Try to parse error details if JSON
                         try:
                             error_data = json.loads(response_text)
-                            if 'error_code' in error_data:
+                            if "error_code" in error_data:
                                 error_msg += f" (Error: {error_data['error_code']})"
-                                logger.error(f"🔍 Databricks Error Code: {error_data['error_code']}")
-                            if 'message' in error_data:
+                                logger.error(
+                                    f"🔍 Databricks Error Code: {error_data['error_code']}"
+                                )
+                            if "message" in error_data:
                                 error_msg += f" - {error_data['message']}"
-                                logger.error(f"🔍 Databricks Error Message: {error_data['message']}")
+                                logger.error(
+                                    f"🔍 Databricks Error Message: {error_data['message']}"
+                                )
                         except json.JSONDecodeError:
                             logger.warning("❌ Could not parse error response as JSON")
 
@@ -700,13 +813,17 @@ class DatabricksJobsTool(BaseTool):
 
             # Check if this action has reached its limit
             if action_limit is not None and action_usage >= action_limit:
-                logger.warning(f"[ACTION_LIMIT] Action '{action}' has reached its limit of {action_limit} executions")
+                logger.warning(
+                    f"[ACTION_LIMIT] Action '{action}' has reached its limit of {action_limit} executions"
+                )
 
                 # Build usage summary
                 usage_summary = "Current action usage:\n"
                 for act, count in self._action_usage_counts.items():
                     act_limit = self._action_limits.get(act)
-                    limit_str = f"/{act_limit}" if act_limit is not None else "/unlimited"
+                    limit_str = (
+                        f"/{act_limit}" if act_limit is not None else "/unlimited"
+                    )
                     usage_summary += f"- {act}: {count}{limit_str}\n"
 
                 return f"⚠️ ACTION LIMIT REACHED\n\nThe '{action}' action has reached its usage limit of {action_limit}.\n🔒 This prevents accidental overuse of this action.\n\n{usage_summary}\n💡 Use reset_execution_state() or create a new tool instance to reset limits."
@@ -714,27 +831,39 @@ class DatabricksJobsTool(BaseTool):
             # DUPLICATE PREVENTION: Check for duplicate 'run' and 'create' actions
             if action == "run":
                 # Create a unique execution key based on job_id and parameters
-                param_hash = DatabricksJobsTool._deterministic_hash(job_params) if job_params else 'no_params'
+                param_hash = (
+                    DatabricksJobsTool._deterministic_hash(job_params)
+                    if job_params
+                    else "no_params"
+                )
                 execution_key = f"run_{job_id}_{param_hash}"
 
                 # Check if this exact run has already been executed (class-level tracking)
                 if execution_key in _GLOBAL_RUN_EXECUTIONS:
                     previous_run_id = _GLOBAL_RUN_EXECUTIONS[execution_key]
                     stats = DatabricksJobsTool.get_execution_stats()
-                    logger.warning(f"[DUPLICATE_PREVENTION] Preventing duplicate run of job {job_id} - already executed with run_id: {previous_run_id}. Total tracked runs: {stats['tracked_runs']}")
+                    logger.warning(
+                        f"[DUPLICATE_PREVENTION] Preventing duplicate run of job {job_id} - already executed with run_id: {previous_run_id}. Total tracked runs: {stats['tracked_runs']}"
+                    )
                     return f"⚠️ DUPLICATE RUN PREVENTED\n\nJob {job_id} with these parameters has already been executed.\nPrevious run_id: {previous_run_id}\n\n🔒 This tool enforces single execution to prevent duplicate job runs.\n💡 Use action='monitor', run_id={previous_run_id} to check the status of the existing run.\n\n📊 Global tracking stats: {stats['tracked_runs']} runs, {stats['tracked_creates']} creates"
 
             elif action == "create":
                 # Create a unique execution key based on job config
                 job_name = job_config.get("name", "") if job_config else ""
-                config_hash = DatabricksJobsTool._deterministic_hash(job_config) if job_config else 'no_config'
+                config_hash = (
+                    DatabricksJobsTool._deterministic_hash(job_config)
+                    if job_config
+                    else "no_config"
+                )
                 execution_key = f"create_{config_hash}"
 
                 # Check if this exact job config has already been created (class-level tracking)
                 if execution_key in _GLOBAL_CREATE_EXECUTIONS:
                     previous_job_id = _GLOBAL_CREATE_EXECUTIONS[execution_key]
                     stats = DatabricksJobsTool.get_execution_stats()
-                    logger.warning(f"[DUPLICATE_PREVENTION] Preventing duplicate creation of job '{job_name}' - already created with job_id: {previous_job_id}. Total tracked creates: {stats['tracked_creates']}")
+                    logger.warning(
+                        f"[DUPLICATE_PREVENTION] Preventing duplicate creation of job '{job_name}' - already created with job_id: {previous_job_id}. Total tracked creates: {stats['tracked_creates']}"
+                    )
                     return f"⚠️ DUPLICATE CREATE PREVENTED\n\nA job with this exact configuration has already been created.\nPrevious job_id: {previous_job_id}\nJob name: {job_name}\n\n🔒 This tool enforces single execution to prevent duplicate job creation.\n💡 Use action='get', job_id={previous_job_id} to view the existing job.\n\n📊 Global tracking stats: {stats['tracked_runs']} runs, {stats['tracked_creates']} creates"
 
             # Validate input
@@ -755,7 +884,9 @@ class DatabricksJobsTool(BaseTool):
                 result = _run_async_in_sync_context(self._list_jobs(limit, name_filter))
                 self._action_usage_counts[action] += 1
             elif action == "list_my_jobs":
-                result = _run_async_in_sync_context(self._list_my_jobs(limit, name_filter))
+                result = _run_async_in_sync_context(
+                    self._list_my_jobs(limit, name_filter)
+                )
                 self._action_usage_counts[action] += 1
             elif action == "get":
                 result = _run_async_in_sync_context(self._get_job(job_id))
@@ -770,15 +901,22 @@ class DatabricksJobsTool(BaseTool):
                 if result and "Successfully triggered job" in result:
                     # Extract run_id from the result
                     import re
-                    run_id_match = re.search(r'Run ID: (\d+)', result)
+
+                    run_id_match = re.search(r"Run ID: (\d+)", result)
                     if run_id_match:
                         new_run_id = run_id_match.group(1)
-                        param_hash = DatabricksJobsTool._deterministic_hash(job_params) if job_params else 'no_params'
+                        param_hash = (
+                            DatabricksJobsTool._deterministic_hash(job_params)
+                            if job_params
+                            else "no_params"
+                        )
                         execution_key = f"run_{job_id}_{param_hash}"
                         _GLOBAL_RUN_EXECUTIONS[execution_key] = new_run_id
                         self.current_usage_count += 1
                         self._action_usage_counts[action] += 1
-                        logger.info(f"[SINGLE_EXECUTION] Tracked successful run: job_id={job_id}, run_id={new_run_id}, action_usage={self._action_usage_counts[action]}, total_tracked_runs={len(_GLOBAL_RUN_EXECUTIONS)}")
+                        logger.info(
+                            f"[SINGLE_EXECUTION] Tracked successful run: job_id={job_id}, run_id={new_run_id}, action_usage={self._action_usage_counts[action]}, total_tracked_runs={len(_GLOBAL_RUN_EXECUTIONS)}"
+                        )
 
                         # Add execution tracking info to result
                         result += f"\n\n🔒 EXECUTION TRACKING: This tool will prevent duplicate runs of this job with these parameters."
@@ -798,15 +936,22 @@ class DatabricksJobsTool(BaseTool):
                 if result and "Successfully created job" in result:
                     # Extract job_id from the result
                     import re
-                    job_id_match = re.search(r'Job ID: (\d+)', result)
+
+                    job_id_match = re.search(r"Job ID: (\d+)", result)
                     if job_id_match:
                         new_job_id = job_id_match.group(1)
-                        config_hash = DatabricksJobsTool._deterministic_hash(job_config) if job_config else 'no_config'
+                        config_hash = (
+                            DatabricksJobsTool._deterministic_hash(job_config)
+                            if job_config
+                            else "no_config"
+                        )
                         execution_key = f"create_{config_hash}"
                         _GLOBAL_CREATE_EXECUTIONS[execution_key] = new_job_id
                         self.current_usage_count += 1
                         self._action_usage_counts[action] += 1
-                        logger.info(f"[SINGLE_EXECUTION] Tracked successful creation: job_name={job_config.get('name', 'Unknown')}, job_id={new_job_id}, action_usage={self._action_usage_counts[action]}, total_tracked_creates={len(_GLOBAL_CREATE_EXECUTIONS)}")
+                        logger.info(
+                            f"[SINGLE_EXECUTION] Tracked successful creation: job_name={job_config.get('name', 'Unknown')}, job_id={new_job_id}, action_usage={self._action_usage_counts[action]}, total_tracked_creates={len(_GLOBAL_CREATE_EXECUTIONS)}"
+                        )
 
                         # Add execution tracking info to result
                         result += f"\n\n🔒 EXECUTION TRACKING: This tool will prevent duplicate creation of jobs with this configuration."
@@ -819,7 +964,9 @@ class DatabricksJobsTool(BaseTool):
                 result = _run_async_in_sync_context(self._get_run_output(run_id))
                 self._action_usage_counts[action] += 1
             elif action == "submit":
-                result = _run_async_in_sync_context(self._submit_run(tasks, run_name, job_params))
+                result = _run_async_in_sync_context(
+                    self._submit_run(tasks, run_name, job_params)
+                )
                 self._action_usage_counts[action] += 1
             else:
                 result = f"Error: Unknown action '{action}'"
@@ -892,7 +1039,9 @@ class DatabricksJobsTool(BaseTool):
 
             output += f"🔧 {name}\n"
             if include_creator:
-                output += f"   ID: {job_id} | Creator: {creator} | Created: {created_str}\n"
+                output += (
+                    f"   ID: {job_id} | Creator: {creator} | Created: {created_str}\n"
+                )
             else:
                 output += f"   ID: {job_id} | Created: {created_str}\n"
             output += f"   Tasks: {task_info}\n"
@@ -928,14 +1077,18 @@ class DatabricksJobsTool(BaseTool):
                 if page_token:
                     params["page_token"] = page_token
 
-                response = await self._make_api_call("GET", "/api/2.2/jobs/list", params=params)
+                response = await self._make_api_call(
+                    "GET", "/api/2.2/jobs/list", params=params
+                )
 
                 jobs = response.get("jobs", [])
                 all_jobs.extend(jobs)
                 remaining -= len(jobs)
 
                 # Check for more pages
-                if not response.get("has_more", False) or not response.get("next_page_token"):
+                if not response.get("has_more", False) or not response.get(
+                    "next_page_token"
+                ):
                     break
                 page_token = response["next_page_token"]
 
@@ -951,7 +1104,9 @@ class DatabricksJobsTool(BaseTool):
                     if filter_lower in job_name or filter_lower in job_id_str:
                         filtered_jobs.append(job)
                 all_jobs = filtered_jobs
-                logger.info(f"[list_jobs] Filtered to {len(all_jobs)} jobs matching '{name_filter}'")
+                logger.info(
+                    f"[list_jobs] Filtered to {len(all_jobs)} jobs matching '{name_filter}'"
+                )
 
             # Format output
             if not all_jobs:
@@ -976,17 +1131,25 @@ class DatabricksJobsTool(BaseTool):
     async def _list_my_jobs(self, limit: int, name_filter: Optional[str] = None) -> str:
         """List only jobs created by the current user."""
         start_time = time.time()
-        logger.info(f"[list_my_jobs] Starting with limit={limit}, filter='{name_filter}'")
+        logger.info(
+            f"[list_my_jobs] Starting with limit={limit}, filter='{name_filter}'"
+        )
 
         try:
             # First get current user info
             current_user = None
             try:
-                user_response = await self._make_api_call("GET", "/api/2.0/preview/scim/v2/Me")
-                current_user = user_response.get("userName") or user_response.get("emails", [{}])[0].get("value")
+                user_response = await self._make_api_call(
+                    "GET", "/api/2.0/preview/scim/v2/Me"
+                )
+                current_user = user_response.get("userName") or user_response.get(
+                    "emails", [{}]
+                )[0].get("value")
                 logger.info(f"[list_my_jobs] Current user: {current_user}")
             except Exception as user_err:
-                logger.warning(f"[list_my_jobs] Could not determine current user: {user_err}, showing all jobs")
+                logger.warning(
+                    f"[list_my_jobs] Could not determine current user: {user_err}, showing all jobs"
+                )
 
             # Paginate through all jobs
             all_jobs = []
@@ -1003,13 +1166,17 @@ class DatabricksJobsTool(BaseTool):
                 if page_token:
                     params["page_token"] = page_token
 
-                response = await self._make_api_call("GET", "/api/2.2/jobs/list", params=params)
+                response = await self._make_api_call(
+                    "GET", "/api/2.2/jobs/list", params=params
+                )
 
                 jobs = response.get("jobs", [])
                 all_jobs.extend(jobs)
                 remaining -= len(jobs)
 
-                if not response.get("has_more", False) or not response.get("next_page_token"):
+                if not response.get("has_more", False) or not response.get(
+                    "next_page_token"
+                ):
                     break
                 page_token = response["next_page_token"]
 
@@ -1017,9 +1184,15 @@ class DatabricksJobsTool(BaseTool):
 
             # Filter by current user if we have user info
             if current_user:
-                my_jobs = [j for j in all_jobs if j.get("creator_user_name", "") == current_user]
+                my_jobs = [
+                    j
+                    for j in all_jobs
+                    if j.get("creator_user_name", "") == current_user
+                ]
                 all_jobs = my_jobs
-                logger.info(f"[list_my_jobs] Filtered to {len(all_jobs)} jobs created by {current_user}")
+                logger.info(
+                    f"[list_my_jobs] Filtered to {len(all_jobs)} jobs created by {current_user}"
+                )
 
             # Apply client-side ID filter if name_filter looks like an ID
             if name_filter and all_jobs:
@@ -1031,7 +1204,9 @@ class DatabricksJobsTool(BaseTool):
                     if filter_lower in job_name or filter_lower in job_id_str:
                         filtered_jobs.append(job)
                 all_jobs = filtered_jobs
-                logger.info(f"[list_my_jobs] Further filtered to {len(all_jobs)} jobs matching '{name_filter}'")
+                logger.info(
+                    f"[list_my_jobs] Further filtered to {len(all_jobs)} jobs matching '{name_filter}'"
+                )
 
             # Format output
             user_info = f" created by {current_user}" if current_user else ""
@@ -1060,7 +1235,9 @@ class DatabricksJobsTool(BaseTool):
 
         try:
             # Get job details
-            response = await self._make_api_call("GET", f"/api/2.2/jobs/get", params={"job_id": job_id})
+            response = await self._make_api_call(
+                "GET", f"/api/2.2/jobs/get", params={"job_id": job_id}
+            )
 
             job_id = response.get("job_id")
             settings = response.get("settings", {})
@@ -1097,7 +1274,9 @@ class DatabricksJobsTool(BaseTool):
 
                     # Determine task type and details
                     if "notebook_task" in task:
-                        notebook_path = task["notebook_task"].get("notebook_path", "Unknown")
+                        notebook_path = task["notebook_task"].get(
+                            "notebook_path", "Unknown"
+                        )
                         output += f" (Notebook: {notebook_path})"
                     elif "python_task" in task:
                         python_file = task["python_task"].get("python_file", "Unknown")
@@ -1106,10 +1285,14 @@ class DatabricksJobsTool(BaseTool):
                         warehouse_id = task["sql_task"].get("warehouse_id", "Unknown")
                         output += f" (SQL: warehouse {warehouse_id})"
                     elif "spark_jar_task" in task:
-                        main_class = task["spark_jar_task"].get("main_class_name", "Unknown")
+                        main_class = task["spark_jar_task"].get(
+                            "main_class_name", "Unknown"
+                        )
                         output += f" (Spark JAR: {main_class})"
                     elif "pipeline_task" in task:
-                        pipeline_id = task["pipeline_task"].get("pipeline_id", "Unknown")
+                        pipeline_id = task["pipeline_task"].get(
+                            "pipeline_id", "Unknown"
+                        )
                         output += f" (Pipeline: {pipeline_id})"
                     elif "dbt_task" in task:
                         output += " (dbt)"
@@ -1142,7 +1325,9 @@ class DatabricksJobsTool(BaseTool):
             # Get recent runs
             try:
                 runs_response = await self._make_api_call(
-                    "GET", "/api/2.2/jobs/runs/list", params={"job_id": job_id, "limit": 5}
+                    "GET",
+                    "/api/2.2/jobs/runs/list",
+                    params={"job_id": job_id, "limit": 5},
                 )
                 runs = runs_response.get("runs", [])
 
@@ -1152,8 +1337,12 @@ class DatabricksJobsTool(BaseTool):
                         r_id = run.get("run_id")
                         state = run.get("state", {})
                         status = run.get("status", {})
-                        life_cycle_state = state.get("life_cycle_state") or status.get("state", "Unknown")
-                        result_state = state.get("result_state") or status.get("termination_details", {}).get("type", "")
+                        life_cycle_state = state.get("life_cycle_state") or status.get(
+                            "state", "Unknown"
+                        )
+                        result_state = state.get("result_state") or status.get(
+                            "termination_details", {}
+                        ).get("type", "")
                         run_start_time = run.get("start_time")
 
                         if run_start_time:
@@ -1165,7 +1354,11 @@ class DatabricksJobsTool(BaseTool):
                         else:
                             start_str = "Unknown"
 
-                        status_emoji = "🟢" if result_state == "SUCCESS" else "🔴" if result_state == "FAILED" else "🟡"
+                        status_emoji = (
+                            "🟢"
+                            if result_state == "SUCCESS"
+                            else "🔴" if result_state == "FAILED" else "🟡"
+                        )
                         output += f"  {status_emoji} Run {r_id}: {life_cycle_state}"
                         if result_state:
                             output += f" ({result_state})"
@@ -1173,7 +1366,9 @@ class DatabricksJobsTool(BaseTool):
                 else:
                     output += "Recent Runs: No runs found\n"
             except Exception as runs_err:
-                logger.warning(f"[get_job] Failed to fetch recent runs for job {job_id}: {runs_err}")
+                logger.warning(
+                    f"[get_job] Failed to fetch recent runs for job {job_id}: {runs_err}"
+                )
                 output += "Recent Runs: Unable to fetch\n"
 
             execution_time = time.time() - start_time
@@ -1194,7 +1389,9 @@ class DatabricksJobsTool(BaseTool):
 
         try:
             # First get job details to find notebook paths
-            job_response = await self._make_api_call("GET", "/api/2.2/jobs/get", params={"job_id": job_id})
+            job_response = await self._make_api_call(
+                "GET", "/api/2.2/jobs/get", params={"job_id": job_id}
+            )
 
             settings = job_response.get("settings", {})
             tasks = settings.get("tasks", [])
@@ -1228,7 +1425,7 @@ class DatabricksJobsTool(BaseTool):
                     export_response = await self._make_api_call(
                         "GET",
                         "/api/2.0/workspace/export",
-                        params={"path": notebook_path, "format": "SOURCE"}
+                        params={"path": notebook_path, "format": "SOURCE"},
                     )
 
                     # Get content
@@ -1236,7 +1433,7 @@ class DatabricksJobsTool(BaseTool):
                     if content:
                         # Decode base64 content
                         try:
-                            decoded_content = base64.b64decode(content).decode('utf-8')
+                            decoded_content = base64.b64decode(content).decode("utf-8")
 
                             # Analyze content for parameters
                             output += "   ✅ Notebook content retrieved\n"
@@ -1244,27 +1441,45 @@ class DatabricksJobsTool(BaseTool):
 
                             # Look for parameter patterns
                             param_patterns = []
-                            lines = decoded_content.split('\n')
+                            lines = decoded_content.split("\n")
 
                             # Look for common parameter patterns
                             for line_num, line in enumerate(lines, 1):
                                 line_lower = line.lower().strip()
 
                                 # Databricks widgets
-                                if 'dbutils.widgets' in line_lower:
-                                    param_patterns.append(f"Line {line_num}: {line.strip()}")
+                                if "dbutils.widgets" in line_lower:
+                                    param_patterns.append(
+                                        f"Line {line_num}: {line.strip()}"
+                                    )
 
                                 # getArgument patterns
-                                elif 'getargument' in line_lower:
-                                    param_patterns.append(f"Line {line_num}: {line.strip()}")
+                                elif "getargument" in line_lower:
+                                    param_patterns.append(
+                                        f"Line {line_num}: {line.strip()}"
+                                    )
 
                                 # JSON parameter parsing
-                                elif any(term in line_lower for term in ['json.loads', 'json.load', 'json.dumps']):
-                                    param_patterns.append(f"Line {line_num}: {line.strip()}")
+                                elif any(
+                                    term in line_lower
+                                    for term in [
+                                        "json.loads",
+                                        "json.load",
+                                        "json.dumps",
+                                    ]
+                                ):
+                                    param_patterns.append(
+                                        f"Line {line_num}: {line.strip()}"
+                                    )
 
                                 # Variable assignments that might be parameters
-                                elif any(term in line_lower for term in ['search_id', 'api_key', 'params']):
-                                    param_patterns.append(f"Line {line_num}: {line.strip()}")
+                                elif any(
+                                    term in line_lower
+                                    for term in ["search_id", "api_key", "params"]
+                                ):
+                                    param_patterns.append(
+                                        f"Line {line_num}: {line.strip()}"
+                                    )
 
                             if param_patterns:
                                 output += "\n   🔍 Found parameter-related patterns:\n"
@@ -1273,13 +1488,19 @@ class DatabricksJobsTool(BaseTool):
                                 if len(param_patterns) > 10:
                                     output += f"     ... and {len(param_patterns) - 10} more\n"
                             else:
-                                output += "\n   ℹ️  No obvious parameter patterns found\n"
+                                output += (
+                                    "\n   ℹ️  No obvious parameter patterns found\n"
+                                )
 
                             # Add parameter recommendations
-                            output += self._analyze_notebook_parameters(notebook_path, notebook_task)
+                            output += self._analyze_notebook_parameters(
+                                notebook_path, notebook_task
+                            )
 
                         except Exception as decode_error:
-                            output += f"   ❌ Failed to decode content: {str(decode_error)}\n"
+                            output += (
+                                f"   ❌ Failed to decode content: {str(decode_error)}\n"
+                            )
                     else:
                         output += "   ❌ No content returned from export\n"
 
@@ -1297,7 +1518,9 @@ class DatabricksJobsTool(BaseTool):
             logger.error(f"[get_notebook] Error after {execution_time:.3f}s: {str(e)}")
             return f"Error getting notebook content: {str(e)}"
 
-    def _analyze_notebook_parameters(self, notebook_path: str, task_config: Dict) -> str:
+    def _analyze_notebook_parameters(
+        self, notebook_path: str, task_config: Dict
+    ) -> str:
         """Analyze notebook and provide parameter recommendations."""
         output = "\n    🔍 Parameter Analysis:\n"
         output += "\n    ⚠️  IMPORTANT: The tool will automatically wrap your parameters with key 'job_params' as a JSON string.\n"
@@ -1309,7 +1532,10 @@ class DatabricksJobsTool(BaseTool):
         output += "    ```\n"
 
         # Common patterns for search/pagination jobs
-        if any(term in notebook_path.lower() for term in ['search', 'gmaps', 'google_maps', 'pagination']):
+        if any(
+            term in notebook_path.lower()
+            for term in ["search", "gmaps", "google_maps", "pagination"]
+        ):
             output += "    Based on notebook name, this appears to be a search/pagination job.\n"
             output += "    \n"
             output += "    📋 Recommended parameter structure for 'job_params':\n"
@@ -1325,11 +1551,14 @@ class DatabricksJobsTool(BaseTool):
             output += '        "zoom": "14",\n'
             output += '        "language": "en",\n'
             output += '        "country": "ch"\n'
-            output += '      }\n'
-            output += '    }\n'
+            output += "      }\n"
+            output += "    }\n"
 
         # ETL patterns
-        elif any(term in notebook_path.lower() for term in ['etl', 'extract', 'transform', 'load']):
+        elif any(
+            term in notebook_path.lower()
+            for term in ["etl", "extract", "transform", "load"]
+        ):
             output += "    Based on notebook name, this appears to be an ETL job.\n"
             output += "    \n"
             output += "    📋 Common ETL parameter structure:\n"
@@ -1338,7 +1567,7 @@ class DatabricksJobsTool(BaseTool):
             output += '      "target_path": "/path/to/target",\n'
             output += '      "date_range": "2024-01-01,2024-01-31",\n'
             output += '      "batch_size": 1000\n'
-            output += '    }\n'
+            output += "    }\n"
 
         # Generic recommendations
         else:
@@ -1350,7 +1579,9 @@ class DatabricksJobsTool(BaseTool):
 
         return output
 
-    async def _run_job(self, job_id: int, job_params: Optional[Union[Dict, List]] = None) -> str:
+    async def _run_job(
+        self, job_id: int, job_params: Optional[Union[Dict, List]] = None
+    ) -> str:
         """Trigger a job run."""
         start_time = time.time()
         logger.info(f"[run_job] Triggering job {job_id} with params: {job_params}")
@@ -1365,23 +1596,25 @@ class DatabricksJobsTool(BaseTool):
                 # with key "job_params" to avoid malformed request errors
                 if isinstance(job_params, dict):
                     # Convert the entire dict to a JSON string and pass with single key
-                    payload["job_parameters"] = {
-                        "job_params": json.dumps(job_params)
-                    }
-                    logger.info(f"[run_job] Formatted parameters with single key 'job_params': {payload['job_parameters']}")
+                    payload["job_parameters"] = {"job_params": json.dumps(job_params)}
+                    logger.info(
+                        f"[run_job] Formatted parameters with single key 'job_params': {payload['job_parameters']}"
+                    )
                 elif isinstance(job_params, list):
                     # For list parameters (Python script args), use python_params
                     payload["python_params"] = job_params
                     logger.info(f"[run_job] Using python_params for list: {job_params}")
                 else:
                     # Fallback: convert to string with single key
-                    payload["job_parameters"] = {
-                        "job_params": str(job_params)
-                    }
-                    logger.info(f"[run_job] Formatted other type as string with key 'job_params': {payload['job_parameters']}")
+                    payload["job_parameters"] = {"job_params": str(job_params)}
+                    logger.info(
+                        f"[run_job] Formatted other type as string with key 'job_params': {payload['job_parameters']}"
+                    )
 
             # Make the API call
-            response = await self._make_api_call("POST", "/api/2.2/jobs/run-now", payload)
+            response = await self._make_api_call(
+                "POST", "/api/2.2/jobs/run-now", payload
+            )
 
             run_id = response.get("run_id")
 
@@ -1390,14 +1623,18 @@ class DatabricksJobsTool(BaseTool):
 
             # Get initial run status
             try:
-                run_response = await self._make_api_call("GET", "/api/2.2/jobs/runs/get", params={"run_id": run_id})
+                run_response = await self._make_api_call(
+                    "GET", "/api/2.2/jobs/runs/get", params={"run_id": run_id}
+                )
 
                 state = run_response.get("state", {})
                 life_cycle_state = state.get("life_cycle_state", "Unknown")
                 result_state = state.get("result_state", "")
 
                 execution_time = time.time() - start_time
-                logger.info(f"[run_job] Successfully started job run {run_id} in {execution_time:.3f}s")
+                logger.info(
+                    f"[run_job] Successfully started job run {run_id} in {execution_time:.3f}s"
+                )
 
                 output = f"✅ Successfully triggered job {job_id}\n\n"
                 output += f"Run ID: {run_id}\n"
@@ -1407,27 +1644,37 @@ class DatabricksJobsTool(BaseTool):
                 output += "\n"
 
                 if job_params:
-                    output += f"\nParameters passed:\n{json.dumps(job_params, indent=2)}\n"
+                    output += (
+                        f"\nParameters passed:\n{json.dumps(job_params, indent=2)}\n"
+                    )
 
                 output += f"\n🚀 Job run started successfully in {execution_time:.2f}s"
-                output += f"\n💡 Monitor progress with: action='monitor', run_id={run_id}"
+                output += (
+                    f"\n💡 Monitor progress with: action='monitor', run_id={run_id}"
+                )
 
                 return output
 
             except Exception as status_error:
                 # Job was triggered but we couldn't get status
                 execution_time = time.time() - start_time
-                logger.warning(f"[run_job] Job triggered but status check failed: {status_error}")
+                logger.warning(
+                    f"[run_job] Job triggered but status check failed: {status_error}"
+                )
 
                 output = f"✅ Successfully triggered job {job_id}\n\n"
                 output += f"Run ID: {run_id}\n"
                 output += f"Status: Unable to check initial status\n"
 
                 if job_params:
-                    output += f"\nParameters passed:\n{json.dumps(job_params, indent=2)}\n"
+                    output += (
+                        f"\nParameters passed:\n{json.dumps(job_params, indent=2)}\n"
+                    )
 
                 output += f"\n🚀 Job run started in {execution_time:.2f}s"
-                output += f"\n💡 Monitor progress with: action='monitor', run_id={run_id}"
+                output += (
+                    f"\n💡 Monitor progress with: action='monitor', run_id={run_id}"
+                )
 
                 return output
 
@@ -1443,7 +1690,9 @@ class DatabricksJobsTool(BaseTool):
 
         try:
             # Get run status
-            response = await self._make_api_call("GET", "/api/2.2/jobs/runs/get", params={"run_id": run_id})
+            response = await self._make_api_call(
+                "GET", "/api/2.2/jobs/runs/get", params={"run_id": run_id}
+            )
 
             r_id = response.get("run_id")
             job_id = response.get("job_id")
@@ -1519,7 +1768,15 @@ class DatabricksJobsTool(BaseTool):
                     task_life_cycle = task_state.get("life_cycle_state", "Unknown")
                     task_result = task_state.get("result_state", "")
 
-                    task_emoji = "✅" if task_result == "SUCCESS" else "❌" if task_result == "FAILED" else "🚫" if task_result == "CANCELED" else "🔄"
+                    task_emoji = (
+                        "✅"
+                        if task_result == "SUCCESS"
+                        else (
+                            "❌"
+                            if task_result == "FAILED"
+                            else "🚫" if task_result == "CANCELED" else "🔄"
+                        )
+                    )
                     output += f"  {task_emoji} {task_key}: {task_life_cycle}"
                     if task_result:
                         output += f" ({task_result})"
@@ -1535,7 +1792,9 @@ class DatabricksJobsTool(BaseTool):
                 output += f"\n💡 Job is still running. Check again with: action='monitor', run_id={r_id}"
             elif result_state == "FAILED":
                 output += f"\n💡 Job failed. Get output with: action='get_output', run_id={r_id}"
-                output += f"\n💡 Check logs in Databricks UI for job {job_id}, run {r_id}"
+                output += (
+                    f"\n💡 Check logs in Databricks UI for job {job_id}, run {r_id}"
+                )
             elif result_state == "SUCCESS":
                 output += f"\n💡 Get results with: action='get_output', run_id={r_id}"
 
@@ -1560,7 +1819,9 @@ class DatabricksJobsTool(BaseTool):
                 return "Error: Job configuration must include 'tasks' field"
 
             # Make the API call
-            response = await self._make_api_call("POST", "/api/2.2/jobs/create", job_config)
+            response = await self._make_api_call(
+                "POST", "/api/2.2/jobs/create", job_config
+            )
 
             job_id = response.get("job_id")
 
@@ -1568,7 +1829,9 @@ class DatabricksJobsTool(BaseTool):
                 return f"Error: No job_id returned from API response: {response}"
 
             execution_time = time.time() - start_time
-            logger.info(f"[create_job] Successfully created job {job_id} in {execution_time:.3f}s")
+            logger.info(
+                f"[create_job] Successfully created job {job_id} in {execution_time:.3f}s"
+            )
 
             output = f"✅ Successfully created job '{job_config['name']}'\n\n"
             output += f"Job ID: {job_id}\n"
@@ -1581,7 +1844,9 @@ class DatabricksJobsTool(BaseTool):
                 task_key = task.get("task_key", f"Task_{i}")
 
                 if "notebook_task" in task:
-                    notebook_path = task["notebook_task"].get("notebook_path", "Unknown")
+                    notebook_path = task["notebook_task"].get(
+                        "notebook_path", "Unknown"
+                    )
                     output += f"  - {task_key}: Notebook ({notebook_path})\n"
                 elif "python_task" in task:
                     python_file = task["python_task"].get("python_file", "Unknown")
@@ -1626,7 +1891,9 @@ class DatabricksJobsTool(BaseTool):
         logger.info(f"[get_run_output] Getting output for run {run_id}")
 
         try:
-            response = await self._make_api_call("GET", "/api/2.2/jobs/runs/get-output", params={"run_id": run_id})
+            response = await self._make_api_call(
+                "GET", "/api/2.2/jobs/runs/get-output", params={"run_id": run_id}
+            )
 
             output = f"Run Output for {run_id}:\n"
             output += "=" * 80 + "\n"
@@ -1652,7 +1919,9 @@ class DatabricksJobsTool(BaseTool):
             if error_trace:
                 output += f"\n📋 Error Trace:\n{error_trace[:2000]}\n"
                 if len(error_trace) > 2000:
-                    output += f"   ... (truncated, full trace is {len(error_trace)} chars)\n"
+                    output += (
+                        f"   ... (truncated, full trace is {len(error_trace)} chars)\n"
+                    )
 
             # SQL output
             sql_output = response.get("sql_output")
@@ -1676,7 +1945,9 @@ class DatabricksJobsTool(BaseTool):
             run_job_output = response.get("run_job_output")
             if run_job_output:
                 output += f"\n🔗 Run Job Output:\n"
-                output += f"   Triggered Run ID: {run_job_output.get('run_id', 'N/A')}\n"
+                output += (
+                    f"   Triggered Run ID: {run_job_output.get('run_id', 'N/A')}\n"
+                )
 
             # Metadata
             metadata = response.get("metadata", {})
@@ -1693,7 +1964,9 @@ class DatabricksJobsTool(BaseTool):
             # If no output sections found
             if not any([notebook_output, error, sql_output, run_job_output]):
                 output += "\nNo output data available for this run.\n"
-                output += "The run may still be in progress or may not produce output.\n"
+                output += (
+                    "The run may still be in progress or may not produce output.\n"
+                )
 
             execution_time = time.time() - start_time
             logger.info(f"[get_run_output] Completed in {execution_time:.3f}s")
@@ -1703,7 +1976,9 @@ class DatabricksJobsTool(BaseTool):
 
         except Exception as e:
             execution_time = time.time() - start_time
-            logger.error(f"[get_run_output] Error after {execution_time:.3f}s: {str(e)}")
+            logger.error(
+                f"[get_run_output] Error after {execution_time:.3f}s: {str(e)}"
+            )
             return f"Error getting run output: {str(e)}"
 
     async def _submit_run(
@@ -1725,13 +2000,13 @@ class DatabricksJobsTool(BaseTool):
             # Add parameters if provided
             if job_params:
                 if isinstance(job_params, dict):
-                    payload["job_parameters"] = {
-                        "job_params": json.dumps(job_params)
-                    }
+                    payload["job_parameters"] = {"job_params": json.dumps(job_params)}
                 elif isinstance(job_params, list):
                     payload["python_params"] = job_params
 
-            response = await self._make_api_call("POST", "/api/2.2/jobs/runs/submit", payload)
+            response = await self._make_api_call(
+                "POST", "/api/2.2/jobs/runs/submit", payload
+            )
 
             run_id = response.get("run_id")
 
@@ -1739,7 +2014,9 @@ class DatabricksJobsTool(BaseTool):
                 return f"Error: No run_id returned from API response: {response}"
 
             execution_time = time.time() - start_time
-            logger.info(f"[submit_run] Successfully submitted run {run_id} in {execution_time:.3f}s")
+            logger.info(
+                f"[submit_run] Successfully submitted run {run_id} in {execution_time:.3f}s"
+            )
 
             name_str = f" '{run_name}'" if run_name else ""
             output = f"✅ Successfully submitted one-time run{name_str}\n\n"

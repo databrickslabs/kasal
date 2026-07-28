@@ -75,7 +75,9 @@ def build_attachment_hint(agent_spec: Dict[str, Any]) -> str:
         return ""
 
     listed = names[:MAX_LISTED]
-    suffix = "" if len(names) <= MAX_LISTED else f" (and {len(names) - MAX_LISTED} more)"
+    suffix = (
+        "" if len(names) <= MAX_LISTED else f" (and {len(names) - MAX_LISTED} more)"
+    )
     return (
         f"Files attached to this conversation: {', '.join(listed)}{suffix}. "
         f"Their contents are not included here — {KNOWLEDGE_TOOL_NAME} reads them."

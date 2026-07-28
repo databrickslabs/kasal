@@ -1,7 +1,8 @@
 """Unit tests for MCPServer model — column defaults, constraints, and init logic."""
 
-import pytest
 from datetime import datetime
+
+import pytest
 from sqlalchemy import UniqueConstraint
 
 from src.models.mcp_server import MCPServer

@@ -4,18 +4,26 @@ Unit tests for group model.
 Tests the functionality of the Group and GroupUser database models including
 field validation, relationships, and data integrity.
 """
-import pytest
+
+import uuid
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
-import uuid
+
+import pytest
+
+from src.models.group import (
+    Group,
+    GroupStatus,
+    GroupUser,
+    GroupUserRole,
+    GroupUserStatus,
+    generate_uuid,
+    get_role_hierarchy,
+    role_has_access,
+)
 
 # Import all required models to ensure relationships are loaded
 from src.models.user import User
-from src.models.group import (
-    Group, GroupUser, generate_uuid,
-    GroupStatus, GroupUserRole, GroupUserStatus,
-    get_role_hierarchy, role_has_access
-)
 
 
 class TestGroup:
@@ -25,27 +33,33 @@ class TestGroup:
         """Test basic Group model creation."""
         # Test model structure and column configuration
         columns = Group.__table__.columns
-        
+
         # Assert required columns exist
-        assert 'id' in columns
-        assert 'name' in columns
-        assert 'status' in columns
-        assert 'auto_created' in columns
-        
+        assert "id" in columns
+        assert "name" in columns
+        assert "status" in columns
+        assert "auto_created" in columns
+
         # Test default values in column definitions
-        assert columns['status'].default.arg == "ACTIVE"
-        assert columns['auto_created'].default.arg is False
+        assert columns["status"].default.arg == "ACTIVE"
+        assert columns["auto_created"].default.arg is False
 
     def test_group_creation_with_all_fields(self):
         """Test Group model has all expected fields."""
         # Test that all expected columns exist
         columns = Group.__table__.columns
-        
+
         expected_columns = [
-            'id', 'name', 'status', 'description',
-            'auto_created', 'created_by_email', 'created_at', 'updated_at'
+            "id",
+            "name",
+            "status",
+            "description",
+            "auto_created",
+            "created_by_email",
+            "created_at",
+            "updated_at",
         ]
-        
+
         for col_name in expected_columns:
             assert col_name in columns, f"Column {col_name} should exist in Group model"
 
@@ -91,58 +105,64 @@ class TestGroup:
         """Test that columns have correct data types and constraints."""
         # Act
         columns = Group.__table__.columns
-        
+
         # Assert
         # Primary key
-        assert columns['id'].primary_key is True
-        assert "VARCHAR" in str(columns['id'].type) or "STRING" in str(columns['id'].type)
-        
+        assert columns["id"].primary_key is True
+        assert "VARCHAR" in str(columns["id"].type) or "STRING" in str(
+            columns["id"].type
+        )
+
         # Required fields
-        assert columns['name'].nullable is False
-        assert columns['status'].nullable is False
-        
+        assert columns["name"].nullable is False
+        assert columns["status"].nullable is False
+
         # Optional fields
-        assert columns['description'].nullable is True
-        assert columns['created_by_email'].nullable is True
-        
+        assert columns["description"].nullable is True
+        assert columns["created_by_email"].nullable is True
+
         # Boolean field
-        assert "BOOLEAN" in str(columns['auto_created'].type)
-        
+        assert "BOOLEAN" in str(columns["auto_created"].type)
+
         # DateTime fields
-        assert "DATETIME" in str(columns['created_at'].type)
-        assert "DATETIME" in str(columns['updated_at'].type)
+        assert "DATETIME" in str(columns["created_at"].type)
+        assert "DATETIME" in str(columns["updated_at"].type)
 
     def test_group_default_values(self):
         """Test Group model default values."""
         # Act
         columns = Group.__table__.columns
-        
+
         # Assert
-        assert columns['status'].default.arg == "ACTIVE"
-        assert columns['auto_created'].default.arg is False
+        assert columns["status"].default.arg == "ACTIVE"
+        assert columns["auto_created"].default.arg is False
 
     def test_group_relationships(self):
         """Test that Group model has the expected relationships."""
         # Test that relationship is defined
-        assert hasattr(Group, 'group_users'), "Group should have group_users relationship"
+        assert hasattr(
+            Group, "group_users"
+        ), "Group should have group_users relationship"
 
     def test_group_status_column(self):
         """Test Group status column configuration."""
         # Test that status column exists and is configured correctly
         columns = Group.__table__.columns
 
-        assert 'status' in columns
-        assert columns['status'].nullable is False
-        assert "VARCHAR" in str(columns['status'].type) or "STRING" in str(columns['status'].type)
+        assert "status" in columns
+        assert columns["status"].nullable is False
+        assert "VARCHAR" in str(columns["status"].type) or "STRING" in str(
+            columns["status"].type
+        )
 
     def test_group_auto_created_scenarios(self):
         """Test Group auto_created column configuration."""
         # Test that auto_created column exists and has correct default
         columns = Group.__table__.columns
-        
-        assert 'auto_created' in columns
-        assert "BOOLEAN" in str(columns['auto_created'].type)
-        assert columns['auto_created'].default.arg is False
+
+        assert "auto_created" in columns
+        assert "BOOLEAN" in str(columns["auto_created"].type)
+        assert columns["auto_created"].default.arg is False
 
 
 class TestGroupUser:
@@ -153,20 +173,23 @@ class TestGroupUser:
         # Arrange
         group_id = "group_123"
         user_id = "user_456"
-        
+
         # Act
-        group_user = GroupUser(
-            group_id=group_id,
-            user_id=user_id
-        )
-        
+        group_user = GroupUser(group_id=group_id, user_id=user_id)
+
         # Assert
         assert group_user.group_id == group_id
         assert group_user.user_id == user_id
         # Note: defaults are set at DB level, not on Python object
-        assert group_user.role is None or group_user.role == "operator"  # Default at DB level
-        assert group_user.status is None or group_user.status == "active"  # Default at DB level
-        assert group_user.auto_created is None or group_user.auto_created is False  # Default at DB level
+        assert (
+            group_user.role is None or group_user.role == "operator"
+        )  # Default at DB level
+        assert (
+            group_user.status is None or group_user.status == "active"
+        )  # Default at DB level
+        assert (
+            group_user.auto_created is None or group_user.auto_created is False
+        )  # Default at DB level
 
     def test_group_user_creation_with_all_fields(self):
         """Test GroupUser model creation with all fields populated."""
@@ -179,7 +202,7 @@ class TestGroupUser:
         auto_created = True
         created_at = datetime.now(timezone.utc)
         updated_at = datetime.now(timezone.utc)
-        
+
         # Act
         group_user = GroupUser(
             group_id=group_id,
@@ -189,9 +212,9 @@ class TestGroupUser:
             joined_at=joined_at,
             auto_created=auto_created,
             created_at=created_at,
-            updated_at=updated_at
+            updated_at=updated_at,
         )
-        
+
         # Assert
         assert group_user.group_id == group_id
         assert group_user.user_id == user_id
@@ -209,9 +232,7 @@ class TestGroupUser:
         for role in roles:
             # Act
             group_user = GroupUser(
-                group_id="test_group",
-                user_id=f"user_{role.lower()}",
-                role=role
+                group_id="test_group", user_id=f"user_{role.lower()}", role=role
             )
 
             # Assert
@@ -224,9 +245,7 @@ class TestGroupUser:
         for status in statuses:
             # Act
             group_user = GroupUser(
-                group_id="test_group",
-                user_id=f"user_{status.lower()}",
-                status=status
+                group_id="test_group", user_id=f"user_{status.lower()}", status=status
             )
 
             # Assert
@@ -241,59 +260,57 @@ class TestGroupUser:
         """Test that columns have correct data types and constraints."""
         # Act
         columns = GroupUser.__table__.columns
-        
+
         # Assert
         # Primary key
-        assert columns['id'].primary_key is True
-        assert "VARCHAR" in str(columns['id'].type) or "STRING" in str(columns['id'].type)
-        
+        assert columns["id"].primary_key is True
+        assert "VARCHAR" in str(columns["id"].type) or "STRING" in str(
+            columns["id"].type
+        )
+
         # Foreign keys
-        assert columns['group_id'].nullable is False
-        assert columns['user_id'].nullable is False
-        
+        assert columns["group_id"].nullable is False
+        assert columns["user_id"].nullable is False
+
         # Required fields
-        assert columns['role'].nullable is False
-        assert columns['status'].nullable is False
-        
+        assert columns["role"].nullable is False
+        assert columns["status"].nullable is False
+
         # Boolean field
-        assert "BOOLEAN" in str(columns['auto_created'].type)
-        
+        assert "BOOLEAN" in str(columns["auto_created"].type)
+
         # DateTime fields
-        assert "DATETIME" in str(columns['joined_at'].type)
-        assert "DATETIME" in str(columns['created_at'].type)
-        assert "DATETIME" in str(columns['updated_at'].type)
+        assert "DATETIME" in str(columns["joined_at"].type)
+        assert "DATETIME" in str(columns["created_at"].type)
+        assert "DATETIME" in str(columns["updated_at"].type)
 
     def test_group_user_default_values(self):
         """Test GroupUser model default values."""
         # Act
         columns = GroupUser.__table__.columns
-        
+
         # Assert
-        assert columns['role'].default.arg == "USER"
-        assert columns['status'].default.arg == "ACTIVE"
-        assert columns['auto_created'].default.arg is False
+        assert columns["role"].default.arg == "USER"
+        assert columns["status"].default.arg == "ACTIVE"
+        assert columns["auto_created"].default.arg is False
 
     def test_group_user_relationships(self):
         """Test that GroupUser model has the expected relationships."""
         # Act
         relationships = GroupUser.__mapper__.relationships
-        
+
         # Assert
-        assert 'group' in relationships
-        assert 'user' in relationships
+        assert "group" in relationships
+        assert "user" in relationships
 
     def test_group_user_repr(self):
         """Test string representation of GroupUser model."""
         # Arrange
-        group_user = GroupUser(
-            group_id="test_group",
-            user_id="test_user",
-            role="admin"
-        )
-        
+        group_user = GroupUser(group_id="test_group", user_id="test_user", role="admin")
+
         # Act
         repr_str = repr(group_user)
-        
+
         # Assert
         assert "GroupUser" in repr_str
         assert "test_group" in repr_str
@@ -307,7 +324,7 @@ class TestGroupUser:
             group_id="startup_group",
             user_id="founder_001",
             role="admin",
-            auto_created=True
+            auto_created=True,
         )
 
         # Invited admin
@@ -315,7 +332,7 @@ class TestGroupUser:
             group_id="startup_group",
             user_id="admin_002",
             role="admin",
-            auto_created=False
+            auto_created=False,
         )
 
         # Regular team member
@@ -323,7 +340,7 @@ class TestGroupUser:
             group_id="startup_group",
             user_id="member_003",
             role="operator",
-            auto_created=False
+            auto_created=False,
         )
 
         # Content creator
@@ -331,7 +348,7 @@ class TestGroupUser:
             group_id="startup_group",
             user_id="editor_004",
             role="editor",
-            auto_created=False
+            auto_created=False,
         )
 
         # Assert
@@ -418,7 +435,7 @@ class TestGenerateUuidFunction:
         # Act
         uuid1 = generate_uuid()
         uuid2 = generate_uuid()
-        
+
         # Assert
         assert uuid1 is not None
         assert uuid2 is not None
@@ -432,7 +449,7 @@ class TestGenerateUuidFunction:
         """Test that generate_uuid generates unique IDs."""
         # Act
         uuids = [generate_uuid() for _ in range(20)]
-        
+
         # Assert
         assert len(set(uuids)) == 20  # All UUIDs should be unique
 
@@ -445,14 +462,12 @@ class TestGroupEdgeCases:
         # Arrange
         long_name = "Very Long Company Name " * 10  # 260 characters
         long_description = "This is a very long description " * 20  # 660 characters
-        
+
         # Act
         group = Group(
-            id="long_name_group",
-            name=long_name,
-            description=long_description
+            id="long_name_group", name=long_name, description=long_description
         )
-        
+
         # Assert
         assert len(group.name) == 230
         assert len(group.description) == 640
@@ -464,16 +479,16 @@ class TestGroupEdgeCases:
             "dept.university.edu",
             "team.startup.io",
             "division.enterprise.com",
-            "my-company-name.business.org"
+            "my-company-name.business.org",
         ]
-        
+
         # Test with company names instead of domains
         complex_names = [
             "Sub Department Company UK",
             "University Division",
             "Team Startup IO",
             "Division Enterprise Corp",
-            "My Company Business Org"
+            "My Company Business Org",
         ]
 
         for name in complex_names:
@@ -489,15 +504,13 @@ class TestGroupEdgeCases:
         """Test GroupUser edge cases."""
         # Very long IDs
         long_group_id = "very_long_group_id_" * 5  # 100 characters
-        long_user_id = "very_long_user_id_" * 5   # 95 characters
-        
+        long_user_id = "very_long_user_id_" * 5  # 95 characters
+
         # Act
         group_user = GroupUser(
-            group_id=long_group_id,
-            user_id=long_user_id,
-            role="ADMIN"
+            group_id=long_group_id, user_id=long_user_id, role="ADMIN"
         )
-        
+
         # Assert
         assert len(group_user.group_id) == 95
         assert len(group_user.user_id) == 90
@@ -510,7 +523,7 @@ class TestGroupEdgeCases:
             name="TechStart AI",
             description="AI-powered startup focusing on automation",
             auto_created=True,
-            created_by_email="founder@techstart.ai"
+            created_by_email="founder@techstart.ai",
         )
 
         # Enterprise division
@@ -519,7 +532,7 @@ class TestGroupEdgeCases:
             name="MegaCorp Engineering Division",
             description="Engineering division of MegaCorp",
             auto_created=False,
-            created_by_email="admin@megacorp.com"
+            created_by_email="admin@megacorp.com",
         )
 
         # Educational institution
@@ -528,64 +541,63 @@ class TestGroupEdgeCases:
             name="University Computer Science",
             description="Computer Science department",
             auto_created=False,
-            created_by_email="head@cs.university.edu"
+            created_by_email="head@cs.university.edu",
         )
-        
+
         # Assert
         assert startup.auto_created is True
         assert "AI" in startup.name
-        
+
         assert enterprise.auto_created is False
         assert "Engineering" in enterprise.name
-        
+
         assert "Computer Science" in university.name
         assert "department" in university.description
 
     def test_group_membership_patterns(self):
         """Test common group membership patterns."""
         group_id = "company_team"
-        
+
         # Founder/Admin
         founder = GroupUser(
             group_id=group_id,
             user_id="founder",
             role="ADMIN",
             auto_created=True,
-            status="ACTIVE"
+            status="ACTIVE",
         )
-        
+
         # Department manager
         manager = GroupUser(
             group_id=group_id,
             user_id="dept_manager",
             role="MANAGER",
             auto_created=False,
-            status="ACTIVE"
+            status="ACTIVE",
         )
-        
+
         # Team members
         developers = [
-            GroupUser(group_id=group_id, user_id=f"dev_{i}", role="USER", status="ACTIVE")
+            GroupUser(
+                group_id=group_id, user_id=f"dev_{i}", role="USER", status="ACTIVE"
+            )
             for i in range(5)
         ]
-        
+
         # External stakeholder
         stakeholder = GroupUser(
             group_id=group_id,
             user_id="external_stakeholder",
             role="VIEWER",
             auto_created=False,
-            status="ACTIVE"
+            status="ACTIVE",
         )
-        
+
         # Inactive member
         former_employee = GroupUser(
-            group_id=group_id,
-            user_id="former_employee",
-            role="USER",
-            status="INACTIVE"
+            group_id=group_id, user_id="former_employee", role="USER", status="INACTIVE"
         )
-        
+
         # Assert
         assert founder.role == "ADMIN" and founder.auto_created
         assert manager.role == "MANAGER"

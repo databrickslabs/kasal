@@ -1,6 +1,7 @@
 """Unit tests for MeasureDependencyResolver in metadata_reduction package."""
 
 import pytest
+
 from src.services.tools.metadata_reduction.dependency_resolver import (
     MeasureDependencyResolver,
 )
@@ -9,11 +10,27 @@ from src.services.tools.metadata_reduction.dependency_resolver import (
 def _make_measures_and_tables():
     """Create a sample set of measures and tables for testing."""
     measures = [
-        {"name": "Total Revenue", "expression": "SUM(Sales[Revenue])", "table": "Sales"},
+        {
+            "name": "Total Revenue",
+            "expression": "SUM(Sales[Revenue])",
+            "table": "Sales",
+        },
         {"name": "Total Cost", "expression": "SUM(Sales[Cost])", "table": "Sales"},
-        {"name": "Gross Profit", "expression": "[Total Revenue] - [Total Cost]", "table": "Sales"},
-        {"name": "Profit Margin", "expression": "DIVIDE([Gross Profit], [Total Revenue])", "table": "Sales"},
-        {"name": "Country Count", "expression": "DISTINCTCOUNT(Geography[Country])", "table": "Geography"},
+        {
+            "name": "Gross Profit",
+            "expression": "[Total Revenue] - [Total Cost]",
+            "table": "Sales",
+        },
+        {
+            "name": "Profit Margin",
+            "expression": "DIVIDE([Gross Profit], [Total Revenue])",
+            "table": "Sales",
+        },
+        {
+            "name": "Country Count",
+            "expression": "DISTINCTCOUNT(Geography[Country])",
+            "table": "Geography",
+        },
         {"name": "Standalone", "expression": "42", "table": "Other"},
     ]
     tables = [

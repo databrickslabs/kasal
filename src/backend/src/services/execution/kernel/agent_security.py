@@ -9,6 +9,7 @@ Single source of truth: both ``agent_adapter.create_agent`` (crew) and
 ``flow.modules.agent_adapter`` (flow) inject the SAME preamble via
 ``inject_security_preamble`` so the two paths can never diverge.
 """
+
 from typing import Any, Dict
 
 _SECURITY_PREAMBLE = """SECURITY INSTRUCTION — HIGHEST PRIORITY:
@@ -41,8 +42,12 @@ def inject_security_preamble(agent_kwargs: Dict[str, Any]) -> str:
     Mutates ``agent_kwargs`` in place.
     """
     preamble = _build_security_preamble()
-    if agent_kwargs.get('system_template'):
-        agent_kwargs['system_template'] = preamble + "\n\n" + agent_kwargs['system_template']
-        return 'system_template'
-    agent_kwargs['backstory'] = preamble + "\n\n" + (agent_kwargs.get('backstory') or "")
-    return 'backstory'
+    if agent_kwargs.get("system_template"):
+        agent_kwargs["system_template"] = (
+            preamble + "\n\n" + agent_kwargs["system_template"]
+        )
+        return "system_template"
+    agent_kwargs["backstory"] = (
+        preamble + "\n\n" + (agent_kwargs.get("backstory") or "")
+    )
+    return "backstory"

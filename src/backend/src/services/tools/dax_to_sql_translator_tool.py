@@ -1,28 +1,37 @@
 """DAX to SQL Translator Tool for CrewAI — standalone DAX→SQL translation."""
+
 import json
 import logging
 from typing import Any, Optional, Type
 
-from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
+
+from src.services.tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
 
 
 class DaxToSqlTranslatorSchema(BaseModel):
     """Input schema for DaxToSqlTranslatorTool."""
+
     dax_measures_json: Optional[str] = Field(
-        None, description="JSON string containing DAX measures to translate. "
-        "Each entry: {measure_name, dax_expression, proposed_allocation}")
+        None,
+        description="JSON string containing DAX measures to translate. "
+        "Each entry: {measure_name, dax_expression, proposed_allocation}",
+    )
     table_key: Optional[str] = Field(
-        None, description="Target fact table key for context (e.g. 'fact_pe002')")
+        None, description="Target fact table key for context (e.g. 'fact_pe002')"
+    )
     config_json: Optional[str] = Field(
-        None, description="JSON string with pipeline config overrides "
-        "(filter_sets, column_overrides, measure_resolutions, fact_join_map)")
+        None,
+        description="JSON string with pipeline config overrides "
+        "(filter_sets, column_overrides, measure_resolutions, fact_join_map)",
+    )
 
 
 class DaxToSqlTranslatorTool(BaseTool):
     """Translate DAX expressions to Spark SQL using pattern-based rules."""
+
     name: str = "DAX to SQL Translator"
     description: str = (
         "Translate Power BI DAX measure expressions to Databricks Spark SQL. "
@@ -38,8 +47,13 @@ class DaxToSqlTranslatorTool(BaseTool):
 
     def __init__(self, **kwargs: Any) -> None:
         default_config = {}
-        for key in ('config_json', 'filter_sets', 'column_overrides',
-                     'measure_resolutions', 'fact_join_map'):
+        for key in (
+            "config_json",
+            "filter_sets",
+            "column_overrides",
+            "measure_resolutions",
+            "fact_join_map",
+        ):
             val = kwargs.pop(key, None)
             if val is not None:
                 default_config[key] = val
@@ -50,13 +64,23 @@ class DaxToSqlTranslatorTool(BaseTool):
         from src.services.tools.metric_view_utils.dax_translator import DaxTranslator
         from src.services.tools.metric_view_utils.utils import to_snake_case
 
-        measures_json = kwargs.get('dax_measures_json') or self._default_config.get('dax_measures_json', '[]')
-        table_key = kwargs.get('table_key') or self._default_config.get('table_key', '')
-        config_json = kwargs.get('config_json') or self._default_config.get('config_json', '{}')
+        measures_json = kwargs.get("dax_measures_json") or self._default_config.get(
+            "dax_measures_json", "[]"
+        )
+        table_key = kwargs.get("table_key") or self._default_config.get("table_key", "")
+        config_json = kwargs.get("config_json") or self._default_config.get(
+            "config_json", "{}"
+        )
 
         try:
-            measures = json.loads(measures_json) if isinstance(measures_json, str) else measures_json
-            config = json.loads(config_json) if isinstance(config_json, str) else config_json
+            measures = (
+                json.loads(measures_json)
+                if isinstance(measures_json, str)
+                else measures_json
+            )
+            config = (
+                json.loads(config_json) if isinstance(config_json, str) else config_json
+            )
         except json.JSONDecodeError as e:
             return json.dumps({"error": f"Invalid JSON: {e}"})
 
@@ -64,24 +88,29 @@ class DaxToSqlTranslatorTool(BaseTool):
         results = []
         for m in measures:
             result = translator.translate(m, table_key)
-            results.append({
-                'measure_name': result.measure_name,
-                'original_name': result.original_name,
-                'sql_expr': result.sql_expr,
-                'is_translatable': result.is_translatable,
-                'skip_reason': result.skip_reason,
-                'confidence': result.confidence,
-                'category': result.category,
-            })
+            results.append(
+                {
+                    "measure_name": result.measure_name,
+                    "original_name": result.original_name,
+                    "sql_expr": result.sql_expr,
+                    "is_translatable": result.is_translatable,
+                    "skip_reason": result.skip_reason,
+                    "confidence": result.confidence,
+                    "category": result.category,
+                }
+            )
 
-        translated = sum(1 for r in results if r['is_translatable'])
+        translated = sum(1 for r in results if r["is_translatable"])
         total = len(results)
-        return json.dumps({
-            'results': results,
-            'summary': {
-                'total': total,
-                'translated': translated,
-                'untranslatable': total - translated,
-                'rate': f'{translated * 100 // total}%' if total else '0%',
-            }
-        }, indent=2)
+        return json.dumps(
+            {
+                "results": results,
+                "summary": {
+                    "total": total,
+                    "translated": translated,
+                    "untranslatable": total - translated,
+                    "rate": f"{translated * 100 // total}%" if total else "0%",
+                },
+            },
+            indent=2,
+        )

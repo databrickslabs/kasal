@@ -61,12 +61,12 @@ Use front-end facing tools in services/tools/:
 
 # Base framework and core models
 from .base import (
+    KPI,
     BaseConverter,
     ConversionFormat,
     ConverterFactory,
-    KPI,
-    KPIDefinition,
     DAXMeasure,
+    KPIDefinition,
     SQLMeasure,
     UCMetric,
 )

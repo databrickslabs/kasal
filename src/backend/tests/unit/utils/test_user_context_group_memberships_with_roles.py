@@ -1,11 +1,12 @@
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
-from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+from unittest.mock import AsyncMock, Mock, patch
 
-# Test user_context utilities - based on actual code inspection
+import pytest
 
 from src.utils.user_context import GroupContext, UserContext, clear_membership_cache
+
+# Test user_context utilities - based on actual code inspection
 
 
 @pytest.fixture(autouse=True)
@@ -27,14 +28,14 @@ class TestGroupContextBasic:
         email_domain = "example.com"
         access_token = "test-token"
         user_id = "user123"
-        
+
         context = GroupContext(
             group_ids=group_ids,
             email_domain=email_domain,
             access_token=access_token,
-            user_id=user_id
+            user_id=user_id,
         )
-        
+
         assert context.group_ids == group_ids
         assert context.email_domain == email_domain
         assert context.access_token == access_token
@@ -44,12 +45,9 @@ class TestGroupContextBasic:
         """Test GroupContext creation with minimal parameters"""
         group_ids = ["group1"]
         email_domain = "example.com"
-        
-        context = GroupContext(
-            group_ids=group_ids,
-            email_domain=email_domain
-        )
-        
+
+        context = GroupContext(group_ids=group_ids, email_domain=email_domain)
+
         assert context.group_ids == group_ids
         assert context.email_domain == email_domain
         assert context.access_token is None
@@ -59,36 +57,27 @@ class TestGroupContextBasic:
         """Test primary_group_id property with groups"""
         group_ids = ["group1", "group2", "group3"]
         email_domain = "example.com"
-        
-        context = GroupContext(
-            group_ids=group_ids,
-            email_domain=email_domain
-        )
-        
+
+        context = GroupContext(group_ids=group_ids, email_domain=email_domain)
+
         assert context.primary_group_id == "group1"
 
     def test_group_context_primary_group_id_empty_groups(self):
         """Test primary_group_id property with empty groups"""
         group_ids = []
         email_domain = "example.com"
-        
-        context = GroupContext(
-            group_ids=group_ids,
-            email_domain=email_domain
-        )
-        
+
+        context = GroupContext(group_ids=group_ids, email_domain=email_domain)
+
         assert context.primary_group_id is None
 
     def test_group_context_primary_group_id_none_groups(self):
         """Test primary_group_id property with None groups"""
         group_ids = None
         email_domain = "example.com"
-        
-        context = GroupContext(
-            group_ids=group_ids,
-            email_domain=email_domain
-        )
-        
+
+        context = GroupContext(group_ids=group_ids, email_domain=email_domain)
+
         assert context.primary_group_id is None
 
 
@@ -106,51 +95,45 @@ class TestGroupContextToDict:
             group_ids=group_ids,
             email_domain=email_domain,
             access_token=access_token,
-            user_id=user_id
+            user_id=user_id,
         )
 
         result = context.to_dict()
 
         # Check that result contains expected fields
-        assert result['group_ids'] == group_ids
-        assert result['email_domain'] == email_domain
-        assert result['access_token'] == access_token
-        assert result['user_id'] == user_id
-        assert 'group_email' in result
-        assert 'user_role' in result
-        assert 'highest_role' in result
-        assert 'primary_group_id' in result
-        assert 'group_id' in result
-        assert 'is_system_admin' in result
-        assert 'is_personal_workspace_manager' in result
+        assert result["group_ids"] == group_ids
+        assert result["email_domain"] == email_domain
+        assert result["access_token"] == access_token
+        assert result["user_id"] == user_id
+        assert "group_email" in result
+        assert "user_role" in result
+        assert "highest_role" in result
+        assert "primary_group_id" in result
+        assert "group_id" in result
+        assert "is_system_admin" in result
+        assert "is_personal_workspace_manager" in result
 
     def test_to_dict_minimal(self):
         """Test to_dict with minimal fields"""
         group_ids = ["group1"]
         email_domain = "example.com"
 
-        context = GroupContext(
-            group_ids=group_ids,
-            email_domain=email_domain
-        )
+        context = GroupContext(group_ids=group_ids, email_domain=email_domain)
 
         result = context.to_dict()
 
         # Check that result contains expected fields with correct values
-        assert result['group_ids'] == group_ids
-        assert result['email_domain'] == email_domain
-        assert result['access_token'] is None
-        assert result['user_id'] is None
-        assert result['group_email'] is None
-        assert result['user_role'] is None
-        assert result['highest_role'] is None
+        assert result["group_ids"] == group_ids
+        assert result["email_domain"] == email_domain
+        assert result["access_token"] is None
+        assert result["user_id"] is None
+        assert result["group_email"] is None
+        assert result["user_role"] is None
+        assert result["highest_role"] is None
 
     def test_to_dict_returns_dict(self):
         """Test to_dict returns a dictionary"""
-        context = GroupContext(
-            group_ids=["group1"],
-            email_domain="example.com"
-        )
+        context = GroupContext(group_ids=["group1"], email_domain="example.com")
 
         result = context.to_dict()
 
@@ -176,19 +159,19 @@ class TestGroupContextStaticMethods:
         """Test generate_group_id returns different results for different domains"""
         domain1 = "example.com"
         domain2 = "test.org"
-        
+
         result1 = GroupContext.generate_group_id(domain1)
         result2 = GroupContext.generate_group_id(domain2)
-        
+
         assert result1 != result2
 
     def test_generate_group_id_consistent(self):
         """Test generate_group_id returns consistent results for same domain"""
         email_domain = "example.com"
-        
+
         result1 = GroupContext.generate_group_id(email_domain)
         result2 = GroupContext.generate_group_id(email_domain)
-        
+
         assert result1 == result2
 
     def test_generate_individual_group_id(self):
@@ -206,19 +189,19 @@ class TestGroupContextStaticMethods:
         """Test generate_individual_group_id returns different results for different emails"""
         email1 = "user1@example.com"
         email2 = "user2@example.com"
-        
+
         result1 = GroupContext.generate_individual_group_id(email1)
         result2 = GroupContext.generate_individual_group_id(email2)
-        
+
         assert result1 != result2
 
     def test_generate_individual_group_id_consistent(self):
         """Test generate_individual_group_id returns consistent results for same email"""
         email = "user@example.com"
-        
+
         result1 = GroupContext.generate_individual_group_id(email)
         result2 = GroupContext.generate_individual_group_id(email)
-        
+
         assert result1 == result2
 
 
@@ -227,56 +210,40 @@ class TestGroupContextIsValid:
 
     def test_is_valid_with_valid_context(self):
         """Test is_valid with valid context"""
-        context = GroupContext(
-            group_ids=["group1"],
-            email_domain="example.com"
-        )
-        
+        context = GroupContext(group_ids=["group1"], email_domain="example.com")
+
         assert context.is_valid() is True
 
     def test_is_valid_with_multiple_groups(self):
         """Test is_valid with multiple groups"""
         context = GroupContext(
-            group_ids=["group1", "group2"],
-            email_domain="example.com"
+            group_ids=["group1", "group2"], email_domain="example.com"
         )
-        
+
         assert context.is_valid() is True
 
     def test_is_valid_with_empty_groups(self):
         """Test is_valid with empty groups"""
-        context = GroupContext(
-            group_ids=[],
-            email_domain="example.com"
-        )
-        
+        context = GroupContext(group_ids=[], email_domain="example.com")
+
         assert context.is_valid() is False
 
     def test_is_valid_with_none_groups(self):
         """Test is_valid with None groups"""
-        context = GroupContext(
-            group_ids=None,
-            email_domain="example.com"
-        )
-        
+        context = GroupContext(group_ids=None, email_domain="example.com")
+
         assert context.is_valid() is False
 
     def test_is_valid_with_none_email_domain(self):
         """Test is_valid with None email_domain"""
-        context = GroupContext(
-            group_ids=["group1"],
-            email_domain=None
-        )
-        
+        context = GroupContext(group_ids=["group1"], email_domain=None)
+
         assert context.is_valid() is False
 
     def test_is_valid_with_empty_email_domain(self):
         """Test is_valid with empty email_domain"""
-        context = GroupContext(
-            group_ids=["group1"],
-            email_domain=""
-        )
-        
+        context = GroupContext(group_ids=["group1"], email_domain="")
+
         assert context.is_valid() is False
 
 
@@ -286,10 +253,10 @@ class TestUserContextStaticMethods:
     def test_set_user_token(self):
         """Test set_user_token static method"""
         token = "test-token-123"
-        
+
         # Should not raise an exception
         UserContext.set_user_token(token)
-        
+
         # Verify it was set by getting it back
         result = UserContext.get_user_token()
         assert result == token
@@ -297,28 +264,28 @@ class TestUserContextStaticMethods:
     def test_get_user_token_after_set(self):
         """Test get_user_token after setting token"""
         token = "test-token-456"
-        
+
         UserContext.set_user_token(token)
         result = UserContext.get_user_token()
-        
+
         assert result == token
 
     def test_get_user_token_default(self):
         """Test get_user_token returns None by default"""
         # Clear context first
         UserContext.clear_context()
-        
+
         result = UserContext.get_user_token()
-        
+
         assert result is None
 
     def test_set_user_context(self):
         """Test set_user_context static method"""
         context = {"user_id": "123", "email": "test@example.com"}
-        
+
         # Should not raise an exception
         UserContext.set_user_context(context)
-        
+
         # Verify it was set by getting it back
         result = UserContext.get_user_context()
         assert result == context
@@ -326,54 +293,48 @@ class TestUserContextStaticMethods:
     def test_get_user_context_after_set(self):
         """Test get_user_context after setting context"""
         context = {"user_id": "456", "role": "admin"}
-        
+
         UserContext.set_user_context(context)
         result = UserContext.get_user_context()
-        
+
         assert result == context
 
     def test_get_user_context_default(self):
         """Test get_user_context returns None by default"""
         # Clear context first
         UserContext.clear_context()
-        
+
         result = UserContext.get_user_context()
-        
+
         assert result is None
 
     def test_set_group_context(self):
         """Test set_group_context static method"""
-        group_context = GroupContext(
-            group_ids=["group1"],
-            email_domain="example.com"
-        )
-        
+        group_context = GroupContext(group_ids=["group1"], email_domain="example.com")
+
         # Should not raise an exception
         UserContext.set_group_context(group_context)
-        
+
         # Verify it was set by getting it back
         result = UserContext.get_group_context()
         assert result == group_context
 
     def test_get_group_context_after_set(self):
         """Test get_group_context after setting context"""
-        group_context = GroupContext(
-            group_ids=["group2"],
-            email_domain="test.org"
-        )
-        
+        group_context = GroupContext(group_ids=["group2"], email_domain="test.org")
+
         UserContext.set_group_context(group_context)
         result = UserContext.get_group_context()
-        
+
         assert result == group_context
 
     def test_get_group_context_default(self):
         """Test get_group_context returns None by default"""
         # Clear context first
         UserContext.clear_context()
-        
+
         result = UserContext.get_group_context()
-        
+
         assert result is None
 
     def test_clear_context(self):
@@ -383,10 +344,10 @@ class TestUserContextStaticMethods:
         UserContext.set_user_context({"user_id": "123"})
         group_context = GroupContext(group_ids=["group1"], email_domain="example.com")
         UserContext.set_group_context(group_context)
-        
+
         # Clear context
         UserContext.clear_context()
-        
+
         # Verify all context is cleared
         assert UserContext.get_user_token() is None
         assert UserContext.get_user_context() is None
@@ -398,8 +359,12 @@ class TestUserContextConstants:
 
     def test_context_variables_exist(self):
         """Test that context variables are properly defined"""
-        from src.utils.user_context import _user_access_token, _user_context, _group_context
-        
+        from src.utils.user_context import (
+            _group_context,
+            _user_access_token,
+            _user_context,
+        )
+
         assert _user_access_token is not None
         assert _user_context is not None
         assert _group_context is not None
@@ -409,9 +374,9 @@ class TestUserContextConstants:
         from src.utils.user_context import logger
 
         assert logger is not None
-        assert hasattr(logger, 'info')
-        assert hasattr(logger, 'error')
-        assert hasattr(logger, 'warning')
+        assert hasattr(logger, "info")
+        assert hasattr(logger, "error")
+        assert hasattr(logger, "warning")
 
 
 # ---------------------------------------------------------------------------
@@ -422,8 +387,10 @@ class TestUserContextConstants:
 
 def _make_smart_mock(mock_session):
     """Create an execute_db_operation_smart mock that calls the callback with mock_session."""
+
     async def _smart(operation):
         return await operation(mock_session)
+
     return AsyncMock(side_effect=_smart)
 
 
@@ -437,18 +404,33 @@ class TestGetUserGroupMembershipsWithRoles:
         mock_user = Mock(id="user-1", email="test@example.com", is_system_admin=False)
 
         mock_user_service = Mock()
-        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+        mock_user_service.get_or_create_user_by_email = AsyncMock(
+            return_value=mock_user
+        )
 
         mock_group_service = Mock()
         mock_group_service.get_user_groups_with_roles = AsyncMock(return_value=[])
 
         smart_mock = _make_smart_mock(mock_session)
 
-        with patch("src.utils.user_context.execute_db_operation_smart", smart_mock, create=True), \
-             patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
-             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
-            user, groups = await GroupContext._get_user_group_memberships_with_roles("test@example.com")
+        with (
+            patch(
+                "src.utils.user_context.execute_db_operation_smart",
+                smart_mock,
+                create=True,
+            ),
+            patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock),
+            patch(
+                "src.services.groups.users.UserService", return_value=mock_user_service
+            ),
+            patch(
+                "src.services.groups.groups.GroupService",
+                return_value=mock_group_service,
+            ),
+        ):
+            user, groups = await GroupContext._get_user_group_memberships_with_roles(
+                "test@example.com"
+            )
 
         assert user is mock_user
         assert groups == []
@@ -465,17 +447,30 @@ class TestGetUserGroupMembershipsWithRoles:
         groups_with_roles = [(mock_group_a, "admin"), (mock_group_b, "operator")]
 
         mock_user_service = Mock()
-        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+        mock_user_service.get_or_create_user_by_email = AsyncMock(
+            return_value=mock_user
+        )
 
         mock_group_service = Mock()
-        mock_group_service.get_user_groups_with_roles = AsyncMock(return_value=groups_with_roles)
+        mock_group_service.get_user_groups_with_roles = AsyncMock(
+            return_value=groups_with_roles
+        )
 
         smart_mock = _make_smart_mock(mock_session)
 
-        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
-             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
-            user, result = await GroupContext._get_user_group_memberships_with_roles("alice@corp.com")
+        with (
+            patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock),
+            patch(
+                "src.services.groups.users.UserService", return_value=mock_user_service
+            ),
+            patch(
+                "src.services.groups.groups.GroupService",
+                return_value=mock_group_service,
+            ),
+        ):
+            user, result = await GroupContext._get_user_group_memberships_with_roles(
+                "alice@corp.com"
+            )
 
         assert user is mock_user
         assert len(result) == 2
@@ -492,10 +487,16 @@ class TestGetUserGroupMembershipsWithRoles:
 
         smart_mock = _make_smart_mock(mock_session)
 
-        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
-             patch("src.services.groups.groups.GroupService"):
-            user, groups = await GroupContext._get_user_group_memberships_with_roles("ghost@example.com")
+        with (
+            patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock),
+            patch(
+                "src.services.groups.users.UserService", return_value=mock_user_service
+            ),
+            patch("src.services.groups.groups.GroupService"),
+        ):
+            user, groups = await GroupContext._get_user_group_memberships_with_roles(
+                "ghost@example.com"
+            )
 
         assert user is None
         assert groups == []
@@ -507,30 +508,44 @@ class TestGetUserGroupMembershipsWithRoles:
         mock_user = Mock(id="user-1", email="test@example.com", is_system_admin=False)
 
         mock_user_service = Mock()
-        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+        mock_user_service.get_or_create_user_by_email = AsyncMock(
+            return_value=mock_user
+        )
 
         mock_group_service = Mock()
         mock_group_service.get_user_groups_with_roles = AsyncMock(return_value=[])
 
         smart_mock = _make_smart_mock(mock_session)
 
-        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
-             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
-            await GroupContext._get_user_group_memberships_with_roles("test@example.com")
+        with (
+            patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock),
+            patch(
+                "src.services.groups.users.UserService", return_value=mock_user_service
+            ),
+            patch(
+                "src.services.groups.groups.GroupService",
+                return_value=mock_group_service,
+            ),
+        ):
+            await GroupContext._get_user_group_memberships_with_roles(
+                "test@example.com"
+            )
 
         mock_session.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_exception_returns_none_tuple(self):
         """When execute_db_operation_smart raises, return (None, []) gracefully."""
+
         async def _failing(operation):
             raise ConnectionError("DB unavailable")
 
         smart_mock = AsyncMock(side_effect=_failing)
 
         with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock):
-            user, groups = await GroupContext._get_user_group_memberships_with_roles("test@example.com")
+            user, groups = await GroupContext._get_user_group_memberships_with_roles(
+                "test@example.com"
+            )
 
         assert user is None
         assert groups == []
@@ -542,17 +557,28 @@ class TestGetUserGroupMembershipsWithRoles:
         mock_user = Mock(id="user-1", email="test@example.com", is_system_admin=False)
 
         mock_user_service = Mock()
-        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+        mock_user_service.get_or_create_user_by_email = AsyncMock(
+            return_value=mock_user
+        )
 
         mock_group_service = Mock()
         mock_group_service.get_user_groups_with_roles = AsyncMock(return_value=[])
 
         smart_mock = _make_smart_mock(mock_session)
 
-        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
-             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
-            await GroupContext._get_user_group_memberships_with_roles("test@example.com")
+        with (
+            patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock),
+            patch(
+                "src.services.groups.users.UserService", return_value=mock_user_service
+            ),
+            patch(
+                "src.services.groups.groups.GroupService",
+                return_value=mock_group_service,
+            ),
+        ):
+            await GroupContext._get_user_group_memberships_with_roles(
+                "test@example.com"
+            )
 
         mock_user_service.get_or_create_user_by_email.assert_awaited_once_with(
             "test@example.com", update_login=False
@@ -565,19 +591,32 @@ class TestGetUserGroupMembershipsWithRoles:
         mock_user = Mock(id="user-42", email="test@example.com", is_system_admin=False)
 
         mock_user_service = Mock()
-        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+        mock_user_service.get_or_create_user_by_email = AsyncMock(
+            return_value=mock_user
+        )
 
         mock_group_service = Mock()
         mock_group_service.get_user_groups_with_roles = AsyncMock(return_value=[])
 
         smart_mock = _make_smart_mock(mock_session)
 
-        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
-             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
-            await GroupContext._get_user_group_memberships_with_roles("test@example.com")
+        with (
+            patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock),
+            patch(
+                "src.services.groups.users.UserService", return_value=mock_user_service
+            ),
+            patch(
+                "src.services.groups.groups.GroupService",
+                return_value=mock_group_service,
+            ),
+        ):
+            await GroupContext._get_user_group_memberships_with_roles(
+                "test@example.com"
+            )
 
-        mock_group_service.get_user_groups_with_roles.assert_awaited_once_with("user-42")
+        mock_group_service.get_user_groups_with_roles.assert_awaited_once_with(
+            "user-42"
+        )
 
 
 class TestGetUserGroupMemberships:
@@ -590,17 +629,28 @@ class TestGetUserGroupMemberships:
         mock_user = Mock(id="user-1")
 
         mock_user_service = Mock()
-        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+        mock_user_service.get_or_create_user_by_email = AsyncMock(
+            return_value=mock_user
+        )
 
         mock_group = Mock(id="group-1")
         mock_group_service = Mock()
-        mock_group_service.get_user_group_memberships = AsyncMock(return_value=[mock_group])
+        mock_group_service.get_user_group_memberships = AsyncMock(
+            return_value=[mock_group]
+        )
 
         smart_mock = _make_smart_mock(mock_session)
 
-        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
-             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
+        with (
+            patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock),
+            patch(
+                "src.services.groups.users.UserService", return_value=mock_user_service
+            ),
+            patch(
+                "src.services.groups.groups.GroupService",
+                return_value=mock_group_service,
+            ),
+        ):
             result = await GroupContext._get_user_group_memberships("test@example.com")
 
         assert result == ["group-1"]
@@ -613,17 +663,28 @@ class TestGetUserGroupMemberships:
         mock_user = Mock(id="user-1")
 
         mock_user_service = Mock()
-        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+        mock_user_service.get_or_create_user_by_email = AsyncMock(
+            return_value=mock_user
+        )
 
         mock_groups = [Mock(id="alpha"), Mock(id="beta"), Mock(id="gamma")]
         mock_group_service = Mock()
-        mock_group_service.get_user_group_memberships = AsyncMock(return_value=mock_groups)
+        mock_group_service.get_user_group_memberships = AsyncMock(
+            return_value=mock_groups
+        )
 
         smart_mock = _make_smart_mock(mock_session)
 
-        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
-             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
+        with (
+            patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock),
+            patch(
+                "src.services.groups.users.UserService", return_value=mock_user_service
+            ),
+            patch(
+                "src.services.groups.groups.GroupService",
+                return_value=mock_group_service,
+            ),
+        ):
             result = await GroupContext._get_user_group_memberships("test@example.com")
 
         assert result == ["alpha", "beta", "gamma"]
@@ -638,9 +699,13 @@ class TestGetUserGroupMemberships:
 
         smart_mock = _make_smart_mock(mock_session)
 
-        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
-             patch("src.services.groups.groups.GroupService"):
+        with (
+            patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock),
+            patch(
+                "src.services.groups.users.UserService", return_value=mock_user_service
+            ),
+            patch("src.services.groups.groups.GroupService"),
+        ):
             result = await GroupContext._get_user_group_memberships("ghost@example.com")
 
         assert result == []
@@ -652,16 +717,25 @@ class TestGetUserGroupMemberships:
         mock_user = Mock(id="user-1")
 
         mock_user_service = Mock()
-        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+        mock_user_service.get_or_create_user_by_email = AsyncMock(
+            return_value=mock_user
+        )
 
         mock_group_service = Mock()
         mock_group_service.get_user_group_memberships = AsyncMock(return_value=[])
 
         smart_mock = _make_smart_mock(mock_session)
 
-        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
-             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
+        with (
+            patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock),
+            patch(
+                "src.services.groups.users.UserService", return_value=mock_user_service
+            ),
+            patch(
+                "src.services.groups.groups.GroupService",
+                return_value=mock_group_service,
+            ),
+        ):
             result = await GroupContext._get_user_group_memberships("loner@example.com")
 
         assert result == []
@@ -673,16 +747,25 @@ class TestGetUserGroupMemberships:
         mock_user = Mock(id="user-1")
 
         mock_user_service = Mock()
-        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+        mock_user_service.get_or_create_user_by_email = AsyncMock(
+            return_value=mock_user
+        )
 
         mock_group_service = Mock()
         mock_group_service.get_user_group_memberships = AsyncMock(return_value=[])
 
         smart_mock = _make_smart_mock(mock_session)
 
-        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
-             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
+        with (
+            patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock),
+            patch(
+                "src.services.groups.users.UserService", return_value=mock_user_service
+            ),
+            patch(
+                "src.services.groups.groups.GroupService",
+                return_value=mock_group_service,
+            ),
+        ):
             await GroupContext._get_user_group_memberships("test@example.com")
 
         assert mock_session.commit.await_count == 2
@@ -690,6 +773,7 @@ class TestGetUserGroupMemberships:
     @pytest.mark.asyncio
     async def test_exception_returns_empty_list(self):
         """When execute_db_operation_smart raises, return [] gracefully."""
+
         async def _failing(operation):
             raise ConnectionError("DB unavailable")
 
@@ -707,19 +791,30 @@ class TestGetUserGroupMemberships:
         mock_user = Mock(id="user-1")
 
         mock_user_service = Mock()
-        mock_user_service.get_or_create_user_by_email = AsyncMock(return_value=mock_user)
+        mock_user_service.get_or_create_user_by_email = AsyncMock(
+            return_value=mock_user
+        )
 
         mock_group_service = Mock()
         mock_group_service.get_user_group_memberships = AsyncMock(return_value=[])
 
         smart_mock = _make_smart_mock(mock_session)
 
-        with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
-             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
+        with (
+            patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock),
+            patch(
+                "src.services.groups.users.UserService", return_value=mock_user_service
+            ),
+            patch(
+                "src.services.groups.groups.GroupService",
+                return_value=mock_group_service,
+            ),
+        ):
             await GroupContext._get_user_group_memberships("alice@corp.com")
 
-        mock_group_service.get_user_group_memberships.assert_awaited_once_with("alice@corp.com")
+        mock_group_service.get_user_group_memberships.assert_awaited_once_with(
+            "alice@corp.com"
+        )
 
 
 class TestFromEmailUsesSmartSession:
@@ -734,13 +829,14 @@ class TestFromEmailUsesSmartSession:
         mock_user = Mock(id="user-1", email="ada@databricks.com", is_system_admin=False)
 
         with patch.object(
-            GroupContext, "_get_user_group_memberships_with_roles",
-            new=AsyncMock(return_value=(mock_user, groups_with_roles))
+            GroupContext,
+            "_get_user_group_memberships_with_roles",
+            new=AsyncMock(return_value=(mock_user, groups_with_roles)),
         ):
             ctx = await GroupContext.from_email(
                 email="ada@databricks.com",
                 access_token="tok",
-                group_id="energy_0380b619"
+                group_id="energy_0380b619",
             )
 
         assert ctx.primary_group_id == "energy_0380b619"
@@ -759,13 +855,12 @@ class TestFromEmailUsesSmartSession:
         personal = GroupContext.generate_individual_group_id("ada@databricks.com")
 
         with patch.object(
-            GroupContext, "_get_user_group_memberships_with_roles",
-            new=AsyncMock(return_value=(mock_user, groups_with_roles))
+            GroupContext,
+            "_get_user_group_memberships_with_roles",
+            new=AsyncMock(return_value=(mock_user, groups_with_roles)),
         ):
             ctx = await GroupContext.from_email(
-                email="ada@databricks.com",
-                access_token="tok",
-                group_id=personal
+                email="ada@databricks.com", access_token="tok", group_id=personal
             )
 
         assert ctx.primary_group_id == personal
@@ -774,12 +869,14 @@ class TestFromEmailUsesSmartSession:
     async def test_from_email_no_groups_falls_back_to_individual(self):
         """When user has no group memberships and no specific workspace is
         requested, falls back to their individual group ID. (Requesting an
-        unauthorized group now raises — see test_no_groups_explicit_other_group_id_rejected.)"""
+        unauthorized group now raises — see test_no_groups_explicit_other_group_id_rejected.)
+        """
         mock_user = Mock(id="user-1", email="solo@example.com", is_system_admin=False)
 
         with patch.object(
-            GroupContext, "_get_user_group_memberships_with_roles",
-            new=AsyncMock(return_value=(mock_user, []))
+            GroupContext,
+            "_get_user_group_memberships_with_roles",
+            new=AsyncMock(return_value=(mock_user, [])),
         ):
             ctx = await GroupContext.from_email(
                 email="solo@example.com",
@@ -798,12 +895,13 @@ class TestFromEmailUsesSmartSession:
         mock_user = Mock(id="user-1", email="test@example.com", is_system_admin=False)
 
         with patch.object(
-            GroupContext, "_get_user_group_memberships_with_roles",
-            new=AsyncMock(return_value=(mock_user, groups_with_roles))
+            GroupContext,
+            "_get_user_group_memberships_with_roles",
+            new=AsyncMock(return_value=(mock_user, groups_with_roles)),
         ):
             with pytest.raises(ValueError, match="Access denied"):
                 await GroupContext.from_email(
                     email="test@example.com",
                     access_token="tok",
-                    group_id="unauthorized_group"
+                    group_id="unauthorized_group",
                 )

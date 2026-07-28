@@ -13,8 +13,8 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from src.services.memory.engine import MemoryRecord
 
+from src.services.memory.engine import MemoryRecord
 from src.services.memory.lakebase_storage_backend import (
     LakebaseStorageBackend,
     _to_aware_utc,

@@ -1,8 +1,10 @@
 """Tests for LakebaseService - list_instances, _get_autoscaling_project, get_instance, test_connection."""
-import sys
+
 import os
+import sys
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 # Ensure the backend src is on sys.path
 
@@ -23,25 +25,33 @@ def mock_session():
 def service(mock_session):
     with patch("src.services.databricks.lakebase.service.DatabaseConfigRepository"):
         from src.services.databricks.lakebase.service import LakebaseService
-        svc = LakebaseService(session=mock_session, user_token="tok", user_email="u@example.com")
+
+        svc = LakebaseService(
+            session=mock_session, user_token="tok", user_email="u@example.com"
+        )
         return svc
 
 
 # ---- list_instances ----
+
 
 @pytest.mark.asyncio
 async def test_list_instances_empty(service):
     """list_instances returns empty when both APIs return nothing."""
     mock_w = MagicMock()
     mock_w.config.workspace_id = "123"
-    mock_w.api_client.do = MagicMock(return_value={"database_instances": [], "projects": []})
+    mock_w.api_client.do = MagicMock(
+        return_value={"database_instances": [], "projects": []}
+    )
     service.get_workspace_client = AsyncMock(return_value=mock_w)
 
     # First call for provisioned, second for autoscaling
-    mock_w.api_client.do = MagicMock(side_effect=[
-        {"database_instances": []},
-        {"projects": []},
-    ])
+    mock_w.api_client.do = MagicMock(
+        side_effect=[
+            {"database_instances": []},
+            {"projects": []},
+        ]
+    )
 
     result = await service.list_instances()
     assert result["items"] == []
@@ -56,12 +66,20 @@ async def test_list_instances_provisioned_only(service):
     mock_w.config.workspace_id = "123"
 
     provisioned = [
-        {"name": "inst-a", "state": "READY", "capacity": "CU_1", "read_write_dns": "dns-a", "node_count": 1},
+        {
+            "name": "inst-a",
+            "state": "READY",
+            "capacity": "CU_1",
+            "read_write_dns": "dns-a",
+            "node_count": 1,
+        },
     ]
-    mock_w.api_client.do = MagicMock(side_effect=[
-        {"database_instances": provisioned},
-        {"projects": []},
-    ])
+    mock_w.api_client.do = MagicMock(
+        side_effect=[
+            {"database_instances": provisioned},
+            {"projects": []},
+        ]
+    )
     service.get_workspace_client = AsyncMock(return_value=mock_w)
 
     result = await service.list_instances()
@@ -77,7 +95,15 @@ async def test_list_instances_autoscaling_only(service):
     mock_w.config.workspace_id = "123"
 
     projects = [
-        {"name": "projects/proj-b", "status": {"default_endpoint_settings": {"autoscaling_limit_min_cu": 1, "autoscaling_limit_max_cu": 4}}},
+        {
+            "name": "projects/proj-b",
+            "status": {
+                "default_endpoint_settings": {
+                    "autoscaling_limit_min_cu": 1,
+                    "autoscaling_limit_max_cu": 4,
+                }
+            },
+        },
     ]
 
     def fake_do(method, path, query=None, headers=None):
@@ -106,13 +132,27 @@ async def test_list_instances_search_filter(service):
     mock_w.config.workspace_id = "123"
 
     provisioned = [
-        {"name": "alpha", "state": "READY", "capacity": "CU_1", "read_write_dns": "dns-alpha", "node_count": 1},
-        {"name": "beta", "state": "READY", "capacity": "CU_2", "read_write_dns": "dns-beta", "node_count": 1},
+        {
+            "name": "alpha",
+            "state": "READY",
+            "capacity": "CU_1",
+            "read_write_dns": "dns-alpha",
+            "node_count": 1,
+        },
+        {
+            "name": "beta",
+            "state": "READY",
+            "capacity": "CU_2",
+            "read_write_dns": "dns-beta",
+            "node_count": 1,
+        },
     ]
-    mock_w.api_client.do = MagicMock(side_effect=[
-        {"database_instances": provisioned},
-        {"projects": []},
-    ])
+    mock_w.api_client.do = MagicMock(
+        side_effect=[
+            {"database_instances": provisioned},
+            {"projects": []},
+        ]
+    )
     service.get_workspace_client = AsyncMock(return_value=mock_w)
 
     result = await service.list_instances(search="alph")
@@ -126,11 +166,22 @@ async def test_list_instances_pagination(service):
     mock_w = MagicMock()
     mock_w.config.workspace_id = "123"
 
-    provisioned = [{"name": f"inst-{i}", "state": "READY", "capacity": "CU_1", "read_write_dns": f"dns-{i}", "node_count": 1} for i in range(5)]
-    mock_w.api_client.do = MagicMock(side_effect=[
-        {"database_instances": provisioned},
-        {"projects": []},
-    ])
+    provisioned = [
+        {
+            "name": f"inst-{i}",
+            "state": "READY",
+            "capacity": "CU_1",
+            "read_write_dns": f"dns-{i}",
+            "node_count": 1,
+        }
+        for i in range(5)
+    ]
+    mock_w.api_client.do = MagicMock(
+        side_effect=[
+            {"database_instances": provisioned},
+            {"projects": []},
+        ]
+    )
     service.get_workspace_client = AsyncMock(return_value=mock_w)
 
     result = await service.list_instances(page=2, page_size=2)
@@ -147,10 +198,12 @@ async def test_list_instances_page_size_capped(service):
     """page_size is capped at 100."""
     mock_w = MagicMock()
     mock_w.config.workspace_id = "123"
-    mock_w.api_client.do = MagicMock(side_effect=[
-        {"database_instances": []},
-        {"projects": []},
-    ])
+    mock_w.api_client.do = MagicMock(
+        side_effect=[
+            {"database_instances": []},
+            {"projects": []},
+        ]
+    )
     service.get_workspace_client = AsyncMock(return_value=mock_w)
 
     result = await service.list_instances(page_size=200)
@@ -160,9 +213,12 @@ async def test_list_instances_page_size_capped(service):
 @pytest.mark.asyncio
 async def test_list_instances_lakebase_unavailable(mock_session):
     """list_instances returns empty when LAKEBASE_AVAILABLE is False."""
-    with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False), \
-         patch("src.services.databricks.lakebase.service.DatabaseConfigRepository"):
+    with (
+        patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False),
+        patch("src.services.databricks.lakebase.service.DatabaseConfigRepository"),
+    ):
         from src.services.databricks.lakebase.service import LakebaseService
+
         svc = LakebaseService(session=mock_session)
         result = await svc.list_instances()
         assert result["items"] == []
@@ -170,6 +226,7 @@ async def test_list_instances_lakebase_unavailable(mock_session):
 
 
 # ---- _get_autoscaling_project ----
+
 
 @pytest.mark.asyncio
 async def test_get_autoscaling_project_found(service):
@@ -218,6 +275,7 @@ async def test_get_autoscaling_project_raises_other_errors(service):
 
 # ---- get_instance ----
 
+
 @pytest.mark.asyncio
 async def test_get_instance_provisioned(service):
     """get_instance returns provisioned instance when found."""
@@ -244,7 +302,12 @@ async def test_get_instance_fallback_to_autoscaling(service):
     mock_w.database.get_database_instance.side_effect = Exception("not found")
     service.get_workspace_client = AsyncMock(return_value=mock_w)
 
-    autoscaling_info = {"name": "proj-a", "state": "AVAILABLE", "type": "autoscaling", "read_write_dns": "dns"}
+    autoscaling_info = {
+        "name": "proj-a",
+        "state": "AVAILABLE",
+        "type": "autoscaling",
+        "read_write_dns": "dns",
+    }
     service._get_autoscaling_project = AsyncMock(return_value=autoscaling_info)
 
     result = await service.get_instance("proj-a")
@@ -266,9 +329,12 @@ async def test_get_instance_not_found_anywhere(service):
 @pytest.mark.asyncio
 async def test_get_instance_lakebase_unavailable(mock_session):
     """get_instance returns NOT_FOUND when LAKEBASE_AVAILABLE is False."""
-    with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False), \
-         patch("src.services.databricks.lakebase.service.DatabaseConfigRepository"):
+    with (
+        patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False),
+        patch("src.services.databricks.lakebase.service.DatabaseConfigRepository"),
+    ):
         from src.services.databricks.lakebase.service import LakebaseService
+
         svc = LakebaseService(session=mock_session)
         result = await svc.get_instance("x")
         assert result["state"] == "NOT_FOUND"
@@ -276,20 +342,25 @@ async def test_get_instance_lakebase_unavailable(mock_session):
 
 # ---- test_connection (test_connection_and_check_migration) ----
 
+
 @pytest.mark.asyncio
 async def test_test_connection_success(service):
     """test_connection returns success with migration info."""
-    service.get_instance = AsyncMock(return_value={
-        "state": "READY",
-        "read_write_dns": "dns-test",
-    })
+    service.get_instance = AsyncMock(
+        return_value={
+            "state": "READY",
+            "read_write_dns": "dns-test",
+        }
+    )
     cred = MagicMock()
     cred.token = "tok123"
     service.connection_service.generate_credentials = AsyncMock(return_value=cred)
     service.connection_service.get_username = AsyncMock(return_value="user@example.com")
 
     mock_engine = AsyncMock()
-    service.connection_service.create_lakebase_engine_async = AsyncMock(return_value=mock_engine)
+    service.connection_service.create_lakebase_engine_async = AsyncMock(
+        return_value=mock_engine
+    )
 
     # Mock the AsyncSession context
     mock_session_ctx = AsyncMock()
@@ -300,10 +371,16 @@ async def test_test_connection_success(service):
     mock_result_tables = MagicMock()
     mock_result_tables.scalar.return_value = 10
 
-    mock_session_ctx.execute = AsyncMock(side_effect=[mock_result_version, mock_result_schema, mock_result_tables])
+    mock_session_ctx.execute = AsyncMock(
+        side_effect=[mock_result_version, mock_result_schema, mock_result_tables]
+    )
 
-    with patch("src.services.databricks.lakebase.service.AsyncSession") as MockAsyncSession:
-        MockAsyncSession.return_value.__aenter__ = AsyncMock(return_value=mock_session_ctx)
+    with patch(
+        "src.services.databricks.lakebase.service.AsyncSession"
+    ) as MockAsyncSession:
+        MockAsyncSession.return_value.__aenter__ = AsyncMock(
+            return_value=mock_session_ctx
+        )
         MockAsyncSession.return_value.__aexit__ = AsyncMock(return_value=False)
 
         result = await service.test_connection("test-inst")
@@ -316,10 +393,12 @@ async def test_test_connection_success(service):
 @pytest.mark.asyncio
 async def test_test_connection_instance_not_ready(service):
     """test_connection returns error dict when instance not in a ready state."""
-    service.get_instance = AsyncMock(return_value={
-        "state": "STOPPED",
-        "read_write_dns": "dns",
-    })
+    service.get_instance = AsyncMock(
+        return_value={
+            "state": "STOPPED",
+            "read_write_dns": "dns",
+        }
+    )
 
     result = await service.test_connection("stopped-inst")
     assert result["success"] is False
@@ -329,10 +408,12 @@ async def test_test_connection_instance_not_ready(service):
 @pytest.mark.asyncio
 async def test_test_connection_no_endpoint(service):
     """test_connection returns error dict when instance has no endpoint."""
-    service.get_instance = AsyncMock(return_value={
-        "state": "READY",
-        "read_write_dns": None,
-    })
+    service.get_instance = AsyncMock(
+        return_value={
+            "state": "READY",
+            "read_write_dns": None,
+        }
+    )
 
     result = await service.test_connection("no-ep-inst")
     assert result["success"] is False
@@ -342,13 +423,19 @@ async def test_test_connection_no_endpoint(service):
 @pytest.mark.asyncio
 async def test_test_connection_lakebase_unavailable(mock_session):
     """test_connection raises NotImplementedError when lakebase unavailable."""
-    with patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False), \
-         patch("src.services.databricks.lakebase.service.DatabaseConfigRepository"):
+    with (
+        patch("src.services.databricks.lakebase.service.LAKEBASE_AVAILABLE", False),
+        patch("src.services.databricks.lakebase.service.DatabaseConfigRepository"),
+    ):
         from src.services.databricks.lakebase.service import LakebaseService
+
         svc = LakebaseService(session=mock_session)
         # test_connection catches all exceptions and returns error dict for most cases
         # but NotImplementedError is raised before the try/except in some paths
         # Let's just check it handles it
         result = await svc.test_connection("x")
         # With LAKEBASE_AVAILABLE=False it raises NotImplementedError which is caught
-        assert result.get("success") is False or "not available" in str(result.get("error", "")).lower()
+        assert (
+            result.get("success") is False
+            or "not available" in str(result.get("error", "")).lower()
+        )

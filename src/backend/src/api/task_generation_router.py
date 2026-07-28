@@ -10,14 +10,13 @@ import logging
 
 from fastapi import APIRouter
 
-from src.core.exceptions import KasalError
-
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import KasalError
 from src.schemas.task_generation import (
-    TaskGenerationRequest,
-    TaskGenerationResponse,
     GuardrailSuggestionRequest,
     GuardrailSuggestionResponse,
+    TaskGenerationRequest,
+    TaskGenerationResponse,
 )
 from src.services.generation.tasks import TaskGenerationService
 
@@ -64,7 +63,9 @@ async def generate_task(
 
 @router.post("/suggest-guardrail", response_model=GuardrailSuggestionResponse)
 async def suggest_guardrail(
-    request: GuardrailSuggestionRequest, group_context: GroupContextDep, session: SessionDep
+    request: GuardrailSuggestionRequest,
+    group_context: GroupContextDep,
+    session: SessionDep,
 ):
     """
     Generate a suggested LLM-guardrail validation criteria for a task.
@@ -81,6 +82,7 @@ async def suggest_guardrail(
     # required" — standard models survive via litellm's SDK fallback, codex
     # does not. Mirrors dispatcher_router.
     from src.utils.user_context import UserContext
+
     if group_context:
         UserContext.set_group_context(group_context)
         if group_context.access_token:

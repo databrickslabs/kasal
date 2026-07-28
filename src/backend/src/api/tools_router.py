@@ -3,14 +3,19 @@ API router for tool operations.
 
 This module provides endpoints for managing and interacting with tools.
 """
+
 import logging
 from typing import Annotated, Any, Dict, List
 
 from fastapi import APIRouter, Depends, status
 
-from src.core.exceptions import BadRequestError, ForbiddenError, KasalError, NotFoundError
-
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import (
+    BadRequestError,
+    ForbiddenError,
+    KasalError,
+    NotFoundError,
+)
 from src.core.permissions import check_role_in_context, require_admin
 from src.schemas.tool import (
     ToggleResponse,
@@ -101,6 +106,7 @@ async def list_global_tools(
 ) -> ToolListResponse:
     """List globally cataloged tools (base tools with no group_id)."""
     from src.services.tools.tool_service import _filter_personal_workspace_tools
+
     all_tools = await service.get_all_tools()
     base_tools = [t for t in all_tools.tools if getattr(t, "group_id", None) is None]
     # Hide personal-workspace-only tools (Gmail) outside the personal workspace.

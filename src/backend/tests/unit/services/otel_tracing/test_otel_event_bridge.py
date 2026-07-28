@@ -8,24 +8,23 @@ Target: 100% code coverage.
 
 import logging
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from src.services.otel_tracing.event_bridge import (
-    _safe_str,
-    _get_agent_name,
-    _get_task_name,
-    _get_full_task_description,
-    _get_tool_name,
-    _FULL_TASK_DESCRIPTION_MAX,
-    _get_output,
-    _EVENT_SPAN_MAP,
-    _SKIP_EVENTS,
     _EVENT_CLASSES,
+    _EVENT_SPAN_MAP,
+    _FULL_TASK_DESCRIPTION_MAX,
+    _SKIP_EVENTS,
     OTelEventBridge,
+    _get_agent_name,
+    _get_full_task_description,
+    _get_output,
+    _get_task_name,
+    _get_tool_name,
+    _safe_str,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -502,24 +501,42 @@ class TestOTelEventBridgeRegister:
 
         # All class names from register() _EVENT_CLASSES list
         all_class_names = [
-            "CrewKickoffStartedEvent", "CrewKickoffCompletedEvent",
-            "AgentExecutionStartedEvent", "AgentExecutionCompletedEvent",
-            "TaskStartedEvent", "TaskCompletedEvent", "TaskFailedEvent",
-            "ToolUsageStartedEvent", "ToolUsageFinishedEvent", "ToolUsageErrorEvent",
-            "LLMCallStartedEvent", "LLMCallCompletedEvent", "LLMCallFailedEvent",
+            "CrewKickoffStartedEvent",
+            "CrewKickoffCompletedEvent",
+            "AgentExecutionStartedEvent",
+            "AgentExecutionCompletedEvent",
+            "TaskStartedEvent",
+            "TaskCompletedEvent",
+            "TaskFailedEvent",
+            "ToolUsageStartedEvent",
+            "ToolUsageFinishedEvent",
+            "ToolUsageErrorEvent",
+            "LLMCallStartedEvent",
+            "LLMCallCompletedEvent",
+            "LLMCallFailedEvent",
             "LLMStreamChunkEvent",
-            "MemorySaveStartedEvent", "MemorySaveCompletedEvent",
-            "MemoryQueryStartedEvent", "MemoryQueryCompletedEvent",
+            "MemorySaveStartedEvent",
+            "MemorySaveCompletedEvent",
+            "MemoryQueryStartedEvent",
+            "MemoryQueryCompletedEvent",
             "MemoryRetrievalCompletedEvent",
-            "KnowledgeRetrievalStartedEvent", "KnowledgeRetrievalCompletedEvent",
-            "AgentReasoningStartedEvent", "AgentReasoningCompletedEvent",
+            "KnowledgeRetrievalStartedEvent",
+            "KnowledgeRetrievalCompletedEvent",
+            "AgentReasoningStartedEvent",
+            "AgentReasoningCompletedEvent",
             "AgentReasoningFailedEvent",
-            "LLMGuardrailStartedEvent", "LLMGuardrailCompletedEvent",
+            "LLMGuardrailStartedEvent",
+            "LLMGuardrailCompletedEvent",
             "LLMGuardrailFailedEvent",
-            "FlowStartedEvent", "FlowFinishedEvent", "FlowCreatedEvent",
-            "MCPConnectionStartedEvent", "MCPConnectionCompletedEvent",
-            "MCPToolExecutionStartedEvent", "MCPToolExecutionCompletedEvent",
-            "HumanFeedbackRequestedEvent", "HumanFeedbackReceivedEvent",
+            "FlowStartedEvent",
+            "FlowFinishedEvent",
+            "FlowCreatedEvent",
+            "MCPConnectionStartedEvent",
+            "MCPConnectionCompletedEvent",
+            "MCPToolExecutionStartedEvent",
+            "MCPToolExecutionCompletedEvent",
+            "HumanFeedbackRequestedEvent",
+            "HumanFeedbackReceivedEvent",
         ]
         class_types = {name: type(name, (), {}) for name in all_class_names}
         fake_module = SimpleNamespace(**class_types)
@@ -598,6 +615,7 @@ class TestOTelEventBridgeRegisterHandler:
             def decorator(fn):
                 handlers[cls] = fn
                 return fn
+
             return decorator
 
         event_bus.on = on_decorator
@@ -676,7 +694,8 @@ class TestOTelEventBridgeEmitSpan:
         )
 
         full_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c.args and c.args[0] == "kasal.extra.task_description_full"
         ]
         assert full_calls == []
@@ -687,21 +706,28 @@ class TestOTelEventBridgeEmitSpan:
         tracer, span = _make_tracer()
         bridge = OTelEventBridge(tracer, "job-mem-label")
 
-        bridge._emit_span("kasal.memory.save_started", "memory_write_started", _make_event())
+        bridge._emit_span(
+            "kasal.memory.save_started", "memory_write_started", _make_event()
+        )
         bridge._emit_span("kasal.llm.call_started", "llm_call", _make_event(model="m"))
 
-        span.set_attribute.assert_any_call("kasal.extra.llm_purpose", "memory_labelling")
+        span.set_attribute.assert_any_call(
+            "kasal.extra.llm_purpose", "memory_labelling"
+        )
 
     def test_llm_call_outside_a_memory_save_is_not_marked(self):
         tracer, span = _make_tracer()
         bridge = OTelEventBridge(tracer, "job-mem-label-off")
 
-        bridge._emit_span("kasal.memory.save_started", "memory_write_started", _make_event())
+        bridge._emit_span(
+            "kasal.memory.save_started", "memory_write_started", _make_event()
+        )
         bridge._emit_span("kasal.memory.save_completed", "memory_write", _make_event())
         bridge._emit_span("kasal.llm.call_started", "llm_call", _make_event(model="m"))
 
         purpose_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c.args and c.args[0] == "kasal.extra.llm_purpose"
         ]
         assert purpose_calls == []
@@ -735,10 +761,14 @@ class TestOTelEventBridgeEmitSpan:
         bridge = OTelEventBridge(tracer, "job-no-inherit")
         bridge._current_agent_name = "Researcher"
 
-        bridge._emit_span("CrewAI.tool.execute", "tool_usage", _make_event(tool_name="t"))
+        bridge._emit_span(
+            "CrewAI.tool.execute", "tool_usage", _make_event(tool_name="t")
+        )
 
         agent_calls = [
-            c for c in span.set_attribute.call_args_list if c.args and c.args[0] == "kasal.agent_name"
+            c
+            for c in span.set_attribute.call_args_list
+            if c.args and c.args[0] == "kasal.agent_name"
         ]
         assert agent_calls == []
 
@@ -770,7 +800,8 @@ class TestOTelEventBridgeEmitSpan:
         bridge._emit_span("kasal.llm.call_started", "llm_call", _make_event())
 
         stamped = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c.args and c.args[0] == "kasal.extra.task_id"
         ]
         assert stamped == []
@@ -794,7 +825,9 @@ class TestOTelEventBridgeEmitSpan:
         # The guardrail's own LLM call: carries the internal "Guardrail Agent"
         # and NO task of its own.
         span.set_attribute.reset_mock()
-        bridge._emit_span("CrewAI.llm.call", "llm_call", _make_event(agent_role="Guardrail Agent"))
+        bridge._emit_span(
+            "CrewAI.llm.call", "llm_call", _make_event(agent_role="Guardrail Agent")
+        )
 
         span.set_attribute.assert_any_call("kasal.agent_name", "Researcher")
         span.set_attribute.assert_any_call("kasal.task_name", "Gather")
@@ -817,10 +850,13 @@ class TestOTelEventBridgeEmitSpan:
         bridge._emit_span("kasal.guardrail.completed", "llm_guardrail", _make_event())
 
         span.set_attribute.reset_mock()
-        bridge._emit_span("CrewAI.llm.call", "llm_call", _make_event(agent_role="Guardrail Agent"))
+        bridge._emit_span(
+            "CrewAI.llm.call", "llm_call", _make_event(agent_role="Guardrail Agent")
+        )
 
         marked = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c.args and c.args[0] == "kasal.extra.guardrail_validation"
         ]
         assert marked == []
@@ -833,14 +869,18 @@ class TestOTelEventBridgeEmitSpan:
 
         # Task 1 active; its agent kicks off a save.
         bridge._emit_span(
-            "CrewAI.task.execute", "task_started",
+            "CrewAI.task.execute",
+            "task_started",
             _make_event(task_id="t1", task_name="T1", agent_role="A"),
         )
-        bridge._emit_span("kasal.memory.save_started", "memory_write_started", _make_event())
+        bridge._emit_span(
+            "kasal.memory.save_started", "memory_write_started", _make_event()
+        )
 
         # Task 2 starts → current task moves on while the save is still running.
         bridge._emit_span(
-            "CrewAI.task.execute", "task_started",
+            "CrewAI.task.execute",
+            "task_started",
             _make_event(task_id="t2", task_name="T2", agent_role="A"),
         )
 
@@ -862,7 +902,8 @@ class TestOTelEventBridgeEmitSpan:
         attr_calls = [c[0] for c in span.set_attribute.call_args_list]
         attr_keys = [c[0] for c in attr_calls]
         assert ("kasal.agent_name",) not in attr_calls or all(
-            c[0][0] != "kasal.agent_name" for c in span.set_attribute.call_args_list
+            c[0][0] != "kasal.agent_name"
+            for c in span.set_attribute.call_args_list
             if len(c[0]) > 0
         )
 
@@ -875,6 +916,7 @@ class TestOTelEventBridgeEmitSpan:
         bridge._emit_span("CrewAI.task.fail", "task_failed", event)
 
         from opentelemetry.trace import StatusCode
+
         span.set_status.assert_called_once_with(
             StatusCode.ERROR, "Something went wrong"
         )
@@ -888,9 +930,8 @@ class TestOTelEventBridgeEmitSpan:
         bridge._emit_span("CrewAI.tool.error", "tool_error", event)
 
         from opentelemetry.trace import StatusCode
-        span.set_status.assert_called_once_with(
-            StatusCode.ERROR, "Tool error occurred"
-        )
+
+        span.set_status.assert_called_once_with(StatusCode.ERROR, "Tool error occurred")
 
     def test_emit_span_error_event_with_no_error_or_message(self):
         """Failed event with neither error nor message uses empty string."""
@@ -901,6 +942,7 @@ class TestOTelEventBridgeEmitSpan:
         bridge._emit_span("CrewAI.task.fail", "task_failed", event)
 
         from opentelemetry.trace import StatusCode
+
         span.set_status.assert_called_once_with(StatusCode.ERROR, "")
 
     def test_emit_span_exception_is_caught_and_logged(self):
@@ -924,8 +966,7 @@ class TestOTelEventBridgeEmitSpan:
 
         # _get_task_name applies _safe_str (500) and then span code does [:500]
         task_calls = [
-            c for c in span.set_attribute.call_args_list
-            if c[0][0] == "kasal.task_name"
+            c for c in span.set_attribute.call_args_list if c[0][0] == "kasal.task_name"
         ]
         assert len(task_calls) == 1
         assert len(task_calls[0][0][1]) == 500
@@ -976,7 +1017,8 @@ class TestSetExtraAttributesTask:
         bridge._set_extra_attributes(span, event)
 
         name_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.task_name"
         ]
         assert len(name_calls) == 1
@@ -1001,7 +1043,8 @@ class TestSetExtraAttributesTask:
         bridge._set_extra_attributes(span, event)
 
         id_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.task_id"
         ]
         assert len(id_calls) == 1
@@ -1016,7 +1059,8 @@ class TestSetExtraAttributesTask:
         bridge._set_extra_attributes(span, event)
 
         name_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.task_name"
         ]
         assert len(name_calls) == 1
@@ -1031,7 +1075,8 @@ class TestSetExtraAttributesTask:
         bridge._set_extra_attributes(span, event)
 
         name_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.task_name"
         ]
         assert len(name_calls) == 1
@@ -1046,7 +1091,8 @@ class TestSetExtraAttributesTask:
         bridge._set_extra_attributes(span, event)
 
         name_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.task_name"
         ]
         assert len(name_calls) == 1
@@ -1147,7 +1193,8 @@ class TestSetExtraAttributesAgent:
         bridge._set_extra_attributes(span, event)
 
         role_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.agent_role"
         ]
         assert len(role_calls) == 1
@@ -1314,7 +1361,9 @@ class TestSetExtraAttributesMemoryFields:
         event = _make_event(memory_content="remembered fact")
         bridge._set_extra_attributes(span, event)
 
-        span.set_attribute.assert_any_call("kasal.extra.memory_content", "remembered fact")
+        span.set_attribute.assert_any_call(
+            "kasal.extra.memory_content", "remembered fact"
+        )
 
     def test_memory_content_not_truncated(self):
         """memory_content uses str() directly, no truncation."""
@@ -1326,7 +1375,8 @@ class TestSetExtraAttributesMemoryFields:
         bridge._set_extra_attributes(span, event)
 
         mc_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.memory_content"
         ]
         assert len(mc_calls) == 1
@@ -1460,9 +1510,7 @@ class TestSetExtraAttributesTool:
         event = _make_event(tool_args={"query": "test"})
         bridge._set_extra_attributes(span, event)
 
-        span.set_attribute.assert_any_call(
-            "kasal.extra.tool_args", "{'query': 'test'}"
-        )
+        span.set_attribute.assert_any_call("kasal.extra.tool_args", "{'query': 'test'}")
 
     def test_tool_args_not_truncated(self):
         tracer, span = _make_tracer()
@@ -1473,7 +1521,8 @@ class TestSetExtraAttributesTool:
         bridge._set_extra_attributes(span, event)
 
         args_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.tool_args"
         ]
         assert len(args_calls) == 1
@@ -1593,7 +1642,8 @@ class TestSetExtraAttributesCrew:
         bridge._set_extra_attributes(span, event)
 
         inp_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.inputs"
         ]
         assert len(inp_calls) == 1
@@ -1646,7 +1696,8 @@ class TestSetExtraAttributesAgentExecution:
         bridge._set_extra_attributes(span, event)
 
         prompt_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.task_prompt"
         ]
         assert len(prompt_calls) == 1
@@ -1717,7 +1768,8 @@ class TestSetExtraAttributesAgentExecution:
         bridge._set_extra_attributes(span, event)
 
         tools_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.tools"
         ]
         assert len(tools_calls) == 1
@@ -1755,7 +1807,8 @@ class TestSetExtraAttributesContext:
         bridge._set_extra_attributes(span, event)
 
         ctx_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.context"
         ]
         assert len(ctx_calls) == 1
@@ -1812,7 +1865,8 @@ class TestSetExtraAttributesKnowledge:
         bridge._set_extra_attributes(span, event)
 
         calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.retrieved_knowledge"
         ]
         assert len(calls) == 1
@@ -1847,7 +1901,8 @@ class TestSetExtraAttributesReasoning:
         bridge._set_extra_attributes(span, event)
 
         calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.plan"
         ]
         assert len(calls) == 1
@@ -1905,9 +1960,7 @@ class TestSetExtraAttributesGuardrail:
         event = _make_event(guardrail="content_filter_v2")
         bridge._set_extra_attributes(span, event)
 
-        span.set_attribute.assert_any_call(
-            "kasal.extra.guardrail", "content_filter_v2"
-        )
+        span.set_attribute.assert_any_call("kasal.extra.guardrail", "content_filter_v2")
 
     def test_guardrail_truncated_via_safe_str(self):
         tracer, span = _make_tracer()
@@ -1918,7 +1971,8 @@ class TestSetExtraAttributesGuardrail:
         bridge._set_extra_attributes(span, event)
 
         calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.guardrail"
         ]
         assert len(calls) == 1
@@ -1960,7 +2014,8 @@ class TestSetExtraAttributesGuardrail:
         bridge._set_extra_attributes(span, event)
 
         calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.result"
         ]
         assert len(calls) == 1
@@ -2066,9 +2121,7 @@ class TestSetExtraAttributesMCP:
         event = _make_event(connection_duration_ms=150.5)
         bridge._set_extra_attributes(span, event)
 
-        span.set_attribute.assert_any_call(
-            "kasal.extra.connection_duration_ms", 150.5
-        )
+        span.set_attribute.assert_any_call("kasal.extra.connection_duration_ms", 150.5)
 
     def test_connection_duration_ms_zero(self):
         tracer, span = _make_tracer()
@@ -2077,9 +2130,7 @@ class TestSetExtraAttributesMCP:
         event = _make_event(connection_duration_ms=0)
         bridge._set_extra_attributes(span, event)
 
-        span.set_attribute.assert_any_call(
-            "kasal.extra.connection_duration_ms", 0.0
-        )
+        span.set_attribute.assert_any_call("kasal.extra.connection_duration_ms", 0.0)
 
     def test_execution_duration_ms(self):
         tracer, span = _make_tracer()
@@ -2088,9 +2139,7 @@ class TestSetExtraAttributesMCP:
         event = _make_event(execution_duration_ms=320.7)
         bridge._set_extra_attributes(span, event)
 
-        span.set_attribute.assert_any_call(
-            "kasal.extra.execution_duration_ms", 320.7
-        )
+        span.set_attribute.assert_any_call("kasal.extra.execution_duration_ms", 320.7)
 
     def test_execution_duration_ms_zero(self):
         tracer, span = _make_tracer()
@@ -2099,9 +2148,7 @@ class TestSetExtraAttributesMCP:
         event = _make_event(execution_duration_ms=0)
         bridge._set_extra_attributes(span, event)
 
-        span.set_attribute.assert_any_call(
-            "kasal.extra.execution_duration_ms", 0.0
-        )
+        span.set_attribute.assert_any_call("kasal.extra.execution_duration_ms", 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -2130,7 +2177,8 @@ class TestSetExtraAttributesHITL:
         bridge._set_extra_attributes(span, event)
 
         msg_calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.message"
         ]
         assert len(msg_calls) == 1
@@ -2178,7 +2226,8 @@ class TestSetExtraAttributesHITL:
         bridge._set_extra_attributes(span, event)
 
         calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.feedback"
         ]
         assert len(calls) == 1
@@ -2274,7 +2323,8 @@ class TestSetExtraAttributesLLMCall:
         bridge._set_extra_attributes(span, event)
 
         calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.prompt"
         ]
         assert len(calls) == 1
@@ -2321,7 +2371,8 @@ class TestSetExtraAttributesLLMCall:
 
         # Keys are extracted and passed through _safe_str
         calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.available_tools"
         ]
         assert len(calls) == 1
@@ -2378,7 +2429,8 @@ class TestSetExtraAttributesError:
         bridge._set_extra_attributes(span, event)
 
         calls = [
-            c for c in span.set_attribute.call_args_list
+            c
+            for c in span.set_attribute.call_args_list
             if c[0][0] == "kasal.extra.error"
         ]
         assert len(calls) == 1
@@ -2400,9 +2452,7 @@ class TestSetExtraAttributesOperation:
         event = _make_event(operation="similarity_search")
         bridge._set_extra_attributes(span, event)
 
-        span.set_attribute.assert_any_call(
-            "kasal.extra.operation", "similarity_search"
-        )
+        span.set_attribute.assert_any_call("kasal.extra.operation", "similarity_search")
 
 
 # ---------------------------------------------------------------------------
@@ -2584,6 +2634,7 @@ class TestIntegrationRegisterAndTrigger:
                 def decorator(fn):
                     handlers[cls.__name__] = fn
                     return fn
+
                 return decorator
 
         event_bus = FakeEventBus()
@@ -2622,6 +2673,7 @@ class TestIntegrationRegisterAndTrigger:
                 def decorator(fn):
                     handlers[cls.__name__] = fn
                     return fn
+
                 return decorator
 
         event_bus = FakeEventBus()
@@ -2633,9 +2685,8 @@ class TestIntegrationRegisterAndTrigger:
         handlers["TaskFailedEvent"]("source", event)
 
         from opentelemetry.trace import StatusCode
-        span.set_status.assert_called_once_with(
-            StatusCode.ERROR, "Task timed out"
-        )
+
+        span.set_status.assert_called_once_with(StatusCode.ERROR, "Task timed out")
 
 
 class TestFailedMemoryEventMapping:
@@ -2644,11 +2695,18 @@ class TestFailedMemoryEventMapping:
 
     def test_failed_memory_events_are_mapped(self):
         from src.services.otel_tracing.event_bridge import _EVENT_SPAN_MAP
+
         assert _EVENT_SPAN_MAP["MemorySaveFailedEvent"][1] == "memory_write_failed"
         assert _EVENT_SPAN_MAP["MemoryQueryFailedEvent"][1] == "memory_retrieval_failed"
-        assert _EVENT_SPAN_MAP["MemoryRetrievalFailedEvent"][1] == "memory_retrieval_failed"
+        assert (
+            _EVENT_SPAN_MAP["MemoryRetrievalFailedEvent"][1]
+            == "memory_retrieval_failed"
+        )
 
     def test_failed_memory_span_names(self):
         from src.services.otel_tracing.event_bridge import _EVENT_SPAN_MAP
+
         assert _EVENT_SPAN_MAP["MemorySaveFailedEvent"][0] == "kasal.memory.save_failed"
-        assert _EVENT_SPAN_MAP["MemoryQueryFailedEvent"][0] == "kasal.memory.query_failed"
+        assert (
+            _EVENT_SPAN_MAP["MemoryQueryFailedEvent"][0] == "kasal.memory.query_failed"
+        )

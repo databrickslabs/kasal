@@ -3,16 +3,18 @@ Unit tests for DatabaseConfigRepository.
 
 Tests get_by_key, upsert, and delete_by_key operations with mocked AsyncSession.
 """
+
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 
-from src.repositories.database_config_repository import DatabaseConfigRepository
 from src.models.database_config import LakebaseConfig
-
+from src.repositories.database_config_repository import DatabaseConfigRepository
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_session():
     session = AsyncMock()
@@ -37,6 +39,7 @@ def scalar_result(obj):
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def session():
     return make_session()
@@ -59,6 +62,7 @@ def sample_config():
 # __init__
 # ---------------------------------------------------------------------------
 
+
 class TestInit:
     def test_stores_model_and_session(self, session):
         repo = DatabaseConfigRepository(LakebaseConfig, session)
@@ -69,6 +73,7 @@ class TestInit:
 # ---------------------------------------------------------------------------
 # get_by_key
 # ---------------------------------------------------------------------------
+
 
 class TestGetByKey:
     @pytest.mark.asyncio
@@ -102,6 +107,7 @@ class TestGetByKey:
 # upsert
 # ---------------------------------------------------------------------------
 
+
 class TestUpsert:
     @pytest.mark.asyncio
     async def test_updates_existing_config(self, repo, session, sample_config):
@@ -119,8 +125,13 @@ class TestUpsert:
         """When key does not exist, create and return new config."""
         new_cfg = MagicMock(spec=LakebaseConfig)
 
-        with patch.object(repo, "get_by_key", new_callable=AsyncMock) as mock_get, \
-             patch("src.repositories.database_config_repository.LakebaseConfig", return_value=new_cfg) as mock_model:
+        with (
+            patch.object(repo, "get_by_key", new_callable=AsyncMock) as mock_get,
+            patch(
+                "src.repositories.database_config_repository.LakebaseConfig",
+                return_value=new_cfg,
+            ) as mock_model,
+        ):
             # Patch the model class used inside upsert
             repo.model = mock_model
             mock_get.return_value = None
@@ -146,7 +157,9 @@ class TestUpsert:
         assert result is sample_config
 
     @pytest.mark.asyncio
-    async def test_upsert_sets_correct_value_on_existing(self, repo, session, sample_config):
+    async def test_upsert_sets_correct_value_on_existing(
+        self, repo, session, sample_config
+    ):
         new_value = {"host": "updated.host", "port": 9999}
         with patch.object(repo, "get_by_key", new_callable=AsyncMock) as mock_get:
             mock_get.return_value = sample_config
@@ -157,6 +170,7 @@ class TestUpsert:
 # ---------------------------------------------------------------------------
 # delete_by_key
 # ---------------------------------------------------------------------------
+
 
 class TestDeleteByKey:
     @pytest.mark.asyncio

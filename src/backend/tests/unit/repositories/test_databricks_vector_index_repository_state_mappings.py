@@ -3,16 +3,22 @@ Extended coverage tests for DatabricksVectorIndexRepository.
 
 Targets uncovered lines in state mapping, API error paths, and upsert validation.
 """
-import pytest
-import json
+
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.repositories.databricks_vector_index_repository import DatabricksVectorIndexRepository
-from src.schemas.databricks_vector_index import (
-    IndexResponse, IndexListResponse, IndexState, IndexType
-)
+import pytest
 
+from src.repositories.databricks_vector_index_repository import (
+    DatabricksVectorIndexRepository,
+)
+from src.schemas.databricks_vector_index import (
+    IndexListResponse,
+    IndexResponse,
+    IndexState,
+    IndexType,
+)
 
 WORKSPACE_URL = "https://example.databricks.com"
 AUTH_TOKEN = "test-token"
@@ -47,6 +53,7 @@ def make_aiohttp_ctx(status: int, json_data=None, text_data: str = ""):
 # Constructor with empty/None workspace_url
 # ---------------------------------------------------------------------------
 
+
 class TestConstructorFallback:
 
     def test_empty_workspace_url_triggers_auth_context(self):
@@ -73,6 +80,7 @@ class TestConstructorFallback:
 # get_index: state mapping (covers lines 238-268)
 # ---------------------------------------------------------------------------
 
+
 class TestGetIndexStateMappings:
     """Tests for get_index with different state values."""
 
@@ -81,7 +89,7 @@ class TestGetIndexStateMappings:
             "name": "cat.schema.idx",
             "endpoint_name": "ep",
             "primary_key": "id",
-            "status": {"ready": ready}
+            "status": {"ready": ready},
         }
         if state is not None:
             data["status"]["state"] = state
@@ -96,8 +104,13 @@ class TestGetIndexStateMappings:
         data = self._make_index_data("PROVISIONING", ready=False)
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert isinstance(result, IndexResponse)
@@ -110,8 +123,13 @@ class TestGetIndexStateMappings:
         data = self._make_index_data("OFFLINE", ready=False)
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert result.success is True
@@ -123,8 +141,13 @@ class TestGetIndexStateMappings:
         data = self._make_index_data("FAILED", ready=False)
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert result.success is True
@@ -136,8 +159,13 @@ class TestGetIndexStateMappings:
         data = self._make_index_data(None, "READY", ready=True)
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert result.success is True
@@ -149,8 +177,13 @@ class TestGetIndexStateMappings:
         data = self._make_index_data(None, "PROVISIONING", ready=False)
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert result.success is True
@@ -162,8 +195,13 @@ class TestGetIndexStateMappings:
         data = self._make_index_data(None, "WEIRD_STATE", ready=True)
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert result.success is True
@@ -172,12 +210,21 @@ class TestGetIndexStateMappings:
     async def test_no_state_uses_ready_flag(self):
         """No state or detailed_state -> uses ready flag."""
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
-        data = {"name": "idx", "endpoint_name": "ep", "primary_key": "id",
-                "status": {"ready": True}}
+        data = {
+            "name": "idx",
+            "endpoint_name": "ep",
+            "primary_key": "id",
+            "status": {"ready": True},
+        }
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.get_index("idx", "ep")
 
         assert result.success is True
@@ -189,8 +236,13 @@ class TestGetIndexStateMappings:
         data = self._make_index_data("BANANA", ready=False)
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert result.success is True
@@ -200,14 +252,21 @@ class TestGetIndexStateMappings:
         """direct_access_index_spec present sets DIRECT_ACCESS type."""
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
         data = {
-            "name": "idx", "endpoint_name": "ep", "primary_key": "id",
+            "name": "idx",
+            "endpoint_name": "ep",
+            "primary_key": "id",
             "direct_access_index_spec": {"embedding_dimension": 768},
-            "status": {"state": "READY", "ready": True}
+            "status": {"state": "READY", "ready": True},
         }
         session_cm, _, _ = make_aiohttp_ctx(200, data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.get_index("idx", "ep")
 
         assert result.success is True
@@ -218,8 +277,13 @@ class TestGetIndexStateMappings:
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
         session_cm, _, _ = make_aiohttp_ctx(500, text_data="server error")
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.get_index("cat.schema.idx", "ep")
 
         assert result.success is False
@@ -229,17 +293,30 @@ class TestGetIndexStateMappings:
 # list_indexes: state mapping edge cases (lines 390-412)
 # ---------------------------------------------------------------------------
 
+
 class TestListIndexesStateMappings:
 
     @pytest.mark.asyncio
     async def test_list_provisioning_state(self):
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
-        list_data = {"vector_indexes": [{"name": "idx", "primary_key": "id",
-                                         "status": {"state": "PROVISIONING", "ready": False}}]}
+        list_data = {
+            "vector_indexes": [
+                {
+                    "name": "idx",
+                    "primary_key": "id",
+                    "status": {"state": "PROVISIONING", "ready": False},
+                }
+            ]
+        }
         session_cm, _, _ = make_aiohttp_ctx(200, list_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.list_indexes("ep")
 
         # list_indexes may return 0 or more depending on internal get calls,
@@ -249,12 +326,24 @@ class TestListIndexesStateMappings:
     @pytest.mark.asyncio
     async def test_list_offline_state(self):
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
-        list_data = {"vector_indexes": [{"name": "idx", "primary_key": "id",
-                                         "status": {"state": "OFFLINE", "ready": False}}]}
+        list_data = {
+            "vector_indexes": [
+                {
+                    "name": "idx",
+                    "primary_key": "id",
+                    "status": {"state": "OFFLINE", "ready": False},
+                }
+            ]
+        }
         session_cm, _, _ = make_aiohttp_ctx(200, list_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.list_indexes("ep")
 
         assert result.success is True
@@ -262,12 +351,24 @@ class TestListIndexesStateMappings:
     @pytest.mark.asyncio
     async def test_list_failed_state(self):
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
-        list_data = {"vector_indexes": [{"name": "idx", "primary_key": "id",
-                                         "status": {"state": "FAILED", "ready": False}}]}
+        list_data = {
+            "vector_indexes": [
+                {
+                    "name": "idx",
+                    "primary_key": "id",
+                    "status": {"state": "FAILED", "ready": False},
+                }
+            ]
+        }
         session_cm, _, _ = make_aiohttp_ctx(200, list_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.list_indexes("ep")
 
         assert result.success is True
@@ -275,12 +376,24 @@ class TestListIndexesStateMappings:
     @pytest.mark.asyncio
     async def test_list_none_state_uses_detailed(self):
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
-        list_data = {"vector_indexes": [{"name": "idx", "primary_key": "id",
-                                         "status": {"state": None, "detailed_state": "READY", "ready": True}}]}
+        list_data = {
+            "vector_indexes": [
+                {
+                    "name": "idx",
+                    "primary_key": "id",
+                    "status": {"state": None, "detailed_state": "READY", "ready": True},
+                }
+            ]
+        }
         session_cm, _, _ = make_aiohttp_ctx(200, list_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.list_indexes("ep")
 
         assert result.success is True
@@ -288,12 +401,24 @@ class TestListIndexesStateMappings:
     @pytest.mark.asyncio
     async def test_list_none_state_unknown_detailed_uses_ready(self):
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
-        list_data = {"vector_indexes": [{"name": "idx", "primary_key": "id",
-                                         "status": {"state": None, "detailed_state": "WEIRD", "ready": True}}]}
+        list_data = {
+            "vector_indexes": [
+                {
+                    "name": "idx",
+                    "primary_key": "id",
+                    "status": {"state": None, "detailed_state": "WEIRD", "ready": True},
+                }
+            ]
+        }
         session_cm, _, _ = make_aiohttp_ctx(200, list_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.list_indexes("ep")
 
         assert result.success is True
@@ -301,12 +426,24 @@ class TestListIndexesStateMappings:
     @pytest.mark.asyncio
     async def test_list_invalid_state_defaults_to_unknown(self):
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
-        list_data = {"vector_indexes": [{"name": "idx", "primary_key": "id",
-                                         "status": {"state": "NOPE", "ready": False}}]}
+        list_data = {
+            "vector_indexes": [
+                {
+                    "name": "idx",
+                    "primary_key": "id",
+                    "status": {"state": "NOPE", "ready": False},
+                }
+            ]
+        }
         session_cm, _, _ = make_aiohttp_ctx(200, list_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.list_indexes("ep")
 
         assert result.success is True
@@ -316,8 +453,13 @@ class TestListIndexesStateMappings:
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
         session_cm, _, _ = make_aiohttp_ctx(500, text_data="server error")
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.list_indexes("ep")
 
         assert result.success is False
@@ -325,12 +467,20 @@ class TestListIndexesStateMappings:
     @pytest.mark.asyncio
     async def test_list_no_state_uses_ready_flag(self):
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
-        list_data = {"vector_indexes": [{"name": "idx", "primary_key": "id",
-                                         "status": {"ready": False}}]}
+        list_data = {
+            "vector_indexes": [
+                {"name": "idx", "primary_key": "id", "status": {"ready": False}}
+            ]
+        }
         session_cm, _, _ = make_aiohttp_ctx(200, list_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.list_indexes("ep")
 
         assert result.success is True
@@ -339,6 +489,7 @@ class TestListIndexesStateMappings:
 # ---------------------------------------------------------------------------
 # upsert: validation and error paths (lines 573-1135)
 # ---------------------------------------------------------------------------
+
 
 class TestUpsertEdgeCases:
 
@@ -350,7 +501,10 @@ class TestUpsertEdgeCases:
 
         result = await repo.upsert("cat.schema.idx", "ep", [{"id": 1}])
         assert result["success"] is False
-        assert "workspace" in result.get("error", "").lower() or "workspace" in result.get("message", "").lower()
+        assert (
+            "workspace" in result.get("error", "").lower()
+            or "workspace" in result.get("message", "").lower()
+        )
 
     @pytest.mark.asyncio
     async def test_upsert_empty_records_list(self):
@@ -361,7 +515,9 @@ class TestUpsertEdgeCases:
             result = await repo.upsert("cat.schema.idx", "ep", [])
 
         assert result["success"] is False
-        assert "No records" in result.get("error", "") or "No records" in result.get("message", "")
+        assert "No records" in result.get("error", "") or "No records" in result.get(
+            "message", ""
+        )
 
     @pytest.mark.asyncio
     async def test_upsert_empty_dict_record(self):
@@ -379,9 +535,16 @@ class TestUpsertEdgeCases:
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
         session_cm, _, _ = make_aiohttp_ctx(200, {"status": "OK"})
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            result = await repo.upsert("cat.schema.idx", "ep", [{"id": 1, "text": "hello"}])
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
+            result = await repo.upsert(
+                "cat.schema.idx", "ep", [{"id": 1, "text": "hello"}]
+            )
 
         assert "success" in result
 
@@ -391,9 +554,16 @@ class TestUpsertEdgeCases:
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
         session_cm, _, _ = make_aiohttp_ctx(200, {"status": "OK"})
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            result = await repo.upsert("cat.schema.idx", "ep", {"id": 1, "text": "hello"})
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
+            result = await repo.upsert(
+                "cat.schema.idx", "ep", {"id": 1, "text": "hello"}
+            )
 
         assert "success" in result
 
@@ -404,9 +574,16 @@ class TestUpsertEdgeCases:
         error_text = "INVALID_PARAMETER_VALUE: inputs_json is empty"
         session_cm, _, _ = make_aiohttp_ctx(400, text_data=error_text)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            result = await repo.upsert("cat.schema.idx", "ep", [{"id": 1, "embedding": [0.1] * 10}])
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
+            result = await repo.upsert(
+                "cat.schema.idx", "ep", [{"id": 1, "embedding": [0.1] * 10}]
+            )
 
         assert result["success"] is False
 
@@ -417,9 +594,16 @@ class TestUpsertEdgeCases:
         error_text = "INVALID_PARAMETER_VALUE: wrong column name"
         session_cm, _, _ = make_aiohttp_ctx(400, text_data=error_text)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            result = await repo.upsert("cat.schema.idx", "ep", [{"id": 1, "embedding": [0.1] * 10}])
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
+            result = await repo.upsert(
+                "cat.schema.idx", "ep", [{"id": 1, "embedding": [0.1] * 10}]
+            )
 
         assert result["success"] is False
 
@@ -429,9 +613,16 @@ class TestUpsertEdgeCases:
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
         session_cm, _, _ = make_aiohttp_ctx(500, text_data="server error")
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
-            result = await repo.upsert("cat.schema.idx", "ep", [{"id": 1, "embedding": [0.1] * 10}])
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
+            result = await repo.upsert(
+                "cat.schema.idx", "ep", [{"id": 1, "embedding": [0.1] * 10}]
+            )
 
         assert result["success"] is False
 
@@ -440,8 +631,12 @@ class TestUpsertEdgeCases:
         """upsert handles unexpected exceptions."""
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
 
-        with patch.object(repo, "_get_auth_token", side_effect=Exception("auth failed")):
-            result = await repo.upsert("cat.schema.idx", "ep", [{"id": 1, "embedding": [0.1] * 10}])
+        with patch.object(
+            repo, "_get_auth_token", side_effect=Exception("auth failed")
+        ):
+            result = await repo.upsert(
+                "cat.schema.idx", "ep", [{"id": 1, "embedding": [0.1] * 10}]
+            )
 
         assert result["success"] is False
         assert "auth failed" in result.get("error", "")
@@ -451,6 +646,7 @@ class TestUpsertEdgeCases:
 # count_documents: edge cases (lines 1236-1266)
 # ---------------------------------------------------------------------------
 
+
 class TestCountDocumentsEdgeCases:
 
     @pytest.mark.asyncio
@@ -458,7 +654,9 @@ class TestCountDocumentsEdgeCases:
         """count_documents returns 0 on exception."""
         repo = DatabricksVectorIndexRepository(WORKSPACE_URL)
 
-        with patch.object(repo, "_get_auth_token", side_effect=Exception("token failed")):
+        with patch.object(
+            repo, "_get_auth_token", side_effect=Exception("token failed")
+        ):
             result = await repo.count_documents("cat.schema.idx", "ep")
 
         assert result == 0
@@ -473,12 +671,17 @@ class TestCountDocumentsEdgeCases:
             "endpoint_name": "ep",
             "primary_key": "id",
             "num_rows": 42,
-            "status": {"state": "READY", "ready": True, "indexed_row_count": 25}
+            "status": {"state": "READY", "ready": True, "indexed_row_count": 25},
         }
         session_cm, _, _ = make_aiohttp_ctx(200, describe_data)
 
-        with patch("src.repositories.databricks_vector_index_repository.shared_client_session", MagicMock(return_value=session_cm)), \
-             patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN):
+        with (
+            patch(
+                "src.repositories.databricks_vector_index_repository.shared_client_session",
+                MagicMock(return_value=session_cm),
+            ),
+            patch.object(repo, "_get_auth_token", return_value=AUTH_TOKEN),
+        ):
             result = await repo.count_documents("cat.schema.idx", "ep")
 
         assert isinstance(result, int)

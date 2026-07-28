@@ -12,21 +12,26 @@ import os
 import re
 import traceback
 from collections import defaultdict
-from typing import Dict, Any, List, Tuple, Optional
-from src.utils.prompt_utils import robust_json_parser
-from src.services.catalog.templates import TemplateService
-from src.services.tools.tool_service import ToolService
-from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse, CrewStreamingRequest
-from src.schemas.task_generation import TaskGenerationRequest
-from src.schemas.task_generation import Agent as TaskGenAgent
-from src.repositories.log_repository import LLMLogRepository
-from src.services.execution.logs.llm_log_service import LLMLogService
-from src.services.llm.manager import LLMManager
-from src.core.sse_manager import sse_manager, SSEEvent
-from src.core.exceptions import KasalError, BadRequestError
+from typing import Any, Dict, List, Optional, Tuple
+
+from src.core.exceptions import BadRequestError, KasalError
+from src.core.sse_manager import SSEEvent, sse_manager
 from src.repositories.crew_generator_repository import CrewGeneratorRepository
+from src.repositories.log_repository import LLMLogRepository
+from src.schemas.crew import (
+    CrewGenerationRequest,
+    CrewGenerationResponse,
+    CrewStreamingRequest,
+)
+from src.schemas.task_generation import Agent as TaskGenAgent
+from src.schemas.task_generation import TaskGenerationRequest
+from src.services.catalog.templates import TemplateService
+from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.generation.agents import AgentGenerationService
 from src.services.generation.tasks import TaskGenerationService
+from src.services.llm.manager import LLMManager
+from src.services.tools.tool_service import ToolService
+from src.utils.prompt_utils import robust_json_parser
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -61,10 +66,18 @@ class ProgressiveGenerationMixin:
         has already been sent. The request-scoped DB session is closed by then,
         so all database work uses an independent session created here.
         """
-        from contextlib import nullcontext, asynccontextmanager
-        from src.db.session import async_session_factory, detach_request_session, get_isolated_db_session
-        from src.db.database_router import is_lakebase_enabled, get_lakebase_config_from_db
+        from contextlib import asynccontextmanager, nullcontext
+
+        from src.db.database_router import (
+            get_lakebase_config_from_db,
+            is_lakebase_enabled,
+        )
         from src.db.lakebase_session import get_lakebase_session
+        from src.db.session import (
+            async_session_factory,
+            detach_request_session,
+            get_isolated_db_session,
+        )
 
         # This runs via asyncio.create_task, so it inherited a COPY of the
         # dispatch request's context — including the request-scoped DB session,
@@ -77,9 +90,13 @@ class ProgressiveGenerationMixin:
         if mlflow_enabled:
             try:
                 from src.services.mlflow.tracing import start_root_trace
+
                 trace_ctx = start_root_trace(
                     "crew_generation",
-                    inputs={"prompt": request.prompt, "model": request.model or "default"},
+                    inputs={
+                        "prompt": request.prompt,
+                        "model": request.model or "default",
+                    },
                 )
             except Exception:
                 trace_ctx = nullcontext()
@@ -96,14 +113,17 @@ class ProgressiveGenerationMixin:
                 # synthesize a default agent + a task from the raw prompt and go
                 # straight to auto-execute. 'research'/'deep' still generate a
                 # full crew (they need the plan/agents/tasks).
-                if (getattr(request, "chat_mode_type", "chat") or "chat") == "chat" \
-                        and getattr(request, "auto_execute", False):
+                if (
+                    getattr(request, "chat_mode_type", "chat") or "chat"
+                ) == "chat" and getattr(request, "auto_execute", False):
                     await self._run_chat_fast_path(
                         request, group_context, generation_id, root_span
                     )
                     return
 
-                model = request.model or os.getenv("CREW_MODEL", "databricks-gpt-5-3-codex")
+                model = request.model or os.getenv(
+                    "CREW_MODEL", "databricks-gpt-5-3-codex"
+                )
 
                 # ── Compute caps BEFORE planning so the LLM knows the limits ──
                 # Caps are UPPER BOUNDS, not predictions: the PLAN LLM decides the
@@ -137,12 +157,20 @@ class ProgressiveGenerationMixin:
                 # agents", and a digit-only pattern silently dropped the user's
                 # count back to DEFAULT_MAX_AGENTS.
                 _NUMBER_WORDS = {
-                    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-                    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+                    "one": 1,
+                    "two": 2,
+                    "three": 3,
+                    "four": 4,
+                    "five": 5,
+                    "six": 6,
+                    "seven": 7,
+                    "eight": 8,
+                    "nine": 9,
+                    "ten": 10,
                 }
-                _num = r'\d+|' + '|'.join(_NUMBER_WORDS)
+                _num = r"\d+|" + "|".join(_NUMBER_WORDS)
                 _count_re = (
-                    r'\b(%s)\s+(?:(?!agents?\b|tasks?\b)\w+\s+){0,3}%%s\b' % _num
+                    r"\b(%s)\s+(?:(?!agents?\b|tasks?\b)\w+\s+){0,3}%%s\b" % _num
                 )
 
                 def _parse_count(noun: str) -> Optional[int]:
@@ -152,17 +180,21 @@ class ProgressiveGenerationMixin:
                     token = m.group(1)
                     return int(token) if token.isdigit() else _NUMBER_WORDS[token]
 
-                requested_tasks = _parse_count('tasks?')
-                requested_agents = _parse_count('agents?')
+                requested_tasks = _parse_count("tasks?")
+                requested_agents = _parse_count("agents?")
 
                 if requested_tasks is not None:
                     max_tasks = min(requested_tasks, ABSOLUTE_MAX_TASKS)
-                    logger.info(f"PROGRESSIVE [{generation_id}]: User requested {max_tasks} tasks")
+                    logger.info(
+                        f"PROGRESSIVE [{generation_id}]: User requested {max_tasks} tasks"
+                    )
                 else:
                     max_tasks = DEFAULT_MAX_TASKS
                 if requested_agents is not None:
                     max_agents = min(requested_agents, ABSOLUTE_MAX_AGENTS)
-                    logger.info(f"PROGRESSIVE [{generation_id}]: User requested {max_agents} agents")
+                    logger.info(
+                        f"PROGRESSIVE [{generation_id}]: User requested {max_agents} agents"
+                    )
                     # An explicit agent count can exceed the default task ceiling
                     # ("5 agents" with no task count): every agent needs a task of
                     # its own or the orphan sweep below deletes it again.
@@ -183,18 +215,21 @@ class ProgressiveGenerationMixin:
                 # in the schema, and clamping on it alone collapsed every canvas
                 # generation to 1 agent / 1 task (regression vs v1.3.0).
                 if (
-                    (getattr(request, "chat_mode_type", "chat") or "chat") == "chat"
-                    and getattr(request, "auto_execute", False)
-                ):
+                    getattr(request, "chat_mode_type", "chat") or "chat"
+                ) == "chat" and getattr(request, "auto_execute", False):
                     max_agents = 1
                     max_tasks = 1
-                    logger.info(f"PROGRESSIVE [{generation_id}]: chat (light agent) answer mode — capping to 1 agent / 1 task")
+                    logger.info(
+                        f"PROGRESSIVE [{generation_id}]: chat (light agent) answer mode — capping to 1 agent / 1 task"
+                    )
 
                 # ── Phase 1: Planning (LLM only, no DB writes) ───────────
                 # Inject the computed cap into the request so the LLM generates
                 # the correct number from the start (instead of generating many
                 # and truncating, which loses the user's actual goal).
-                logger.info(f"PROGRESSIVE [{generation_id}]: Phase 1 — Planning (max {max_agents} agents, {max_tasks} tasks)")
+                logger.info(
+                    f"PROGRESSIVE [{generation_id}]: Phase 1 — Planning (max {max_agents} agents, {max_tasks} tasks)"
+                )
 
                 # Crews this workspace already built and a human marked good.
                 # The PLAN call is where they belong: it decides the shape —
@@ -213,8 +248,11 @@ class ProgressiveGenerationMixin:
 
                 try:
                     plan = await self._generate_crew_plan(
-                        request, group_context, model,
-                        max_agents=max_agents, max_tasks=max_tasks,
+                        request,
+                        group_context,
+                        model,
+                        max_agents=max_agents,
+                        max_tasks=max_tasks,
                         explicit_agents=(
                             max_agents if requested_agents is not None else None
                         ),
@@ -222,10 +260,13 @@ class ProgressiveGenerationMixin:
                     )
                 except Exception as e:
                     logger.error(f"PROGRESSIVE [{generation_id}]: Planning failed: {e}")
-                    await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                        data={"type": "generation_failed", "error": str(e)},
-                        event="generation_failed",
-                    ))
+                    await sse_manager.broadcast_to_job(
+                        generation_id,
+                        SSEEvent(
+                            data={"type": "generation_failed", "error": str(e)},
+                            event="generation_failed",
+                        ),
+                    )
                     return
 
                 plan_agents = plan.get("agents", [])
@@ -256,10 +297,16 @@ class ProgressiveGenerationMixin:
                     else:
                         plan_tasks = plan_tasks[:max_tasks]
                 if not plan_agents:
-                    await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                        data={"type": "generation_failed", "error": "Plan returned no agents"},
-                        event="generation_failed",
-                    ))
+                    await sse_manager.broadcast_to_job(
+                        generation_id,
+                        SSEEvent(
+                            data={
+                                "type": "generation_failed",
+                                "error": "Plan returned no agents",
+                            },
+                            event="generation_failed",
+                        ),
+                    )
                     return
 
                 # Re-assign orphaned tasks to valid agents and clean stale context refs
@@ -277,8 +324,7 @@ class ProgressiveGenerationMixin:
                 # Remove orphan agents that have no tasks assigned
                 assigned_agents = {t.get("assigned_agent") for t in plan_tasks}
                 orphan_agents = [
-                    a for a in plan_agents
-                    if a.get("name") not in assigned_agents
+                    a for a in plan_agents if a.get("name") not in assigned_agents
                 ]
                 if orphan_agents:
                     orphan_names = [a.get("name") for a in orphan_agents]
@@ -288,8 +334,7 @@ class ProgressiveGenerationMixin:
                         f"{orphan_names}"
                     )
                     plan_agents = [
-                        a for a in plan_agents
-                        if a.get("name") in assigned_agents
+                        a for a in plan_agents if a.get("name") in assigned_agents
                     ]
 
                 # ── Enforce sequential dependency chain ────────────────
@@ -310,16 +355,19 @@ class ProgressiveGenerationMixin:
                 )
 
                 # Broadcast plan_ready
-                await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                    data={
-                        "type": "plan_ready",
-                        "agents": plan_agents,
-                        "tasks": plan_tasks,
-                        "process_type": process_type,
-                        "complexity": complexity,
-                    },
-                    event="plan_ready",
-                ))
+                await sse_manager.broadcast_to_job(
+                    generation_id,
+                    SSEEvent(
+                        data={
+                            "type": "plan_ready",
+                            "agents": plan_agents,
+                            "tasks": plan_tasks,
+                            "process_type": process_type,
+                            "complexity": complexity,
+                        },
+                        event="plan_ready",
+                    ),
+                )
 
                 # ── Phases 2-4: DB writes use an independent session ──────
                 # The request-scoped session is already closed by FastAPI DI,
@@ -337,10 +385,9 @@ class ProgressiveGenerationMixin:
                 # are already per-connection, so the helper falls through to them.)
                 if await is_lakebase_enabled():
                     lb_config = await get_lakebase_config_from_db()
-                    lb_instance = (
-                        (lb_config or {}).get("instance_name")
-                        or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
-                    )
+                    lb_instance = (lb_config or {}).get(
+                        "instance_name"
+                    ) or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
                     _session_ctx = get_lakebase_session(lb_instance)
                 else:
                     _session_ctx = get_isolated_db_session()
@@ -365,11 +412,11 @@ class ProgressiveGenerationMixin:
                                 )
                                 available_tools_for_llm = [
                                     {
-                                        "name": t.get('title') or t.get('name', ''),
-                                        "description": t.get('description', ''),
+                                        "name": t.get("title") or t.get("name", ""),
+                                        "description": t.get("description", ""),
                                     }
                                     for t in tools_with_details
-                                    if t.get('title') or t.get('name')
+                                    if t.get("title") or t.get("name")
                                 ]
                                 logger.info(
                                     f"PROGRESSIVE [{generation_id}]: Resolved "
@@ -397,7 +444,9 @@ class ProgressiveGenerationMixin:
                                 unassigned_tasks.append(task_plan)
 
                         # ── Interleaved Phase: Agent → its Tasks → next Agent → its Tasks ──
-                        logger.info(f"PROGRESSIVE [{generation_id}]: Interleaved agent→task generation")
+                        logger.info(
+                            f"PROGRESSIVE [{generation_id}]: Interleaved agent→task generation"
+                        )
                         agent_results: List[Dict[str, Any]] = []
                         task_results: List[Dict[str, Any]] = []
                         global_task_index = 0
@@ -405,8 +454,12 @@ class ProgressiveGenerationMixin:
                         # If no persistent memory backend is configured, disable memory on
                         # generated agents (otherwise memory silently writes to ephemeral
                         # local storage that doesn't survive in a deployed app).
-                        has_memory = await self._has_persistent_memory_backend(session, group_context)
-                        logger.info(f"PROGRESSIVE [{generation_id}]: persistent memory backend present = {has_memory}")
+                        has_memory = await self._has_persistent_memory_backend(
+                            session, group_context
+                        )
+                        logger.info(
+                            f"PROGRESSIVE [{generation_id}]: persistent memory backend present = {has_memory}"
+                        )
 
                         for i, agent_plan in enumerate(plan_agents):
                             agent_name = agent_plan.get("name", f"Agent {i+1}")
@@ -440,10 +493,16 @@ class ProgressiveGenerationMixin:
                                     agent_data["memory"] = False
                                 adv = agent_config.get("advanced_config", {})
                                 for key in (
-                                    "function_calling_llm", "max_iter", "max_rpm",
-                                    "verbose", "allow_delegation", "cache",
-                                    "code_execution_mode", "max_retry_limit",
-                                    "use_system_prompt", "respect_context_window",
+                                    "function_calling_llm",
+                                    "max_iter",
+                                    "max_rpm",
+                                    "verbose",
+                                    "allow_delegation",
+                                    "cache",
+                                    "code_execution_mode",
+                                    "max_retry_limit",
+                                    "use_system_prompt",
+                                    "respect_context_window",
                                 ):
                                     if key in adv:
                                         agent_data[key] = adv[key]
@@ -455,30 +514,51 @@ class ProgressiveGenerationMixin:
                                 await session.commit()
                                 agent_results.append(saved)
 
-                                await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                                    data={"type": "agent_detail", "index": i, "agent": saved},
-                                    event="agent_detail",
-                                ))
-                                logger.info(f"PROGRESSIVE [{generation_id}]: Agent {i+1}/{len(plan_agents)} done — {saved.get('name')}")
+                                await sse_manager.broadcast_to_job(
+                                    generation_id,
+                                    SSEEvent(
+                                        data={
+                                            "type": "agent_detail",
+                                            "index": i,
+                                            "agent": saved,
+                                        },
+                                        event="agent_detail",
+                                    ),
+                                )
+                                logger.info(
+                                    f"PROGRESSIVE [{generation_id}]: Agent {i+1}/{len(plan_agents)} done — {saved.get('name')}"
+                                )
 
                             except Exception as e:
-                                logger.error(f"PROGRESSIVE [{generation_id}]: Agent '{agent_name}' failed: {e}")
+                                logger.error(
+                                    f"PROGRESSIVE [{generation_id}]: Agent '{agent_name}' failed: {e}"
+                                )
                                 await session.rollback()
-                                await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                                    data={
-                                        "type": "entity_error", "index": i,
-                                        "entity_type": "agent", "name": agent_name, "error": str(e),
-                                    },
-                                    event="entity_error",
-                                ))
+                                await sse_manager.broadcast_to_job(
+                                    generation_id,
+                                    SSEEvent(
+                                        data={
+                                            "type": "entity_error",
+                                            "index": i,
+                                            "entity_type": "agent",
+                                            "name": agent_name,
+                                            "error": str(e),
+                                        },
+                                        event="entity_error",
+                                    ),
+                                )
                                 continue
 
                             # ── Generate tasks assigned to this agent ──────
                             agent_tasks = tasks_by_agent.get(agent_name.lower(), [])
                             for task_plan in agent_tasks:
-                                task_name = task_plan.get("name", f"Task {global_task_index+1}")
+                                task_name = task_plan.get(
+                                    "name", f"Task {global_task_index+1}"
+                                )
                                 try:
-                                    agent_context = self._find_agent_context(task_plan, agent_results)
+                                    agent_context = self._find_agent_context(
+                                        task_plan, agent_results
+                                    )
 
                                     task_request = TaskGenerationRequest(
                                         text=(
@@ -490,19 +570,32 @@ class ProgressiveGenerationMixin:
                                         agent=agent_context,
                                         available_tools=available_tools_for_llm or None,
                                     )
-                                    task_response = await task_gen_service.generate_task(
-                                        task_request, group_context
+                                    task_response = (
+                                        await task_gen_service.generate_task(
+                                            task_request, group_context
+                                        )
                                     )
 
-                                    agent_id = self._resolve_agent_id(task_plan, agent_results)
+                                    agent_id = self._resolve_agent_id(
+                                        task_plan, agent_results
+                                    )
 
                                     # Convert tool names to DB IDs
                                     task_tool_ids = [
                                         tool_name_to_id_map[
-                                            t.get("name") if isinstance(t, dict) else str(t)
+                                            (
+                                                t.get("name")
+                                                if isinstance(t, dict)
+                                                else str(t)
+                                            )
                                         ]
                                         for t in (task_response.tools or [])
-                                        if (t.get("name") if isinstance(t, dict) else str(t)) in tool_name_to_id_map
+                                        if (
+                                            t.get("name")
+                                            if isinstance(t, dict)
+                                            else str(t)
+                                        )
+                                        in tool_name_to_id_map
                                     ]
 
                                     task_data = {
@@ -513,59 +606,92 @@ class ProgressiveGenerationMixin:
                                         "tool_configs": {},
                                         "async_execution": False,
                                         "human_input": False,
-                                        "llm_guardrail": task_response.llm_guardrail.model_dump() if task_response.llm_guardrail else None,
+                                        "llm_guardrail": (
+                                            task_response.llm_guardrail.model_dump()
+                                            if task_response.llm_guardrail
+                                            else None
+                                        ),
                                     }
 
                                     task_saved = await repo.create_single_task(
                                         task_data, agent_id, group_context
                                     )
                                     await session.commit()
-                                    task_results.append({**task_saved, "_plan": task_plan})
+                                    task_results.append(
+                                        {**task_saved, "_plan": task_plan}
+                                    )
 
-                                    await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                                        data={"type": "task_detail", "index": global_task_index, "task": task_saved},
-                                        event="task_detail",
-                                    ))
-                                    logger.info(f"PROGRESSIVE [{generation_id}]: Task {global_task_index+1}/{len(plan_tasks)} done — {task_saved.get('name')}")
+                                    await sse_manager.broadcast_to_job(
+                                        generation_id,
+                                        SSEEvent(
+                                            data={
+                                                "type": "task_detail",
+                                                "index": global_task_index,
+                                                "task": task_saved,
+                                            },
+                                            event="task_detail",
+                                        ),
+                                    )
+                                    logger.info(
+                                        f"PROGRESSIVE [{generation_id}]: Task {global_task_index+1}/{len(plan_tasks)} done — {task_saved.get('name')}"
+                                    )
 
                                     # ── Detect GenieTool and suggest space ──
                                     needs_genie_config = any(
-                                        tool_id_to_title.get(tid) == 'GenieTool' for tid in task_tool_ids
+                                        tool_id_to_title.get(tid) == "GenieTool"
+                                        for tid in task_tool_ids
                                     )
                                     if needs_genie_config:
                                         suggested = await self._suggest_genie_space(
                                             task_name=task_saved["name"],
-                                            task_description=task_saved.get("description", ""),
+                                            task_description=task_saved.get(
+                                                "description", ""
+                                            ),
                                         )
-                                        await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                                            data={
-                                                "type": "tool_config_needed",
-                                                "task_id": task_saved["id"],
-                                                "task_name": task_saved["name"],
-                                                "tool_name": "GenieTool",
-                                                "config_fields": ["spaceId"],
-                                                "suggested_space": suggested,
-                                            },
-                                            event="tool_config_needed",
-                                        ))
+                                        await sse_manager.broadcast_to_job(
+                                            generation_id,
+                                            SSEEvent(
+                                                data={
+                                                    "type": "tool_config_needed",
+                                                    "task_id": task_saved["id"],
+                                                    "task_name": task_saved["name"],
+                                                    "tool_name": "GenieTool",
+                                                    "config_fields": ["spaceId"],
+                                                    "suggested_space": suggested,
+                                                },
+                                                event="tool_config_needed",
+                                            ),
+                                        )
 
                                 except Exception as e:
-                                    logger.error(f"PROGRESSIVE [{generation_id}]: Task '{task_name}' failed: {e}")
+                                    logger.error(
+                                        f"PROGRESSIVE [{generation_id}]: Task '{task_name}' failed: {e}"
+                                    )
                                     await session.rollback()
-                                    await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                                        data={
-                                            "type": "entity_error", "index": global_task_index,
-                                            "entity_type": "task", "name": task_name, "error": str(e),
-                                        },
-                                        event="entity_error",
-                                    ))
+                                    await sse_manager.broadcast_to_job(
+                                        generation_id,
+                                        SSEEvent(
+                                            data={
+                                                "type": "entity_error",
+                                                "index": global_task_index,
+                                                "entity_type": "task",
+                                                "name": task_name,
+                                                "error": str(e),
+                                            },
+                                            event="entity_error",
+                                        ),
+                                    )
                                 global_task_index += 1
 
                         # ── Handle unassigned tasks at the end ──────────
                         for task_plan in unassigned_tasks:
-                            task_name = task_plan.get("name", f"Task {global_task_index+1}")
+                            task_name = task_plan.get(
+                                "name", f"Task {global_task_index+1}"
+                            )
                             try:
-                                agent_context = self._find_agent_context(task_plan, agent_results)
+                                agent_context = self._find_agent_context(
+                                    task_plan, agent_results
+                                )
 
                                 task_request = TaskGenerationRequest(
                                     text=(
@@ -580,14 +706,19 @@ class ProgressiveGenerationMixin:
                                     task_request, group_context
                                 )
 
-                                agent_id = self._resolve_agent_id(task_plan, agent_results)
+                                agent_id = self._resolve_agent_id(
+                                    task_plan, agent_results
+                                )
 
                                 task_tool_ids = [
                                     tool_name_to_id_map[
                                         t.get("name") if isinstance(t, dict) else str(t)
                                     ]
                                     for t in (task_response.tools or [])
-                                    if (t.get("name") if isinstance(t, dict) else str(t)) in tool_name_to_id_map
+                                    if (
+                                        t.get("name") if isinstance(t, dict) else str(t)
+                                    )
+                                    in tool_name_to_id_map
                                 ]
 
                                 task_data = {
@@ -598,7 +729,11 @@ class ProgressiveGenerationMixin:
                                     "tool_configs": {},
                                     "async_execution": False,
                                     "human_input": False,
-                                    "llm_guardrail": task_response.llm_guardrail.model_dump() if task_response.llm_guardrail else None,
+                                    "llm_guardrail": (
+                                        task_response.llm_guardrail.model_dump()
+                                        if task_response.llm_guardrail
+                                        else None
+                                    ),
                                 }
 
                                 task_saved = await repo.create_single_task(
@@ -607,43 +742,66 @@ class ProgressiveGenerationMixin:
                                 await session.commit()
                                 task_results.append({**task_saved, "_plan": task_plan})
 
-                                await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                                    data={"type": "task_detail", "index": global_task_index, "task": task_saved},
-                                    event="task_detail",
-                                ))
-                                logger.info(f"PROGRESSIVE [{generation_id}]: Task {global_task_index+1}/{len(plan_tasks)} done — {task_saved.get('name')}")
+                                await sse_manager.broadcast_to_job(
+                                    generation_id,
+                                    SSEEvent(
+                                        data={
+                                            "type": "task_detail",
+                                            "index": global_task_index,
+                                            "task": task_saved,
+                                        },
+                                        event="task_detail",
+                                    ),
+                                )
+                                logger.info(
+                                    f"PROGRESSIVE [{generation_id}]: Task {global_task_index+1}/{len(plan_tasks)} done — {task_saved.get('name')}"
+                                )
 
                                 # ── Detect GenieTool and suggest space ──
                                 needs_genie_config = any(
-                                    tool_id_to_title.get(tid) == 'GenieTool' for tid in task_tool_ids
+                                    tool_id_to_title.get(tid) == "GenieTool"
+                                    for tid in task_tool_ids
                                 )
                                 if needs_genie_config:
                                     suggested = await self._suggest_genie_space(
                                         task_name=task_saved["name"],
-                                        task_description=task_saved.get("description", ""),
+                                        task_description=task_saved.get(
+                                            "description", ""
+                                        ),
                                     )
-                                    await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                                        data={
-                                            "type": "tool_config_needed",
-                                            "task_id": task_saved["id"],
-                                            "task_name": task_saved["name"],
-                                            "tool_name": "GenieTool",
-                                            "config_fields": ["spaceId"],
-                                            "suggested_space": suggested,
-                                        },
-                                        event="tool_config_needed",
-                                    ))
+                                    await sse_manager.broadcast_to_job(
+                                        generation_id,
+                                        SSEEvent(
+                                            data={
+                                                "type": "tool_config_needed",
+                                                "task_id": task_saved["id"],
+                                                "task_name": task_saved["name"],
+                                                "tool_name": "GenieTool",
+                                                "config_fields": ["spaceId"],
+                                                "suggested_space": suggested,
+                                            },
+                                            event="tool_config_needed",
+                                        ),
+                                    )
 
                             except Exception as e:
-                                logger.error(f"PROGRESSIVE [{generation_id}]: Task '{task_name}' failed: {e}")
+                                logger.error(
+                                    f"PROGRESSIVE [{generation_id}]: Task '{task_name}' failed: {e}"
+                                )
                                 await session.rollback()
-                                await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                                    data={
-                                        "type": "entity_error", "index": global_task_index,
-                                        "entity_type": "task", "name": task_name, "error": str(e),
-                                    },
-                                    event="entity_error",
-                                ))
+                                await sse_manager.broadcast_to_job(
+                                    generation_id,
+                                    SSEEvent(
+                                        data={
+                                            "type": "entity_error",
+                                            "index": global_task_index,
+                                            "entity_type": "task",
+                                            "name": task_name,
+                                            "error": str(e),
+                                        },
+                                        event="entity_error",
+                                    ),
+                                )
                             global_task_index += 1
 
                         # ── Fallback: synthesize tasks when generation produced none ──
@@ -659,9 +817,13 @@ class ProgressiveGenerationMixin:
                                 f"synthesizing {len(plan_tasks)} task(s) from the plan"
                             )
                             for task_plan in plan_tasks:
-                                task_name = task_plan.get("name", f"Task {global_task_index + 1}")
+                                task_name = task_plan.get(
+                                    "name", f"Task {global_task_index + 1}"
+                                )
                                 try:
-                                    agent_id = self._resolve_agent_id(task_plan, agent_results)
+                                    agent_id = self._resolve_agent_id(
+                                        task_plan, agent_results
+                                    )
                                     task_data = {
                                         "name": task_name,
                                         "description": (
@@ -679,11 +841,20 @@ class ProgressiveGenerationMixin:
                                         task_data, agent_id, group_context
                                     )
                                     await session.commit()
-                                    task_results.append({**task_saved, "_plan": task_plan})
-                                    await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                                        data={"type": "task_detail", "index": global_task_index, "task": task_saved},
-                                        event="task_detail",
-                                    ))
+                                    task_results.append(
+                                        {**task_saved, "_plan": task_plan}
+                                    )
+                                    await sse_manager.broadcast_to_job(
+                                        generation_id,
+                                        SSEEvent(
+                                            data={
+                                                "type": "task_detail",
+                                                "index": global_task_index,
+                                                "task": task_saved,
+                                            },
+                                            event="task_detail",
+                                        ),
+                                    )
                                     logger.info(
                                         f"PROGRESSIVE [{generation_id}]: Synthesized fallback task — "
                                         f"{task_saved.get('name')}"
@@ -693,13 +864,19 @@ class ProgressiveGenerationMixin:
                                         f"PROGRESSIVE [{generation_id}]: Fallback task '{task_name}' failed: {e}"
                                     )
                                     await session.rollback()
-                                    await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                                        data={
-                                            "type": "entity_error", "index": global_task_index,
-                                            "entity_type": "task", "name": task_name, "error": str(e),
-                                        },
-                                        event="entity_error",
-                                    ))
+                                    await sse_manager.broadcast_to_job(
+                                        generation_id,
+                                        SSEEvent(
+                                            data={
+                                                "type": "entity_error",
+                                                "index": global_task_index,
+                                                "entity_type": "task",
+                                                "name": task_name,
+                                                "error": str(e),
+                                            },
+                                            event="entity_error",
+                                        ),
+                                    )
                                 global_task_index += 1
 
                         # ── Phase 4: Resolve task dependencies ────────────
@@ -717,18 +894,23 @@ class ProgressiveGenerationMixin:
                 for t in task_results:
                     resolved = t.get("context", [])
                     if resolved:
-                        await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                            data={
-                                "type": "dependencies_resolved",
-                                "task_id": t["id"],
-                                "task_name": t.get("name", ""),
-                                "context": resolved,
-                            },
-                            event="dependencies_resolved",
-                        ))
+                        await sse_manager.broadcast_to_job(
+                            generation_id,
+                            SSEEvent(
+                                data={
+                                    "type": "dependencies_resolved",
+                                    "task_id": t["id"],
+                                    "task_name": t.get("name", ""),
+                                    "context": resolved,
+                                },
+                                event="dependencies_resolved",
+                            ),
+                        )
 
                 # ── Done ──────────────────────────────────────────────────
-                clean_tasks = [{k: v for k, v in t.items() if k != "_plan"} for t in task_results]
+                clean_tasks = [
+                    {k: v for k, v in t.items() if k != "_plan"} for t in task_results
+                ]
                 gen_complete_data = {
                     "type": "generation_complete",
                     "status": "completed",
@@ -748,7 +930,9 @@ class ProgressiveGenerationMixin:
                 # would slow the common case down to re-confirm a judgement
                 # already made when the recipe was marked good.
                 if recipe_decision is not None and recipe_decision.injected_labels:
-                    gen_complete_data["reused_recipes"] = recipe_decision.injected_labels
+                    gen_complete_data["reused_recipes"] = (
+                        recipe_decision.injected_labels
+                    )
 
                 # ── ChatMode auto-execute ─────────────────────────────────
                 # ChatMode generates AND runs in one backend flow so the run
@@ -786,12 +970,16 @@ class ProgressiveGenerationMixin:
                         # request_scoped_session() (already detached above), so a
                         # request-scoped session would only be a closed handle.
                         # background_tasks=None launches via asyncio.create_task.
-                        exec_result = await ExecutionService(session=None).create_execution(
+                        exec_result = await ExecutionService(
+                            session=None
+                        ).create_execution(
                             config=crew_config,
                             background_tasks=None,
                             group_context=group_context,
                         )
-                        gen_complete_data["execution_id"] = exec_result.get("execution_id")
+                        gen_complete_data["execution_id"] = exec_result.get(
+                            "execution_id"
+                        )
                         gen_complete_data["run_name"] = exec_result.get("run_name")
                         logger.info(
                             f"PROGRESSIVE [{generation_id}]: Auto-execute launched "
@@ -805,10 +993,13 @@ class ProgressiveGenerationMixin:
                         logger.error(traceback.format_exc())
                         gen_complete_data["execution_error"] = str(exec_err)
 
-                await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                    data=gen_complete_data,
-                    event="generation_complete",
-                ))
+                await sse_manager.broadcast_to_job(
+                    generation_id,
+                    SSEEvent(
+                        data=gen_complete_data,
+                        event="generation_complete",
+                    ),
+                )
                 logger.info(f"PROGRESSIVE [{generation_id}]: Generation complete")
 
                 # Populate the trace Response (otherwise it shows null).
@@ -816,6 +1007,7 @@ class ProgressiveGenerationMixin:
                     from src.services.otel_tracing.mlflow_parent_setup import (
                         set_root_span_outputs,
                     )
+
                     set_root_span_outputs(root_span, gen_complete_data)
                 except Exception:
                     pass
@@ -823,10 +1015,17 @@ class ProgressiveGenerationMixin:
             except Exception as e:
                 logger.error(f"PROGRESSIVE [{generation_id}]: Unexpected error: {e}")
                 logger.error(traceback.format_exc())
-                await sse_manager.broadcast_to_job(generation_id, SSEEvent(
-                    data={"type": "generation_failed", "status": "failed", "error": str(e)},
-                    event="generation_failed",
-                ))
+                await sse_manager.broadcast_to_job(
+                    generation_id,
+                    SSEEvent(
+                        data={
+                            "type": "generation_failed",
+                            "status": "failed",
+                            "error": str(e),
+                        },
+                        event="generation_failed",
+                    ),
+                )
 
     async def _generate_crew_plan(
         self,
@@ -869,7 +1068,9 @@ class ProgressiveGenerationMixin:
                 "generate_crew", group_context
             )
             if not system_message:
-                raise KasalError("Required prompt template 'generate_crew_plan' not found")
+                raise KasalError(
+                    "Required prompt template 'generate_crew_plan' not found"
+                )
             planning_prefix = (
                 "You are generating a PLAN OUTLINE only. Return a lightweight JSON with:\n"
                 '{"complexity": "light|standard|complex", "process_type": "sequential|parallel", '
@@ -922,32 +1123,34 @@ class ProgressiveGenerationMixin:
         # escalation (genuinely different specialisms get their own agent).
         # Without the second example the model over-consolidated to one agent
         # even when the cap allowed more.
-        messages.extend([
-            {
-                "role": "user",
-                "content": (
-                    "gather swiss news, create a presentation, and send an email to the team\n\n"
-                    "CONSTRAINT: Generate up to 2 agent(s) and up to 3 task(s). "
-                    "Match task count to the number of distinct action verbs in the message."
-                ),
-            },
-            {
-                "role": "assistant",
-                "content": '{"complexity":"complex","process_type":"sequential","agents":[{"name":"Swiss News Specialist","role":"News Research and Content Creation Expert"}],"tasks":[{"name":"Gather Swiss News","assigned_agent":"Swiss News Specialist","context":[]},{"name":"Create News Presentation","assigned_agent":"Swiss News Specialist","context":["Gather Swiss News"]},{"name":"Send Email to Team","assigned_agent":"Swiss News Specialist","context":["Create News Presentation"]}]}',
-            },
-            {
-                "role": "user",
-                "content": (
-                    "research our top competitors, analyze their pricing, and write a summary report\n\n"
-                    "CONSTRAINT: Generate up to 2 agent(s) and up to 3 task(s). "
-                    "Match task count to the number of distinct action verbs in the message."
-                ),
-            },
-            {
-                "role": "assistant",
-                "content": '{"complexity":"standard","process_type":"sequential","agents":[{"name":"Market Research Analyst","role":"Competitive research and pricing analysis specialist"},{"name":"Report Writer","role":"Business report composition specialist"}],"tasks":[{"name":"Research Competitors","assigned_agent":"Market Research Analyst","context":[]},{"name":"Analyze Pricing","assigned_agent":"Market Research Analyst","context":["Research Competitors"]},{"name":"Write Summary Report","assigned_agent":"Report Writer","context":["Analyze Pricing"]}]}',
-            },
-        ])
+        messages.extend(
+            [
+                {
+                    "role": "user",
+                    "content": (
+                        "gather swiss news, create a presentation, and send an email to the team\n\n"
+                        "CONSTRAINT: Generate up to 2 agent(s) and up to 3 task(s). "
+                        "Match task count to the number of distinct action verbs in the message."
+                    ),
+                },
+                {
+                    "role": "assistant",
+                    "content": '{"complexity":"complex","process_type":"sequential","agents":[{"name":"Swiss News Specialist","role":"News Research and Content Creation Expert"}],"tasks":[{"name":"Gather Swiss News","assigned_agent":"Swiss News Specialist","context":[]},{"name":"Create News Presentation","assigned_agent":"Swiss News Specialist","context":["Gather Swiss News"]},{"name":"Send Email to Team","assigned_agent":"Swiss News Specialist","context":["Create News Presentation"]}]}',
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "research our top competitors, analyze their pricing, and write a summary report\n\n"
+                        "CONSTRAINT: Generate up to 2 agent(s) and up to 3 task(s). "
+                        "Match task count to the number of distinct action verbs in the message."
+                    ),
+                },
+                {
+                    "role": "assistant",
+                    "content": '{"complexity":"standard","process_type":"sequential","agents":[{"name":"Market Research Analyst","role":"Competitive research and pricing analysis specialist"},{"name":"Report Writer","role":"Business report composition specialist"}],"tasks":[{"name":"Research Competitors","assigned_agent":"Market Research Analyst","context":[]},{"name":"Analyze Pricing","assigned_agent":"Market Research Analyst","context":["Research Competitors"]},{"name":"Write Summary Report","assigned_agent":"Report Writer","context":["Analyze Pricing"]}]}',
+                },
+            ]
+        )
 
         messages.append(
             {"role": "user", "content": user_message},
@@ -966,6 +1169,7 @@ class ProgressiveGenerationMixin:
         # Log via an independent session (the request-scoped session is closed
         # by the time this background task runs).
         from src.db.session import async_session_factory as _plan_session_factory
+
         try:
             async with _plan_session_factory() as log_session:
                 log_service = LLMLogService(LLMLogRepository(log_session))
@@ -992,10 +1196,13 @@ class ProgressiveGenerationMixin:
 
         return plan
 
-    async def _suggest_genie_space(self, task_name: str, task_description: str) -> Optional[Dict]:
+    async def _suggest_genie_space(
+        self, task_name: str, task_description: str
+    ) -> Optional[Dict]:
         """Query Genie spaces and suggest the best match based on task context."""
         try:
             from src.repositories.genie_repository import GenieRepository
+
             genie_repo = GenieRepository()
 
             # Search using task name as query
@@ -1007,13 +1214,21 @@ class ProgressiveGenerationMixin:
 
             if response.spaces:
                 best = response.spaces[0]
-                return {"id": best.id, "name": best.name, "description": best.description or ""}
+                return {
+                    "id": best.id,
+                    "name": best.name,
+                    "description": best.description or "",
+                }
 
             # Fallback: get first available space if search returned nothing
             response = await genie_repo.get_spaces(page_size=1, enabled_only=True)
             if response.spaces:
                 best = response.spaces[0]
-                return {"id": best.id, "name": best.name, "description": best.description or ""}
+                return {
+                    "id": best.id,
+                    "name": best.name,
+                    "description": best.description or "",
+                }
 
             return None
         except Exception as e:
@@ -1087,9 +1302,7 @@ class ProgressiveGenerationMixin:
 
             if resolved_ids:
                 try:
-                    await effective_repo.update_task_dependencies(
-                        t["id"], resolved_ids
-                    )
+                    await effective_repo.update_task_dependencies(t["id"], resolved_ids)
                     t["context"] = resolved_ids
                     logger.info(
                         f"PROGRESSIVE [{generation_id}]: "

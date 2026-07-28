@@ -4,18 +4,25 @@ Unit tests for SelfReflectionGuardrail (self_reflection type).
 Tests patch ``_run_completion`` (shared helper in llm_injection_guardrail module)
 so no real LLM or DB calls are made.
 """
-import pytest
+
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 # _run_completion is imported by self_reflection_guardrail from llm_injection_guardrail.
 # We patch it at the *import site* in self_reflection_guardrail.
-_RUN_COMPLETION = "src.services.guardrails.core.self_reflection_guardrail._run_completion"
+_RUN_COMPLETION = (
+    "src.services.guardrails.core.self_reflection_guardrail._run_completion"
+)
 
 
 def _make_guardrail(config=None):
     """Create a guardrail."""
     cfg = config or {"llm_model": "databricks-test-model"}
-    from src.services.guardrails.core.self_reflection_guardrail import SelfReflectionGuardrail
+    from src.services.guardrails.core.self_reflection_guardrail import (
+        SelfReflectionGuardrail,
+    )
+
     return SelfReflectionGuardrail(cfg)
 
 
@@ -30,10 +37,12 @@ class TestSelfReflectionGuardrailInit:
         assert g._model_name == "databricks-claude-sonnet-4-5"
 
     def test_task_description_stored_from_config(self):
-        g = _make_guardrail({
-            "llm_model": "databricks-test-model",
-            "task_description": "Summarise Q4 revenue.",
-        })
+        g = _make_guardrail(
+            {
+                "llm_model": "databricks-test-model",
+                "task_description": "Summarise Q4 revenue.",
+            }
+        )
         assert g._task_description == "Summarise Q4 revenue."
 
     def test_default_task_description_used_when_missing(self):
@@ -49,10 +58,12 @@ class TestSelfReflectionGuardrailInit:
 class TestSelfReflectionGuardrailValidate:
     @pytest.fixture
     def guardrail(self):
-        return _make_guardrail({
-            "llm_model": "databricks-test-model",
-            "task_description": "Summarise the Q4 revenue report.",
-        })
+        return _make_guardrail(
+            {
+                "llm_model": "databricks-test-model",
+                "task_description": "Summarise the Q4 revenue report.",
+            }
+        )
 
     @patch(_RUN_COMPLETION, return_value="FAIL")
     def test_fail_verdict_returns_invalid(self, mock_rc, guardrail):
@@ -127,16 +138,22 @@ class TestSelfReflectionGuardrailValidate:
 
 class TestSelfReflectionGuardrailFactoryRegistration:
     def test_factory_creates_correct_type(self):
+        from src.services.guardrails.core.self_reflection_guardrail import (
+            SelfReflectionGuardrail,
+        )
         from src.services.guardrails.guardrail_factory import GuardrailFactory
-        from src.services.guardrails.core.self_reflection_guardrail import SelfReflectionGuardrail
-        guardrail = GuardrailFactory.create_guardrail({
-            "type": "self_reflection",
-            "llm_model": "databricks-test-model",
-            "task_description": "Test task.",
-        })
+
+        guardrail = GuardrailFactory.create_guardrail(
+            {
+                "type": "self_reflection",
+                "llm_model": "databricks-test-model",
+                "task_description": "Test task.",
+            }
+        )
         assert isinstance(guardrail, SelfReflectionGuardrail)
 
     def test_factory_returns_none_for_unknown_type(self):
         from src.services.guardrails.guardrail_factory import GuardrailFactory
+
         guardrail = GuardrailFactory.create_guardrail({"type": "totally_unknown"})
         assert guardrail is None

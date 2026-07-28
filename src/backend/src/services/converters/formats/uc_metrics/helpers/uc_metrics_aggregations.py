@@ -4,7 +4,8 @@ Provides Spark SQL aggregation support for Unity Catalog Metrics Store
 """
 
 import logging
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
 from ....base.models import KPI
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,9 @@ class UCMetricsAggregationBuilder:
             COUNT(customer_id)
             AVG(price)
         """
-        aggregation_type = kpi.aggregation_type.upper() if kpi.aggregation_type else "SUM"
+        aggregation_type = (
+            kpi.aggregation_type.upper() if kpi.aggregation_type else "SUM"
+        )
         formula = kpi.formula or "1"
 
         # Map aggregation types to UC metrics expressions
@@ -52,13 +55,13 @@ class UCMetricsAggregationBuilder:
             return formula
         else:
             # Default to SUM for unknown types
-            logger.warning(f"Unknown aggregation type: {aggregation_type}, defaulting to SUM")
+            logger.warning(
+                f"Unknown aggregation type: {aggregation_type}, defaulting to SUM"
+            )
             return f"SUM({formula})"
 
     def build_measure_expression_with_filter(
-        self,
-        kpi: KPI,
-        specific_filters: Optional[str]
+        self, kpi: KPI, specific_filters: Optional[str]
     ) -> str:
         """Build the measure expression with FILTER clause for specific conditions
 
@@ -73,12 +76,14 @@ class UCMetricsAggregationBuilder:
             SUM(revenue) FILTER (WHERE region = 'EMEA')
             COUNT(*) FILTER (WHERE status = 'active')
         """
-        aggregation_type = kpi.aggregation_type.upper() if kpi.aggregation_type else "SUM"
+        aggregation_type = (
+            kpi.aggregation_type.upper() if kpi.aggregation_type else "SUM"
+        )
         formula = kpi.formula or "1"
-        display_sign = getattr(kpi, 'display_sign', 1)  # Default to 1 if not specified
+        display_sign = getattr(kpi, "display_sign", 1)  # Default to 1 if not specified
 
         # Handle exceptions by transforming the formula
-        exceptions = getattr(kpi, 'exceptions', None)
+        exceptions = getattr(kpi, "exceptions", None)
         if exceptions:
             formula = self.apply_exceptions_to_formula(formula, exceptions)
 
@@ -101,7 +106,9 @@ class UCMetricsAggregationBuilder:
             base_expr = formula
         else:
             # Default to SUM for unknown types
-            logger.warning(f"Unknown aggregation type: {aggregation_type}, defaulting to SUM")
+            logger.warning(
+                f"Unknown aggregation type: {aggregation_type}, defaulting to SUM"
+            )
             base_expr = f"SUM({formula})"
 
         # Add FILTER clause if there are specific filters
@@ -116,7 +123,9 @@ class UCMetricsAggregationBuilder:
         else:
             return filtered_expr
 
-    def apply_exceptions_to_formula(self, formula: str, exceptions: List[Dict[str, Any]]) -> str:
+    def apply_exceptions_to_formula(
+        self, formula: str, exceptions: List[Dict[str, Any]]
+    ) -> str:
         """Apply exception transformations to the formula
 
         Args:
@@ -134,21 +143,21 @@ class UCMetricsAggregationBuilder:
         transformed_formula = formula
 
         for exception in exceptions:
-            exception_type = exception.get('type', '').lower()
+            exception_type = exception.get("type", "").lower()
 
-            if exception_type == 'negative_to_zero':
+            if exception_type == "negative_to_zero":
                 # Transform: field -> CASE WHEN field < 0 THEN 0 ELSE field END
                 transformed_formula = f"CASE WHEN {transformed_formula} < 0 THEN 0 ELSE {transformed_formula} END"
 
-            elif exception_type == 'null_to_zero':
+            elif exception_type == "null_to_zero":
                 # Transform: field -> COALESCE(field, 0)
                 transformed_formula = f"COALESCE({transformed_formula}, 0)"
 
-            elif exception_type == 'division_by_zero':
+            elif exception_type == "division_by_zero":
                 # For division operations, handle division by zero
-                if '/' in transformed_formula:
+                if "/" in transformed_formula:
                     # Split on division and wrap denominator with NULL check
-                    parts = transformed_formula.split('/')
+                    parts = transformed_formula.split("/")
                     if len(parts) == 2:
                         numerator = parts[0].strip()
                         denominator = parts[1].strip()
@@ -157,9 +166,7 @@ class UCMetricsAggregationBuilder:
         return transformed_formula
 
     def build_exception_aggregation_with_window(
-        self,
-        kpi: KPI,
-        specific_filters: Optional[str]
+        self, kpi: KPI, specific_filters: Optional[str]
     ) -> Tuple[str, List[Dict[str, str]]]:
         """Build exception aggregation with window configuration
 
@@ -183,9 +190,9 @@ class UCMetricsAggregationBuilder:
             ]
         """
         formula = kpi.formula or "1"
-        display_sign = getattr(kpi, 'display_sign', 1)
-        exception_agg_type = getattr(kpi, 'exception_aggregation', 'sum').upper()
-        exception_fields = getattr(kpi, 'fields_for_exception_aggregation', [])
+        display_sign = getattr(kpi, "display_sign", 1)
+        exception_agg_type = getattr(kpi, "exception_aggregation", "sum").upper()
+        exception_fields = getattr(kpi, "fields_for_exception_aggregation", [])
 
         # Build the aggregation function for the main expression
         if exception_agg_type == "SUM":
@@ -219,16 +226,14 @@ class UCMetricsAggregationBuilder:
                 window_entry = {
                     "order": field,
                     "range": "current",
-                    "semiadditive": "last"
+                    "semiadditive": "last",
                 }
                 window_config.append(window_entry)
 
         return main_expr, window_config
 
     def build_constant_selection_measure(
-        self,
-        kpi: KPI,
-        kbi_specific_filters: List[str]
+        self, kpi: KPI, kbi_specific_filters: List[str]
     ) -> Tuple[str, List[Dict[str, str]]]:
         """Build measure with constant selection (SAP BW pattern)
 
@@ -247,9 +252,11 @@ class UCMetricsAggregationBuilder:
             - Takes last inventory value per period
             - Window: {"order": "fiscal_period", "semiadditive": "last", "range": "current"}
         """
-        aggregation_type = kpi.aggregation_type.upper() if kpi.aggregation_type else "SUM"
+        aggregation_type = (
+            kpi.aggregation_type.upper() if kpi.aggregation_type else "SUM"
+        )
         formula = kpi.formula or "1"
-        display_sign = getattr(kpi, 'display_sign', 1)
+        display_sign = getattr(kpi, "display_sign", 1)
 
         # Build base aggregation
         if aggregation_type == "SUM":
@@ -279,11 +286,7 @@ class UCMetricsAggregationBuilder:
         # Build window configuration for constant selection fields
         window_config = []
         for field in kpi.fields_for_constant_selection:
-            window_entry = {
-                "order": field,
-                "semiadditive": "last",
-                "range": "current"
-            }
+            window_entry = {"order": field, "semiadditive": "last", "range": "current"}
             window_config.append(window_entry)
 
         return measure_expr, window_config

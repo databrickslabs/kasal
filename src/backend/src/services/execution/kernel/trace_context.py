@@ -6,6 +6,7 @@ carry the right ownership. Both the crew path (``crew_preparation``) and the
 flow path (``flow.modules.flow_methods``) attach this identically through the
 single entry point here.
 """
+
 from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
@@ -36,6 +37,7 @@ def attach_execution_trace_context(
         svc = service
         if svc is None:
             from src.services.memory.crew_memory import CrewMemoryService
+
             svc = CrewMemoryService({"group_id": group_id, "execution_id": job_id})
         # memory_backend_config is unused by attach_memory_trace_context
         # (it reads only self.config); pass None.

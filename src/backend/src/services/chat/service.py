@@ -57,6 +57,7 @@ class _RunTraceWriter:
     async def _get_session(self) -> Any:
         if self._session is None:
             from src.db.session import get_isolated_db_session
+
             self._ctx = get_isolated_db_session()
             self._session = await self._ctx.__aenter__()
         return self._session
@@ -76,6 +77,7 @@ class _RunTraceWriter:
         """Write one trace event. Never raises — a lost trace must not fail the run."""
         try:
             from src.services.trace import ExecutionTraceService
+
             async with self._lock:
                 session = await self._get_session()
                 try:
@@ -147,13 +149,14 @@ class LightAgentService:
             ``{"execution_id", "status"[, "error"]}``.
         """
         import re
-        from datetime import datetime, UTC
-        from src.utils.user_context import UserContext
-        from src.services.execution.kernel.agent_tools import build_agent_with_tools
-        from src.services.execution.status import ExecutionStatusService
+        from datetime import UTC, datetime
+
         from src.db.session import request_scoped_session
         from src.services.catalog.agents import AgentService
+        from src.services.execution.kernel.agent_tools import build_agent_with_tools
         from src.services.execution.logs.queue import enqueue_log
+        from src.services.execution.status import ExecutionStatusService
+        from src.utils.user_context import UserContext
 
         def _log(msg: str) -> None:
             """Best-effort execution log line. The main-process logs writer drains
@@ -161,7 +164,9 @@ class LightAgentService:
             (plain queue) so it is also callable from the bus's handler threads;
             never raises."""
             try:
-                enqueue_log(execution_id=execution_id, content=msg, group_context=group_context)
+                enqueue_log(
+                    execution_id=execution_id, content=msg, group_context=group_context
+                )
             except Exception:  # noqa: BLE001
                 pass
 
@@ -181,44 +186,68 @@ class LightAgentService:
 
             # ── Resolve the single agent spec from the config ─────────────────
             agent_spec: Optional[Dict[str, Any]] = None
-            if getattr(config, "agents_yaml", None) and isinstance(config.agents_yaml, dict):
+            if getattr(config, "agents_yaml", None) and isinstance(
+                config.agents_yaml, dict
+            ):
                 for agent_key, agent_config in config.agents_yaml.items():
                     agent_spec = dict(agent_config)
                     agent_spec.setdefault("id", agent_key)
                     break
-            elif getattr(config, "agents", None) and isinstance(config.agents, list) and config.agents:
+            elif (
+                getattr(config, "agents", None)
+                and isinstance(config.agents, list)
+                and config.agents
+            ):
                 agent_spec = dict(config.agents[0])
             if not agent_spec:
-                raise ValueError("Light agent execution requires exactly one agent in the config")
+                raise ValueError(
+                    "Light agent execution requires exactly one agent in the config"
+                )
 
             # Best-effort: merge DB tool_configs when the spec lacks them (catalog
             # agents). Chat-generated agents already carry their own tool_configs.
             if not agent_spec.get("tool_configs"):
                 try:
                     async with request_scoped_session() as db_session:
-                        db_id = str(agent_spec.get("id", "")).replace("agent_", "").replace("agent-", "")
-                        db_agent = await AgentService(db_session).get(db_id) if db_id else None
+                        db_id = (
+                            str(agent_spec.get("id", ""))
+                            .replace("agent_", "")
+                            .replace("agent-", "")
+                        )
+                        db_agent = (
+                            await AgentService(db_session).get(db_id) if db_id else None
+                        )
                         if db_agent and getattr(db_agent, "tool_configs", None):
                             agent_spec["tool_configs"] = db_agent.tool_configs
                 except Exception as enrich_err:  # noqa: BLE001
-                    logger.debug(f"[light_agent] tool_configs enrichment skipped: {enrich_err}")
+                    logger.debug(
+                        f"[light_agent] tool_configs enrichment skipped: {enrich_err}"
+                    )
 
             # ── Prompt = the (already user-grounded) first task description ────
             prompt = ""
-            if getattr(config, "tasks_yaml", None) and isinstance(config.tasks_yaml, dict):
+            if getattr(config, "tasks_yaml", None) and isinstance(
+                config.tasks_yaml, dict
+            ):
                 for _tid, task_config in config.tasks_yaml.items():
                     prompt = str(task_config.get("description") or "")
                     expected = str(task_config.get("expected_output") or "")
                     if expected:
                         prompt = f"{prompt}\n\nExpected output: {expected}"
                     break
-            elif getattr(config, "tasks", None) and isinstance(config.tasks, list) and config.tasks:
+            elif (
+                getattr(config, "tasks", None)
+                and isinstance(config.tasks, list)
+                and config.tasks
+            ):
                 prompt = str(config.tasks[0].get("description") or "")
             if not prompt.strip():
                 _inputs = getattr(config, "inputs", None) or {}
                 prompt = str(_inputs.get("user_request") or _inputs.get("prompt") or "")
             if not prompt.strip():
-                raise ValueError("Light agent execution requires a prompt (task description)")
+                raise ValueError(
+                    "Light agent execution requires a prompt (task description)"
+                )
 
             group_id = self._resolve_group_id(config, group_context)
             group_email = getattr(group_context, "group_email", None)
@@ -237,7 +266,9 @@ class LightAgentService:
             )
             role = str(agent_spec.get("role") or agent_spec.get("name") or "Assistant")
             # Short label for the trace's event_context (the user's ask, one line).
-            trace_context = (prompt.strip().splitlines()[0] if prompt.strip() else "chat")[:120]
+            trace_context = (
+                prompt.strip().splitlines()[0] if prompt.strip() else "chat"
+            )[:120]
 
             # Prior turns of THIS chat session. Each light-agent turn runs as an
             # isolated kickoff with no built-in history, so without this the agent
@@ -251,6 +282,7 @@ class LightAgentService:
             # the run start so the Logs tab is populated for this light run too.
             try:
                 from src.services.execution.logs.writer_task import LogWriterTask
+
                 await LogWriterTask.ensure_writer_started()
             except Exception as w_err:  # noqa: BLE001
                 logger.debug(f"[light_agent] logs writer ensure skipped: {w_err}")
@@ -295,7 +327,10 @@ class LightAgentService:
                     try:
                         await asyncio.wait_for(
                             asyncio.gather(
-                                *(asyncio.wrap_future(f) for f in _pending_trace_futures),
+                                *(
+                                    asyncio.wrap_future(f)
+                                    for f in _pending_trace_futures
+                                ),
                                 return_exceptions=True,
                             ),
                             timeout=timeout,
@@ -319,10 +354,13 @@ class LightAgentService:
                     fut.add_done_callback(lambda f: f.exception())  # drain, never raise
                 except Exception as sched_err:  # noqa: BLE001
                     logger.warning(
-                        f"[light_agent] trace schedule FAILED: {sched_err}", exc_info=True
+                        f"[light_agent] trace schedule FAILED: {sched_err}",
+                        exc_info=True,
                     )
 
-            def _base_trace(event_type: str, output: Dict[str, Any], tool_name: str) -> Dict[str, Any]:
+            def _base_trace(
+                event_type: str, output: Dict[str, Any], tool_name: str
+            ) -> Dict[str, Any]:
                 td: Dict[str, Any] = {
                     "job_id": execution_id,
                     "event_source": role,
@@ -340,20 +378,26 @@ class LightAgentService:
 
             # ── Build the ToolFactory (DB-backed API keys), then the agent, then
             # kickoff — all within one DB session so MCP/tool resources stay live.
-            from src.services.tools.tool_factory import ToolFactory
             from src.services.settings.api_keys import ApiKeysService
+            from src.services.tools.tool_factory import ToolFactory
 
             _factory_group = group_id if group_id != "default" else None
             async with request_scoped_session() as db_session:
                 try:
-                    api_keys_service = ApiKeysService(db_session, group_id=_factory_group)
+                    api_keys_service = ApiKeysService(
+                        db_session, group_id=_factory_group
+                    )
                     tool_factory = await ToolFactory.create(
                         config={"group_id": group_id} if _factory_group else {},
                         api_keys_service=api_keys_service,
                     )
                 except Exception as tf_err:  # noqa: BLE001
-                    logger.warning(f"[light_agent] ToolFactory.create failed, using basic factory: {tf_err}")
-                    tool_factory = ToolFactory({"group_id": group_id} if _factory_group else {})
+                    logger.warning(
+                        f"[light_agent] ToolFactory.create failed, using basic factory: {tf_err}"
+                    )
+                    tool_factory = ToolFactory(
+                        {"group_id": group_id} if _factory_group else {}
+                    )
                     try:
                         await tool_factory.initialize()
                     except Exception:  # noqa: BLE001
@@ -371,7 +415,9 @@ class LightAgentService:
                     agent_spec,
                     group_id=group_id,
                     default_model="databricks-llama-4-maverick",
-                    label=str(agent_spec.get("role") or agent_spec.get("name") or "chat-agent"),
+                    label=str(
+                        agent_spec.get("role") or agent_spec.get("name") or "chat-agent"
+                    ),
                     tool_ids=agent_spec.get("tools") or None,
                     tool_factory=tool_factory,
                     tool_configs=agent_spec.get("tool_configs", {}),
@@ -410,8 +456,14 @@ class LightAgentService:
                 # tenant-safe for concurrent in-process light runs. None means
                 # memory was not attached (disabled / no backend) → no traces.
                 _agent_memory = await self._attach_memory(
-                    agent, agent_spec, config, group_context,
-                    group_id, prompt, execution_id, _log,
+                    agent,
+                    agent_spec,
+                    config,
+                    group_context,
+                    group_id,
+                    prompt,
+                    execution_id,
+                    _log,
                 )
 
                 # This agent's own LLM instance. CrewAI emits tool/LLM events with
@@ -429,15 +481,15 @@ class LightAgentService:
                 # per text delta. Chat Completions only — the Responses-API
                 # branch (codex models) does not read the flag, so setting it
                 # there is a harmless no-op. Kill-switch: CHAT_TOKEN_STREAMING=false.
-                if (
-                    _agent_llm is not None
-                    and os.getenv("CHAT_TOKEN_STREAMING", "true").strip().lower()
-                    not in ("0", "false", "no")
-                ):
+                if _agent_llm is not None and os.getenv(
+                    "CHAT_TOKEN_STREAMING", "true"
+                ).strip().lower() not in ("0", "false", "no"):
                     try:
                         _agent_llm.stream = True
                     except Exception as stream_err:  # noqa: BLE001
-                        logger.debug(f"[light_agent] token streaming not enabled: {stream_err}")
+                        logger.debug(
+                            f"[light_agent] token streaming not enabled: {stream_err}"
+                        )
 
                 # Register tool-activity handlers scoped to THIS agent's id. A
                 # ``tool_usage`` trace marks the call; a ``<tool>_run`` trace carries
@@ -445,21 +497,32 @@ class LightAgentService:
                 # the DB on refresh). Both are matched by agent id so a concurrent
                 # light run's tools never bleed into this run's timeline.
                 import json
-                from src.core.events import event_bus
-                from src.core.events import ToolUsageStartedEvent, ToolUsageFinishedEvent, ToolUsageErrorEvent
-                # ``Agent.kickoff_async`` runs as a CrewAI "LiteAgent" and emits these
-                # lifecycle events on the SAME bus — they fire on every run, even one
-                # that calls no tools, which is what gives the chat a trace when the
-                # answer is pure prose (the tool handlers above never fire then).
-                from src.core.events import LiteAgentExecutionStartedEvent, LiteAgentExecutionCompletedEvent, LiteAgentExecutionErrorEvent
-                from src.core.events import LLMCallStartedEvent, LLMCallCompletedEvent, LLMCallFailedEvent
-                from src.core.events import LLMStreamChunkEvent
+
                 # Memory recall/persist events — emitted by the unified Memory with
                 # source=<the Memory> (no agent_id), so they're matched by identity
                 # (source is _agent_memory). These give the chat trace the same
                 # "Memory Read / Memory Context Retrieved / Memory Write" rows the
                 # crew/flow OTel timeline shows — homogeneous across paths.
-                from src.core.events import MemoryQueryCompletedEvent, MemoryRetrievalCompletedEvent, MemorySaveCompletedEvent
+                # ``Agent.kickoff_async`` runs as a CrewAI "LiteAgent" and emits these
+                # lifecycle events on the SAME bus — they fire on every run, even one
+                # that calls no tools, which is what gives the chat a trace when the
+                # answer is pure prose (the tool handlers above never fire then).
+                from src.core.events import (
+                    LiteAgentExecutionCompletedEvent,
+                    LiteAgentExecutionErrorEvent,
+                    LiteAgentExecutionStartedEvent,
+                    LLMCallCompletedEvent,
+                    LLMCallFailedEvent,
+                    LLMCallStartedEvent,
+                    LLMStreamChunkEvent,
+                    MemoryQueryCompletedEvent,
+                    MemoryRetrievalCompletedEvent,
+                    MemorySaveCompletedEvent,
+                    ToolUsageErrorEvent,
+                    ToolUsageFinishedEvent,
+                    ToolUsageStartedEvent,
+                    event_bus,
+                )
 
                 _agent_id = str(getattr(agent, "id", "") or "")
                 # Mutable holder so the (sync, possibly worker-thread) started/completed
@@ -470,9 +533,12 @@ class LightAgentService:
 
                 def _matches(event, source=None) -> bool:
                     if self._event_matches_run(
-                        event, source,
-                        agent=agent, agent_id=_agent_id,
-                        role_lower=_role_lower, agent_llm=_agent_llm,
+                        event,
+                        source,
+                        agent=agent,
+                        agent_id=_agent_id,
+                        role_lower=_role_lower,
+                        agent_llm=_agent_llm,
                     ):
                         return True
                     # Nothing matched — log once so a dropped MCP/tool event is
@@ -481,7 +547,8 @@ class LightAgentService:
                         "[light_agent] tool event NOT matched to this run "
                         "(tool=%s event_agent_id=%s our_agent_id=%s source=%s) — dropped",
                         getattr(event, "tool_name", "?"),
-                        getattr(event, "agent_id", None), _agent_id,
+                        getattr(event, "agent_id", None),
+                        _agent_id,
                         type(source).__name__ if source is not None else None,
                     )
                     return False
@@ -504,12 +571,19 @@ class LightAgentService:
                         tool_name = str(getattr(event, "tool_name", "") or "tool")
                         args = _args_str(event)
                         _log(f"Using tool: {tool_name}({args[:200]})")
-                        _schedule_trace(_base_trace(
-                            "tool_usage",
-                            {"tool_name": tool_name,
-                             "extra_data": {"tool_name": tool_name, "tool_args": args}},
-                            tool_name,
-                        ))
+                        _schedule_trace(
+                            _base_trace(
+                                "tool_usage",
+                                {
+                                    "tool_name": tool_name,
+                                    "extra_data": {
+                                        "tool_name": tool_name,
+                                        "tool_args": args,
+                                    },
+                                },
+                                tool_name,
+                            )
+                        )
                     except Exception as h_err:  # noqa: BLE001
                         logger.debug(f"[light_agent] tool-start trace skipped: {h_err}")
 
@@ -537,14 +611,18 @@ class LightAgentService:
                             sa = getattr(event, "started_at", None)
                             fa = getattr(event, "finished_at", None)
                             if sa and fa:
-                                output["duration_ms"] = int((fa - sa).total_seconds() * 1000)
+                                output["duration_ms"] = int(
+                                    (fa - sa).total_seconds() * 1000
+                                )
                         except Exception:  # noqa: BLE001
                             pass
                         norm = re.sub(r"[^a-z0-9]+", "", tool_name.lower()) or "tool"
                         _log(f"Tool {tool_name} returned ({len(content)} chars)")
                         _schedule_trace(_base_trace(f"{norm}_run", output, tool_name))
                     except Exception as h_err:  # noqa: BLE001
-                        logger.debug(f"[light_agent] tool-finish trace skipped: {h_err}")
+                        logger.debug(
+                            f"[light_agent] tool-finish trace skipped: {h_err}"
+                        )
 
                 def _on_tool_error(source, event) -> None:
                     # Without this a tool that ERRORS (e.g. an MCP server timeout or
@@ -558,12 +636,18 @@ class LightAgentService:
                         err = str(getattr(event, "error", "") or "Tool error")
                         norm = re.sub(r"[^a-z0-9]+", "", tool_name.lower()) or "tool"
                         _log(f"Tool {tool_name} failed: {err[:200]}")
-                        _schedule_trace(_base_trace(
-                            f"{norm}_error",
-                            {"tool_name": tool_name, "input": _args_str(event),
-                             "content": err, "error": err},
-                            tool_name,
-                        ))
+                        _schedule_trace(
+                            _base_trace(
+                                f"{norm}_error",
+                                {
+                                    "tool_name": tool_name,
+                                    "input": _args_str(event),
+                                    "content": err,
+                                    "error": err,
+                                },
+                                tool_name,
+                            )
+                        )
                     except Exception as h_err:  # noqa: BLE001
                         logger.debug(f"[light_agent] tool-error trace skipped: {h_err}")
 
@@ -584,7 +668,9 @@ class LightAgentService:
                         parts = []
                         for m in msgs:
                             if isinstance(m, dict):
-                                parts.append(f"{m.get('role', '?')}: {m.get('content', '')}")
+                                parts.append(
+                                    f"{m.get('role', '?')}: {m.get('content', '')}"
+                                )
                             else:
                                 parts.append(str(m))
                         return "\n\n".join(parts)
@@ -601,18 +687,24 @@ class LightAgentService:
                         if len(prompt_text) > max_len:
                             prompt_text = prompt_text[:max_len] + "…[truncated]"
                         _log(f"LLM call ({model_name})")
-                        _schedule_trace(_base_trace(
-                            "llm_call",
-                            {"tool_name": "LLM",
-                             "input": model_name,
-                             # The Jobs timeline reads output.content; the prompt here
-                             # makes 'LLM Request → View' show the real request.
-                             "content": prompt_text,
-                             "extra_data": {"model": model_name,
-                                            "prompt": prompt_text,
-                                            "prompt_length": len(prompt_text)}},
-                            "LLM",
-                        ))
+                        _schedule_trace(
+                            _base_trace(
+                                "llm_call",
+                                {
+                                    "tool_name": "LLM",
+                                    "input": model_name,
+                                    # The Jobs timeline reads output.content; the prompt here
+                                    # makes 'LLM Request → View' show the real request.
+                                    "content": prompt_text,
+                                    "extra_data": {
+                                        "model": model_name,
+                                        "prompt": prompt_text,
+                                        "prompt_length": len(prompt_text),
+                                    },
+                                },
+                                "LLM",
+                            )
+                        )
                     except Exception as h_err:  # noqa: BLE001
                         logger.debug(f"[light_agent] llm-start trace skipped: {h_err}")
 
@@ -626,12 +718,16 @@ class LightAgentService:
                         max_len = 20000
                         if len(content) > max_len:
                             content = content[:max_len] + "…[truncated]"
-                        extra: Dict[str, Any] = {"model": model_name,
-                                                 "output_length": len(content)}
+                        extra: Dict[str, Any] = {
+                            "model": model_name,
+                            "output_length": len(content),
+                        }
                         usage = getattr(event, "usage", None)
                         if usage is not None:
                             try:
-                                extra["usage"] = json.loads(json.dumps(usage, default=str))
+                                extra["usage"] = json.loads(
+                                    json.dumps(usage, default=str)
+                                )
                             except Exception:  # noqa: BLE001
                                 pass
                         output: Dict[str, Any] = {
@@ -648,7 +744,9 @@ class LightAgentService:
                         _log(f"LLM responded ({len(content)} chars, {model_name})")
                         _schedule_trace(td)
                     except Exception as h_err:  # noqa: BLE001
-                        logger.debug(f"[light_agent] llm-complete trace skipped: {h_err}")
+                        logger.debug(
+                            f"[light_agent] llm-complete trace skipped: {h_err}"
+                        )
 
                 def _on_llm_failed(source, event) -> None:
                     try:
@@ -656,11 +754,13 @@ class LightAgentService:
                             return
                         err = str(getattr(event, "error", "") or "LLM error")
                         _log(f"LLM call failed: {err[:200]}")
-                        _schedule_trace(_base_trace(
-                            "llm_call_failed",
-                            {"tool_name": "LLM", "content": err, "error": err},
-                            "LLM",
-                        ))
+                        _schedule_trace(
+                            _base_trace(
+                                "llm_call_failed",
+                                {"tool_name": "LLM", "content": err, "error": err},
+                                "LLM",
+                            )
+                        )
                     except Exception as h_err:  # noqa: BLE001
                         logger.debug(f"[light_agent] llm-fail trace skipped: {h_err}")
 
@@ -679,7 +779,9 @@ class LightAgentService:
                         if not _matches_memory(source):
                             return
                         results = getattr(event, "results", None)
-                        count = len(results) if isinstance(results, (list, tuple)) else None
+                        count = (
+                            len(results) if isinstance(results, (list, tuple)) else None
+                        )
                         qms = getattr(event, "query_time_ms", None)
                         content = "" if results is None else _cap(str(results))
                         extra: Dict[str, Any] = {}
@@ -687,13 +789,21 @@ class LightAgentService:
                             extra["results_count"] = count
                         if qms is not None:
                             extra["query_time_ms"] = float(qms)
-                        out = {"tool_name": "Memory", "content": content, "extra_data": extra}
+                        out = {
+                            "tool_name": "Memory",
+                            "content": content,
+                            "extra_data": extra,
+                        }
                         td = _base_trace("memory_retrieval", out, "Memory")
                         td["trace_metadata"].update(extra)
-                        _log(f"Memory read: {count if count is not None else '?'} result(s)")
+                        _log(
+                            f"Memory read: {count if count is not None else '?'} result(s)"
+                        )
                         _schedule_trace(td)
                     except Exception as h_err:  # noqa: BLE001
-                        logger.debug(f"[light_agent] memory-query trace skipped: {h_err}")
+                        logger.debug(
+                            f"[light_agent] memory-query trace skipped: {h_err}"
+                        )
 
                 def _on_memory_retrieval(source, event) -> None:
                     try:
@@ -708,12 +818,18 @@ class LightAgentService:
                         extra: Dict[str, Any] = {}
                         if rms is not None:
                             extra["retrieval_time_ms"] = float(rms)
-                        out = {"tool_name": "Memory", "content": content, "extra_data": extra}
+                        out = {
+                            "tool_name": "Memory",
+                            "content": content,
+                            "extra_data": extra,
+                        }
                         td = _base_trace("memory_retrieval_completed", out, "Memory")
                         td["trace_metadata"].update(extra)
                         _schedule_trace(td)
                     except Exception as h_err:  # noqa: BLE001
-                        logger.debug(f"[light_agent] memory-retrieval trace skipped: {h_err}")
+                        logger.debug(
+                            f"[light_agent] memory-retrieval trace skipped: {h_err}"
+                        )
 
                 def _on_memory_save(source, event) -> None:
                     try:
@@ -725,13 +841,19 @@ class LightAgentService:
                         extra: Dict[str, Any] = {}
                         if sms is not None:
                             extra["save_time_ms"] = float(sms)
-                        out = {"tool_name": "Memory", "content": content, "extra_data": extra}
+                        out = {
+                            "tool_name": "Memory",
+                            "content": content,
+                            "extra_data": extra,
+                        }
                         td = _base_trace("memory_write", out, "Memory")
                         td["trace_metadata"].update(extra)
                         _log("Memory write")
                         _schedule_trace(td)
                     except Exception as h_err:  # noqa: BLE001
-                        logger.debug(f"[light_agent] memory-save trace skipped: {h_err}")
+                        logger.debug(
+                            f"[light_agent] memory-save trace skipped: {h_err}"
+                        )
 
                 # ── Agent lifecycle tracing (fires even with NO tools) ──────
                 # The LiteAgent events are emitted with the AGENT instance as the bus
@@ -752,7 +874,9 @@ class LightAgentService:
                             return
                         _agent_started_at.append(datetime.now(UTC))
                     except Exception as h_err:  # noqa: BLE001
-                        logger.debug(f"[light_agent] agent-start trace skipped: {h_err}")
+                        logger.debug(
+                            f"[light_agent] agent-start trace skipped: {h_err}"
+                        )
 
                 def _on_agent_completed(source, event) -> None:
                     try:
@@ -772,26 +896,34 @@ class LightAgentService:
                         if _agent_started_at:
                             try:
                                 elapsed = datetime.now(UTC) - _agent_started_at[0]
-                                output["duration_ms"] = int(elapsed.total_seconds() * 1000)
+                                output["duration_ms"] = int(
+                                    elapsed.total_seconds() * 1000
+                                )
                             except Exception:  # noqa: BLE001
                                 pass
                         _log(f"Response generated ({len(answer_text)} chars)")
                         _schedule_trace(_base_trace("response_run", output, "Response"))
                     except Exception as h_err:  # noqa: BLE001
-                        logger.debug(f"[light_agent] agent-complete trace skipped: {h_err}")
+                        logger.debug(
+                            f"[light_agent] agent-complete trace skipped: {h_err}"
+                        )
 
                 def _on_agent_error(source, event) -> None:
                     try:
                         if source is not agent:
                             return
                         err = str(getattr(event, "error", "") or "Agent error")
-                        _schedule_trace(_base_trace(
-                            "tool_error",
-                            {"tool_name": "Response", "content": err, "error": err},
-                            "Response",
-                        ))
+                        _schedule_trace(
+                            _base_trace(
+                                "tool_error",
+                                {"tool_name": "Response", "content": err, "error": err},
+                                "Response",
+                            )
+                        )
                     except Exception as h_err:  # noqa: BLE001
-                        logger.debug(f"[light_agent] agent-error trace skipped: {h_err}")
+                        logger.debug(
+                            f"[light_agent] agent-error trace skipped: {h_err}"
+                        )
 
                 # ── Token chunks → SSE (chat live-typing) ───────────────────
                 # Chunk events fire on the LLM worker thread (kickoff runs under
@@ -821,16 +953,23 @@ class LightAgentService:
                         return
                     try:
                         from src.core.sse_manager import SSEEvent, sse_manager
+
                         await sse_manager.broadcast_to_job(
                             execution_id,
                             SSEEvent(
-                                data={"job_id": execution_id, "chunk": text, "seq": seq},
+                                data={
+                                    "job_id": execution_id,
+                                    "chunk": text,
+                                    "seq": seq,
+                                },
                                 event="llm_chunk",
                             ),
                             skip_replay=True,
                         )
                     except Exception as sse_err:  # noqa: BLE001
-                        logger.debug(f"[light_agent] llm_chunk broadcast skipped: {sse_err}")
+                        logger.debug(
+                            f"[light_agent] llm_chunk broadcast skipped: {sse_err}"
+                        )
 
                 def _on_llm_chunk(source, event) -> None:
                     try:
@@ -844,10 +983,16 @@ class LightAgentService:
                             if _chunk_state["scheduled"]:
                                 return
                             _chunk_state["scheduled"] = True
-                        fut = asyncio.run_coroutine_threadsafe(_flush_chunks(), _main_loop)
-                        fut.add_done_callback(lambda f: f.exception())  # drain, never raise
+                        fut = asyncio.run_coroutine_threadsafe(
+                            _flush_chunks(), _main_loop
+                        )
+                        fut.add_done_callback(
+                            lambda f: f.exception()
+                        )  # drain, never raise
                     except Exception as h_err:  # noqa: BLE001
-                        logger.debug(f"[light_agent] llm-chunk forward skipped: {h_err}")
+                        logger.debug(
+                            f"[light_agent] llm-chunk forward skipped: {h_err}"
+                        )
 
                 event_bus.register_handler(LLMStreamChunkEvent, _on_llm_chunk)
                 event_bus.register_handler(ToolUsageStartedEvent, _on_tool_started)
@@ -857,11 +1002,19 @@ class LightAgentService:
                 event_bus.register_handler(LLMCallCompletedEvent, _on_llm_completed)
                 event_bus.register_handler(LLMCallFailedEvent, _on_llm_failed)
                 event_bus.register_handler(MemoryQueryCompletedEvent, _on_memory_query)
-                event_bus.register_handler(MemoryRetrievalCompletedEvent, _on_memory_retrieval)
+                event_bus.register_handler(
+                    MemoryRetrievalCompletedEvent, _on_memory_retrieval
+                )
                 event_bus.register_handler(MemorySaveCompletedEvent, _on_memory_save)
-                event_bus.register_handler(LiteAgentExecutionStartedEvent, _on_agent_started)
-                event_bus.register_handler(LiteAgentExecutionCompletedEvent, _on_agent_completed)
-                event_bus.register_handler(LiteAgentExecutionErrorEvent, _on_agent_error)
+                event_bus.register_handler(
+                    LiteAgentExecutionStartedEvent, _on_agent_started
+                )
+                event_bus.register_handler(
+                    LiteAgentExecutionCompletedEvent, _on_agent_completed
+                )
+                event_bus.register_handler(
+                    LiteAgentExecutionErrorEvent, _on_agent_error
+                )
 
                 # Tool-approval gates: tools stamped with an approval policy
                 # (requires_approval in tool config) pause before executing and
@@ -871,13 +1024,18 @@ class LightAgentService:
                     from src.services.execution.kernel.tool_approval import (
                         install_tool_approval_hook,
                     )
+
                     _uninstall_approval_hook = install_tool_approval_hook(
                         execution_id, group_context
                     )
                 except Exception as approval_err:  # noqa: BLE001
-                    logger.warning(f"[light_agent] approval hook not installed: {approval_err}")
+                    logger.warning(
+                        f"[light_agent] approval hook not installed: {approval_err}"
+                    )
 
-                logger.info(f"[light_agent] Kicking off single agent for execution {execution_id}")
+                logger.info(
+                    f"[light_agent] Kicking off single agent for execution {execution_id}"
+                )
                 try:
                     # ── Memory recall — the engine Agent does not consult memory
                     # itself, so recall here and prepend a capped context block.
@@ -887,6 +1045,7 @@ class LightAgentService:
                         from src.services.memory.hooks import (
                             build_memory_preamble,
                         )
+
                         memory_block = await asyncio.to_thread(
                             build_memory_preamble, _agent_memory, prompt
                         )
@@ -906,16 +1065,26 @@ class LightAgentService:
                         _log("Attached files noted for the agent")
                     preamble_parts = [
                         part
-                        for part in (memory_block, conversation_preamble, attachment_hint)
+                        for part in (
+                            memory_block,
+                            conversation_preamble,
+                            attachment_hint,
+                        )
                         if part
                     ]
                     kickoff_prompt = (
                         "\n\n".join(preamble_parts) + f"\n\nCurrent message:\n{prompt}"
-                        if preamble_parts else prompt
+                        if preamble_parts
+                        else prompt
                     )
                     kicked = await self._kickoff_with_mlflow_trace(
-                        agent, kickoff_prompt, config, execution_id,
-                        trace_context, group_context, group_id,
+                        agent,
+                        kickoff_prompt,
+                        config,
+                        execution_id,
+                        trace_context,
+                        group_context,
+                        group_id,
                     )
                 finally:
                     if _uninstall_approval_hook is not None:
@@ -933,13 +1102,19 @@ class LightAgentService:
                         event_bus.off(LLMCallCompletedEvent, _on_llm_completed)
                         event_bus.off(LLMCallFailedEvent, _on_llm_failed)
                         event_bus.off(MemoryQueryCompletedEvent, _on_memory_query)
-                        event_bus.off(MemoryRetrievalCompletedEvent, _on_memory_retrieval)
+                        event_bus.off(
+                            MemoryRetrievalCompletedEvent, _on_memory_retrieval
+                        )
                         event_bus.off(MemorySaveCompletedEvent, _on_memory_save)
                         event_bus.off(LiteAgentExecutionStartedEvent, _on_agent_started)
-                        event_bus.off(LiteAgentExecutionCompletedEvent, _on_agent_completed)
+                        event_bus.off(
+                            LiteAgentExecutionCompletedEvent, _on_agent_completed
+                        )
                         event_bus.off(LiteAgentExecutionErrorEvent, _on_agent_error)
                     except Exception as off_err:  # noqa: BLE001
-                        logger.debug(f"[light_agent] handler unregister skipped: {off_err}")
+                        logger.debug(
+                            f"[light_agent] handler unregister skipped: {off_err}"
+                        )
                 answer = getattr(kicked, "raw", None)
                 if answer is None:
                     answer = str(kicked) if kicked is not None else ""
@@ -951,6 +1126,7 @@ class LightAgentService:
                         format_turn_for_memory,
                         remember_async,
                     )
+
                     remember_async(
                         _agent_memory,
                         format_turn_for_memory(prompt, answer),
@@ -968,8 +1144,11 @@ class LightAgentService:
                         compaction_enabled,
                         maintain_session_summary,
                     )
+
                     _session_id = getattr(config, "session_id", None)
-                    _compact_groups = list(getattr(group_context, "group_ids", None) or [])
+                    _compact_groups = list(
+                        getattr(group_context, "group_ids", None) or []
+                    )
                     if not _compact_groups and group_id and group_id != "default":
                         _compact_groups = [group_id]
                     if compaction_enabled() and _session_id and _compact_groups:
@@ -994,13 +1173,16 @@ class LightAgentService:
             result_payload: Any = answer
             try:
                 from src.services.a2ui.runner import compose_surface
+
                 # Bounded: this is an auxiliary LLM call for the UI surface. If it
                 # hangs it must NOT block the terminal status — the prose answer has
                 # already streamed, so on timeout we complete with the plain answer.
                 surface = await asyncio.wait_for(
                     compose_surface(
                         answer,
-                        purpose=str(agent_spec.get("goal") or agent_spec.get("role") or ""),
+                        purpose=str(
+                            agent_spec.get("goal") or agent_spec.get("role") or ""
+                        ),
                         query=prompt,
                         model=getattr(config, "model", None),
                         group_id=group_id,
@@ -1020,7 +1202,9 @@ class LightAgentService:
                 )
                 if surface:
                     result_payload = {"text": answer, "a2ui": surface}
-                    _log(f"Composed A2UI surface: {surface.get('surfaceKind', 'conversation')}")
+                    _log(
+                        f"Composed A2UI surface: {surface.get('surfaceKind', 'conversation')}"
+                    )
             except asyncio.TimeoutError:
                 logger.warning(
                     f"[light_agent] a2ui compose timed out for {execution_id}; "
@@ -1044,10 +1228,16 @@ class LightAgentService:
                 result=result_payload,
             )
             logger.info(f"[light_agent] Completed light agent execution {execution_id}")
-            return {"execution_id": execution_id, "status": ExecutionStatus.COMPLETED.value}
+            return {
+                "execution_id": execution_id,
+                "status": ExecutionStatus.COMPLETED.value,
+            }
 
         except Exception as e:  # noqa: BLE001
-            logger.error(f"[light_agent] Error in light agent execution {execution_id}: {e}", exc_info=True)
+            logger.error(
+                f"[light_agent] Error in light agent execution {execution_id}: {e}",
+                exc_info=True,
+            )
             _log(f"Chat agent failed: {e}")
             # Flush + release the run's private trace session. Guarded: the
             # failure may predate the persister closures being defined.
@@ -1056,7 +1246,9 @@ class LightAgentService:
             except NameError:
                 pass
             except Exception as flush_err:  # noqa: BLE001
-                logger.debug(f"[light_agent] trace flush on failure skipped: {flush_err}")
+                logger.debug(
+                    f"[light_agent] trace flush on failure skipped: {flush_err}"
+                )
             try:
                 await ExecutionStatusService.update_status(
                     job_id=execution_id,
@@ -1065,8 +1257,14 @@ class LightAgentService:
                     result=None,
                 )
             except Exception as status_err:  # noqa: BLE001
-                logger.error(f"[light_agent] Could not mark execution {execution_id} FAILED: {status_err}")
-            return {"execution_id": execution_id, "status": ExecutionStatus.FAILED.value, "error": str(e)}
+                logger.error(
+                    f"[light_agent] Could not mark execution {execution_id} FAILED: {status_err}"
+                )
+            return {
+                "execution_id": execution_id,
+                "status": ExecutionStatus.FAILED.value,
+                "error": str(e),
+            }
 
     @staticmethod
     def _event_matches_run(
@@ -1122,7 +1320,11 @@ class LightAgentService:
         resolved = (
             getattr(config, "group_id", None)
             or getattr(group_context, "primary_group_id", None)
-            or (group_context.group_ids[0] if group_context and getattr(group_context, "group_ids", None) else None)
+            or (
+                group_context.group_ids[0]
+                if group_context and getattr(group_context, "group_ids", None)
+                else None
+            )
         )
         if resolved:
             return resolved
@@ -1170,7 +1372,9 @@ class LightAgentService:
         configured"). Output FORMATTING is intentionally not done here: the answer
         flows through the shared A2UI composer like every other deliverable.
         """
-        from src.services.execution.kernel.genie_formatting import apply_genie_mcp_space_id
+        from src.services.execution.kernel.genie_formatting import (
+            apply_genie_mcp_space_id,
+        )
 
         # Copy the picked Genie MCP server's space id into any co-assigned GenieTool
         # (scans agent.tools) so it doesn't error "Genie space ID is not configured".
@@ -1214,20 +1418,23 @@ class LightAgentService:
         Fully best-effort: any MLflow problem falls back to a plain kickoff, and
         ``kickoff_async`` runs exactly once (a real kickoff error propagates).
         """
+
         async def _do() -> Any:
             return await agent.kickoff_async(kickoff_prompt)
 
         try:
             import logging as _logging
+
             import mlflow
+
+            from src.db.session import async_session_factory
+            from src.services.databricks.workspace.service import DatabricksService
             from src.services.mlflow.tracing import start_root_trace
             from src.services.otel_tracing.mlflow_setup import (
                 configure_mlflow_in_subprocess,
-                set_trace_attributes,
                 extract_trace_outputs,
+                set_trace_attributes,
             )
-            from src.db.session import async_session_factory
-            from src.services.databricks.workspace.service import DatabricksService
 
             # Load the workspace's Databricks config (same source crew/flow use).
             async with async_session_factory() as _session:
@@ -1279,17 +1486,18 @@ class LightAgentService:
         # user's current message) on the trace, not the generic one-line task
         # label — so the MLflow trace's Inputs reflect the real request. Capped so
         # a long conversation doesn't bloat the trace.
-        _prompt_for_trace = kickoff_prompt if isinstance(kickoff_prompt, str) else str(kickoff_prompt)
+        _prompt_for_trace = (
+            kickoff_prompt if isinstance(kickoff_prompt, str) else str(kickoff_prompt)
+        )
         if len(_prompt_for_trace) > 20000:
             _prompt_for_trace = _prompt_for_trace[:20000] + "…[truncated]"
         inputs = {"run_name": run_name or trace_context, "prompt": _prompt_for_trace}
         # session_id can ride on the config top-level OR inside inputs depending on
         # the entry path (the service copies it into execution_config["session_id"]).
         # Read both so the MLflow session tag is set consistently across runs.
-        session_id = (
-            getattr(config, "session_id", None)
-            or (getattr(config, "inputs", None) or {}).get("session_id")
-        )
+        session_id = getattr(config, "session_id", None) or (
+            getattr(config, "inputs", None) or {}
+        ).get("session_id")
         user = getattr(group_context, "group_email", None)
 
         logger.info(
@@ -1297,7 +1505,9 @@ class LightAgentService:
             uc_name,
             session_id,
         )
-        with start_root_trace(f"chat_kickoff:{run_name or trace_context}", inputs) as root_span:
+        with start_root_trace(
+            f"chat_kickoff:{run_name or trace_context}", inputs
+        ) as root_span:
             # CHAT-ONLY: group this conversation's turns into one MLflow session.
             if session_id:
                 try:
@@ -1306,7 +1516,9 @@ class LightAgentService:
                         metadata["mlflow.trace.user"] = str(user)
                     mlflow.update_current_trace(metadata=metadata)
                 except Exception as sess_err:  # noqa: BLE001
-                    logger.debug(f"[light_agent] mlflow session tag skipped: {sess_err}")
+                    logger.debug(
+                        f"[light_agent] mlflow session tag skipped: {sess_err}"
+                    )
             try:
                 set_trace_attributes(root_span, flow_config, logger, run_name=run_name)
             except Exception:  # noqa: BLE001
@@ -1314,7 +1526,11 @@ class LightAgentService:
             result = await _do()
             try:
                 outputs = extract_trace_outputs(result, logger)
-                if outputs and root_span is not None and hasattr(root_span, "set_outputs"):
+                if (
+                    outputs
+                    and root_span is not None
+                    and hasattr(root_span, "set_outputs")
+                ):
                     root_span.set_outputs(outputs)
             except Exception:  # noqa: BLE001
                 pass
@@ -1371,12 +1587,15 @@ class LightAgentService:
             from src.repositories.chat_session_repository import (
                 ChatSessionRepository,
             )
+
             async with request_scoped_session() as db_session:
                 # MOST RECENT window (not the oldest page) — a session longer than
                 # one page must still recall what was just said.
                 messages = await ChatHistoryRepository(
                     db_session
-                ).get_recent_by_session_and_group(session_id, group_ids, limit=recent_limit)
+                ).get_recent_by_session_and_group(
+                    session_id, group_ids, limit=recent_limit
+                )
                 # Running compaction summary: turns at or before summary_upto are
                 # represented by the summary block, not injected verbatim.
                 #
@@ -1392,8 +1611,12 @@ class LightAgentService:
                         db_session
                     ).get_by_id_and_group(session_id, group_ids)
                     if session_record is not None:
-                        context_summary = getattr(session_record, "context_summary", None)
-                        summary_upto = getattr(session_record, "context_summary_upto", None)
+                        context_summary = getattr(
+                            session_record, "context_summary", None
+                        )
+                        summary_upto = getattr(
+                            session_record, "context_summary_upto", None
+                        )
                 except Exception as summary_err:  # noqa: BLE001
                     logger.debug(
                         f"[light_agent] compaction summary unavailable, using the "
@@ -1405,7 +1628,8 @@ class LightAgentService:
 
         if summary_upto is not None:
             messages = [
-                m for m in messages
+                m
+                for m in messages
                 if getattr(m, "timestamp", None) is None or m.timestamp > summary_upto
             ]
 
@@ -1437,7 +1661,9 @@ class LightAgentService:
             return ""
 
         # Keep ALL user turns; keep only the most recent N assistant turns.
-        assistant_positions = [i for i, (role, _) in enumerate(entries) if role == "assistant"]
+        assistant_positions = [
+            i for i, (role, _) in enumerate(entries) if role == "assistant"
+        ]
         keep_assistant = set(assistant_positions[-max_assistant_turns:])
         selected = [
             (role, line)
@@ -1451,7 +1677,9 @@ class LightAgentService:
             return sum(len(line) + 1 for _, line in items)
 
         while selected and _total(selected) > max_chars:
-            drop_at = next((i for i, (role, _) in enumerate(selected) if role == "assistant"), None)
+            drop_at = next(
+                (i for i, (role, _) in enumerate(selected) if role == "assistant"), None
+            )
             if drop_at is None:
                 # Only user turns remain. This used to be an unbounded growth
                 # path (user turns were never dropped, so hundred-question
@@ -1474,8 +1702,11 @@ class LightAgentService:
         from src.services.chat.context_compaction import (
             SUMMARY_HEADER,
         )
+
         summary_block = (
-            f"{SUMMARY_HEADER}\n{context_summary.strip()}\n\n" if context_summary else ""
+            f"{SUMMARY_HEADER}\n{context_summary.strip()}\n\n"
+            if context_summary
+            else ""
         )
         return (
             summary_block
@@ -1517,10 +1748,14 @@ class LightAgentService:
             log("Memory disabled for this run")
             return None
         try:
-            from src.services.memory.crew_memory import CrewMemoryService
-            from src.services.execution.config.crew_config_builder import CrewConfigBuilder
-            from src.services.execution.config.embedder_config_builder import EmbedderConfigBuilder
             from src.schemas.memory_backend import MemoryBackendConfig
+            from src.services.execution.config.crew_config_builder import (
+                CrewConfigBuilder,
+            )
+            from src.services.execution.config.embedder_config_builder import (
+                EmbedderConfigBuilder,
+            )
+            from src.services.memory.crew_memory import CrewMemoryService
 
             user_token = getattr(group_context, "access_token", None)
 
@@ -1531,7 +1766,9 @@ class LightAgentService:
             mem_config: Dict[str, Any] = {
                 "group_id": group_id,
                 "session_id": getattr(config, "session_id", None),
-                "memory_workspace_scope": True if workspace_scope is None else bool(workspace_scope),
+                "memory_workspace_scope": (
+                    True if workspace_scope is None else bool(workspace_scope)
+                ),
                 "model": getattr(config, "model", None),
                 "name": "chat",
                 "execution_id": execution_id,
@@ -1548,7 +1785,9 @@ class LightAgentService:
 
             # Embedder (Databricks/Lakebase need a custom one; default → None).
             embedder_builder = EmbedderConfigBuilder(mem_config, user_token)
-            crew_kwargs, custom_embedder, _embedder_config = await embedder_builder.configure_embedder(crew_kwargs)
+            crew_kwargs, custom_embedder, _embedder_config = (
+                await embedder_builder.configure_embedder(crew_kwargs)
+            )
 
             # Backend config from DB → default (local SQLite) fallback.
             memory_backend_config = await memory_service.fetch_memory_backend_config()
@@ -1559,20 +1798,25 @@ class LightAgentService:
             memory_service.setup_storage_directory(crew_id, memory_backend_config)
 
             # "Disabled Configuration" → all memory types off → no memory.
-            if config_builder.check_memory_disabled_by_backend_config(memory_backend_config):
+            if config_builder.check_memory_disabled_by_backend_config(
+                memory_backend_config
+            ):
                 log("Memory backend is the 'Disabled Configuration' — no memory")
                 return None
 
             backend_type = memory_backend_config.get("backend_type")
             embedder_for_backend = (
-                custom_embedder if backend_type in ("databricks", "lakebase")
+                custom_embedder
+                if backend_type in ("databricks", "lakebase")
                 else crew_kwargs.get("embedder")
             )
             unified_storage = await memory_service.create_unified_storage(
                 memory_backend_config, crew_id, embedder_for_backend
             )
             memory_config = MemoryBackendConfig(**memory_backend_config)
-            memory_llm_override = await memory_service.resolve_memory_llm_override(memory_config)
+            memory_llm_override = await memory_service.resolve_memory_llm_override(
+                memory_config
+            )
 
             # Builds crew_kwargs['memory'] = Memory(...) AND sets agent.memory via
             # _attach_crew_memory_to_agents (it iterates crew_kwargs['agents']).
@@ -1591,10 +1835,15 @@ class LightAgentService:
             if attached not in (None, True, False):
                 scope = (
                     "session"
-                    if (mem_config["session_id"] and not mem_config["memory_workspace_scope"])
+                    if (
+                        mem_config["session_id"]
+                        and not mem_config["memory_workspace_scope"]
+                    )
                     else "workspace"
                 )
-                log(f"Memory enabled ({backend_type}, {scope} scope) — recall + persist")
+                log(
+                    f"Memory enabled ({backend_type}, {scope} scope) — recall + persist"
+                )
                 return attached
             else:
                 # Report the reason the memory layer RECORDED, not a guess.

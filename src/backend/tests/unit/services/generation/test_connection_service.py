@@ -16,20 +16,20 @@ Tests cover:
 import json
 import os
 import sys
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.generation.connections import ConnectionService
-from src.utils.model_config import DEFAULT_ENGINE_MODEL
+import pytest
+
 from src.schemas.connection import (
+    Agent,
     ConnectionRequest,
     ConnectionResponse,
-    Agent,
     Task,
     TaskContext,
 )
-
+from src.services.generation.connections import ConnectionService
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -37,12 +37,23 @@ from src.schemas.connection import (
 
 _SENTINEL = object()
 
-def _make_agent(name="Agent1", role="Researcher", goal="Research", backstory=None, tools=None):
+
+def _make_agent(
+    name="Agent1", role="Researcher", goal="Research", backstory=None, tools=None
+):
     return Agent(name=name, role=role, goal=goal, backstory=backstory, tools=tools)
 
 
-def _make_task(name="Task1", description="Do stuff", expected_output=None, tools=None, context=None):
-    return Task(name=name, description=description, expected_output=expected_output, tools=tools, context=context)
+def _make_task(
+    name="Task1", description="Do stuff", expected_output=None, tools=None, context=None
+):
+    return Task(
+        name=name,
+        description=description,
+        expected_output=expected_output,
+        tools=tools,
+        context=context,
+    )
 
 
 def _make_request(agents=None, tasks=None, model=_SENTINEL, instructions=None):
@@ -72,9 +83,6 @@ def _valid_response_data(task_names=None, agent_name="Agent1"):
     }
 
 
-
-
-
 # Patch paths -- local imports in generate_connections use these modules
 _AUTH_PATCH = "src.utils.databricks_auth.get_auth_context"
 _LLM_MANAGER_PATCH = "src.services.generation.connections.LLMManager"
@@ -87,6 +95,7 @@ _AIOHTTP_SESSION_PATCH = "aiohttp.ClientSession"
 # ---------------------------------------------------------------------------
 # TestInit
 # ---------------------------------------------------------------------------
+
 
 class TestInit:
     def test_init_with_session(self):
@@ -102,6 +111,7 @@ class TestInit:
 # ---------------------------------------------------------------------------
 # TestLogLLMInteraction
 # ---------------------------------------------------------------------------
+
 
 class TestLogLLMInteraction:
 
@@ -144,6 +154,7 @@ class TestLogLLMInteraction:
 # ---------------------------------------------------------------------------
 # TestFormatAgentsAndTasks
 # ---------------------------------------------------------------------------
+
 
 class TestFormatAgentsAndTasks:
 
@@ -239,6 +250,7 @@ class TestFormatAgentsAndTasks:
 # TestValidateResponse
 # ---------------------------------------------------------------------------
 
+
 class TestValidateResponse:
 
     @pytest.mark.asyncio
@@ -297,9 +309,7 @@ class TestValidateResponse:
         svc = ConnectionService()
         request = _make_request()
         data = {
-            "assignments": [
-                {"agent_name": "Agent1", "tasks": [{"reasoning": "ok"}]}
-            ],
+            "assignments": [{"agent_name": "Agent1", "tasks": [{"reasoning": "ok"}]}],
             "dependencies": [],
         }
         with pytest.raises(ValueError, match="Invalid task structure"):
@@ -326,7 +336,10 @@ class TestValidateResponse:
         # Only T1 assigned, T2 missing
         data = {
             "assignments": [
-                {"agent_name": "Agent1", "tasks": [{"task_name": "T1", "reasoning": "ok"}]}
+                {
+                    "agent_name": "Agent1",
+                    "tasks": [{"task_name": "T1", "reasoning": "ok"}],
+                }
             ],
             "dependencies": [],
         }
@@ -340,8 +353,14 @@ class TestValidateResponse:
         request = _make_request(tasks=tasks)
         data = {
             "assignments": [
-                {"agent_name": "Agent1", "tasks": [{"task_name": "T1", "reasoning": "ok"}]},
-                {"agent_name": "Agent2", "tasks": [{"task_name": "T2", "reasoning": "ok"}]},
+                {
+                    "agent_name": "Agent1",
+                    "tasks": [{"task_name": "T1", "reasoning": "ok"}],
+                },
+                {
+                    "agent_name": "Agent2",
+                    "tasks": [{"task_name": "T2", "reasoning": "ok"}],
+                },
             ],
             "dependencies": [],
         }
@@ -353,9 +372,7 @@ class TestValidateResponse:
         svc = ConnectionService()
         request = _make_request()
         data = {
-            "assignments": [
-                {"agent_name": "Agent1", "tasks": ["not a dict"]}
-            ],
+            "assignments": [{"agent_name": "Agent1", "tasks": ["not a dict"]}],
             "dependencies": [],
         }
         with pytest.raises(ValueError, match="Invalid task structure"):
@@ -377,6 +394,7 @@ class TestValidateResponse:
 # TestGenerateConnections
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateConnections:
 
     @pytest.mark.asyncio
@@ -384,13 +402,17 @@ class TestGenerateConnections:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_happy_path_no_session(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_happy_path_no_session(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """Test generate_connections with no session (static fallback)."""
         svc = ConnectionService(session=None)
         request = _make_request()
 
         # Template static method -- no session means TemplateService.get_template_content is called as static
-        MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="system prompt"
+        )
 
         # LLM
         response_data = _valid_response_data()
@@ -408,7 +430,9 @@ class TestGenerateConnections:
     @patch(_LLM_MANAGER_PATCH)
     @patch(_JSON_PARSER_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_happy_path_with_session(self, mock_auth, mock_parser, MockLLMManager):
+    async def test_happy_path_with_session(
+        self, mock_auth, mock_parser, MockLLMManager
+    ):
         """Test generate_connections with a session (instance template lookup)."""
         svc = ConnectionService(session=MagicMock())
         request = _make_request()
@@ -416,14 +440,20 @@ class TestGenerateConnections:
         response_data = _valid_response_data()
 
         # Patch the template repository and service at their real import locations
-        with patch(_TEMPLATE_REPO_PATCH) as MockRepo, \
-             patch(_TEMPLATE_SVC_PATCH) as MockTplSvc:
+        with (
+            patch(_TEMPLATE_REPO_PATCH) as MockRepo,
+            patch(_TEMPLATE_SVC_PATCH) as MockTplSvc,
+        ):
 
             mock_tpl_instance = MagicMock()
-            mock_tpl_instance.get_template_content = AsyncMock(return_value="system prompt")
+            mock_tpl_instance.get_template_content = AsyncMock(
+                return_value="system prompt"
+            )
             MockTplSvc.return_value = mock_tpl_instance
 
-            MockLLMManager.completion = AsyncMock(return_value=json.dumps(response_data))
+            MockLLMManager.completion = AsyncMock(
+                return_value=json.dumps(response_data)
+            )
             mock_parser.return_value = response_data
 
             result = await svc.generate_connections(request)
@@ -435,7 +465,9 @@ class TestGenerateConnections:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_template_not_found_raises(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_template_not_found_raises(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """Raises ValueError when template is not found."""
         svc = ConnectionService(session=None)
         request = _make_request()
@@ -450,7 +482,9 @@ class TestGenerateConnections:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_empty_template_raises(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_empty_template_raises(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """Raises ValueError when template content is empty string."""
         svc = ConnectionService(session=None)
         request = _make_request()
@@ -465,16 +499,21 @@ class TestGenerateConnections:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_additional_instructions_appended(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_additional_instructions_appended(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """When request has instructions, they are included in user message."""
         svc = ConnectionService(session=None)
         request = _make_request(instructions="Focus on performance")
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="system prompt"
+        )
 
         response_data = _valid_response_data()
 
         captured_kwargs = {}
+
         async def capture_completion(**kwargs):
             captured_kwargs.update(kwargs)
             return json.dumps(response_data)
@@ -494,12 +533,16 @@ class TestGenerateConnections:
     @patch(_LLM_MANAGER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_llm_completion_error_raises_valueerror(self, mock_auth, MockTemplateService, MockLLMManager):
+    async def test_llm_completion_error_raises_valueerror(
+        self, mock_auth, MockTemplateService, MockLLMManager
+    ):
         """When LLM completion raises, it becomes a ValueError."""
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="system prompt"
+        )
         MockLLMManager.completion = AsyncMock(side_effect=RuntimeError("API down"))
 
         with pytest.raises(ValueError, match="Failed to generate connections"):
@@ -510,12 +553,16 @@ class TestGenerateConnections:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_json_parsing_error_raises_valueerror(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_json_parsing_error_raises_valueerror(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """When JSON parsing fails, a ValueError is raised."""
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="system prompt"
+        )
         MockLLMManager.completion = AsyncMock(return_value="not json at all")
         mock_parser.side_effect = ValueError("Cannot parse")
 
@@ -527,18 +574,25 @@ class TestGenerateConnections:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_validation_failure_raises_valueerror(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_validation_failure_raises_valueerror(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """When _validate_response raises ValueError, it is re-raised."""
         svc = ConnectionService(session=None)
         tasks = [_make_task(name="T1"), _make_task(name="T2")]
         request = _make_request(tasks=tasks)
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="system prompt"
+        )
 
         # Only assign T1, leave T2 unassigned
         bad_data = {
             "assignments": [
-                {"agent_name": "Agent1", "tasks": [{"task_name": "T1", "reasoning": "ok"}]}
+                {
+                    "agent_name": "Agent1",
+                    "tasks": [{"task_name": "T1", "reasoning": "ok"}],
+                }
             ],
             "dependencies": [],
         }
@@ -553,12 +607,16 @@ class TestGenerateConnections:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_markdown_json_extraction(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_markdown_json_extraction(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """Content wrapped in ```json ``` is stripped before parsing."""
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="system prompt"
+        )
 
         response_data = _valid_response_data()
         markdown_content = f"```json\n{json.dumps(response_data)}\n```"
@@ -577,12 +635,16 @@ class TestGenerateConnections:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_generic_code_block_extraction(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_generic_code_block_extraction(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """Content wrapped in generic ``` ``` blocks is also stripped."""
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="system prompt"
+        )
 
         response_data = _valid_response_data()
         # generic code block (no 'json' keyword)
@@ -599,13 +661,17 @@ class TestGenerateConnections:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_model_default_no_env_no_request(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_model_default_no_env_no_request(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """When request.model is empty and no env var, defaults to the engine model."""
         svc = ConnectionService(session=None)
         # Use empty string model to trigger default logic
         request = _make_request(model="")
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="system prompt"
+        )
 
         response_data = _valid_response_data()
         captured_model = []
@@ -630,13 +696,17 @@ class TestGenerateConnections:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_model_from_env_var(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_model_from_env_var(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """When request.model is empty, CONNECTION_MODEL env var is used."""
         svc = ConnectionService(session=None)
         # Empty string model triggers fallback to env var
         request = _make_request(model="")
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="system prompt"
+        )
 
         response_data = _valid_response_data()
         captured_model = []
@@ -657,7 +727,9 @@ class TestGenerateConnections:
     @patch(_LLM_MANAGER_PATCH)
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
-    async def test_auth_method_does_not_change_the_default_model(self, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_auth_method_does_not_change_the_default_model(
+        self, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """The default no longer branches on auth method.
 
         It used to: gpt-4o-mini normally, databricks-llama-4-maverick under
@@ -668,7 +740,9 @@ class TestGenerateConnections:
         # Empty string model triggers default logic
         request = _make_request(model="")
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="system prompt"
+        )
 
         response_data = _valid_response_data()
         captured_model = []
@@ -692,13 +766,17 @@ class TestGenerateConnections:
     @patch(_LLM_MANAGER_PATCH)
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
-    async def test_auth_context_exception_falls_back(self, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_auth_context_exception_falls_back(
+        self, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """When get_auth_context raises, the default model is still the engine model."""
         svc = ConnectionService(session=None)
         # Empty string model triggers default logic
         request = _make_request(model="")
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="system prompt"
+        )
 
         response_data = _valid_response_data()
         captured_model = []
@@ -710,7 +788,9 @@ class TestGenerateConnections:
         MockLLMManager.completion = capture_completion
         mock_parser.return_value = response_data
 
-        with patch(_AUTH_PATCH, new_callable=AsyncMock, side_effect=ImportError("no module")):
+        with patch(
+            _AUTH_PATCH, new_callable=AsyncMock, side_effect=ImportError("no module")
+        ):
             os.environ.pop("CONNECTION_MODEL", None)
             result = await svc.generate_connections(request)
 
@@ -721,12 +801,16 @@ class TestGenerateConnections:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_request_model_overrides_default(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_request_model_overrides_default(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """When request.model is specified, it overrides all defaults."""
         svc = ConnectionService(session=None)
         request = _make_request(model="claude-3-opus")
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="system prompt"
+        )
 
         response_data = _valid_response_data()
         captured_model = []
@@ -747,16 +831,23 @@ class TestGenerateConnections:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_response_without_explanation(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_response_without_explanation(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """Response data without 'explanation' key still works (defaults to empty)."""
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="system prompt"
+        )
 
         response_data = {
             "assignments": [
-                {"agent_name": "Agent1", "tasks": [{"task_name": "Task1", "reasoning": "ok"}]}
+                {
+                    "agent_name": "Agent1",
+                    "tasks": [{"task_name": "Task1", "reasoning": "ok"}],
+                }
             ],
             "dependencies": [],
         }
@@ -771,6 +862,7 @@ class TestGenerateConnections:
 # ---------------------------------------------------------------------------
 # TestValidateApiKey
 # ---------------------------------------------------------------------------
+
 
 class TestValidateApiKey:
 
@@ -842,7 +934,9 @@ class TestValidateApiKey:
         svc = ConnectionService()
 
         mock_client_ctx = AsyncMock()
-        mock_client_ctx.__aenter__ = AsyncMock(side_effect=ConnectionError("no network"))
+        mock_client_ctx.__aenter__ = AsyncMock(
+            side_effect=ConnectionError("no network")
+        )
         mock_client_ctx.__aexit__ = AsyncMock(return_value=False)
 
         with patch(_AIOHTTP_SESSION_PATCH, return_value=mock_client_ctx):
@@ -855,6 +949,7 @@ class TestValidateApiKey:
 # ---------------------------------------------------------------------------
 # TestTestApiKeys
 # ---------------------------------------------------------------------------
+
 
 class TestTestApiKeys:
 
@@ -894,8 +989,11 @@ class TestTestApiKeys:
         svc = ConnectionService()
 
         # Remove all relevant keys
-        env_clean = {k: v for k, v in os.environ.items()
-                     if k not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY")}
+        env_clean = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY")
+        }
         with patch.dict(os.environ, env_clean, clear=True):
             results = await svc.test_api_keys()
 
@@ -910,8 +1008,11 @@ class TestTestApiKeys:
         svc.validate_api_key = AsyncMock(return_value=(False, "invalid key"))
 
         env = {"OPENAI_API_KEY": "sk-bad"}
-        env_clean = {k: v for k, v in os.environ.items()
-                     if k not in ("ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY")}
+        env_clean = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY")
+        }
         env_clean.update(env)
         with patch.dict(os.environ, env_clean, clear=True):
             results = await svc.test_api_keys()
@@ -924,8 +1025,11 @@ class TestTestApiKeys:
     async def test_python_info_populated(self):
         svc = ConnectionService()
 
-        env_clean = {k: v for k, v in os.environ.items()
-                     if k not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY")}
+        env_clean = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY")
+        }
         with patch.dict(os.environ, env_clean, clear=True):
             results = await svc.test_api_keys()
 
@@ -937,6 +1041,7 @@ class TestTestApiKeys:
 # ---------------------------------------------------------------------------
 # Edge cases and integration-like scenarios
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeCases:
 
@@ -967,12 +1072,16 @@ class TestEdgeCases:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_generate_connections_no_instructions(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_generate_connections_no_instructions(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """When request has no instructions, ADDITIONAL INSTRUCTIONS is not in the prompt."""
         svc = ConnectionService(session=None)
         request = _make_request(instructions=None)
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="system prompt")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="system prompt"
+        )
 
         response_data = _valid_response_data()
         captured_kwargs = {}
@@ -994,7 +1103,9 @@ class TestEdgeCases:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_generate_connections_calls_completion(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_generate_connections_calls_completion(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """Verify completion is called with the correct model."""
         svc = ConnectionService(session=None)
         request = _make_request(model="my-model")
@@ -1014,7 +1125,9 @@ class TestEdgeCases:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_generate_connections_completion_receives_expected_params(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_generate_connections_completion_receives_expected_params(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """Verify completion is called with temperature and max_tokens."""
         svc = ConnectionService(session=None)
         request = _make_request()
@@ -1058,12 +1171,16 @@ class TestEdgeCases:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_generate_connections_messages_structure(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_generate_connections_messages_structure(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """Verify messages contain system and user roles."""
         svc = ConnectionService(session=None)
         request = _make_request()
 
-        MockTemplateService.get_template_content = AsyncMock(return_value="sys prompt text")
+        MockTemplateService.get_template_content = AsyncMock(
+            return_value="sys prompt text"
+        )
 
         response_data = _valid_response_data()
         captured = {}
@@ -1090,7 +1207,9 @@ class TestEdgeCases:
     @patch(_JSON_PARSER_PATCH)
     @patch(_TEMPLATE_SVC_PATCH)
     @patch(_AUTH_PATCH, new_callable=AsyncMock, return_value=None)
-    async def test_generate_connections_model_params_merged(self, mock_auth, MockTemplateService, mock_parser, MockLLMManager):
+    async def test_generate_connections_model_params_merged(
+        self, mock_auth, MockTemplateService, mock_parser, MockLLMManager
+    ):
         """Verify completion receives the expected parameters."""
         svc = ConnectionService(session=None)
         request = _make_request()
@@ -1121,9 +1240,7 @@ class TestEdgeCases:
         tasks = [_make_task(name="MissingTask")]
         request = _make_request(tasks=tasks)
         data = {
-            "assignments": [
-                {"agent_name": "Agent1", "tasks": []}
-            ],
+            "assignments": [{"agent_name": "Agent1", "tasks": []}],
             "dependencies": [],
         }
         with pytest.raises(ValueError) as exc_info:

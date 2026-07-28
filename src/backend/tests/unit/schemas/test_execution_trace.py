@@ -4,13 +4,18 @@ Unit tests for execution trace schemas.
 Tests the functionality of Pydantic schemas for execution trace operations
 including validation, serialization, and field constraints.
 """
-import pytest
+
 from datetime import datetime, timezone
+
+import pytest
 from pydantic import ValidationError
 
 from src.schemas.execution_trace import (
-    ExecutionTraceItem, ExecutionTraceList, ExecutionTraceResponseByRunId,
-    ExecutionTraceResponseByJobId, DeleteTraceResponse
+    DeleteTraceResponse,
+    ExecutionTraceItem,
+    ExecutionTraceList,
+    ExecutionTraceResponseByJobId,
+    ExecutionTraceResponseByRunId,
 )
 
 
@@ -55,7 +60,7 @@ class TestExecutionTraceItem:
             "parent_span_id": "span_parent_001",
             "span_name": "execute_task",
             "status_code": "OK",
-            "duration_ms": 1500
+            "duration_ms": 1500,
         }
         trace = ExecutionTraceItem(**trace_data)
         assert trace.id == 456
@@ -71,7 +76,10 @@ class TestExecutionTraceItem:
         assert trace.event_context == "task_execution"
         assert trace.event_type == "task_start"
         assert trace.output == {"result": "Task initiated successfully"}
-        assert trace.trace_metadata == {"task_name": "analyze_data", "task_id": "task_123"}
+        assert trace.trace_metadata == {
+            "task_name": "analyze_data",
+            "task_id": "task_123",
+        }
         assert trace.span_id == "span_abc123"
         assert trace.trace_id == "trace_xyz789"
         assert trace.parent_span_id == "span_parent_001"
@@ -85,22 +93,29 @@ class TestExecutionTraceItem:
             ExecutionTraceItem(run_id=123)
 
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "id" in missing_fields
 
     def test_execution_trace_item_various_event_types(self):
         """Test ExecutionTraceItem with various event types."""
         event_types = [
-            "task_start", "task_complete", "task_error",
-            "agent_start", "agent_complete", "agent_error",
-            "tool_call", "tool_response", "llm_request", "llm_response"
+            "task_start",
+            "task_complete",
+            "task_error",
+            "agent_start",
+            "agent_complete",
+            "agent_error",
+            "tool_call",
+            "tool_response",
+            "llm_request",
+            "llm_response",
         ]
 
         for event_type in event_types:
             trace = ExecutionTraceItem(
-                id=1,
-                event_type=event_type,
-                event_source="test_source"
+                id=1, event_type=event_type, event_source="test_source"
             )
             assert trace.event_type == event_type
 
@@ -108,40 +123,27 @@ class TestExecutionTraceItem:
         """Test ExecutionTraceItem with various output types."""
         # Dict output
         trace_dict = ExecutionTraceItem(
-            id=1,
-            output={"result": "success", "data": [1, 2, 3]}
+            id=1, output={"result": "success", "data": [1, 2, 3]}
         )
         assert isinstance(trace_dict.output, dict)
         assert trace_dict.output["result"] == "success"
 
         # String output
-        trace_string = ExecutionTraceItem(
-            id=2,
-            output="Simple string output"
-        )
+        trace_string = ExecutionTraceItem(id=2, output="Simple string output")
         assert isinstance(trace_string.output, str)
         assert trace_string.output == "Simple string output"
 
         # List output
-        trace_list = ExecutionTraceItem(
-            id=3,
-            output=["item1", "item2", "item3"]
-        )
+        trace_list = ExecutionTraceItem(id=3, output=["item1", "item2", "item3"])
         assert isinstance(trace_list.output, list)
         assert len(trace_list.output) == 3
 
         # Number output
-        trace_number = ExecutionTraceItem(
-            id=4,
-            output=42
-        )
+        trace_number = ExecutionTraceItem(id=4, output=42)
         assert trace_number.output == 42
 
         # Boolean output
-        trace_bool = ExecutionTraceItem(
-            id=5,
-            output=True
-        )
+        trace_bool = ExecutionTraceItem(id=5, output=True)
         assert trace_bool.output is True
 
     def test_execution_trace_item_complex_data_structures(self):
@@ -153,15 +155,19 @@ class TestExecutionTraceItem:
                 "steps": [
                     {"step": 1, "action": "load_data", "params": {"source": "db"}},
                     {"step": 2, "action": "clean_data", "params": {"method": "pandas"}},
-                    {"step": 3, "action": "analyze", "params": {"model": "linear_regression"}}
-                ]
+                    {
+                        "step": 3,
+                        "action": "analyze",
+                        "params": {"model": "linear_regression"},
+                    },
+                ],
             },
             "execution_context": {
                 "user_id": "user_123",
                 "session_id": "session_456",
                 "timestamp": "2023-01-01T12:00:00Z",
-                "environment": "production"
-            }
+                "environment": "production",
+            },
         }
 
         complex_output = {
@@ -169,25 +175,23 @@ class TestExecutionTraceItem:
                 "status": "completed",
                 "duration_ms": 15000,
                 "steps_completed": 3,
-                "errors": []
+                "errors": [],
             },
             "results": {
                 "rows_processed": 10000,
                 "data_quality_score": 0.95,
                 "model_accuracy": 0.87,
-                "predictions": [0.1, 0.3, 0.7, 0.9]
+                "predictions": [0.1, 0.3, 0.7, 0.9],
             },
             "metadata": {
                 "memory_usage_mb": 512,
                 "cpu_time_ms": 8000,
-                "io_operations": 25
-            }
+                "io_operations": 25,
+            },
         }
 
         trace = ExecutionTraceItem(
-            id=999,
-            trace_metadata=complex_metadata,
-            output=complex_output
+            id=999, trace_metadata=complex_metadata, output=complex_output
         )
 
         assert trace.trace_metadata["workflow"]["name"] == "Data Processing Pipeline"
@@ -197,8 +201,8 @@ class TestExecutionTraceItem:
 
     def test_execution_trace_item_model_config(self):
         """Test ExecutionTraceItem model configuration."""
-        assert hasattr(ExecutionTraceItem, 'model_config')
-        assert ExecutionTraceItem.model_config.get('from_attributes') is True
+        assert hasattr(ExecutionTraceItem, "model_config")
+        assert ExecutionTraceItem.model_config.get("from_attributes") is True
 
     def test_execution_trace_item_datetime_handling(self):
         """Test ExecutionTraceItem with datetime handling."""
@@ -206,17 +210,11 @@ class TestExecutionTraceItem:
         iso_timestamp = "2023-01-01T12:00:00"
 
         # Test with datetime objects
-        trace_datetime = ExecutionTraceItem(
-            id=1,
-            created_at=now
-        )
+        trace_datetime = ExecutionTraceItem(id=1, created_at=now)
         assert isinstance(trace_datetime.created_at, datetime)
 
         # Test with ISO string conversion
-        trace_iso = ExecutionTraceItem(
-            id=2,
-            created_at=iso_timestamp
-        )
+        trace_iso = ExecutionTraceItem(id=2, created_at=iso_timestamp)
         assert isinstance(trace_iso.created_at, datetime)
 
     def test_execution_trace_item_otel_span_fields(self):
@@ -228,7 +226,7 @@ class TestExecutionTraceItem:
             parent_span_id="span_parent_001",
             span_name="crew_kickoff",
             status_code="OK",
-            duration_ms=5000
+            duration_ms=5000,
         )
         assert trace.span_id == "span_001"
         assert trace.trace_id == "trace_001"
@@ -240,10 +238,7 @@ class TestExecutionTraceItem:
     def test_execution_trace_item_trace_metadata(self):
         """Test ExecutionTraceItem with trace_metadata field."""
         metadata = {"task_id": "task_001", "agent_role": "researcher", "retry_count": 2}
-        trace = ExecutionTraceItem(
-            id=1,
-            trace_metadata=metadata
-        )
+        trace = ExecutionTraceItem(id=1, trace_metadata=metadata)
         assert trace.trace_metadata == metadata
         assert trace.trace_metadata["task_id"] == "task_001"
         assert trace.trace_metadata["retry_count"] == 2
@@ -254,12 +249,7 @@ class TestExecutionTraceList:
 
     def test_valid_execution_trace_list_empty(self):
         """Test ExecutionTraceList with empty traces list."""
-        list_data = {
-            "traces": [],
-            "total": 0,
-            "limit": 10,
-            "offset": 0
-        }
+        list_data = {"traces": [], "total": 0, "limit": 10, "offset": 0}
         trace_list = ExecutionTraceList(**list_data)
         assert trace_list.traces == []
         assert trace_list.total == 0
@@ -271,31 +261,17 @@ class TestExecutionTraceList:
         now = datetime.now()
         traces = [
             ExecutionTraceItem(
-                id=1,
-                job_id="exec_001",
-                event_type="task_start",
-                created_at=now
+                id=1, job_id="exec_001", event_type="task_start", created_at=now
             ),
             ExecutionTraceItem(
-                id=2,
-                job_id="exec_001",
-                event_type="task_complete",
-                created_at=now
+                id=2, job_id="exec_001", event_type="task_complete", created_at=now
             ),
             ExecutionTraceItem(
-                id=3,
-                job_id="exec_002",
-                event_type="agent_start",
-                created_at=now
-            )
+                id=3, job_id="exec_002", event_type="agent_start", created_at=now
+            ),
         ]
 
-        list_data = {
-            "traces": traces,
-            "total": 100,
-            "limit": 3,
-            "offset": 0
-        }
+        list_data = {"traces": traces, "total": 100, "limit": 3, "offset": 0}
         trace_list = ExecutionTraceList(**list_data)
         assert len(trace_list.traces) == 3
         assert trace_list.total == 100
@@ -310,19 +286,16 @@ class TestExecutionTraceList:
         required_fields = ["traces", "total", "limit", "offset"]
 
         for missing_field in required_fields:
-            list_data = {
-                "traces": [],
-                "total": 0,
-                "limit": 10,
-                "offset": 0
-            }
+            list_data = {"traces": [], "total": 0, "limit": 10, "offset": 0}
             del list_data[missing_field]
 
             with pytest.raises(ValidationError) as exc_info:
                 ExecutionTraceList(**list_data)
 
             errors = exc_info.value.errors()
-            missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+            missing_fields = [
+                error["loc"][0] for error in errors if error["type"] == "missing"
+            ]
             assert missing_field in missing_fields
 
     def test_execution_trace_list_pagination_scenarios(self):
@@ -331,29 +304,20 @@ class TestExecutionTraceList:
 
         # First page
         first_page = ExecutionTraceList(
-            traces=[base_trace],
-            total=50,
-            limit=10,
-            offset=0
+            traces=[base_trace], total=50, limit=10, offset=0
         )
         assert first_page.offset == 0
         assert first_page.limit == 10
 
         # Middle page
         middle_page = ExecutionTraceList(
-            traces=[base_trace],
-            total=50,
-            limit=10,
-            offset=20
+            traces=[base_trace], total=50, limit=10, offset=20
         )
         assert middle_page.offset == 20
 
         # Last page with fewer items
         last_page = ExecutionTraceList(
-            traces=[base_trace],
-            total=45,
-            limit=10,
-            offset=40
+            traces=[base_trace], total=45, limit=10, offset=40
         )
         assert last_page.total == 45
         assert last_page.offset == 40
@@ -367,23 +331,14 @@ class TestExecutionTraceResponseByRunId:
         now = datetime.now()
         traces = [
             ExecutionTraceItem(
-                id=1,
-                run_id=123,
-                event_type="execution_start",
-                created_at=now
+                id=1, run_id=123, event_type="execution_start", created_at=now
             ),
             ExecutionTraceItem(
-                id=2,
-                run_id=123,
-                event_type="task_start",
-                created_at=now
-            )
+                id=2, run_id=123, event_type="task_start", created_at=now
+            ),
         ]
 
-        response_data = {
-            "run_id": 123,
-            "traces": traces
-        }
+        response_data = {"run_id": 123, "traces": traces}
         response = ExecutionTraceResponseByRunId(**response_data)
         assert response.run_id == 123
         assert len(response.traces) == 2
@@ -396,22 +351,23 @@ class TestExecutionTraceResponseByRunId:
         with pytest.raises(ValidationError) as exc_info:
             ExecutionTraceResponseByRunId(traces=[])
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "run_id" in missing_fields
 
         # Missing traces
         with pytest.raises(ValidationError) as exc_info:
             ExecutionTraceResponseByRunId(run_id=123)
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "traces" in missing_fields
 
     def test_execution_trace_response_by_run_id_empty_traces(self):
         """Test ExecutionTraceResponseByRunId with empty traces."""
-        response = ExecutionTraceResponseByRunId(
-            run_id=456,
-            traces=[]
-        )
+        response = ExecutionTraceResponseByRunId(run_id=456, traces=[])
         assert response.run_id == 456
         assert response.traces == []
 
@@ -424,29 +380,20 @@ class TestExecutionTraceResponseByJobId:
         now = datetime.now()
         traces = [
             ExecutionTraceItem(
-                id=1,
-                job_id="exec_job_001",
-                event_type="workflow_start",
-                created_at=now
+                id=1, job_id="exec_job_001", event_type="workflow_start", created_at=now
             ),
             ExecutionTraceItem(
-                id=2,
-                job_id="exec_job_001",
-                event_type="agent_created",
-                created_at=now
+                id=2, job_id="exec_job_001", event_type="agent_created", created_at=now
             ),
             ExecutionTraceItem(
                 id=3,
                 job_id="exec_job_001",
                 event_type="workflow_complete",
-                created_at=now
-            )
+                created_at=now,
+            ),
         ]
 
-        response_data = {
-            "job_id": "exec_job_001",
-            "traces": traces
-        }
+        response_data = {"job_id": "exec_job_001", "traces": traces}
         response = ExecutionTraceResponseByJobId(**response_data)
         assert response.job_id == "exec_job_001"
         assert len(response.traces) == 3
@@ -458,22 +405,23 @@ class TestExecutionTraceResponseByJobId:
         with pytest.raises(ValidationError) as exc_info:
             ExecutionTraceResponseByJobId(traces=[])
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "job_id" in missing_fields
 
         # Missing traces
         with pytest.raises(ValidationError) as exc_info:
             ExecutionTraceResponseByJobId(job_id="test")
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "traces" in missing_fields
 
     def test_execution_trace_response_by_job_id_empty_traces(self):
         """Test ExecutionTraceResponseByJobId with empty traces."""
-        response = ExecutionTraceResponseByJobId(
-            job_id="exec_empty_001",
-            traces=[]
-        )
+        response = ExecutionTraceResponseByJobId(job_id="exec_empty_001", traces=[])
         assert response.job_id == "exec_empty_001"
         assert response.traces == []
 
@@ -485,7 +433,7 @@ class TestDeleteTraceResponse:
         """Test DeleteTraceResponse for single trace deletion."""
         response_data = {
             "message": "Trace deleted successfully",
-            "deleted_trace_id": 123
+            "deleted_trace_id": 123,
         }
         response = DeleteTraceResponse(**response_data)
         assert response.message == "Trace deleted successfully"
@@ -496,7 +444,7 @@ class TestDeleteTraceResponse:
         """Test DeleteTraceResponse for bulk trace deletion."""
         response_data = {
             "message": "All traces for execution deleted",
-            "deleted_traces": 25
+            "deleted_traces": 25,
         }
         response = DeleteTraceResponse(**response_data)
         assert response.message == "All traces for execution deleted"
@@ -509,7 +457,9 @@ class TestDeleteTraceResponse:
             DeleteTraceResponse(deleted_trace_id=123)
 
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "message" in missing_fields
 
     def test_delete_trace_response_minimal(self):
@@ -537,7 +487,7 @@ class TestExecutionTraceSchemaIntegration:
                 event_source="workflow_engine",
                 event_type="execution_start",
                 trace_metadata={"workflow_id": "wf_001", "user_id": "user_123"},
-                output={"status": "started", "execution_id": "exec_workflow_001"}
+                output={"status": "started", "execution_id": "exec_workflow_001"},
             ),
             ExecutionTraceItem(
                 id=2,
@@ -547,7 +497,7 @@ class TestExecutionTraceSchemaIntegration:
                 event_source="agent_manager",
                 event_type="agent_created",
                 trace_metadata={"agent_type": "data_analyst"},
-                output={"agent_id": "agent_001", "status": "ready"}
+                output={"agent_id": "agent_001", "status": "ready"},
             ),
             ExecutionTraceItem(
                 id=3,
@@ -557,7 +507,7 @@ class TestExecutionTraceSchemaIntegration:
                 event_source="task_executor",
                 event_type="task_start",
                 trace_metadata={"task_name": "analyze_data", "agent_id": "agent_001"},
-                output={"task_id": "task_001", "status": "running"}
+                output={"task_id": "task_001", "status": "running"},
             ),
             ExecutionTraceItem(
                 id=4,
@@ -567,7 +517,10 @@ class TestExecutionTraceSchemaIntegration:
                 event_source="task_executor",
                 event_type="task_complete",
                 trace_metadata={"task_id": "task_001"},
-                output={"status": "completed", "result": {"insights": 3, "confidence": 0.85}}
+                output={
+                    "status": "completed",
+                    "result": {"insights": 3, "confidence": 0.85},
+                },
             ),
             ExecutionTraceItem(
                 id=5,
@@ -577,28 +530,23 @@ class TestExecutionTraceSchemaIntegration:
                 event_source="workflow_engine",
                 event_type="execution_complete",
                 trace_metadata={"execution_id": "exec_workflow_001"},
-                output={"status": "completed", "duration_ms": 15000}
-            )
+                output={"status": "completed", "duration_ms": 15000},
+            ),
         ]
 
         # Create trace list
         trace_list = ExecutionTraceList(
-            traces=workflow_traces,
-            total=5,
-            limit=10,
-            offset=0
+            traces=workflow_traces, total=5, limit=10, offset=0
         )
 
         # Create response by run_id
         response_by_run = ExecutionTraceResponseByRunId(
-            run_id=1001,
-            traces=workflow_traces
+            run_id=1001, traces=workflow_traces
         )
 
         # Create response by job_id
         response_by_job = ExecutionTraceResponseByJobId(
-            job_id="exec_workflow_001",
-            traces=workflow_traces
+            job_id="exec_workflow_001", traces=workflow_traces
         )
 
         # Verify workflow
@@ -608,7 +556,9 @@ class TestExecutionTraceSchemaIntegration:
         assert response_by_run.run_id == 1001
         assert response_by_job.job_id == "exec_workflow_001"
         assert all(trace.run_id == 1001 for trace in response_by_run.traces)
-        assert all(trace.job_id == "exec_workflow_001" for trace in response_by_job.traces)
+        assert all(
+            trace.job_id == "exec_workflow_001" for trace in response_by_job.traces
+        )
 
     def test_error_trace_workflow(self):
         """Test execution trace workflow with errors."""
@@ -624,7 +574,7 @@ class TestExecutionTraceSchemaIntegration:
                 event_source="workflow_engine",
                 event_type="execution_start",
                 trace_metadata={"workflow_id": "wf_error"},
-                output={"status": "started"}
+                output={"status": "started"},
             ),
             ExecutionTraceItem(
                 id=2,
@@ -634,8 +584,11 @@ class TestExecutionTraceSchemaIntegration:
                 event_source="agent_manager",
                 event_type="agent_error",
                 trace_metadata={"agent_type": "unreliable_agent"},
-                output={"error": "Failed to initialize agent", "error_code": "AGENT_INIT_FAILED"},
-                status_code="ERROR"
+                output={
+                    "error": "Failed to initialize agent",
+                    "error_code": "AGENT_INIT_FAILED",
+                },
+                status_code="ERROR",
             ),
             ExecutionTraceItem(
                 id=3,
@@ -646,14 +599,13 @@ class TestExecutionTraceSchemaIntegration:
                 event_type="execution_error",
                 trace_metadata={"execution_id": "exec_error_001"},
                 output={"status": "failed", "error": "Agent initialization failed"},
-                status_code="ERROR"
-            )
+                status_code="ERROR",
+            ),
         ]
 
         # Create error trace response
         error_response = ExecutionTraceResponseByJobId(
-            job_id="exec_error_001",
-            traces=error_traces
+            job_id="exec_error_001", traces=error_traces
         )
 
         # Verify error workflow
@@ -668,24 +620,21 @@ class TestExecutionTraceSchemaIntegration:
         """Test various trace deletion scenarios."""
         # Single trace deletion
         single_delete = DeleteTraceResponse(
-            message="Trace 123 deleted successfully",
-            deleted_trace_id=123
+            message="Trace 123 deleted successfully", deleted_trace_id=123
         )
         assert single_delete.deleted_trace_id == 123
         assert single_delete.deleted_traces is None
 
         # Bulk deletion by execution
         bulk_delete_execution = DeleteTraceResponse(
-            message="All traces for execution exec_001 deleted",
-            deleted_traces=15
+            message="All traces for execution exec_001 deleted", deleted_traces=15
         )
         assert bulk_delete_execution.deleted_traces == 15
         assert bulk_delete_execution.deleted_trace_id is None
 
         # Bulk deletion by time range
         bulk_delete_timerange = DeleteTraceResponse(
-            message="All traces older than 30 days deleted",
-            deleted_traces=500
+            message="All traces older than 30 days deleted", deleted_traces=500
         )
         assert bulk_delete_timerange.deleted_traces == 500
 
@@ -699,33 +648,24 @@ class TestExecutionTraceSchemaIntegration:
                 id=i,
                 job_id="exec_paginated_001",
                 event_type=f"event_{i}",
-                created_at=now
+                created_at=now,
             )
             for i in range(1, 101)  # 100 traces
         ]
 
         # First page
         first_page = ExecutionTraceList(
-            traces=all_traces[:10],  # First 10 traces
-            total=100,
-            limit=10,
-            offset=0
+            traces=all_traces[:10], total=100, limit=10, offset=0  # First 10 traces
         )
 
         # Middle page
         middle_page = ExecutionTraceList(
-            traces=all_traces[40:50],  # Traces 41-50
-            total=100,
-            limit=10,
-            offset=40
+            traces=all_traces[40:50], total=100, limit=10, offset=40  # Traces 41-50
         )
 
         # Last page
         last_page = ExecutionTraceList(
-            traces=all_traces[90:],  # Last 10 traces
-            total=100,
-            limit=10,
-            offset=90
+            traces=all_traces[90:], total=100, limit=10, offset=90  # Last 10 traces
         )
 
         # Verify pagination
@@ -749,55 +689,78 @@ class TestExecutionTraceSchemaIntegration:
         sequence_traces = [
             # Execution setup
             ExecutionTraceItem(
-                id=1, event_type="execution_init", event_source="scheduler",
-                created_at=now, trace_metadata={"priority": "high"}
+                id=1,
+                event_type="execution_init",
+                event_source="scheduler",
+                created_at=now,
+                trace_metadata={"priority": "high"},
             ),
             ExecutionTraceItem(
-                id=2, event_type="resource_allocation", event_source="resource_manager",
-                created_at=now, output={"allocated_memory_mb": 1024, "cpu_cores": 4}
+                id=2,
+                event_type="resource_allocation",
+                event_source="resource_manager",
+                created_at=now,
+                output={"allocated_memory_mb": 1024, "cpu_cores": 4},
             ),
-
             # Agent lifecycle
             ExecutionTraceItem(
-                id=3, event_type="agent_spawn", event_source="agent_factory",
-                created_at=now, output={"agent_count": 3}
+                id=3,
+                event_type="agent_spawn",
+                event_source="agent_factory",
+                created_at=now,
+                output={"agent_count": 3},
             ),
             ExecutionTraceItem(
-                id=4, event_type="agent_config", event_source="config_manager",
-                created_at=now, trace_metadata={"model": "gpt-4", "temperature": 0.7}
+                id=4,
+                event_type="agent_config",
+                event_source="config_manager",
+                created_at=now,
+                trace_metadata={"model": "gpt-4", "temperature": 0.7},
             ),
-
             # Task execution
             ExecutionTraceItem(
-                id=5, event_type="task_queue", event_source="task_scheduler",
-                created_at=now, output={"queued_tasks": 5}
+                id=5,
+                event_type="task_queue",
+                event_source="task_scheduler",
+                created_at=now,
+                output={"queued_tasks": 5},
             ),
             ExecutionTraceItem(
-                id=6, event_type="task_dispatch", event_source="task_scheduler",
-                created_at=now, output={"dispatched_tasks": 3, "pending_tasks": 2}
+                id=6,
+                event_type="task_dispatch",
+                event_source="task_scheduler",
+                created_at=now,
+                output={"dispatched_tasks": 3, "pending_tasks": 2},
             ),
-
             # Results processing
             ExecutionTraceItem(
-                id=7, event_type="result_aggregation", event_source="result_processor",
-                created_at=now, output={"processed_results": 3, "total_insights": 12}
+                id=7,
+                event_type="result_aggregation",
+                event_source="result_processor",
+                created_at=now,
+                output={"processed_results": 3, "total_insights": 12},
             ),
             ExecutionTraceItem(
-                id=8, event_type="execution_finalize", event_source="scheduler",
-                created_at=now, output={"status": "success", "total_duration_ms": 25000},
-                status_code="OK", duration_ms=25000
-            )
+                id=8,
+                event_type="execution_finalize",
+                event_source="scheduler",
+                created_at=now,
+                output={"status": "success", "total_duration_ms": 25000},
+                status_code="OK",
+                duration_ms=25000,
+            ),
         ]
 
         # Create trace response
         sequence_response = ExecutionTraceResponseByJobId(
-            job_id="exec_sequence_001",
-            traces=sequence_traces
+            job_id="exec_sequence_001", traces=sequence_traces
         )
 
         # Analyze sequence
         event_types = [trace.event_type for trace in sequence_response.traces]
-        event_sources = list(set(trace.event_source for trace in sequence_response.traces))
+        event_sources = list(
+            set(trace.event_source for trace in sequence_response.traces)
+        )
 
         # Verify sequence analysis
         assert len(sequence_response.traces) == 8
@@ -809,9 +772,13 @@ class TestExecutionTraceSchemaIntegration:
         assert "result_processor" in event_sources
 
         # Verify data flow
-        resource_trace = next(t for t in sequence_response.traces if t.event_type == "resource_allocation")
+        resource_trace = next(
+            t for t in sequence_response.traces if t.event_type == "resource_allocation"
+        )
         assert resource_trace.output["allocated_memory_mb"] == 1024
 
-        final_trace = next(t for t in sequence_response.traces if t.event_type == "execution_finalize")
+        final_trace = next(
+            t for t in sequence_response.traces if t.event_type == "execution_finalize"
+        )
         assert final_trace.output["status"] == "success"
         assert final_trace.duration_ms == 25000

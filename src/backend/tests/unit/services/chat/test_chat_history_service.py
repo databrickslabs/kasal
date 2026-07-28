@@ -5,21 +5,21 @@ empty group_ids, None group_context), and error propagation from the
 underlying repository layer.
 """
 
-import pytest
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from pydantic import ValidationError
 
-from src.services.chat.history import ChatHistoryService
 from src.schemas.chat_history import ChatHistoryResponse
+from src.services.chat.history import ChatHistoryService
 from src.utils.user_context import GroupContext
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_group_context(
     group_ids=None,
@@ -70,9 +70,7 @@ def _make_chat_history_row(
 def _build_service():
     """Instantiate ChatHistoryService with a mocked session and repository."""
     session = AsyncMock()
-    with patch(
-        "src.services.chat.history.ChatHistoryRepository"
-    ) as RepoClass:
+    with patch("src.services.chat.history.ChatHistoryRepository") as RepoClass:
         repo_mock = AsyncMock()
         RepoClass.return_value = repo_mock
         service = ChatHistoryService(session)
@@ -526,7 +524,12 @@ class TestGetGroupSessions:
         """Result from repository is returned as-is (list of dicts)."""
         svc, repo = _build_service()
         expected = [
-            {"session_id": "s1", "user_id": "u1", "latest_timestamp": datetime.utcnow(), "message_count": 3},
+            {
+                "session_id": "s1",
+                "user_id": "u1",
+                "latest_timestamp": datetime.utcnow(),
+                "message_count": 3,
+            },
         ]
         repo.get_sessions_by_group = AsyncMock(return_value=expected)
         ctx = _make_group_context()
@@ -541,7 +544,9 @@ class TestGetGroupSessions:
         repo.get_sessions_by_group = AsyncMock(return_value=[])
         ctx = _make_group_context()
 
-        await svc.get_group_sessions(page=1, per_page=5, user_id="u1", group_context=ctx)
+        await svc.get_group_sessions(
+            page=1, per_page=5, user_id="u1", group_context=ctx
+        )
 
         repo.get_sessions_by_group.assert_awaited_once_with(
             group_ids=ctx.group_ids,
@@ -606,8 +611,18 @@ class TestGetGroupSessions:
         """Multiple session dicts are returned without transformation."""
         svc, repo = _build_service()
         expected = [
-            {"session_id": "s1", "user_id": "u1", "latest_timestamp": datetime.utcnow(), "message_count": 5},
-            {"session_id": "s2", "user_id": "u2", "latest_timestamp": datetime.utcnow(), "message_count": 2},
+            {
+                "session_id": "s1",
+                "user_id": "u1",
+                "latest_timestamp": datetime.utcnow(),
+                "message_count": 5,
+            },
+            {
+                "session_id": "s2",
+                "user_id": "u2",
+                "latest_timestamp": datetime.utcnow(),
+                "message_count": 2,
+            },
         ]
         repo.get_sessions_by_group = AsyncMock(return_value=expected)
         ctx = _make_group_context()
@@ -780,6 +795,7 @@ class TestGenerateSessionId:
     def test_uuid_format(self):
         """Output matches 8-4-4-4-12 hex pattern."""
         import re
+
         svc, _ = _build_service()
         sid = svc.generate_session_id()
         pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
@@ -797,9 +813,7 @@ class TestInit:
     def test_repository_is_created(self):
         """ChatHistoryRepository is instantiated with the session."""
         session = AsyncMock()
-        with patch(
-            "src.services.chat.history.ChatHistoryRepository"
-        ) as RepoClass:
+        with patch("src.services.chat.history.ChatHistoryRepository") as RepoClass:
             repo_instance = AsyncMock()
             RepoClass.return_value = repo_instance
             svc = ChatHistoryService(session)
@@ -810,9 +824,7 @@ class TestInit:
     def test_session_stored(self):
         """The session is stored via BaseService.__init__."""
         session = AsyncMock()
-        with patch(
-            "src.services.chat.history.ChatHistoryRepository"
-        ):
+        with patch("src.services.chat.history.ChatHistoryRepository"):
             svc = ChatHistoryService(session)
             assert svc.session is session
 
@@ -1000,7 +1012,9 @@ class TestEdgeCases:
             )
 
     @pytest.mark.asyncio
-    async def test_save_message_without_no_group_context_data_dict_has_no_group_keys(self):
+    async def test_save_message_without_no_group_context_data_dict_has_no_group_keys(
+        self,
+    ):
         """When group_context is None, the dict passed to repository.create
         should NOT contain group_id or group_email keys."""
         svc, repo = _build_service()
@@ -1060,7 +1074,9 @@ class TestNamedSessions:
     @pytest.mark.asyncio
     async def test_create_named_session_with_group(self):
         svc, _ = _build_service()
-        svc.session_repository.create = AsyncMock(side_effect=lambda d: SimpleNamespace(**d))
+        svc.session_repository.create = AsyncMock(
+            side_effect=lambda d: SimpleNamespace(**d)
+        )
         ctx = _make_group_context()
 
         record = await svc.create_named_session(
@@ -1075,7 +1091,9 @@ class TestNamedSessions:
     @pytest.mark.asyncio
     async def test_create_named_session_generates_id_and_default_title(self):
         svc, _ = _build_service()
-        svc.session_repository.create = AsyncMock(side_effect=lambda d: SimpleNamespace(**d))
+        svc.session_repository.create = AsyncMock(
+            side_effect=lambda d: SimpleNamespace(**d)
+        )
 
         record = await svc.create_named_session(user_id="u@x.com", title="")
 
@@ -1099,7 +1117,9 @@ class TestNamedSessions:
     @pytest.mark.asyncio
     async def test_list_named_sessions_no_group_returns_empty(self):
         svc, _ = _build_service()
-        assert await svc.list_named_sessions(user_id="u@x.com", group_context=None) == []
+        assert (
+            await svc.list_named_sessions(user_id="u@x.com", group_context=None) == []
+        )
 
     @pytest.mark.asyncio
     async def test_rename_named_session(self):
@@ -1137,19 +1157,26 @@ class TestNamedSessions:
     async def test_save_message_touch_failure_does_not_break_save(self):
         svc, repo = _build_service()
         repo.create = AsyncMock(return_value=MagicMock())
-        svc.session_repository.touch = AsyncMock(side_effect=Exception("no session row"))
+        svc.session_repository.touch = AsyncMock(
+            side_effect=Exception("no session row")
+        )
         ctx = _make_group_context()
 
         result = await svc.save_message(
-            session_id="sess-1", user_id="u", message_type="user",
-            content="hi", group_context=ctx,
+            session_id="sess-1",
+            user_id="u",
+            message_type="user",
+            content="hi",
+            group_context=ctx,
         )
         assert result.content == "hi"
 
     @pytest.mark.asyncio
     async def test_delete_session_also_drops_named_row(self):
         svc, repo = _build_service()
-        repo.delete_session = AsyncMock(return_value=False)  # no messages (empty session)
+        repo.delete_session = AsyncMock(
+            return_value=False
+        )  # no messages (empty session)
         svc.session_repository.delete_by_id_and_group = AsyncMock(return_value=True)
         ctx = _make_group_context()
 
@@ -1167,7 +1194,9 @@ class TestNamedSessions:
         ctx = _make_group_context()
 
         result = await svc.update_message(
-            "msg-1", group_context=ctx, content="new content",
+            "msg-1",
+            group_context=ctx,
+            content="new content",
             generation_result={"k": "v"},
         )
 
@@ -1181,4 +1210,6 @@ class TestNamedSessions:
         repo.get_by_id_and_group = AsyncMock(return_value=None)
         ctx = _make_group_context()
 
-        assert await svc.update_message("missing", group_context=ctx, content="x") is None
+        assert (
+            await svc.update_message("missing", group_context=ctx, content="x") is None
+        )

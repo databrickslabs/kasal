@@ -1,8 +1,8 @@
 """Shared translators and resolvers"""
 
+from .dependencies import DependencyResolver
 from .filters import FilterResolver
 from .formula import FormulaTranslator
-from .dependencies import DependencyResolver
 
 __all__ = [
     "FilterResolver",

@@ -1,6 +1,7 @@
 """Unit tests for ValueNormalizer in metadata_reduction package."""
 
 import pytest
+
 from src.services.tools.metadata_reduction.value_normalizer import (
     ValueNormalizer,
 )
@@ -11,15 +12,21 @@ class TestDemonymStemMatch:
         self.normalizer = ValueNormalizer()
 
     def test_italian_to_italy(self):
-        result = self.normalizer._demonym_stem_match("Italian", ["Italy", "Austria", "Germany"])
+        result = self.normalizer._demonym_stem_match(
+            "Italian", ["Italy", "Austria", "Germany"]
+        )
         assert result == "Italy"
 
     def test_german_to_germany(self):
-        result = self.normalizer._demonym_stem_match("German", ["Italy", "Germany", "France"])
+        result = self.normalizer._demonym_stem_match(
+            "German", ["Italy", "Germany", "France"]
+        )
         assert result == "Germany"
 
     def test_japanese_to_japan(self):
-        result = self.normalizer._demonym_stem_match("Japanese", ["Japan", "China", "Korea"])
+        result = self.normalizer._demonym_stem_match(
+            "Japanese", ["Japan", "China", "Korea"]
+        )
         assert result == "Japan"
 
     def test_ambiguous_returns_none(self):
@@ -58,21 +65,15 @@ class TestTokenWordMatch:
         assert result is None
 
     def test_stopwords_filtered(self):
-        result = self.normalizer._token_word_match(
-            "and the of", ["Value A", "Value B"]
-        )
+        result = self.normalizer._token_word_match("and the of", ["Value A", "Value B"])
         assert result is None
 
     def test_short_tokens_filtered(self):
-        result = self.normalizer._token_word_match(
-            "ab cd", ["Something", "Another"]
-        )
+        result = self.normalizer._token_word_match("ab cd", ["Something", "Another"])
         assert result is None
 
     def test_ambiguous_returns_none(self):
-        result = self.normalizer._token_word_match(
-            "value", ["Value A", "Value B"]
-        )
+        result = self.normalizer._token_word_match("value", ["Value A", "Value B"])
         assert result is None
 
 
@@ -157,7 +158,11 @@ class TestCollectKnownValues:
 
     def test_collects_from_slicers(self):
         slicers = [
-            {"table": "Geography", "column": "Country", "values": ["Austria", "Germany"]},
+            {
+                "table": "Geography",
+                "column": "Country",
+                "values": ["Austria", "Germany"],
+            },
         ]
         values = self.normalizer._collect_known_values(
             "Geography", "Country", {}, slicers

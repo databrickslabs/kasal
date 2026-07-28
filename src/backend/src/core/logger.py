@@ -17,12 +17,32 @@ from typing import Optional
 
 # Standard Python LogRecord attributes that may legitimately be None
 # (e.g. exc_info, exc_text, stack_info) and should never be stripped.
-_STANDARD_LOG_RECORD_ATTRS = frozenset({
-    'args', 'created', 'exc_info', 'exc_text', 'filename', 'funcName',
-    'levelname', 'levelno', 'lineno', 'message', 'module', 'msg', 'msecs',
-    'name', 'pathname', 'process', 'processName', 'relativeCreated',
-    'stack_info', 'thread', 'threadName', 'taskName',
-})
+_STANDARD_LOG_RECORD_ATTRS = frozenset(
+    {
+        "args",
+        "created",
+        "exc_info",
+        "exc_text",
+        "filename",
+        "funcName",
+        "levelname",
+        "levelno",
+        "lineno",
+        "message",
+        "module",
+        "msg",
+        "msecs",
+        "name",
+        "pathname",
+        "process",
+        "processName",
+        "relativeCreated",
+        "stack_info",
+        "thread",
+        "threadName",
+        "taskName",
+    }
+)
 
 
 class _NoneAttributeFilter(logging.Filter):
@@ -39,7 +59,7 @@ class _NoneAttributeFilter(logging.Filter):
         for key in list(record.__dict__):
             if (
                 record.__dict__[key] is None
-                and not key.startswith('_')
+                and not key.startswith("_")
                 and key not in _STANDARD_LOG_RECORD_ATTRS
             ):
                 del record.__dict__[key]
@@ -48,15 +68,15 @@ class _NoneAttributeFilter(logging.Filter):
 
 class LoggerManager:
     """Manages domain-specific loggers with file and console output."""
-    
+
     _instance = None
     _initialized = False
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(LoggerManager, cls).__new__(cls)
         return cls._instance
-    
+
     def __init__(self):
         if not self._initialized:
             self._crew_logger = None
@@ -78,7 +98,7 @@ class LoggerManager:
             self._otel_logger_provider = None
             self._otel_handler = None
             self._initialized = True
-    
+
     @classmethod
     def get_instance(cls, log_dir: str = None):
         """Get or create a LoggerManager instance and initialize it with the given log directory."""
@@ -86,7 +106,7 @@ class LoggerManager:
         if log_dir:
             instance.initialize(log_dir)
         return instance
-    
+
     def initialize(self, log_dir: str = None):
         """Initialize all domain-specific loggers with both file and console handlers."""
         # Set up log directory - always prefer the environment variable if set
@@ -100,100 +120,134 @@ class LoggerManager:
             else:
                 # Default to backend/logs instead of backend/src/logs
                 self._log_dir = Path(__file__).parent.parent.parent / "logs"
-        
+
         # Ensure directory exists
         self._log_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Configure formatters for different domains
         formatters = {
-            'crew': logging.Formatter(
-                '[CREW] %(asctime)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
+            "crew": logging.Formatter(
+                "[CREW] %(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             ),
-            'flow': logging.Formatter(
-                '[FLOW] %(asctime)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
+            "flow": logging.Formatter(
+                "[FLOW] %(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             ),
-            'system': logging.Formatter(
-                '[SYSTEM] %(asctime)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
+            "system": logging.Formatter(
+                "[SYSTEM] %(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             ),
-            'llm': logging.Formatter(
-                '[LLM] %(asctime)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
+            "llm": logging.Formatter(
+                "[LLM] %(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             ),
-            'scheduler': logging.Formatter(
-                '[SCHEDULER] %(asctime)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
+            "scheduler": logging.Formatter(
+                "[SCHEDULER] %(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             ),
-            'api': logging.Formatter(
-                '[API] %(asctime)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
+            "api": logging.Formatter(
+                "[API] %(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             ),
-            'access': logging.Formatter(
-                '[ACCESS] %(asctime)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
+            "access": logging.Formatter(
+                "[ACCESS] %(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
             ),
-            'guardrails': logging.Formatter(
-                '[GUARDRAILS] %(asctime)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
+            "guardrails": logging.Formatter(
+                "[GUARDRAILS] %(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             ),
-            'databricks_vector_search': logging.Formatter(
-                '[DATABRICKS_VECTOR_SEARCH] %(asctime)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
+            "databricks_vector_search": logging.Formatter(
+                "[DATABRICKS_VECTOR_SEARCH] %(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             ),
-            'databricks_short_term': logging.Formatter(
-                '[DATABRICKS_SHORT_TERM] %(asctime)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
+            "databricks_short_term": logging.Formatter(
+                "[DATABRICKS_SHORT_TERM] %(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             ),
-            'databricks_long_term': logging.Formatter(
-                '[DATABRICKS_LONG_TERM] %(asctime)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
+            "databricks_long_term": logging.Formatter(
+                "[DATABRICKS_LONG_TERM] %(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             ),
-            'databricks_entity': logging.Formatter(
-                '[DATABRICKS_ENTITY] %(asctime)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
+            "databricks_entity": logging.Formatter(
+                "[DATABRICKS_ENTITY] %(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             ),
-            'documentation_embedding': logging.Formatter(
-                '[DOC_EMBEDDING] %(asctime)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
+            "documentation_embedding": logging.Formatter(
+                "[DOC_EMBEDDING] %(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
             ),
-            'knowledge_source': logging.Formatter(
-                '[KNOWLEDGE_SOURCE] %(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S.%f'
+            "knowledge_source": logging.Formatter(
+                "[KNOWLEDGE_SOURCE] %(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S.%f",
             ),
-            'database': logging.Formatter(
-                '[DB] %(asctime)s - %(levelname)s - %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S.%f'
-            )
+            "database": logging.Formatter(
+                "[DB] %(asctime)s - %(levelname)s - %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S.%f",
+            ),
         }
-        
+
         # Set up the uvicorn logger early
         # This helps prevent any stdout logging before our handlers are attached
         uvicorn_logger = logging.getLogger("uvicorn")
         uvicorn_logger.handlers = []
         uvicorn_logger.propagate = True
-        
+
         uvicorn_access_logger = logging.getLogger("uvicorn.access")
         uvicorn_access_logger.handlers = []
         uvicorn_access_logger.propagate = True
-        
+
         # Initialize each logger
-        self._crew_logger = self._setup_logger('crew', formatters['crew'])
-        self._flow_logger = self._setup_logger('flow', formatters['flow'])
-        self._system_logger = self._setup_logger('system', formatters['system'], suppress_stdout=True)
-        self._llm_logger = self._setup_logger('llm', formatters['llm'], suppress_stdout=True)
-        self._scheduler_logger = self._setup_logger('scheduler', formatters['scheduler'])
-        self._api_logger = self._setup_logger('api', formatters['api'])
-        self._access_logger = self._setup_logger('access', formatters['access'], suppress_stdout=True)
-        self._guardrails_logger = self._setup_logger('guardrails', formatters['guardrails'])
-        self._databricks_vector_search_logger = self._setup_logger('databricks_vector_search', formatters['databricks_vector_search'], suppress_stdout=True)
-        self._databricks_short_term_logger = self._setup_logger('databricks_short_term', formatters['databricks_short_term'], suppress_stdout=True)
-        self._databricks_long_term_logger = self._setup_logger('databricks_long_term', formatters['databricks_long_term'], suppress_stdout=True)
-        self._databricks_entity_logger = self._setup_logger('databricks_entity', formatters['databricks_entity'], suppress_stdout=True)
-        self._documentation_embedding_logger = self._setup_logger('documentation_embedding', formatters['documentation_embedding'], suppress_stdout=True)
-        self._knowledge_source_logger = self._setup_logger('knowledge_source', formatters['knowledge_source'], debug_level=True, suppress_stdout=True)
-        self._database_logger = self._setup_logger('database', formatters['database'], debug_level=True, suppress_stdout=True)
+        self._crew_logger = self._setup_logger("crew", formatters["crew"])
+        self._flow_logger = self._setup_logger("flow", formatters["flow"])
+        self._system_logger = self._setup_logger(
+            "system", formatters["system"], suppress_stdout=True
+        )
+        self._llm_logger = self._setup_logger(
+            "llm", formatters["llm"], suppress_stdout=True
+        )
+        self._scheduler_logger = self._setup_logger(
+            "scheduler", formatters["scheduler"]
+        )
+        self._api_logger = self._setup_logger("api", formatters["api"])
+        self._access_logger = self._setup_logger(
+            "access", formatters["access"], suppress_stdout=True
+        )
+        self._guardrails_logger = self._setup_logger(
+            "guardrails", formatters["guardrails"]
+        )
+        self._databricks_vector_search_logger = self._setup_logger(
+            "databricks_vector_search",
+            formatters["databricks_vector_search"],
+            suppress_stdout=True,
+        )
+        self._databricks_short_term_logger = self._setup_logger(
+            "databricks_short_term",
+            formatters["databricks_short_term"],
+            suppress_stdout=True,
+        )
+        self._databricks_long_term_logger = self._setup_logger(
+            "databricks_long_term",
+            formatters["databricks_long_term"],
+            suppress_stdout=True,
+        )
+        self._databricks_entity_logger = self._setup_logger(
+            "databricks_entity", formatters["databricks_entity"], suppress_stdout=True
+        )
+        self._documentation_embedding_logger = self._setup_logger(
+            "documentation_embedding",
+            formatters["documentation_embedding"],
+            suppress_stdout=True,
+        )
+        self._knowledge_source_logger = self._setup_logger(
+            "knowledge_source",
+            formatters["knowledge_source"],
+            debug_level=True,
+            suppress_stdout=True,
+        )
+        self._database_logger = self._setup_logger(
+            "database", formatters["database"], debug_level=True, suppress_stdout=True
+        )
 
         # Configure uvicorn access logging after all loggers are initialized
         self._configure_uvicorn_logging()
@@ -205,8 +259,10 @@ class LoggerManager:
             logging.getLogger().addHandler(self._otel_handler)
 
         # Log initialization success
-        self._system_logger.info(f"Logging system initialized. Log directory: {self._log_dir}")
-    
+        self._system_logger.info(
+            f"Logging system initialized. Log directory: {self._log_dir}"
+        )
+
     @property
     def log_dir(self) -> Path:
         """The one directory every log file goes in.
@@ -232,19 +288,30 @@ class LoggerManager:
         """Return all initialized domain loggers."""
         loggers = []
         for attr in [
-            '_crew_logger', '_flow_logger', '_system_logger', '_llm_logger',
-            '_scheduler_logger', '_api_logger', '_access_logger',
-            '_guardrails_logger', '_databricks_vector_search_logger',
-            '_databricks_short_term_logger', '_databricks_long_term_logger',
-            '_databricks_entity_logger', '_documentation_embedding_logger',
-            '_knowledge_source_logger', '_database_logger',
+            "_crew_logger",
+            "_flow_logger",
+            "_system_logger",
+            "_llm_logger",
+            "_scheduler_logger",
+            "_api_logger",
+            "_access_logger",
+            "_guardrails_logger",
+            "_databricks_vector_search_logger",
+            "_databricks_short_term_logger",
+            "_databricks_long_term_logger",
+            "_databricks_entity_logger",
+            "_documentation_embedding_logger",
+            "_knowledge_source_logger",
+            "_database_logger",
         ]:
             logger = getattr(self, attr, None)
             if logger is not None:
                 loggers.append(logger)
         return loggers
 
-    def enable_otel_app_telemetry(self, enabled: bool = True, log_level: str = "INFO") -> None:
+    def enable_otel_app_telemetry(
+        self, enabled: bool = True, log_level: str = "INFO"
+    ) -> None:
         """Enable or disable Databricks App Telemetry via OpenTelemetry (Preview).
 
         Called from the application lifespan after DB init, reading the
@@ -314,9 +381,7 @@ class LoggerManager:
                 logs_endpoint
                 and ("localhost" in logs_endpoint or "127.0.0.1" in logs_endpoint)
             )
-            is_http_scheme = bool(
-                logs_endpoint and logs_endpoint.startswith("http://")
-            )
+            is_http_scheme = bool(logs_endpoint and logs_endpoint.startswith("http://"))
             use_insecure = is_localhost or is_http_scheme
             exporter = OTLPLogExporter(endpoint=logs_endpoint, insecure=use_insecure)  # type: ignore[call-arg]
             provider = LoggerProvider(resource=resource)
@@ -377,7 +442,9 @@ class LoggerManager:
         level = getattr(logging, log_level.upper(), logging.INFO)
         self._otel_handler.setLevel(level)
         if self._system_logger:
-            self._system_logger.info(f"OTel App Telemetry log level changed to {log_level.upper()}")
+            self._system_logger.info(
+                f"OTel App Telemetry log level changed to {log_level.upper()}"
+            )
 
     def shutdown_otel_app_telemetry(self) -> None:
         """Shutdown the OTel App Telemetry provider, flushing pending logs."""
@@ -385,7 +452,9 @@ class LoggerManager:
             try:
                 self._otel_logger_provider.shutdown()
                 if self._system_logger:
-                    self._system_logger.info("Databricks App Telemetry (OTel) shutdown complete")
+                    self._system_logger.info(
+                        "Databricks App Telemetry (OTel) shutdown complete"
+                    )
             except Exception as e:
                 if self._system_logger:
                     self._system_logger.warning(
@@ -451,59 +520,67 @@ class LoggerManager:
         uvicorn_access_logger = logging.getLogger("uvicorn.access")
         uvicorn_access_logger.handlers = []
         uvicorn_access_logger.propagate = False
-        
+
         # Create a special filter to determine where to log
         class APIRequestFilter:
             def __init__(self, api_logger, access_logger):
                 self.api_logger = api_logger
                 self.access_logger = access_logger
-                
+
             def filter_and_log(self, record):
                 try:
-                    client_addr = getattr(record, 'client_addr', '-')
-                    status_code = getattr(record, 'status_code', '-')
-                    request_line = getattr(record, 'request_line', '-')
-                    
+                    client_addr = getattr(record, "client_addr", "-")
+                    status_code = getattr(record, "status_code", "-")
+                    request_line = getattr(record, "request_line", "-")
+
                     # Skip empty or placeholder requests
                     if request_line == "-":
                         return False
-                        
-                    msg = f"{client_addr} - \"{request_line}\" {status_code}"
-                    
+
+                    msg = f'{client_addr} - "{request_line}" {status_code}'
+
                     # Route API requests to the API log file
-                    if '/api/' in request_line:
+                    if "/api/" in request_line:
                         self.api_logger.info(msg)
                     else:
                         self.access_logger.info(msg)
-                    
+
                     # Filter out all messages to prevent them from going to console
                     return False
                 except Exception:
                     # In case of any error, let the record pass through (but this won't happen since we've removed default handlers)
                     return False
-        
+
         # Create and attach the filter
         api_request_filter = APIRequestFilter(self._api_logger, self._access_logger)
-        
+
         class UvicornAccessHandler(logging.Handler):
             def __init__(self, filter_func):
                 super().__init__()
                 self.filter_func = filter_func
-                
+
             def emit(self, record):
                 # Process the record with our filter/router
                 self.filter_func(record)
-        
+
         # Attach our handler to Uvicorn access logger
-        uvicorn_access_logger.addHandler(UvicornAccessHandler(api_request_filter.filter_and_log))
-        
+        uvicorn_access_logger.addHandler(
+            UvicornAccessHandler(api_request_filter.filter_and_log)
+        )
+
         # Also suppress other uvicorn loggers
         for logger_name in ["uvicorn", "uvicorn.error"]:
             logger = logging.getLogger(logger_name)
             logger.handlers = []
             logger.propagate = False
-    
-    def _setup_logger(self, name: str, formatter: logging.Formatter, suppress_stdout=False, debug_level=False) -> logging.Logger:
+
+    def _setup_logger(
+        self,
+        name: str,
+        formatter: logging.Formatter,
+        suppress_stdout=False,
+        debug_level=False,
+    ) -> logging.Logger:
         """Set up a specific logger with both file and console handlers."""
         logger = logging.getLogger(name)
 
@@ -521,52 +598,54 @@ class LoggerManager:
 
         logger.propagate = False
         logger.handlers = []  # Clear any existing handlers
-        
+
         # Create file handler
         file_handler = RotatingFileHandler(
             self._log_dir / f"{name}.log",
-            maxBytes=10*1024*1024,  # 10MB
+            maxBytes=10 * 1024 * 1024,  # 10MB
             backupCount=5,
-            encoding='utf-8'
+            encoding="utf-8",
         )
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
-        
+
         # Create console handler if console output is enabled
         # Check environment variable for console output
-        console_enabled = os.environ.get("KASAL_LOG_CONSOLE", "true").lower() in ["true", "1", "yes"]
+        console_enabled = os.environ.get("KASAL_LOG_CONSOLE", "true").lower() in [
+            "true",
+            "1",
+            "yes",
+        ]
 
         # Create console handler for all loggers except scheduler and when not suppressed
-        if console_enabled and name != 'scheduler' and not suppress_stdout:
+        if console_enabled and name != "scheduler" and not suppress_stdout:
             console_handler = logging.StreamHandler()
             console_handler.setFormatter(formatter)
             logger.addHandler(console_handler)
-        
+
         # Special handling for LLM logger
-        if name == 'llm':
-            litellm_logger = logging.getLogger('LiteLLM')
+        if name == "llm":
+            litellm_logger = logging.getLogger("LiteLLM")
             litellm_logger.handlers = []
             litellm_logger.propagate = True
-            litellm_logger.addHandler(logging.handlers.MemoryHandler(
-                capacity=1024*1024,
-                target=logger
-            ))
-            
-            llm_config_logger = logging.getLogger('backendcrew.llm_config')
+            litellm_logger.addHandler(
+                logging.handlers.MemoryHandler(capacity=1024 * 1024, target=logger)
+            )
+
+            llm_config_logger = logging.getLogger("backendcrew.llm_config")
             llm_config_logger.handlers = []
             llm_config_logger.propagate = True
-            llm_config_logger.addHandler(logging.handlers.MemoryHandler(
-                capacity=1024*1024,
-                target=logger
-            ))
-        
+            llm_config_logger.addHandler(
+                logging.handlers.MemoryHandler(capacity=1024 * 1024, target=logger)
+            )
+
         # Special handling for scheduler logger
-        elif name == 'scheduler':
+        elif name == "scheduler":
             for scheduler_logger_name in [
-                'backendcrew.scheduler',
-                'apscheduler.scheduler',
-                'apscheduler.executors',
-                'apscheduler.jobstores'
+                "backendcrew.scheduler",
+                "apscheduler.scheduler",
+                "apscheduler.executors",
+                "apscheduler.jobstores",
             ]:
                 sub_logger = logging.getLogger(scheduler_logger_name)
                 sub_logger.handlers = []
@@ -574,17 +653,17 @@ class LoggerManager:
                 sub_logger.setLevel(logging.INFO)
                 sub_logger.addHandler(file_handler)
                 # No console handler for scheduler-related loggers
-        
+
         # Special handling for API logger
-        elif name == 'api':
+        elif name == "api":
             # Configure all API-related loggers
             api_logger_names = [
-                'src.api',  # All API routers under src.api
-                'backendcrew.api.runs',
-                'backendcrew.api.jobs',
-                'backendcrew.api.tools',
-                'backendcrew.api.keys',
-                'backendcrew.api.uc_tools'
+                "src.api",  # All API routers under src.api
+                "backendcrew.api.runs",
+                "backendcrew.api.jobs",
+                "backendcrew.api.tools",
+                "backendcrew.api.keys",
+                "backendcrew.api.uc_tools",
             ]
 
             for api_logger_name in api_logger_names:
@@ -593,7 +672,7 @@ class LoggerManager:
                 api_logger.propagate = False
 
                 # Respect environment variable for API log level
-                api_env_level = self._get_logger_level('api')
+                api_env_level = self._get_logger_level("api")
                 if api_env_level is not None:
                     api_logger.setLevel(api_env_level)
                 else:
@@ -604,13 +683,15 @@ class LoggerManager:
                 # Also add console handler if enabled
                 if console_enabled and not suppress_stdout:
                     api_logger.addHandler(console_handler)
-        
+
         # Special handling for access logger
-        elif name == 'access':
+        elif name == "access":
             uvicorn_logger = logging.getLogger("uvicorn.access")
             uvicorn_logger.handlers = []
-            uvicorn_logger.propagate = False  # Change to False to prevent logging to stdout
-            
+            uvicorn_logger.propagate = (
+                False  # Change to False to prevent logging to stdout
+            )
+
             class AccessLogHandler(logging.Handler):
                 def __init__(self, target_logger, api_logger=None):
                     super().__init__()
@@ -619,29 +700,29 @@ class LoggerManager:
 
                 def emit(self, record):
                     try:
-                        client_addr = getattr(record, 'client_addr', '-')
-                        status_code = getattr(record, 'status_code', '-')
-                        request_line = getattr(record, 'request_line', '-')
-                        
+                        client_addr = getattr(record, "client_addr", "-")
+                        status_code = getattr(record, "status_code", "-")
+                        request_line = getattr(record, "request_line", "-")
+
                         # Skip empty or placeholder requests
                         if request_line == "-":
                             return
-                            
-                        msg = f"{client_addr} - \"{request_line}\" {status_code}"
-                        
+
+                        msg = f'{client_addr} - "{request_line}" {status_code}'
+
                         # Route API requests to the API log file
-                        if self.api_logger and '/api/' in request_line:
+                        if self.api_logger and "/api/" in request_line:
                             self.api_logger.info(msg)
                         else:
                             self.target_logger.info(msg)
                     except Exception:
                         self.handleError(record)
-            
+
             # Pass both loggers to handle routing based on the request path
             uvicorn_logger.addHandler(AccessLogHandler(logger, self._api_logger))
-        
+
         return logger
-    
+
     @property
     def crew(self) -> logging.Logger:
         """Get the crew-specific logger."""
@@ -655,70 +736,70 @@ class LoggerManager:
         if not self._flow_logger:
             self.initialize()
         return self._flow_logger
-    
+
     @property
     def system(self) -> logging.Logger:
         """Get the system-specific logger."""
         if not self._system_logger:
             self.initialize()
         return self._system_logger
-    
+
     @property
     def llm(self) -> logging.Logger:
         """Get the LLM-specific logger."""
         if not self._llm_logger:
             self.initialize()
         return self._llm_logger
-    
+
     @property
     def scheduler(self) -> logging.Logger:
         """Get the scheduler-specific logger."""
         if not self._scheduler_logger:
             self.initialize()
         return self._scheduler_logger
-    
+
     @property
     def api(self) -> logging.Logger:
         """Get the API-specific logger."""
         if not self._api_logger:
             self.initialize()
         return self._api_logger
-    
+
     @property
     def access(self) -> logging.Logger:
         """Get the access logger."""
         if not self._access_logger:
             self.initialize()
         return self._access_logger
-    
+
     @property
     def guardrails(self) -> logging.Logger:
         """Get the guardrails logger."""
         if not self._guardrails_logger:
             self.initialize()
         return self._guardrails_logger
-    
+
     @property
     def databricks_vector_search(self) -> logging.Logger:
         """Get the Databricks Vector Search logger for memory operations."""
         if not self._databricks_vector_search_logger:
             self.initialize()
         return self._databricks_vector_search_logger
-    
+
     @property
     def databricks_short_term(self) -> logging.Logger:
         """Get the Databricks short-term memory logger."""
         if not self._databricks_short_term_logger:
             self.initialize()
         return self._databricks_short_term_logger
-    
+
     @property
     def databricks_long_term(self) -> logging.Logger:
         """Get the Databricks long-term memory logger."""
         if not self._databricks_long_term_logger:
             self.initialize()
         return self._databricks_long_term_logger
-    
+
     @property
     def databricks_entity(self) -> logging.Logger:
         """Get the Databricks entity memory logger."""
@@ -762,21 +843,38 @@ class LoggerManager:
             if app_level:
                 logger.setLevel(app_level)
             else:
-                global_level = self._parse_log_level(os.environ.get("KASAL_LOG_LEVEL", "INFO"))
+                global_level = self._parse_log_level(
+                    os.environ.get("KASAL_LOG_LEVEL", "INFO")
+                )
                 if global_level:
                     logger.setLevel(global_level)
         else:
             # Check if it's a third-party library
-            third_party_patterns = ["sqlalchemy", "uvicorn", "httpx", "crewai", "kasal_engine", "engines.kasal", "mlflow", "litellm"]
-            is_third_party = any(pattern in name.lower() for pattern in third_party_patterns)
+            third_party_patterns = [
+                "sqlalchemy",
+                "uvicorn",
+                "httpx",
+                "crewai",
+                "kasal_engine",
+                "engines.kasal",
+                "mlflow",
+                "litellm",
+            ]
+            is_third_party = any(
+                pattern in name.lower() for pattern in third_party_patterns
+            )
 
             if is_third_party:
-                third_party_level = self._parse_log_level(os.environ.get("KASAL_LOG_THIRD_PARTY", "WARNING"))
+                third_party_level = self._parse_log_level(
+                    os.environ.get("KASAL_LOG_THIRD_PARTY", "WARNING")
+                )
                 if third_party_level:
                     logger.setLevel(third_party_level)
             else:
                 # Default to global level
-                global_level = self._parse_log_level(os.environ.get("KASAL_LOG_LEVEL", "INFO"))
+                global_level = self._parse_log_level(
+                    os.environ.get("KASAL_LOG_LEVEL", "INFO")
+                )
                 if global_level:
                     logger.setLevel(global_level)
 
@@ -808,4 +906,4 @@ def get_logger(name: str) -> logging.Logger:
     if not _logger_manager._initialized:
         _logger_manager.initialize()
 
-    return _logger_manager.get_logger(name) 
+    return _logger_manager.get_logger(name)

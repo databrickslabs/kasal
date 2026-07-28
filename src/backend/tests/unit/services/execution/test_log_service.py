@@ -1,9 +1,11 @@
 """
 Comprehensive unit tests for LLMLogService.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock
+
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.utils.user_context import GroupContext
@@ -88,7 +90,9 @@ class TestGetUniqueEndpoints:
     async def test_delegates_to_repo(self):
         """get_unique_endpoints delegates to repository."""
         mock_repo = AsyncMock()
-        mock_repo.get_unique_endpoints = AsyncMock(return_value=["/api/chat", "/api/complete"])
+        mock_repo.get_unique_endpoints = AsyncMock(
+            return_value=["/api/chat", "/api/complete"]
+        )
         service = LLMLogService(repository=mock_repo)
 
         result = await service.get_unique_endpoints()
@@ -200,7 +204,9 @@ class TestGetLogStats:
     async def test_returns_stats_with_endpoint_counts(self):
         """get_log_stats returns aggregated stats by endpoint."""
         mock_repo = AsyncMock()
-        mock_repo.count_logs = AsyncMock(side_effect=lambda ep=None: 10 if ep is None else 5)
+        mock_repo.count_logs = AsyncMock(
+            side_effect=lambda ep=None: 10 if ep is None else 5
+        )
         mock_repo.get_unique_endpoints = AsyncMock(return_value=["/api/a", "/api/b"])
         service = LLMLogService(repository=mock_repo)
 

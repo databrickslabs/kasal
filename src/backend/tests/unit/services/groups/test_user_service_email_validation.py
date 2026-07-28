@@ -1,9 +1,10 @@
 """Tests for UserService.get_or_create_user_by_email email validation."""
-import sys
+
 import os
-import pytest
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 
 @pytest.fixture
@@ -18,11 +19,13 @@ def mock_session():
 @pytest.fixture
 def service(mock_session):
     from src.services.groups.users import UserService
+
     svc = UserService(mock_session)
     return svc
 
 
 # ---- Invalid emails rejected ----
+
 
 @pytest.mark.asyncio
 async def test_rejects_empty_email(service):
@@ -88,6 +91,7 @@ async def test_rejects_email_without_tld(service):
 
 
 # ---- Valid emails accepted ----
+
 
 @pytest.mark.asyncio
 async def test_accepts_normal_email(service):

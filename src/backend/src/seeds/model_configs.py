@@ -4,11 +4,12 @@ Seed the model_configs table with default model configuration definitions.
 
 import logging
 from datetime import datetime
+
 from sqlalchemy import select
 
+from src.core.unit_of_work import UnitOfWork
 from src.db.session import async_session_factory
 from src.models.model_config import ModelConfig
-from src.core.unit_of_work import UnitOfWork
 
 # Configure logging
 logger = logging.getLogger(__name__)

@@ -11,12 +11,14 @@ The contract: an overflow surfaced by the handler must (a) be CrewAI's
 phrase-matcher recognizes.
 """
 
-import pytest
 from unittest.mock import patch
 
-from src.core.llm.transport import is_context_length_exceeded
-from src.core.llm.transport import LLMContextLengthExceededError
+import pytest
 
+from src.core.llm.transport import (
+    LLMContextLengthExceededError,
+    is_context_length_exceeded,
+)
 from src.services.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
 
 
@@ -65,18 +67,20 @@ class TestContextLengthHint:
 
 class TestCallRaisesRecognizableOverflow:
     def _make_handler(self) -> DatabricksRetryLLM:
-        with patch(
-            "src.services.llm.handlers.databricks_retry_llm.litellm"
-        ):
+        with patch("src.services.llm.handlers.databricks_retry_llm.litellm"):
             return DatabricksRetryLLM(model="databricks/test-model")
 
     def test_call_raises_crewai_context_exception(self):
         handler = self._make_handler()
         overflow = Exception("prompt is too long: 2523462 tokens > 1000000 maximum")
 
-        with patch(
-            "src.services.llm.handlers.databricks_retry_llm.LLM.call", side_effect=overflow
-        ), pytest.raises(LLMContextLengthExceededError) as exc_info:
+        with (
+            patch(
+                "src.services.llm.handlers.databricks_retry_llm.LLM.call",
+                side_effect=overflow,
+            ),
+            pytest.raises(LLMContextLengthExceededError) as exc_info,
+        ):
             handler.call(messages=[{"role": "user", "content": "hi"}])
 
         # CrewAI's own detector must accept the raised exception, otherwise
@@ -88,9 +92,13 @@ class TestCallRaisesRecognizableOverflow:
         handler = self._make_handler()
 
         # Non-retryable, non-auth, non-overflow error must propagate unwrapped.
-        with patch(
-            "src.services.llm.handlers.databricks_retry_llm.LLM.call", side_effect=RuntimeError("invalid request: bad parameter")
-        ), pytest.raises(RuntimeError):
+        with (
+            patch(
+                "src.services.llm.handlers.databricks_retry_llm.LLM.call",
+                side_effect=RuntimeError("invalid request: bad parameter"),
+            ),
+            pytest.raises(RuntimeError),
+        ):
             handler.call(messages=[{"role": "user", "content": "hi"}])
 
 
@@ -141,10 +149,13 @@ class TestPlaceholderResponseRetry:
         handler = self._make_handler()
         messages = [{"role": "user", "content": "list the tables"}]
 
-        with patch(
-            "src.services.llm.handlers.databricks_retry_llm.LLM.call",
-            side_effect=["Calling tools.", "Here are the 12 tables…"],
-        ) as mock_call, patch("time.sleep"):
+        with (
+            patch(
+                "src.services.llm.handlers.databricks_retry_llm.LLM.call",
+                side_effect=["Calling tools.", "Here are the 12 tables…"],
+            ) as mock_call,
+            patch("time.sleep"),
+        ):
             result = handler.call(messages=messages)
 
         assert result == "Here are the 12 tables…"
@@ -156,10 +167,13 @@ class TestPlaceholderResponseRetry:
     def test_call_gives_up_after_max_retries_of_placeholder(self):
         handler = self._make_handler()
 
-        with patch(
-            "src.services.llm.handlers.databricks_retry_llm.LLM.call",
-            side_effect=["Calling tools."] * 10,
-        ), patch("time.sleep"):
+        with (
+            patch(
+                "src.services.llm.handlers.databricks_retry_llm.LLM.call",
+                side_effect=["Calling tools."] * 10,
+            ),
+            patch("time.sleep"),
+        ):
             result = handler.call(messages=[{"role": "user", "content": "hi"}])
 
         # Terminal behavior matches the empty-response path (empty string),
@@ -204,7 +218,7 @@ class TestCoerceToResponseModel:
         assert out.keep is True and out.note == "hi"
 
     def test_strips_markdown_json_fence(self):
-        fenced = "```json\n{\"keep\": false}\n```"
+        fenced = '```json\n{"keep": false}\n```'
         out = self._llm()._coerce_to_response_model(fenced, {"response_model": _Plan})
         assert isinstance(out, _Plan)
         assert out.keep is False

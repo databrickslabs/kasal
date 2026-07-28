@@ -1,29 +1,29 @@
-import pytest
-from unittest.mock import AsyncMock
+import importlib
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
-from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
+import pytest
 
 from src.api.database_management_router import (
+    check_database_management_permission,
+    check_lakebase_tables,
+    create_lakebase_instance,
+    debug_headers,
+    debug_permissions,
+    enable_lakebase_without_migration,
     export_database,
+    get_database_info,
+    get_lakebase_config,
+    get_lakebase_instance,
+    get_lakebase_workspace_info,
     import_database,
     list_backups,
-    get_database_info,
-    run_housekeeping,
-    debug_permissions,
-    debug_headers,
-    check_database_management_permission,
-    get_lakebase_config,
-    save_lakebase_config,
-    create_lakebase_instance,
-    get_lakebase_instance,
-    check_lakebase_tables,
     migrate_to_lakebase,
+    run_housekeeping,
+    save_lakebase_config,
     start_lakebase_instance,
-    get_lakebase_workspace_info,
-    enable_lakebase_without_migration,
 )
-import importlib
+from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.schemas.database_management import (
     ExportRequest,
     ImportRequest,
@@ -32,13 +32,22 @@ from src.schemas.database_management import (
 
 
 class Ctx:
-    def __init__(self, user_role=None, primary_group_id="g1", group_email="u@x", access_token="tok", is_system_admin=False):
+    def __init__(
+        self,
+        user_role=None,
+        primary_group_id="g1",
+        group_email="u@x",
+        access_token="tok",
+        is_system_admin=False,
+    ):
         self.user_role = user_role
         self.primary_group_id = primary_group_id
         self.group_email = group_email
         self.access_token = access_token
         # Add current_user attribute for system admin checks
-        self.current_user = type('obj', (object,), {'is_system_admin': is_system_admin})()
+        self.current_user = type(
+            "obj", (object,), {"is_system_admin": is_system_admin}
+        )()
 
 
 @pytest.mark.asyncio
@@ -53,17 +62,33 @@ async def test_export_import_permissions_and_success():
     assert ei.value.status_code == 403
 
     # System admin export -> success
-    svc.export_to_volume = AsyncMock(return_value={"success": True, "backup_filename": "b.db"})
-    out = await export_database(ExportRequest(), service=svc, group_context=ctx_system_admin)
+    svc.export_to_volume = AsyncMock(
+        return_value={"success": True, "backup_filename": "b.db"}
+    )
+    out = await export_database(
+        ExportRequest(), service=svc, group_context=ctx_system_admin
+    )
     assert out.success is True
 
     # Non-system-admin import -> 403
     with pytest.raises(ForbiddenError):
-        await import_database(ImportRequest(catalog="c", schema="s", volume_name="v", backup_filename="b.db"), service=svc, group_context=ctx_user)
+        await import_database(
+            ImportRequest(
+                catalog="c", schema="s", volume_name="v", backup_filename="b.db"
+            ),
+            service=svc,
+            group_context=ctx_user,
+        )
 
     # System admin import -> success
-    svc.import_from_volume = AsyncMock(return_value={"success": True, "imported_from": "v/b.db"})
-    out2 = await import_database(ImportRequest(catalog="c", schema="s", volume_name="v", backup_filename="b.db"), service=svc, group_context=ctx_system_admin)
+    svc.import_from_volume = AsyncMock(
+        return_value={"success": True, "imported_from": "v/b.db"}
+    )
+    out2 = await import_database(
+        ImportRequest(catalog="c", schema="s", volume_name="v", backup_filename="b.db"),
+        service=svc,
+        group_context=ctx_system_admin,
+    )
     assert out2.success is True
 
 
@@ -78,13 +103,19 @@ async def test_list_info_and_permission_checks():
     assert out.success is True
 
     # get_database_info
-    svc.get_database_info = AsyncMock(return_value={"success": True, "database_type": "sqlite"})
+    svc.get_database_info = AsyncMock(
+        return_value={"success": True, "database_type": "sqlite"}
+    )
     out2 = await get_database_info(service=svc, group_context=ctx)
     assert out2.database_type == "sqlite"
 
     # check_database_management_permission returns raw dict
-    svc.check_user_permission = AsyncMock(return_value={"has_permission": True, "is_databricks_apps": False})
-    out3 = await check_database_management_permission(service=svc, session=AsyncMock(), group_context=ctx)
+    svc.check_user_permission = AsyncMock(
+        return_value={"has_permission": True, "is_databricks_apps": False}
+    )
+    out3 = await check_database_management_permission(
+        service=svc, session=AsyncMock(), group_context=ctx
+    )
     assert out3["has_permission"] is True
 
 
@@ -93,6 +124,7 @@ async def test_debug_permissions_and_headers_minimal():
     # Patch settings.DEBUG_MODE since the module-level settings object
     # is created before conftest monkeypatches the environment
     from src.config.settings import settings as app_settings
+
     original = app_settings.DEBUG_MODE
     app_settings.DEBUG_MODE = True
     try:
@@ -124,7 +156,9 @@ async def test_lakebase_endpoints_success_and_validations():
 
     # Create instance
     svc.create_instance = AsyncMock(return_value={"instance_name": "kasal-lakebase"})
-    out3 = await create_lakebase_instance({"instance_name": "kasal-lakebase"}, service=svc)
+    out3 = await create_lakebase_instance(
+        {"instance_name": "kasal-lakebase"}, service=svc
+    )
     assert out3["instance_name"] == "kasal-lakebase"
 
     # Get instance
@@ -148,20 +182,26 @@ async def test_lakebase_endpoints_success_and_validations():
 
     # Start instance: success
     svc.start_instance = AsyncMock(return_value={"status": "running"})
-    out6 = await start_lakebase_instance({"instance_name": "kasal-lakebase"}, service=svc)
+    out6 = await start_lakebase_instance(
+        {"instance_name": "kasal-lakebase"}, service=svc
+    )
     assert out6["status"] == "running"
 
     # Test connection GET/POST via module to avoid pytest name collision
-    m = importlib.import_module('src.api.database_management_router')
+    m = importlib.import_module("src.api.database_management_router")
     svc.test_connection = AsyncMock(return_value={"ok": True})
     out7 = await m.test_lakebase_connection_get("kasal-lakebase", service=svc)
     assert out7["ok"] is True
 
-    out8 = await m.test_lakebase_connection({"instance_name": "kasal-lakebase"}, service=svc)
+    out8 = await m.test_lakebase_connection(
+        {"instance_name": "kasal-lakebase"}, service=svc
+    )
     assert out8["ok"] is True
 
     # Workspace info
-    svc.get_workspace_info = AsyncMock(return_value={"workspace_url": "https://x", "organization_id": "o"})
+    svc.get_workspace_info = AsyncMock(
+        return_value={"workspace_url": "https://x", "organization_id": "o"}
+    )
     out9 = await get_lakebase_workspace_info(service=svc)
     assert out9["workspace_url"].startswith("https://")
 
@@ -170,7 +210,9 @@ async def test_lakebase_endpoints_success_and_validations():
         await enable_lakebase_without_migration({"instance_name": "x"}, service=svc)
 
     svc.enable_lakebase = AsyncMock(return_value={"enabled": True})
-    out10 = await enable_lakebase_without_migration({"instance_name": "x", "endpoint": "https://e"}, service=svc)
+    out10 = await enable_lakebase_without_migration(
+        {"instance_name": "x", "endpoint": "https://e"}, service=svc
+    )
     assert out10["enabled"] is True
 
 
@@ -178,13 +220,21 @@ async def test_lakebase_endpoints_success_and_validations():
 async def test_housekeeping_success():
     """Test housekeeping endpoint with valid cutoff date."""
     svc = AsyncMock()
-    svc.run_housekeeping = AsyncMock(return_value={
-        "success": True,
-        "cutoff_date": "2025-01-01",
-        "deleted": {"executionhistory": 5, "taskstatus": 2, "errortrace": 1,
-                     "execution_trace": 10, "execution_logs": 20, "llmlog": 3},
-        "total_deleted": 41,
-    })
+    svc.run_housekeeping = AsyncMock(
+        return_value={
+            "success": True,
+            "cutoff_date": "2025-01-01",
+            "deleted": {
+                "executionhistory": 5,
+                "taskstatus": 2,
+                "errortrace": 1,
+                "execution_trace": 10,
+                "execution_logs": 20,
+                "llmlog": 3,
+            },
+            "total_deleted": 41,
+        }
+    )
 
     result = await run_housekeeping(
         request={"cutoff_date": "2025-01-01"},
@@ -211,14 +261,15 @@ async def test_housekeeping_missing_cutoff_date():
 async def test_housekeeping_service_failure():
     """Test housekeeping endpoint raises KasalError on service failure."""
     svc = AsyncMock()
-    svc.run_housekeeping = AsyncMock(return_value={
-        "success": False,
-        "error": "Something went wrong",
-    })
+    svc.run_housekeeping = AsyncMock(
+        return_value={
+            "success": False,
+            "error": "Something went wrong",
+        }
+    )
 
     with pytest.raises(KasalError):
         await run_housekeeping(
             request={"cutoff_date": "2025-01-01"},
             service=svc,
         )
-

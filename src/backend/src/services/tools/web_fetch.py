@@ -170,9 +170,9 @@ class FormattedResults(TypedDict, total=False):
 
 
 def _save_results_to_file(content: str) -> None:
-    filename = f"search_results_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
+    filename = (
+        f"search_results_{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
+    )
     with open(filename, "w") as file:
         file.write(content)
     logger.info("Results saved to %s", filename)
-
-

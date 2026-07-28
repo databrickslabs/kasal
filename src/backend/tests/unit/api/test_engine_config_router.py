@@ -4,52 +4,59 @@ Focuses on: get_engine_config_service factory (line 47),
 not-found paths, engine type lookup, and otel endpoints.
 The permission-denied paths are already covered by test_engine_config_router_smoke.py.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.api.engine_config_router import (
-    get_engine_config_service,
-    get_engine_configs_by_type,
+    create_engine_config,
+    delete_engine_config,
     get_engine_config,
     get_engine_config_by_key,
-    create_engine_config,
-    update_engine_config,
+    get_engine_config_service,
+    get_engine_configs_by_type,
+    get_kasal_flow_enabled,
+    get_otel_app_telemetry_enabled,
+    set_kasal_flow_enabled,
+    set_otel_app_telemetry_enabled,
     toggle_engine_config,
     update_config_value,
-    get_kasal_flow_enabled,
-    set_kasal_flow_enabled,
-    get_otel_app_telemetry_enabled,
-    set_otel_app_telemetry_enabled,
-    delete_engine_config,
+    update_engine_config,
 )
+from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
 from src.schemas.engine_config import (
     EngineConfigCreate,
-    EngineConfigUpdate,
     EngineConfigToggleUpdate,
+    EngineConfigUpdate,
     EngineConfigValueUpdate,
     KasalFlowConfigUpdate,
     OtelAppTelemetryConfigUpdate,
 )
-from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
 
 
 def make_ctx(user_role="admin", is_system=False):
     """Create a context object with the given role."""
-    return type("Ctx", (), {
-        "user_role": user_role,
-        "current_user": SimpleNamespace(
-            is_system_admin=is_system,
-            is_personal_workspace_manager=False,
-        ),
-        "primary_group_id": "team_g1",  # team workspace, not personal
-        "group_ids": ["team_g1"],
-        "group_email": "admin@x",
-    })()
+    return type(
+        "Ctx",
+        (),
+        {
+            "user_role": user_role,
+            "current_user": SimpleNamespace(
+                is_system_admin=is_system,
+                is_personal_workspace_manager=False,
+            ),
+            "primary_group_id": "team_g1",  # team workspace, not personal
+            "group_ids": ["team_g1"],
+            "group_email": "admin@x",
+        },
+    )()
 
 
 def make_config_obj(engine_name="kasal", engine_type="crew", enabled=True):
     from datetime import datetime
+
     return SimpleNamespace(
         id=1,
         engine_name=engine_name,
@@ -65,6 +72,7 @@ def make_config_obj(engine_name="kasal", engine_type="crew", enabled=True):
 
 # ── get_engine_config_service factory (line 47) ───────────────────────────────
 
+
 def test_get_engine_config_service_creates_instance():
     """get_engine_config_service creates EngineConfigService with session."""
     from src.services.settings.engine import EngineConfigService
@@ -77,6 +85,7 @@ def test_get_engine_config_service_creates_instance():
 
 
 # ── get_engine_config_by_key: not found (lines 152-161) ──────────────────────
+
 
 @pytest.mark.asyncio
 async def test_get_engine_config_by_key_not_found_raises():
@@ -105,13 +114,16 @@ async def test_get_engine_config_by_key_found():
 
 # ── get_engine_configs_by_type (lines 180-185) ────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_get_engine_configs_by_type_returns_list():
     """get_engine_configs_by_type returns list wrapped in EngineConfigListResponse."""
     svc = AsyncMock()
     svc.find_by_engine_type = AsyncMock(return_value=[make_config_obj()])
 
-    out = await get_engine_configs_by_type("crew", service=svc, group_context=make_ctx())
+    out = await get_engine_configs_by_type(
+        "crew", service=svc, group_context=make_ctx()
+    )
     assert out.count == 1
 
 
@@ -121,11 +133,14 @@ async def test_get_engine_configs_by_type_empty():
     svc = AsyncMock()
     svc.find_by_engine_type = AsyncMock(return_value=[])
 
-    out = await get_engine_configs_by_type("crew", service=svc, group_context=make_ctx())
+    out = await get_engine_configs_by_type(
+        "crew", service=svc, group_context=make_ctx()
+    )
     assert out.count == 0
 
 
 # ── update_engine_config not-found path (lines 247-260) ──────────────────────
+
 
 @pytest.mark.asyncio
 async def test_update_engine_config_not_found():
@@ -160,6 +175,7 @@ async def test_update_engine_config_success():
 
 # ── toggle_engine_config success path (line 287, 302-303) ────────────────────
 
+
 @pytest.mark.asyncio
 async def test_toggle_engine_config_not_found():
     """toggle_engine_config raises NotFoundError when config missing."""
@@ -192,6 +208,7 @@ async def test_toggle_engine_config_success():
 
 
 # ── update_config_value not-found (lines 335, 350-351) ───────────────────────
+
 
 @pytest.mark.asyncio
 async def test_update_config_value_not_found():
@@ -228,6 +245,7 @@ async def test_update_config_value_success():
 
 # ── delete_engine_config not-found (lines 486-498) ───────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_delete_engine_config_not_found():
     """delete_engine_config raises NotFoundError when config missing."""
@@ -235,7 +253,9 @@ async def test_delete_engine_config_not_found():
     svc.delete_engine_config = AsyncMock(return_value=False)
 
     with pytest.raises(NotFoundError):
-        await delete_engine_config("missing", service=svc, group_context=make_ctx(user_role="admin"))
+        await delete_engine_config(
+            "missing", service=svc, group_context=make_ctx(user_role="admin")
+        )
 
 
 @pytest.mark.asyncio
@@ -244,11 +264,14 @@ async def test_delete_engine_config_success():
     svc = AsyncMock()
     svc.delete_engine_config = AsyncMock(return_value=True)
 
-    await delete_engine_config("kasal", service=svc, group_context=make_ctx(user_role="admin"))
+    await delete_engine_config(
+        "kasal", service=svc, group_context=make_ctx(user_role="admin")
+    )
     svc.delete_engine_config.assert_called_once_with("kasal")
 
 
 # ── create_engine_config success (line 218+) ─────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_create_engine_config_success():

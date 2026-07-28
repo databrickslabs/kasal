@@ -20,12 +20,15 @@ from typing import Dict, Optional
 # Optional azure.identity import
 try:
     from azure.identity import ClientSecretCredential, UsernamePasswordCredential
+
     AZURE_IDENTITY_AVAILABLE = True
 except ImportError:
     ClientSecretCredential = None  # type: ignore
     UsernamePasswordCredential = None  # type: ignore
     AZURE_IDENTITY_AVAILABLE = False
-    logging.warning("azure-identity not available. Install with: pip install azure-identity")
+    logging.warning(
+        "azure-identity not available. Install with: pip install azure-identity"
+    )
 
 
 class AadService:
@@ -161,7 +164,9 @@ class AadService:
         # Priority 1: Use pre-obtained token
         if self._access_token:
             self.logger.info("=" * 80)
-            self.logger.info("🔑 AUTHENTICATION METHOD: User OAuth (pre-obtained access token)")
+            self.logger.info(
+                "🔑 AUTHENTICATION METHOD: User OAuth (pre-obtained access token)"
+            )
             self.logger.info("=" * 80)
             return self._access_token
 
@@ -321,12 +326,20 @@ class AadService:
 
         try:
             self.logger.info("=" * 80)
-            self.logger.info("🔑 AUTHENTICATION METHOD: Service Principal (client credentials)")
+            self.logger.info(
+                "🔑 AUTHENTICATION METHOD: Service Principal (client credentials)"
+            )
             self.logger.info("=" * 80)
             self.logger.info(f"[AUTH DEBUG] Acquiring token with:")
-            self.logger.info(f"[AUTH DEBUG]   tenant_id: '{tenant_id}' (type: {type(tenant_id).__name__})")
-            self.logger.info(f"[AUTH DEBUG]   client_id: '{client_id}' (type: {type(client_id).__name__})")
-            self.logger.info(f"[AUTH DEBUG]   client_secret length: {len(client_secret) if client_secret else 0}")
+            self.logger.info(
+                f"[AUTH DEBUG]   tenant_id: '{tenant_id}' (type: {type(tenant_id).__name__})"
+            )
+            self.logger.info(
+                f"[AUTH DEBUG]   client_id: '{client_id}' (type: {type(client_id).__name__})"
+            )
+            self.logger.info(
+                f"[AUTH DEBUG]   client_secret length: {len(client_secret) if client_secret else 0}"
+            )
 
             # Ensure ClientSecretCredential is available (should be checked earlier)
             if ClientSecretCredential is None:
@@ -392,7 +405,9 @@ class AadService:
 
         try:
             self.logger.info("=" * 80)
-            self.logger.info("🔑 AUTHENTICATION METHOD: Service Account (username/password)")
+            self.logger.info(
+                "🔑 AUTHENTICATION METHOD: Service Account (username/password)"
+            )
             # SECURITY: service-account credential context is diagnostic only —
             # keep at DEBUG so it is not emitted to production logs.
             self.logger.debug("=" * 80)
@@ -401,19 +416,26 @@ class AadService:
             self.logger.debug(f"[AUTH DEBUG]   client_id: '{self.client_id}'")
             self.logger.debug(f"[AUTH DEBUG]   username: '{username}'")
             self.logger.debug(f"[AUTH DEBUG]   password length: {len(password)}")
-            self.logger.debug(f"[AUTH DEBUG]   password stripped length: {len(password.strip())}")
-            self.logger.debug(f"[AUTH DEBUG]   password has whitespace: {password != password.strip()}")
+            self.logger.debug(
+                f"[AUTH DEBUG]   password stripped length: {len(password.strip())}"
+            )
+            self.logger.debug(
+                f"[AUTH DEBUG]   password has whitespace: {password != password.strip()}"
+            )
 
             # Strip whitespace from credentials (common copy-paste issue)
             username = username.strip()
 
             # Handle base64-encoded passwords (for special characters like \$ that get escaped)
             # If password starts with 'base64:', decode it
-            if password.strip().startswith('base64:'):
+            if password.strip().startswith("base64:"):
                 import base64
+
                 encoded_password = password.strip()[7:]  # Remove 'base64:' prefix
-                password = base64.b64decode(encoded_password).decode('utf-8')
-                self.logger.info(f"[AUTH DEBUG] Decoded base64 password - length: {len(password)}")
+                password = base64.b64decode(encoded_password).decode("utf-8")
+                self.logger.info(
+                    f"[AUTH DEBUG] Decoded base64 password - length: {len(password)}"
+                )
             else:
                 password = password.strip()
 
@@ -421,15 +443,23 @@ class AadService:
                 # When passwords are stored in env vars/JSON/DB, backslash escape sequences
                 # like \$ get stored literally instead of being interpreted
                 original_length = len(password)
-                password = password.replace('\\$', '$')  # \$ -> $
-                password = password.replace('\\\\', '\\')  # \\ -> \
-                password = password.replace('\\n', '\n')  # \n -> newline (unlikely but handle it)
-                password = password.replace('\\t', '\t')  # \t -> tab (unlikely but handle it)
+                password = password.replace("\\$", "$")  # \$ -> $
+                password = password.replace("\\\\", "\\")  # \\ -> \
+                password = password.replace(
+                    "\\n", "\n"
+                )  # \n -> newline (unlikely but handle it)
+                password = password.replace(
+                    "\\t", "\t"
+                )  # \t -> tab (unlikely but handle it)
 
                 if len(password) != original_length:
-                    self.logger.info(f"[AUTH DEBUG] Unescaped password - original length: {original_length}, new length: {len(password)}")
+                    self.logger.info(
+                        f"[AUTH DEBUG] Unescaped password - original length: {original_length}, new length: {len(password)}"
+                    )
                 else:
-                    self.logger.info(f"[AUTH DEBUG] Using raw password - length: {len(password)}")
+                    self.logger.info(
+                        f"[AUTH DEBUG] Using raw password - length: {len(password)}"
+                    )
 
             # Ensure UsernamePasswordCredential is available
             if UsernamePasswordCredential is None:
@@ -439,16 +469,18 @@ class AadService:
             # Note: Service Account authentication can use both public (no secret) or confidential (with secret) clients
             # Include client_secret if available (matches working implementation)
             credential_kwargs = {
-                'client_id': self.client_id,
-                'username': username,
-                'password': password,
-                'tenant_id': self.tenant_id
+                "client_id": self.client_id,
+                "username": username,
+                "password": password,
+                "tenant_id": self.tenant_id,
             }
 
             # Include client_secret if provided (required for confidential client apps)
             if self.client_secret:
-                credential_kwargs['client_secret'] = self.client_secret
-                self.logger.info(f"[AUTH DEBUG] Including client_secret (confidential client)")
+                credential_kwargs["client_secret"] = self.client_secret
+                self.logger.info(
+                    f"[AUTH DEBUG] Including client_secret (confidential client)"
+                )
             else:
                 self.logger.info(f"[AUTH DEBUG] No client_secret (public client)")
 
@@ -462,7 +494,9 @@ class AadService:
 
         except Exception as ex:
             self.logger.error(f"Service account token acquisition failed: {str(ex)}")
-            raise Exception(f"Error retrieving access token with service account: {str(ex)}")
+            raise Exception(
+                f"Error retrieving access token with service account: {str(ex)}"
+            )
 
     def validate_token(self, token: Optional[str] = None) -> bool:
         """

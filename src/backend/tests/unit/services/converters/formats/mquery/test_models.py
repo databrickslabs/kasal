@@ -8,27 +8,28 @@ CalculatedColumnResult, and MQueryConversionConfig.
 """
 
 import pytest
+
 from src.services.converters.formats.mquery.models import (
-    ExpressionType,
+    CalculatedColumnResult,
     ColumnDataType,
+    ConversionResult,
+    ExpressionType,
+    Hierarchy,
+    HierarchyLevel,
+    MQueryConversionConfig,
+    MQueryExpression,
+    PowerBITable,
+    SemanticModel,
     StorageMode,
     TableColumn,
     TableMeasure,
-    MQueryExpression,
-    PowerBITable,
     TableRelationship,
-    SemanticModel,
-    ConversionResult,
-    CalculatedColumnResult,
-    MQueryConversionConfig,
-    HierarchyLevel,
-    Hierarchy,
 )
-
 
 # ---------------------------------------------------------------------------
 # Enum tests
 # ---------------------------------------------------------------------------
+
 
 def test_expression_type_values():
     """ExpressionType enum contains expected values."""
@@ -59,6 +60,7 @@ def test_storage_mode_values():
 # TableColumn tests
 # ---------------------------------------------------------------------------
 
+
 def test_table_column_from_dict_minimal():
     """TableColumn.from_dict works with minimal required keys."""
     col = TableColumn.from_dict({"name": "SalesAmount", "dataType": "Double"})
@@ -70,24 +72,28 @@ def test_table_column_from_dict_minimal():
 
 def test_table_column_from_dict_calculated():
     """TableColumn with columnType='Calculated' and expression is_calculated=True."""
-    col = TableColumn.from_dict({
-        "name": "Tax",
-        "dataType": "Decimal",
-        "columnType": "Calculated",
-        "expression": "[SalesAmount] * 0.2",
-    })
+    col = TableColumn.from_dict(
+        {
+            "name": "Tax",
+            "dataType": "Decimal",
+            "columnType": "Calculated",
+            "expression": "[SalesAmount] * 0.2",
+        }
+    )
     assert col.is_calculated is True
     assert col.expression == "[SalesAmount] * 0.2"
 
 
 def test_table_column_from_dict_data_column_not_calculated():
     """Regular data column with expression should NOT be is_calculated."""
-    col = TableColumn.from_dict({
-        "name": "Price",
-        "dataType": "Double",
-        "columnType": "Data",
-        "expression": "something",
-    })
+    col = TableColumn.from_dict(
+        {
+            "name": "Price",
+            "dataType": "Double",
+            "columnType": "Data",
+            "expression": "something",
+        }
+    )
     assert col.is_calculated is False
 
 
@@ -103,14 +109,17 @@ def test_table_column_from_dict_defaults():
 # TableMeasure tests
 # ---------------------------------------------------------------------------
 
+
 def test_table_measure_from_dict():
     """TableMeasure.from_dict parses API response dict."""
-    m = TableMeasure.from_dict({
-        "name": "Total Sales",
-        "expression": "SUM(Sales[Amount])",
-        "description": "Total revenue",
-        "isHidden": False,
-    })
+    m = TableMeasure.from_dict(
+        {
+            "name": "Total Sales",
+            "expression": "SUM(Sales[Amount])",
+            "description": "Total revenue",
+            "isHidden": False,
+        }
+    )
     assert m.name == "Total Sales"
     assert m.expression == "SUM(Sales[Amount])"
     assert m.description == "Total revenue"
@@ -129,9 +138,12 @@ def test_table_measure_from_dict_defaults():
 # MQueryExpression tests
 # ---------------------------------------------------------------------------
 
+
 def test_mquery_expression_defaults():
     """MQueryExpression default fields are correctly initialised."""
-    expr = MQueryExpression(raw_expression="let Source = 1 in Source", expression_type=ExpressionType.OTHER)
+    expr = MQueryExpression(
+        raw_expression="let Source = 1 in Source", expression_type=ExpressionType.OTHER
+    )
     assert expr.embedded_sql is None
     assert expr.server is None
     assert expr.enable_folding is False
@@ -143,6 +155,7 @@ def test_mquery_expression_defaults():
 # PowerBITable tests
 # ---------------------------------------------------------------------------
 
+
 def test_powerbi_table_from_dict_full():
     """PowerBITable.from_dict correctly parses a complete dict."""
     data = {
@@ -151,14 +164,18 @@ def test_powerbi_table_from_dict_full():
         "storageMode": "Import",
         "columns": [{"name": "OrderID", "dataType": "Int64"}],
         "measures": [{"name": "Count", "expression": "COUNTROWS(Orders)"}],
-        "source": [{"expression": "let Source = Sql.Database(\"server\", \"db\") in Source"}],
+        "source": [
+            {"expression": 'let Source = Sql.Database("server", "db") in Source'}
+        ],
     }
     table = PowerBITable.from_dict(data)
     assert table.name == "Orders"
     assert len(table.columns) == 1
     assert len(table.measures) == 1
     assert len(table.source_expressions) == 1
-    assert table.source_expressions[0].expression_type == ExpressionType.OTHER  # not yet parsed
+    assert (
+        table.source_expressions[0].expression_type == ExpressionType.OTHER
+    )  # not yet parsed
 
 
 def test_powerbi_table_from_dict_empty():
@@ -174,17 +191,20 @@ def test_powerbi_table_from_dict_empty():
 # TableRelationship tests
 # ---------------------------------------------------------------------------
 
+
 def test_table_relationship_from_dict():
     """TableRelationship.from_dict populates all fields."""
-    rel = TableRelationship.from_dict({
-        "name": "rel_orders_customers",
-        "fromTable": "Orders",
-        "fromColumn": "CustomerID",
-        "toTable": "Customers",
-        "toColumn": "ID",
-        "isActive": True,
-        "cardinality": "ManyToOne",
-    })
+    rel = TableRelationship.from_dict(
+        {
+            "name": "rel_orders_customers",
+            "fromTable": "Orders",
+            "fromColumn": "CustomerID",
+            "toTable": "Customers",
+            "toColumn": "ID",
+            "isActive": True,
+            "cardinality": "ManyToOne",
+        }
+    )
     assert rel.from_table == "Orders"
     assert rel.to_table == "Customers"
     assert rel.is_active is True
@@ -195,18 +215,28 @@ def test_table_relationship_from_dict():
 # SemanticModel tests
 # ---------------------------------------------------------------------------
 
+
 def test_semantic_model_from_scan_result():
     """SemanticModel.from_scan_result parses tables and relationships."""
     dataset_data = {
         "id": "ds-1",
         "name": "Sales Model",
         "tables": [
-            {"name": "Sales", "isHidden": False, "storageMode": "Import", "columns": [], "measures": [], "source": []}
+            {
+                "name": "Sales",
+                "isHidden": False,
+                "storageMode": "Import",
+                "columns": [],
+                "measures": [],
+                "source": [],
+            }
         ],
         "relationships": [],
         "configuredBy": "admin@example.com",
     }
-    model = SemanticModel.from_scan_result(dataset_data, workspace_id="ws-1", workspace_name="MyWorkspace")
+    model = SemanticModel.from_scan_result(
+        dataset_data, workspace_id="ws-1", workspace_name="MyWorkspace"
+    )
     assert model.id == "ds-1"
     assert model.name == "Sales Model"
     assert len(model.tables) == 1
@@ -218,6 +248,7 @@ def test_semantic_model_from_scan_result():
 # ---------------------------------------------------------------------------
 # ConversionResult tests
 # ---------------------------------------------------------------------------
+
 
 def test_conversion_result_defaults():
     """ConversionResult has correct default values."""
@@ -249,6 +280,7 @@ def test_conversion_result_failed():
 # CalculatedColumnResult tests
 # ---------------------------------------------------------------------------
 
+
 def test_calculated_column_result():
     """CalculatedColumnResult stores conversion output."""
     r = CalculatedColumnResult(
@@ -265,6 +297,7 @@ def test_calculated_column_result():
 # ---------------------------------------------------------------------------
 # MQueryConversionConfig tests
 # ---------------------------------------------------------------------------
+
 
 def test_mquery_conversion_config_defaults():
     """MQueryConversionConfig has sensible defaults."""
@@ -293,6 +326,7 @@ def test_mquery_conversion_config_custom():
 # ---------------------------------------------------------------------------
 # Hierarchy tests
 # ---------------------------------------------------------------------------
+
 
 def test_hierarchy_get_columns_ordered():
     """Hierarchy.get_columns_ordered returns columns sorted by ordinal."""

@@ -4,30 +4,34 @@ Focuses on: get_execution_service factory, flow_id lookup branches,
 list_executions result processing (JSON parse, list, bool, other),
 stop execution not-running state, and debug-context endpoint.
 """
+
 import json
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.api.executions_router import (
     create_execution,
+    debug_context,
+    force_stop_execution,
     get_execution_service,
     get_execution_status,
     list_executions,
     stop_execution,
-    force_stop_execution,
-    debug_context,
 )
+from src.core.exceptions import ForbiddenError, NotFoundError
 from src.schemas.execution import (
     CrewConfig,
     StopExecutionRequest,
     StopType,
 )
-from src.core.exceptions import ForbiddenError, NotFoundError
 
 
 class Ctx:
-    def __init__(self, user_role="admin", group_ids=None, group_email="u@x", access_token="tok"):
+    def __init__(
+        self, user_role="admin", group_ids=None, group_email="u@x", access_token="tok"
+    ):
         self.user_role = user_role
         self.group_ids = group_ids or ["g1"]
         self.group_email = group_email
@@ -37,6 +41,7 @@ class Ctx:
 
 
 # ── get_execution_service dependency ─────────────────────────────────────────
+
 
 def test_get_execution_service_returns_service():
     """get_execution_service creates ExecutionService with session."""
@@ -51,6 +56,7 @@ def test_get_execution_service_returns_service():
 
 # ── create_execution: flow_id found in DB ─────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_create_execution_with_valid_flow_id_in_db():
     """create_execution verifies saved flow exists before executing."""
@@ -63,7 +69,9 @@ async def test_create_execution_with_valid_flow_id_in_db():
     )
 
     flow_id = str(uuid.uuid4())
-    cfg = CrewConfig(agents_yaml={"a": {}}, tasks_yaml={"t": {}}, inputs={}, flow_id=flow_id)
+    cfg = CrewConfig(
+        agents_yaml={"a": {}}, tasks_yaml={"t": {}}, inputs={}, flow_id=flow_id
+    )
     ctx = Ctx(user_role="admin")
 
     mock_flow = SimpleNamespace(id=flow_id, name="My Flow")
@@ -84,13 +92,16 @@ async def test_create_execution_with_valid_flow_id_in_db():
 async def test_create_execution_flow_id_not_found_raises():
     """create_execution raises ValueError when flow not found in DB."""
     import uuid
+
     from fastapi import HTTPException
 
     svc = AsyncMock()
     svc.session = MagicMock()
 
     flow_id = str(uuid.uuid4())
-    cfg = CrewConfig(agents_yaml={"a": {}}, tasks_yaml={"t": {}}, inputs={}, flow_id=flow_id)
+    cfg = CrewConfig(
+        agents_yaml={"a": {}}, tasks_yaml={"t": {}}, inputs={}, flow_id=flow_id
+    )
     ctx = Ctx(user_role="admin")
 
     mock_flow_svc = AsyncMock()
@@ -143,9 +154,11 @@ async def test_create_execution_with_nodes_skips_db_lookup():
 
 # ── get_execution_status result processing ────────────────────────────────────
 
+
 def make_exec_data(**kwargs):
     """Build a minimal valid ExecutionResponse data dict."""
     from datetime import datetime
+
     base = {
         "execution_id": "e1",
         "status": "completed",
@@ -162,9 +175,11 @@ def make_exec_data(**kwargs):
 async def test_get_execution_status_json_string_result(MockExecSvc):
     """get_execution_status parses JSON string result into dict."""
     svc = AsyncMock()
-    svc.get_execution_status = AsyncMock(return_value=make_exec_data(
-        result=json.dumps({"output": "hello"}),
-    ))
+    svc.get_execution_status = AsyncMock(
+        return_value=make_exec_data(
+            result=json.dumps({"output": "hello"}),
+        )
+    )
     MockExecSvc.return_value = svc
 
     out = await get_execution_status("e1", group_context=Ctx(), db=MagicMock())
@@ -177,9 +192,11 @@ async def test_get_execution_status_json_string_result(MockExecSvc):
 async def test_get_execution_status_invalid_json_string_result(MockExecSvc):
     """get_execution_status wraps invalid JSON string in dict."""
     svc = AsyncMock()
-    svc.get_execution_status = AsyncMock(return_value=make_exec_data(
-        result="not-json-string",
-    ))
+    svc.get_execution_status = AsyncMock(
+        return_value=make_exec_data(
+            result="not-json-string",
+        )
+    )
     MockExecSvc.return_value = svc
 
     out = await get_execution_status("e1", group_context=Ctx(), db=MagicMock())
@@ -192,9 +209,11 @@ async def test_get_execution_status_invalid_json_string_result(MockExecSvc):
 async def test_get_execution_status_list_result(MockExecSvc):
     """get_execution_status wraps list result in dict."""
     svc = AsyncMock()
-    svc.get_execution_status = AsyncMock(return_value=make_exec_data(
-        result=["item1", "item2"],
-    ))
+    svc.get_execution_status = AsyncMock(
+        return_value=make_exec_data(
+            result=["item1", "item2"],
+        )
+    )
     MockExecSvc.return_value = svc
 
     out = await get_execution_status("e1", group_context=Ctx(), db=MagicMock())
@@ -207,9 +226,11 @@ async def test_get_execution_status_list_result(MockExecSvc):
 async def test_get_execution_status_bool_result(MockExecSvc):
     """get_execution_status wraps bool result in dict."""
     svc = AsyncMock()
-    svc.get_execution_status = AsyncMock(return_value=make_exec_data(
-        result=True,
-    ))
+    svc.get_execution_status = AsyncMock(
+        return_value=make_exec_data(
+            result=True,
+        )
+    )
     MockExecSvc.return_value = svc
 
     out = await get_execution_status("e1", group_context=Ctx(), db=MagicMock())
@@ -222,9 +243,11 @@ async def test_get_execution_status_bool_result(MockExecSvc):
 async def test_get_execution_status_unexpected_type_result(MockExecSvc):
     """get_execution_status sets result to empty dict for unexpected types."""
     svc = AsyncMock()
-    svc.get_execution_status = AsyncMock(return_value=make_exec_data(
-        result=42,  # integer — unexpected type
-    ))
+    svc.get_execution_status = AsyncMock(
+        return_value=make_exec_data(
+            result=42,  # integer — unexpected type
+        )
+    )
     MockExecSvc.return_value = svc
 
     out = await get_execution_status("e1", group_context=Ctx(), db=MagicMock())
@@ -245,6 +268,7 @@ async def test_get_execution_status_not_found(MockExecSvc):
 
 # ── list_executions result processing ─────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 @patch("src.api.executions_router.ExecutionService")
 async def test_list_executions_various_result_types(MockExecSvc):
@@ -253,14 +277,52 @@ async def test_list_executions_various_result_types(MockExecSvc):
 
     ts = datetime.utcnow().isoformat()
     svc = AsyncMock()
-    svc.list_executions = AsyncMock(return_value=[
-        {"execution_id": "e1", "status": "done", "run_name": "r1", "created_at": ts, "result": json.dumps({"k": "v"})},
-        {"execution_id": "e2", "status": "done", "run_name": "r2", "created_at": ts, "result": ["a", "b"]},
-        {"execution_id": "e3", "status": "done", "run_name": "r3", "created_at": ts, "result": True},
-        {"execution_id": "e4", "status": "done", "run_name": "r4", "created_at": ts, "result": 99},
-        {"execution_id": "e5", "status": "done", "run_name": "r5", "created_at": ts, "result": "bad-json"},
-        {"execution_id": "e6", "status": "done", "run_name": "r6", "created_at": ts, "result": None},
-    ])
+    svc.list_executions = AsyncMock(
+        return_value=[
+            {
+                "execution_id": "e1",
+                "status": "done",
+                "run_name": "r1",
+                "created_at": ts,
+                "result": json.dumps({"k": "v"}),
+            },
+            {
+                "execution_id": "e2",
+                "status": "done",
+                "run_name": "r2",
+                "created_at": ts,
+                "result": ["a", "b"],
+            },
+            {
+                "execution_id": "e3",
+                "status": "done",
+                "run_name": "r3",
+                "created_at": ts,
+                "result": True,
+            },
+            {
+                "execution_id": "e4",
+                "status": "done",
+                "run_name": "r4",
+                "created_at": ts,
+                "result": 99,
+            },
+            {
+                "execution_id": "e5",
+                "status": "done",
+                "run_name": "r5",
+                "created_at": ts,
+                "result": "bad-json",
+            },
+            {
+                "execution_id": "e6",
+                "status": "done",
+                "run_name": "r6",
+                "created_at": ts,
+                "result": None,
+            },
+        ]
+    )
     MockExecSvc.return_value = svc
 
     out = await list_executions(group_context=Ctx(), db=MagicMock())
@@ -290,7 +352,9 @@ async def test_list_executions_scopes_to_selected_workspace(MockExecSvc):
 
     assert isinstance(out, list)
     _, kwargs = svc.list_executions.call_args
-    assert kwargs["group_ids"] == ["g1"], "must scope to the selected workspace, not the union"
+    assert kwargs["group_ids"] == [
+        "g1"
+    ], "must scope to the selected workspace, not the union"
 
 
 @pytest.mark.asyncio
@@ -329,14 +393,17 @@ async def test_list_executions_unauthorized_group_fails_closed(MockExecSvc):
 
 # ── stop_execution: non-running state ─────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_stop_execution_not_in_running_state_returns_response():
     """stop_execution returns response with message when execution not running."""
     svc = AsyncMock()
-    svc.get_execution_status = AsyncMock(return_value={
-        "status": "completed",
-        "result": {"output": "done"},
-    })
+    svc.get_execution_status = AsyncMock(
+        return_value={
+            "status": "completed",
+            "result": {"output": "done"},
+        }
+    )
     ctx = Ctx(user_role="admin")
 
     out = await stop_execution(
@@ -353,16 +420,20 @@ async def test_stop_execution_not_in_running_state_returns_response():
 async def test_stop_execution_preparing_state_is_stoppable():
     """stop_execution proceeds for PREPARING status."""
     svc = AsyncMock()
-    svc.get_execution_status = AsyncMock(return_value={
-        "status": "PREPARING",
-        "result": None,
-    })
-    svc.stop_execution = AsyncMock(return_value={
-        "execution_id": "e1",
-        "status": "stopping",
-        "message": "Stopping",
-        "partial_results": None,
-    })
+    svc.get_execution_status = AsyncMock(
+        return_value={
+            "status": "PREPARING",
+            "result": None,
+        }
+    )
+    svc.stop_execution = AsyncMock(
+        return_value={
+            "execution_id": "e1",
+            "status": "stopping",
+            "message": "Stopping",
+            "partial_results": None,
+        }
+    )
     ctx = Ctx(user_role="admin")
 
     out = await stop_execution(
@@ -394,10 +465,12 @@ async def test_stop_execution_not_found_raises():
 
 # ── debug_context endpoint ────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_debug_context_returns_404_when_not_debug():
     """debug_context raises HTTPException 404 when DEBUG_MODE is off."""
     from fastapi import HTTPException
+
     from src.config.settings import settings as app_settings
 
     orig = app_settings.DEBUG_MODE

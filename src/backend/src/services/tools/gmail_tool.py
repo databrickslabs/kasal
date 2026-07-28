@@ -31,6 +31,7 @@ Proxy limitation (verified live): query strings are folded into the forwarded
 path and the upstream 404s, so NO endpoint here uses query parameters — the
 message list is fetched plain (newest first) and filtered client-side.
 """
+
 import asyncio
 import base64
 import logging
@@ -38,10 +39,10 @@ import re
 from typing import Any, Dict, List, Optional, Type
 
 import aiohttp
-from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
-from src.utils.telemetry import get_user_agent_header, KasalProduct
+from src.services.tools.base import BaseTool
+from src.utils.telemetry import KasalProduct, get_user_agent_header
 
 logger = logging.getLogger(__name__)
 
@@ -246,7 +247,11 @@ class GmailTool(BaseTool):
         )
 
     async def _proxy_get(
-        self, session: aiohttp.ClientSession, base: str, path: str, headers: Dict[str, str]
+        self,
+        session: aiohttp.ClientSession,
+        base: str,
+        path: str,
+        headers: Dict[str, str],
     ) -> Dict[str, Any]:
         """GET a Gmail API path through the UC connections proxy."""
         import gzip
@@ -259,7 +264,9 @@ class GmailTool(BaseTool):
         # .json() dies with "can't decode byte 0x8b".
         request_headers = {**headers, "Accept-Encoding": "identity"}
         async with session.get(
-            url, headers=request_headers, timeout=aiohttp.ClientTimeout(total=self._timeout)
+            url,
+            headers=request_headers,
+            timeout=aiohttp.ClientTimeout(total=self._timeout),
         ) as resp:
             raw = await resp.read()
             if raw[:2] == b"\x1f\x8b":  # gzip magic

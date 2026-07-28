@@ -9,15 +9,15 @@ duration of a job, funnelling both into the same queue as everything else.
 The logger REGISTRY is ``src/core/logger.py``. This is capture only.
 """
 
+import io
 import logging
+import sys
+import threading
 import traceback
 import warnings
-from typing import Optional, Any, Dict
-import sys
-import io
-import threading
 from contextlib import contextmanager
 from datetime import datetime
+from typing import Any, Dict, Optional
 
 # Suppress known deprecation warnings from third-party libraries
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="httpx")
@@ -26,14 +26,14 @@ warnings.filterwarnings("ignore", message=".*Use 'content=.*' to upload raw byte
 warnings.filterwarnings("ignore", message=".*Accessing the 'model_fields' attribute on the instance is deprecated.*")
 warnings.filterwarnings("ignore", message=".*remove second argument of ws_handler.*")
 
-# Import CrewAI's Printer for output redirection (still needed)
-from src.utils.agent_printer import Printer
-
 # Import core logger
 from src.core.logger import LoggerManager
 
 # Import queue services
 from src.services.execution.logs.queue import enqueue_log
+
+# Import CrewAI's Printer for output redirection (still needed)
+from src.utils.agent_printer import Printer
 
 # Import group context
 from src.utils.user_context import GroupContext

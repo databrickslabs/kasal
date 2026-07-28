@@ -62,7 +62,9 @@ class LakebaseMemoryService:
 
                 # Check if pgvector extension is already enabled
                 result = await session.execute(
-                    text("SELECT extname FROM pg_extension WHERE extname IN ('vector', 'pgvector')")
+                    text(
+                        "SELECT extname FROM pg_extension WHERE extname IN ('vector', 'pgvector')"
+                    )
                 )
                 row = result.fetchone()
                 has_pgvector = row is not None
@@ -83,9 +85,7 @@ class LakebaseMemoryService:
                         "the instance owner must run: "
                         "CREATE EXTENSION IF NOT EXISTS vector;"
                     )
-                    details["pgvector_setup_instructions"] = (
-                        PGVECTOR_ADMIN_INSTRUCTIONS
-                    )
+                    details["pgvector_setup_instructions"] = PGVECTOR_ADMIN_INSTRUCTIONS
                     details["pgvector_setup_sql"] = (
                         "CREATE EXTENSION IF NOT EXISTS vector;"
                     )
@@ -146,14 +146,20 @@ class LakebaseMemoryService:
                     for ext_name in ("vector", "pgvector"):
                         try:
                             await session.execute(text("SAVEPOINT ext_attempt"))
-                            await session.execute(text(f"CREATE EXTENSION IF NOT EXISTS {ext_name}"))
+                            await session.execute(
+                                text(f"CREATE EXTENSION IF NOT EXISTS {ext_name}")
+                            )
                             await session.execute(text("RELEASE SAVEPOINT ext_attempt"))
                             pgvector_enabled = True
                             logger.info(f"Extension '{ext_name}' created successfully")
                             break
                         except Exception as ext_err:
-                            await session.execute(text("ROLLBACK TO SAVEPOINT ext_attempt"))
-                            logger.debug(f"Extension '{ext_name}' not available: {ext_err}")
+                            await session.execute(
+                                text("ROLLBACK TO SAVEPOINT ext_attempt")
+                            )
+                            logger.debug(
+                                f"Extension '{ext_name}' not available: {ext_err}"
+                            )
 
                 if not pgvector_enabled:
                     return {
@@ -440,22 +446,25 @@ class LakebaseMemoryService:
                     if isinstance(metadata_val, str):
                         try:
                             import json
+
                             metadata_val = json.loads(metadata_val)
                         except (ValueError, TypeError):
                             metadata_val = {}
 
-                    documents.append({
-                        "id": row[0],
-                        "crew_id": row[1],
-                        "group_id": row[2],
-                        "session_id": row[3],
-                        "agent": row[4],
-                        "text": row[5],
-                        "metadata": metadata_val or {},
-                        "score": row[7],
-                        "created_at": str(row[8]) if row[8] else None,
-                        "updated_at": str(row[9]) if row[9] else None,
-                    })
+                    documents.append(
+                        {
+                            "id": row[0],
+                            "crew_id": row[1],
+                            "group_id": row[2],
+                            "session_id": row[3],
+                            "agent": row[4],
+                            "text": row[5],
+                            "metadata": metadata_val or {},
+                            "score": row[7],
+                            "created_at": str(row[8]) if row[8] else None,
+                            "updated_at": str(row[9]) if row[9] else None,
+                        }
+                    )
 
                 return {
                     "success": True,
@@ -501,8 +510,9 @@ class LakebaseMemoryService:
             async with get_lakebase_session(
                 instance_name=self.instance_name
             ) as session:
-                from sqlalchemy import text
                 import json
+
+                from sqlalchemy import text
 
                 where, gparams = self._group_where(group_id)
                 result = await session.execute(
@@ -549,41 +559,64 @@ class LakebaseMemoryService:
                     entity_id = entity_name or record_id
                     if entity_id not in seen_entity_ids:
                         seen_entity_ids.add(entity_id)
-                        entities.append({
-                            "id": entity_id,
-                            "name": entity_name,
-                            "type": entity_type,
-                            "attributes": {
-                                "agent": row[2],
-                                "crew_id": row[1],
-                                "content": content,
-                                "score": row[5],
-                                **{k: v for k, v in metadata_val.items()
-                                   if k not in ("entity_name", "name", "entity_type", "type")},
-                            },
-                        })
+                        entities.append(
+                            {
+                                "id": entity_id,
+                                "name": entity_name,
+                                "type": entity_type,
+                                "attributes": {
+                                    "agent": row[2],
+                                    "crew_id": row[1],
+                                    "content": content,
+                                    "score": row[5],
+                                    **{
+                                        k: v
+                                        for k, v in metadata_val.items()
+                                        if k
+                                        not in (
+                                            "entity_name",
+                                            "name",
+                                            "entity_type",
+                                            "type",
+                                        )
+                                    },
+                                },
+                            }
+                        )
 
                     # Extract relationships from metadata
-                    related_to = metadata_val.get("related_to") or metadata_val.get("relationships") or []
+                    related_to = (
+                        metadata_val.get("related_to")
+                        or metadata_val.get("relationships")
+                        or []
+                    )
                     if isinstance(related_to, str):
-                        related_to = [r.strip() for r in related_to.split(",") if r.strip()]
+                        related_to = [
+                            r.strip() for r in related_to.split(",") if r.strip()
+                        ]
                     if isinstance(related_to, list):
                         for target in related_to:
-                            target_name = target if isinstance(target, str) else str(target)
-                            relationships.append({
-                                "source": entity_id,
-                                "target": target_name,
-                                "type": "related_to",
-                            })
+                            target_name = (
+                                target if isinstance(target, str) else str(target)
+                            )
+                            relationships.append(
+                                {
+                                    "source": entity_id,
+                                    "target": target_name,
+                                    "type": "related_to",
+                                }
+                            )
                             # Ensure target node exists
                             if target_name not in seen_entity_ids:
                                 seen_entity_ids.add(target_name)
-                                entities.append({
-                                    "id": target_name,
-                                    "name": target_name,
-                                    "type": "entity",
-                                    "attributes": {},
-                                })
+                                entities.append(
+                                    {
+                                        "id": target_name,
+                                        "name": target_name,
+                                        "type": "entity",
+                                        "attributes": {},
+                                    }
+                                )
 
                 return {
                     "entities": entities,

@@ -11,15 +11,16 @@ Tests cover all public methods:
 """
 
 import os
-import pytest
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_session():
@@ -47,6 +48,7 @@ def mock_repository():
 def service(mock_session, mock_repository):
     """Create a DatabaseManagementService with mocked dependencies."""
     from src.services.databricks.lakebase.management import DatabaseManagementService
+
     return DatabaseManagementService(
         session=mock_session,
         repository=mock_repository,
@@ -58,6 +60,7 @@ def service(mock_session, mock_repository):
 def service_with_token(mock_session, mock_repository):
     """Create a DatabaseManagementService with a user token."""
     from src.services.databricks.lakebase.management import DatabaseManagementService
+
     return DatabaseManagementService(
         session=mock_session,
         repository=mock_repository,
@@ -69,21 +72,35 @@ def service_with_token(mock_session, mock_repository):
 # Constructor Tests
 # ===================================================================
 
+
 class TestDatabaseManagementServiceInit:
     """Tests for DatabaseManagementService.__init__."""
 
     def test_init_stores_session(self, mock_session, mock_repository):
-        from src.services.databricks.lakebase.management import DatabaseManagementService
-        svc = DatabaseManagementService(session=mock_session, repository=mock_repository)
+        from src.services.databricks.lakebase.management import (
+            DatabaseManagementService,
+        )
+
+        svc = DatabaseManagementService(
+            session=mock_session, repository=mock_repository
+        )
         assert svc.session is mock_session
 
     def test_init_uses_provided_repository(self, mock_session, mock_repository):
-        from src.services.databricks.lakebase.management import DatabaseManagementService
-        svc = DatabaseManagementService(session=mock_session, repository=mock_repository)
+        from src.services.databricks.lakebase.management import (
+            DatabaseManagementService,
+        )
+
+        svc = DatabaseManagementService(
+            session=mock_session, repository=mock_repository
+        )
         assert svc.repository is mock_repository
 
     def test_init_creates_default_repository_when_none(self, mock_session):
-        from src.services.databricks.lakebase.management import DatabaseManagementService
+        from src.services.databricks.lakebase.management import (
+            DatabaseManagementService,
+        )
+
         with patch(
             "src.services.databricks.lakebase.management.DatabaseBackupRepository"
         ) as MockRepo:
@@ -94,23 +111,34 @@ class TestDatabaseManagementServiceInit:
             assert svc.repository is mock_repo_instance
 
     def test_init_passes_user_token_to_default_repository(self, mock_session):
-        from src.services.databricks.lakebase.management import DatabaseManagementService
+        from src.services.databricks.lakebase.management import (
+            DatabaseManagementService,
+        )
+
         with patch(
             "src.services.databricks.lakebase.management.DatabaseBackupRepository"
         ) as MockRepo:
             MockRepo.return_value = MagicMock()
-            DatabaseManagementService(session=mock_session, repository=None, user_token="tok123")
+            DatabaseManagementService(
+                session=mock_session, repository=None, user_token="tok123"
+            )
             MockRepo.assert_called_once_with(session=mock_session, user_token="tok123")
 
     def test_init_stores_user_token(self, mock_session, mock_repository):
-        from src.services.databricks.lakebase.management import DatabaseManagementService
+        from src.services.databricks.lakebase.management import (
+            DatabaseManagementService,
+        )
+
         svc = DatabaseManagementService(
             session=mock_session, repository=mock_repository, user_token="abc"
         )
         assert svc.user_token == "abc"
 
     def test_init_user_token_defaults_to_none(self, mock_session, mock_repository):
-        from src.services.databricks.lakebase.management import DatabaseManagementService
+        from src.services.databricks.lakebase.management import (
+            DatabaseManagementService,
+        )
+
         svc = DatabaseManagementService(
             session=mock_session, repository=mock_repository
         )
@@ -121,6 +149,7 @@ class TestDatabaseManagementServiceInit:
 # export_to_volume Tests
 # ===================================================================
 
+
 class TestExportToVolume:
     """Tests for DatabaseManagementService.export_to_volume."""
 
@@ -129,18 +158,26 @@ class TestExportToVolume:
     @pytest.mark.asyncio
     async def test_export_sqlite_success(self, service, mock_repository):
         """Successful SQLite export with all expected result fields."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.exists", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.getsize",
-            return_value=2 * 1024 * 1024,  # 2 MB
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.exists",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.getsize",
+                return_value=2 * 1024 * 1024,  # 2 MB
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
 
@@ -180,15 +217,22 @@ class TestExportToVolume:
     @pytest.mark.asyncio
     async def test_export_sqlite_db_not_found(self, service, mock_repository):
         """When the SQLite database file does not exist, return error."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.exists", return_value=False
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.exists",
+                return_value=False,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/missing.db"
 
@@ -198,20 +242,30 @@ class TestExportToVolume:
         assert "not found" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_export_sqlite_default_path_when_empty(self, service, mock_repository):
+    async def test_export_sqlite_default_path_when_empty(
+        self, service, mock_repository
+    ):
         """Falls back to ./app.db when SQLITE_DB_PATH is empty/None."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=False
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.abspath",
-            return_value="/abs/app.db",
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.exists", return_value=False
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=False,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.abspath",
+                return_value="/abs/app.db",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.exists",
+                return_value=False,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = None
 
@@ -222,22 +276,34 @@ class TestExportToVolume:
         assert "not found" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_export_sqlite_relative_path_converted(self, service, mock_repository):
+    async def test_export_sqlite_relative_path_converted(
+        self, service, mock_repository
+    ):
         """Relative SQLite paths are converted to absolute via os.path.abspath."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=False
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.abspath",
-            return_value="/abs/app.db",
-        ) as mock_abspath, patch(
-            "src.services.databricks.lakebase.management.os.path.exists", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.getsize", return_value=1024
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=False,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.abspath",
+                return_value="/abs/app.db",
+            ) as mock_abspath,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.exists",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.getsize",
+                return_value=1024,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "./app.db"
 
@@ -246,7 +312,10 @@ class TestExportToVolume:
                 "backup_path": "/Volumes/c/s/v/backup.db",
                 "backup_size": 512,
             }
-            mock_repository.cleanup_old_backups.return_value = {"success": True, "deleted": []}
+            mock_repository.cleanup_old_backups.return_value = {
+                "success": True,
+                "deleted": [],
+            }
             mock_repository.list_backups.return_value = []
 
             await service.export_to_volume(catalog="c", schema="s")
@@ -256,17 +325,26 @@ class TestExportToVolume:
     @pytest.mark.asyncio
     async def test_export_sqlite_backup_failure(self, service, mock_repository):
         """When repository.create_sqlite_backup fails, propagate error result."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.exists", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.getsize", return_value=1024
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.exists",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.getsize",
+                return_value=1024,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.create_sqlite_backup.return_value = {
@@ -293,7 +371,10 @@ class TestExportToVolume:
                 "backup_path": "/Volumes/c/s/v/kasal_backup.sql",
                 "backup_size": 2048,
             }
-            mock_repository.cleanup_old_backups.return_value = {"success": True, "deleted": []}
+            mock_repository.cleanup_old_backups.return_value = {
+                "success": True,
+                "deleted": [],
+            }
             mock_repository.list_backups.return_value = []
 
             result = await service.export_to_volume(
@@ -317,7 +398,10 @@ class TestExportToVolume:
                 "backup_path": "/Volumes/c/s/v/backup.db",
                 "backup_size": 4096,
             }
-            mock_repository.cleanup_old_backups.return_value = {"success": True, "deleted": []}
+            mock_repository.cleanup_old_backups.return_value = {
+                "success": True,
+                "deleted": [],
+            }
             mock_repository.list_backups.return_value = []
 
             result = await service.export_to_volume(
@@ -328,11 +412,16 @@ class TestExportToVolume:
         assert result["backup_filename"].endswith(".db")
         # Verify the repository was called with sqlite format
         call_kwargs = mock_repository.create_postgres_backup.call_args
-        assert call_kwargs.kwargs.get("export_format") == "sqlite" or \
-               (call_kwargs[1] if len(call_kwargs) > 1 else {}).get("export_format") == "sqlite"
+        assert (
+            call_kwargs.kwargs.get("export_format") == "sqlite"
+            or (call_kwargs[1] if len(call_kwargs) > 1 else {}).get("export_format")
+            == "sqlite"
+        )
 
     @pytest.mark.asyncio
-    async def test_export_postgres_uses_provided_session(self, service, mock_repository):
+    async def test_export_postgres_uses_provided_session(
+        self, service, mock_repository
+    ):
         """When session is explicitly passed, it is forwarded to the repository."""
         extra_session = AsyncMock()
         with patch(
@@ -344,7 +433,10 @@ class TestExportToVolume:
                 "backup_path": "/Volumes/c/s/v/backup.sql",
                 "backup_size": 100,
             }
-            mock_repository.cleanup_old_backups.return_value = {"success": True, "deleted": []}
+            mock_repository.cleanup_old_backups.return_value = {
+                "success": True,
+                "deleted": [],
+            }
             mock_repository.list_backups.return_value = []
 
             await service.export_to_volume(
@@ -355,7 +447,9 @@ class TestExportToVolume:
         assert call_kwargs["session"] is extra_session
 
     @pytest.mark.asyncio
-    async def test_export_postgres_uses_injected_session_when_none(self, service, mock_session, mock_repository):
+    async def test_export_postgres_uses_injected_session_when_none(
+        self, service, mock_session, mock_repository
+    ):
         """When no session parameter, falls back to the injected constructor session."""
         with patch(
             "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
@@ -366,12 +460,13 @@ class TestExportToVolume:
                 "backup_path": "/Volumes/c/s/v/backup.sql",
                 "backup_size": 100,
             }
-            mock_repository.cleanup_old_backups.return_value = {"success": True, "deleted": []}
+            mock_repository.cleanup_old_backups.return_value = {
+                "success": True,
+                "deleted": [],
+            }
             mock_repository.list_backups.return_value = []
 
-            await service.export_to_volume(
-                catalog="c", schema="s", session=None
-            )
+            await service.export_to_volume(catalog="c", schema="s", session=None)
 
         call_kwargs = mock_repository.create_postgres_backup.call_args.kwargs
         assert call_kwargs["session"] is mock_session
@@ -412,22 +507,34 @@ class TestExportToVolume:
     @pytest.mark.asyncio
     async def test_export_workspace_url_from_auth(self, service, mock_repository):
         """When get_auth_context provides a workspace URL it is used in the volume browse URL."""
-        mock_auth = SimpleNamespace(workspace_url="https://my-workspace.databricks.com/")
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.exists", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.getsize", return_value=1024
-        ), patch(
-            "src.utils.databricks_auth.get_auth_context",
-            new_callable=AsyncMock,
-            return_value=mock_auth,
+        mock_auth = SimpleNamespace(
+            workspace_url="https://my-workspace.databricks.com/"
+        )
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.exists",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.getsize",
+                return_value=1024,
+            ),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.create_sqlite_backup.return_value = {
@@ -435,33 +542,54 @@ class TestExportToVolume:
                 "backup_path": "/Volumes/c/s/v/backup.db",
                 "backup_size": 512,
             }
-            mock_repository.cleanup_old_backups.return_value = {"success": True, "deleted": []}
+            mock_repository.cleanup_old_backups.return_value = {
+                "success": True,
+                "deleted": [],
+            }
             mock_repository.list_backups.return_value = []
 
-            result = await service.export_to_volume(catalog="c", schema="s", volume_name="v")
+            result = await service.export_to_volume(
+                catalog="c", schema="s", volume_name="v"
+            )
 
         assert "my-workspace" in result["volume_browse_url"]
-        assert result["volume_browse_url"].startswith("https://my-workspace.databricks.com")
+        assert result["volume_browse_url"].startswith(
+            "https://my-workspace.databricks.com"
+        )
         # trailing slash should be stripped
-        assert not result["volume_browse_url"].startswith("https://my-workspace.databricks.com//")
+        assert not result["volume_browse_url"].startswith(
+            "https://my-workspace.databricks.com//"
+        )
 
     @pytest.mark.asyncio
-    async def test_export_workspace_url_fallback_when_auth_fails(self, service, mock_repository):
+    async def test_export_workspace_url_fallback_when_auth_fails(
+        self, service, mock_repository
+    ):
         """When auth raises, falls back to placeholder workspace URL."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.exists", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.getsize", return_value=1024
-        ), patch(
-            "src.utils.databricks_auth.get_auth_context",
-            side_effect=Exception("auth unavailable"),
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.exists",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.getsize",
+                return_value=1024,
+            ),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                side_effect=Exception("auth unavailable"),
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.create_sqlite_backup.return_value = {
@@ -469,10 +597,15 @@ class TestExportToVolume:
                 "backup_path": "/Volumes/c/s/v/backup.db",
                 "backup_size": 512,
             }
-            mock_repository.cleanup_old_backups.return_value = {"success": True, "deleted": []}
+            mock_repository.cleanup_old_backups.return_value = {
+                "success": True,
+                "deleted": [],
+            }
             mock_repository.list_backups.return_value = []
 
-            result = await service.export_to_volume(catalog="c", schema="s", volume_name="v")
+            result = await service.export_to_volume(
+                catalog="c", schema="s", volume_name="v"
+            )
 
         assert "your-workspace" in result["volume_browse_url"]
 
@@ -481,17 +614,26 @@ class TestExportToVolume:
     @pytest.mark.asyncio
     async def test_export_cleanup_logs_deleted(self, service, mock_repository):
         """When cleanup deletes files, the service logs them."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.exists", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.getsize", return_value=1024
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.exists",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.getsize",
+                return_value=1024,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.create_sqlite_backup.return_value = {
@@ -514,17 +656,26 @@ class TestExportToVolume:
     @pytest.mark.asyncio
     async def test_export_files_formatted_with_datetime(self, service, mock_repository):
         """Backup list entries with datetime created_at are ISO-formatted."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.exists", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.getsize", return_value=1024
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.exists",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.getsize",
+                return_value=1024,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.create_sqlite_backup.return_value = {
@@ -532,7 +683,10 @@ class TestExportToVolume:
                 "backup_path": "/Volumes/c/s/v/backup.db",
                 "backup_size": 512,
             }
-            mock_repository.cleanup_old_backups.return_value = {"success": True, "deleted": []}
+            mock_repository.cleanup_old_backups.return_value = {
+                "success": True,
+                "deleted": [],
+            }
             mock_repository.list_backups.return_value = [
                 {
                     "filename": "b1.db",
@@ -567,23 +721,35 @@ class TestExportToVolume:
         assert "boom" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_export_auth_exception_uses_fallback_url(self, service, mock_repository):
+    async def test_export_auth_exception_uses_fallback_url(
+        self, service, mock_repository
+    ):
         """When get_auth_context raises an exception, fallback workspace URL is used."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.exists", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.getsize", return_value=1024
-        ), patch(
-            "src.utils.databricks_auth.get_auth_context",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("auth failed"),
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.exists",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.getsize",
+                return_value=1024,
+            ),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("auth failed"),
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.create_sqlite_backup.return_value = {
@@ -591,10 +757,15 @@ class TestExportToVolume:
                 "backup_path": "/Volumes/c/s/v/backup.db",
                 "backup_size": 512,
             }
-            mock_repository.cleanup_old_backups.return_value = {"success": True, "deleted": []}
+            mock_repository.cleanup_old_backups.return_value = {
+                "success": True,
+                "deleted": [],
+            }
             mock_repository.list_backups.return_value = []
 
-            result = await service.export_to_volume(catalog="c", schema="s", volume_name="v")
+            result = await service.export_to_volume(
+                catalog="c", schema="s", volume_name="v"
+            )
 
         assert result["success"] is True
         assert "your-workspace" in result["volume_browse_url"]
@@ -603,6 +774,7 @@ class TestExportToVolume:
 # ===================================================================
 # import_from_volume Tests
 # ===================================================================
+
 
 class TestImportFromVolume:
     """Tests for DatabaseManagementService.import_from_volume."""
@@ -643,8 +815,7 @@ class TestImportFromVolume:
             return_value="sqlite",
         ):
             result = await service.import_from_volume(
-                catalog="c", schema="s", volume_name="v",
-                backup_filename="backup.sql"
+                catalog="c", schema="s", volume_name="v", backup_filename="backup.sql"
             )
         assert result["success"] is False
         assert "Cannot restore" in result["error"]
@@ -656,8 +827,7 @@ class TestImportFromVolume:
             return_value="sqlite",
         ):
             result = await service.import_from_volume(
-                catalog="c", schema="s", volume_name="v",
-                backup_filename="backup.json"
+                catalog="c", schema="s", volume_name="v", backup_filename="backup.json"
             )
         assert result["success"] is False
         assert "Cannot restore" in result["error"]
@@ -670,8 +840,7 @@ class TestImportFromVolume:
             return_value="postgres",
         ):
             result = await service.import_from_volume(
-                catalog="c", schema="s", volume_name="v",
-                backup_filename="backup.db"
+                catalog="c", schema="s", volume_name="v", backup_filename="backup.db"
             )
         assert result["success"] is False
         assert "Cannot restore" in result["error"]
@@ -684,8 +853,10 @@ class TestImportFromVolume:
             return_value="postgres",
         ):
             result = await service.import_from_volume(
-                catalog="c", schema="s", volume_name="v",
-                backup_filename="backup.tar.gz"
+                catalog="c",
+                schema="s",
+                volume_name="v",
+                backup_filename="backup.tar.gz",
             )
         assert result["success"] is False
         assert "Cannot restore" in result["error"]
@@ -695,13 +866,18 @@ class TestImportFromVolume:
     @pytest.mark.asyncio
     async def test_import_sqlite_success(self, service, mock_repository):
         """Successful SQLite import disposes engine and returns expected result."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.restore_sqlite_backup.return_value = {
@@ -711,12 +887,20 @@ class TestImportFromVolume:
 
             # Mock the engine.dispose call
             mock_engine = AsyncMock()
-            with patch("src.services.databricks.lakebase.management.engine", mock_engine, create=True):
+            with patch(
+                "src.services.databricks.lakebase.management.engine",
+                mock_engine,
+                create=True,
+            ):
                 # The import triggers a lazy import of engine; we need to mock at the import site
-                with patch.dict("sys.modules", {"src.db.session": MagicMock(engine=mock_engine)}):
+                with patch.dict(
+                    "sys.modules", {"src.db.session": MagicMock(engine=mock_engine)}
+                ):
                     result = await service.import_from_volume(
-                        catalog="c", schema="s", volume_name="v",
-                        backup_filename="backup.db"
+                        catalog="c",
+                        schema="s",
+                        volume_name="v",
+                        backup_filename="backup.db",
                     )
 
         assert result["success"] is True
@@ -727,16 +911,22 @@ class TestImportFromVolume:
     @pytest.mark.asyncio
     async def test_import_sqlite_default_path(self, service, mock_repository):
         """Falls back to default path when SQLITE_DB_PATH is None."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=False
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.abspath",
-            return_value="/abs/app.db",
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=False,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.abspath",
+                return_value="/abs/app.db",
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = None
             mock_repository.restore_sqlite_backup.return_value = {
@@ -744,24 +934,35 @@ class TestImportFromVolume:
                 "restored_size": 1024,
             }
 
-            with patch.dict("sys.modules", {"src.db.session": MagicMock(engine=AsyncMock())}):
+            with patch.dict(
+                "sys.modules", {"src.db.session": MagicMock(engine=AsyncMock())}
+            ):
                 result = await service.import_from_volume(
-                    catalog="c", schema="s", volume_name="v",
-                    backup_filename="backup.db"
+                    catalog="c",
+                    schema="s",
+                    volume_name="v",
+                    backup_filename="backup.db",
                 )
 
         assert result["success"] is True
 
     @pytest.mark.asyncio
-    async def test_import_sqlite_engine_dispose_failure_ignored(self, service, mock_repository):
+    async def test_import_sqlite_engine_dispose_failure_ignored(
+        self, service, mock_repository
+    ):
         """If engine dispose fails the import is still considered successful."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.restore_sqlite_backup.return_value = {
@@ -771,10 +972,14 @@ class TestImportFromVolume:
 
             mock_engine = AsyncMock()
             mock_engine.dispose.side_effect = RuntimeError("dispose failed")
-            with patch.dict("sys.modules", {"src.db.session": MagicMock(engine=mock_engine)}):
+            with patch.dict(
+                "sys.modules", {"src.db.session": MagicMock(engine=mock_engine)}
+            ):
                 result = await service.import_from_volume(
-                    catalog="c", schema="s", volume_name="v",
-                    backup_filename="backup.db"
+                    catalog="c",
+                    schema="s",
+                    volume_name="v",
+                    backup_filename="backup.db",
                 )
 
         assert result["success"] is True
@@ -782,13 +987,18 @@ class TestImportFromVolume:
     @pytest.mark.asyncio
     async def test_import_sqlite_restore_failure(self, service, mock_repository):
         """Failed SQLite restore propagates the error."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.restore_sqlite_backup.return_value = {
@@ -797,8 +1007,7 @@ class TestImportFromVolume:
             }
 
             result = await service.import_from_volume(
-                catalog="c", schema="s", volume_name="v",
-                backup_filename="backup.db"
+                catalog="c", schema="s", volume_name="v", backup_filename="backup.db"
             )
 
         assert result["success"] is False
@@ -819,8 +1028,7 @@ class TestImportFromVolume:
             }
 
             result = await service.import_from_volume(
-                catalog="c", schema="s", volume_name="v",
-                backup_filename="backup.sql"
+                catalog="c", schema="s", volume_name="v", backup_filename="backup.sql"
             )
 
         assert result["success"] is True
@@ -841,8 +1049,7 @@ class TestImportFromVolume:
             }
 
             result = await service.import_from_volume(
-                catalog="c", schema="s", volume_name="v",
-                backup_filename="backup.json"
+                catalog="c", schema="s", volume_name="v", backup_filename="backup.json"
             )
 
         assert result["success"] is True
@@ -850,7 +1057,9 @@ class TestImportFromVolume:
         assert result["restored_tables"] == ["agents"]
 
     @pytest.mark.asyncio
-    async def test_import_postgres_uses_provided_session(self, service, mock_repository):
+    async def test_import_postgres_uses_provided_session(
+        self, service, mock_repository
+    ):
         """Explicit session is forwarded to the repository."""
         extra_session = AsyncMock()
         with patch(
@@ -862,7 +1071,9 @@ class TestImportFromVolume:
             }
 
             await service.import_from_volume(
-                catalog="c", schema="s", volume_name="v",
+                catalog="c",
+                schema="s",
+                volume_name="v",
                 backup_filename="backup.sql",
                 session=extra_session,
             )
@@ -871,7 +1082,9 @@ class TestImportFromVolume:
         assert call_kwargs["session"] is extra_session
 
     @pytest.mark.asyncio
-    async def test_import_postgres_uses_injected_session(self, service, mock_session, mock_repository):
+    async def test_import_postgres_uses_injected_session(
+        self, service, mock_session, mock_repository
+    ):
         """Falls back to injected session when no session parameter."""
         with patch(
             "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
@@ -882,7 +1095,9 @@ class TestImportFromVolume:
             }
 
             await service.import_from_volume(
-                catalog="c", schema="s", volume_name="v",
+                catalog="c",
+                schema="s",
+                volume_name="v",
                 backup_filename="backup.sql",
                 session=None,
             )
@@ -900,8 +1115,7 @@ class TestImportFromVolume:
             return_value="oracle",
         ):
             result = await service.import_from_volume(
-                catalog="c", schema="s", volume_name="v",
-                backup_filename="backup.db"
+                catalog="c", schema="s", volume_name="v", backup_filename="backup.db"
             )
 
         # The backup_type would be 'sqlite' (.db extension) but db_type is oracle
@@ -919,8 +1133,7 @@ class TestImportFromVolume:
             side_effect=RuntimeError("kaboom"),
         ):
             result = await service.import_from_volume(
-                catalog="c", schema="s", volume_name="v",
-                backup_filename="backup.db"
+                catalog="c", schema="s", volume_name="v", backup_filename="backup.db"
             )
 
         assert result["success"] is False
@@ -930,6 +1143,7 @@ class TestImportFromVolume:
 # ===================================================================
 # list_backups Tests
 # ===================================================================
+
 
 class TestListBackups:
     """Tests for DatabaseManagementService.list_backups."""
@@ -992,7 +1206,9 @@ class TestListBackups:
         assert "your-workspace" in result["backups"][0]["databricks_url"]
 
     @pytest.mark.asyncio
-    async def test_list_backups_with_workspace_url_from_auth(self, service, mock_repository):
+    async def test_list_backups_with_workspace_url_from_auth(
+        self, service, mock_repository
+    ):
         """When asyncio.run(get_auth_context()) returns a workspace URL, it is used."""
         import asyncio
 
@@ -1010,7 +1226,9 @@ class TestListBackups:
         mock_auth = SimpleNamespace(workspace_url="https://my-ws.databricks.com/")
         original_run = asyncio.run
         with patch.object(asyncio, "run", return_value=mock_auth):
-            result = await service.list_backups(catalog="c", schema="s", volume_name="v")
+            result = await service.list_backups(
+                catalog="c", schema="s", volume_name="v"
+            )
 
         assert result["success"] is True
         assert "my-ws" in result["backups"][0]["databricks_url"]
@@ -1030,6 +1248,7 @@ class TestListBackups:
 # get_database_info Tests
 # ===================================================================
 
+
 class TestGetDatabaseInfo:
     """Tests for DatabaseManagementService.get_database_info."""
 
@@ -1038,15 +1257,22 @@ class TestGetDatabaseInfo:
     @pytest.mark.asyncio
     async def test_get_info_sqlite_success(self, service, mock_repository):
         """Successful SQLite database info with all optional fields."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.exists", return_value=True
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.exists",
+                return_value=True,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.get_database_info.return_value = {
@@ -1079,15 +1305,22 @@ class TestGetDatabaseInfo:
     @pytest.mark.asyncio
     async def test_get_info_sqlite_no_optional_fields(self, service, mock_repository):
         """SQLite info result without optional size/path/date fields."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.exists", return_value=True
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.exists",
+                return_value=True,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.get_database_info.return_value = {
@@ -1111,18 +1344,26 @@ class TestGetDatabaseInfo:
         assert "database_path" not in result
 
     @pytest.mark.asyncio
-    async def test_get_info_sqlite_default_path_fallback(self, service, mock_repository):
+    async def test_get_info_sqlite_default_path_fallback(
+        self, service, mock_repository
+    ):
         """Falls back to ./app.db when SQLITE_DB_PATH is None."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=False
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.abspath",
-            return_value="/abs/app.db",
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=False,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.abspath",
+                return_value="/abs/app.db",
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = None
             mock_repository.get_database_info.return_value = {
@@ -1144,13 +1385,18 @@ class TestGetDatabaseInfo:
     @pytest.mark.asyncio
     async def test_get_info_sqlite_repo_failure(self, service, mock_repository):
         """When repository returns failure, it is propagated."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.get_database_info.return_value = {
@@ -1197,7 +1443,9 @@ class TestGetDatabaseInfo:
         assert len(result["memory_backends"]) == 1
 
     @pytest.mark.asyncio
-    async def test_get_info_postgres_uses_provided_session(self, service, mock_repository):
+    async def test_get_info_postgres_uses_provided_session(
+        self, service, mock_repository
+    ):
         """Explicit session parameter is forwarded."""
         extra_session = AsyncMock()
         with patch(
@@ -1246,7 +1494,9 @@ class TestGetDatabaseInfo:
     # ---- Lakebase ----
 
     @pytest.mark.asyncio
-    async def test_get_info_lakebase_success(self, service, mock_session, mock_repository):
+    async def test_get_info_lakebase_success(
+        self, service, mock_session, mock_repository
+    ):
         """Successful Lakebase database info with endpoint."""
         # Give the mock session a bind with postgres URL
         mock_bind = MagicMock()
@@ -1267,13 +1517,16 @@ class TestGetDatabaseInfo:
             "memory_backends": [],
         }
 
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="postgres",
-        ), patch(
-            "src.db.database_router.get_lakebase_config_from_db",
-            new_callable=AsyncMock,
-            return_value=lakebase_cfg,
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="postgres",
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=lakebase_cfg,
+            ),
         ):
             result = await service.get_database_info()
 
@@ -1284,7 +1537,9 @@ class TestGetDatabaseInfo:
         assert result["lakebase_endpoint"] == "https://lakebase.databricks.com"
 
     @pytest.mark.asyncio
-    async def test_get_info_lakebase_not_fully_enabled(self, service, mock_session, mock_repository):
+    async def test_get_info_lakebase_not_fully_enabled(
+        self, service, mock_session, mock_repository
+    ):
         """Lakebase config present but not fully enabled falls through to normal postgres."""
         mock_bind = MagicMock()
         mock_bind.url = "postgresql+asyncpg://user" ":pass@host/db"
@@ -1305,13 +1560,16 @@ class TestGetDatabaseInfo:
             "memory_backends": [],
         }
 
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="postgres",
-        ), patch(
-            "src.db.database_router.get_lakebase_config_from_db",
-            new_callable=AsyncMock,
-            return_value=lakebase_cfg,
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="postgres",
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=lakebase_cfg,
+            ),
         ):
             result = await service.get_database_info()
 
@@ -1320,7 +1578,9 @@ class TestGetDatabaseInfo:
         assert result["database_type"] == "postgres"
 
     @pytest.mark.asyncio
-    async def test_get_info_lakebase_enabled_but_session_is_sqlite(self, service, mock_session, mock_repository):
+    async def test_get_info_lakebase_enabled_but_session_is_sqlite(
+        self, service, mock_session, mock_repository
+    ):
         """Lakebase config is enabled but session is actually SQLite -- reports lakebase with connection_error."""
         mock_bind = MagicMock()
         mock_bind.url = "sqlite+aiosqlite:///app.db"
@@ -1340,17 +1600,23 @@ class TestGetDatabaseInfo:
             "memory_backends": [],
         }
 
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.db.database_router.get_lakebase_config_from_db",
-            new_callable=AsyncMock,
-            return_value=lakebase_cfg,
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=lakebase_cfg,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             result = await service.get_database_info()
@@ -1363,7 +1629,9 @@ class TestGetDatabaseInfo:
         assert "connection_error" in result
 
     @pytest.mark.asyncio
-    async def test_get_info_lakebase_repo_failure(self, service, mock_session, mock_repository):
+    async def test_get_info_lakebase_repo_failure(
+        self, service, mock_session, mock_repository
+    ):
         """Lakebase path with repository failure is propagated."""
         mock_bind = MagicMock()
         mock_bind.url = "postgresql+asyncpg://user" ":pass@host/db"
@@ -1381,13 +1649,16 @@ class TestGetDatabaseInfo:
             "error": "Lakebase unreachable",
         }
 
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="postgres",
-        ), patch(
-            "src.db.database_router.get_lakebase_config_from_db",
-            new_callable=AsyncMock,
-            return_value=lakebase_cfg,
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="postgres",
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=lakebase_cfg,
+            ),
         ):
             result = await service.get_database_info()
 
@@ -1395,7 +1666,9 @@ class TestGetDatabaseInfo:
         assert result["error"] == "Lakebase unreachable"
 
     @pytest.mark.asyncio
-    async def test_get_info_lakebase_no_endpoint(self, service, mock_session, mock_repository):
+    async def test_get_info_lakebase_no_endpoint(
+        self, service, mock_session, mock_repository
+    ):
         """Lakebase result does not include endpoint key when config has no endpoint."""
         mock_bind = MagicMock()
         mock_bind.url = "postgresql+asyncpg://user" ":pass@host/db"
@@ -1423,13 +1696,16 @@ class TestGetDatabaseInfo:
         # The check does: lakebase_config.get("endpoint") -- truthy check, so empty string
         # is falsy => lakebase_enabled = False. Let's just verify it falls through.
 
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="postgres",
-        ), patch(
-            "src.db.database_router.get_lakebase_config_from_db",
-            new_callable=AsyncMock,
-            return_value=lakebase_cfg_no_endpoint,
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="postgres",
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=lakebase_cfg_no_endpoint,
+            ),
         ):
             result = await service.get_database_info()
 
@@ -1439,19 +1715,27 @@ class TestGetDatabaseInfo:
     # ---- Lakebase config check failure ----
 
     @pytest.mark.asyncio
-    async def test_get_info_lakebase_config_check_exception(self, service, mock_repository):
+    async def test_get_info_lakebase_config_check_exception(
+        self, service, mock_repository
+    ):
         """Exception when checking lakebase config is caught and code continues."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.db.database_router.get_lakebase_config_from_db",
-            new_callable=AsyncMock,
-            side_effect=ImportError("module not found"),
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                side_effect=ImportError("module not found"),
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.get_database_info.return_value = {
@@ -1471,13 +1755,16 @@ class TestGetDatabaseInfo:
     @pytest.mark.asyncio
     async def test_get_info_unsupported_database_type(self, service):
         """Returns error for unsupported database types."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="oracle",
-        ), patch(
-            "src.db.database_router.get_lakebase_config_from_db",
-            new_callable=AsyncMock,
-            return_value=None,
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="oracle",
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
             result = await service.get_database_info()
 
@@ -1487,23 +1774,31 @@ class TestGetDatabaseInfo:
     # ---- Session bind detection ----
 
     @pytest.mark.asyncio
-    async def test_get_info_session_bind_sqlite_detection(self, service, mock_session, mock_repository):
+    async def test_get_info_session_bind_sqlite_detection(
+        self, service, mock_session, mock_repository
+    ):
         """Session bind with sqlite URL correctly sets actual_session_db_type."""
         mock_bind = MagicMock()
         mock_bind.url = "sqlite+aiosqlite:///app.db"
         mock_session.bind = mock_bind
 
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.db.database_router.get_lakebase_config_from_db",
-            new_callable=AsyncMock,
-            return_value=None,
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.get_database_info.return_value = {
@@ -1518,21 +1813,29 @@ class TestGetDatabaseInfo:
         assert result["success"] is True
 
     @pytest.mark.asyncio
-    async def test_get_info_session_no_bind(self, service, mock_session, mock_repository):
+    async def test_get_info_session_no_bind(
+        self, service, mock_session, mock_repository
+    ):
         """When session has no bind, actual_session_db_type stays unknown."""
         mock_session.bind = None
 
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.db.database_router.get_lakebase_config_from_db",
-            new_callable=AsyncMock,
-            return_value=None,
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.get_database_info.return_value = {
@@ -1549,7 +1852,9 @@ class TestGetDatabaseInfo:
     # ---- Lakebase info reporting (new behavior) ----
 
     @pytest.mark.asyncio
-    async def test_get_database_info_lakebase_enabled_connected(self, service, mock_session, mock_repository):
+    async def test_get_database_info_lakebase_enabled_connected(
+        self, service, mock_session, mock_repository
+    ):
         """When lakebase is enabled and session is postgres, report database_type='lakebase' with tables."""
         mock_bind = MagicMock()
         mock_bind.url = "postgresql+asyncpg://user" ":pass@host/db"
@@ -1569,13 +1874,16 @@ class TestGetDatabaseInfo:
             "memory_backends": [{"id": "mb1", "name": "default"}],
         }
 
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="postgres",
-        ), patch(
-            "src.db.database_router.get_lakebase_config_from_db",
-            new_callable=AsyncMock,
-            return_value=lakebase_cfg,
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="postgres",
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=lakebase_cfg,
+            ),
         ):
             result = await service.get_database_info()
 
@@ -1590,7 +1898,9 @@ class TestGetDatabaseInfo:
         assert "connection_error" not in result
 
     @pytest.mark.asyncio
-    async def test_get_database_info_lakebase_enabled_connection_failed(self, service, mock_session, mock_repository):
+    async def test_get_database_info_lakebase_enabled_connection_failed(
+        self, service, mock_session, mock_repository
+    ):
         """When lakebase is enabled but session fell back to sqlite, report 'lakebase' with connection_error."""
         mock_bind = MagicMock()
         mock_bind.url = "sqlite+aiosqlite:///app.db"
@@ -1603,17 +1913,23 @@ class TestGetDatabaseInfo:
             "instance_name": "my-lakebase",
         }
 
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.db.database_router.get_lakebase_config_from_db",
-            new_callable=AsyncMock,
-            return_value=lakebase_cfg,
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=lakebase_cfg,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             result = await service.get_database_info()
@@ -1631,21 +1947,29 @@ class TestGetDatabaseInfo:
         assert result["memory_backends"] == []
 
     @pytest.mark.asyncio
-    async def test_get_database_info_sqlite_normal(self, service, mock_session, mock_repository):
+    async def test_get_database_info_sqlite_normal(
+        self, service, mock_session, mock_repository
+    ):
         """Normal sqlite path when lakebase is not enabled -- no lakebase fields in result."""
         mock_session.bind = None
 
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.db.database_router.get_lakebase_config_from_db",
-            new_callable=AsyncMock,
-            return_value=None,
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.get_database_info.return_value = {
@@ -1675,13 +1999,16 @@ class TestGetDatabaseInfo:
     @pytest.mark.asyncio
     async def test_get_info_general_exception(self, service):
         """Unhandled exceptions are caught and returned as error dict."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            side_effect=RuntimeError("db error"),
-        ), patch(
-            "src.db.database_router.get_lakebase_config_from_db",
-            new_callable=AsyncMock,
-            return_value=None,
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                side_effect=RuntimeError("db error"),
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
             result = await service.get_database_info()
 
@@ -1692,6 +2019,7 @@ class TestGetDatabaseInfo:
 # ===================================================================
 # check_user_permission Tests
 # ===================================================================
+
 
 class TestCheckUserPermission:
     """Tests for DatabaseManagementService.check_user_permission."""
@@ -1736,19 +2064,21 @@ class TestCheckUserPermission:
     async def test_permission_exception_defaults_to_allow(self, service):
         """Even when an exception occurs, permission defaults to allowed."""
         # Force an exception inside the try block by patching the logger
-        with patch(
-            "src.services.databricks.lakebase.management.logger"
-        ) as mock_logger:
+        with patch("src.services.databricks.lakebase.management.logger") as mock_logger:
             mock_logger.info.side_effect = RuntimeError("logging failed")
             result = await service.check_user_permission(user_email="user@example.com")
 
         assert result["has_permission"] is True
-        assert "failed" in result["reason"].lower() or "defaulting" in result["reason"].lower()
+        assert (
+            "failed" in result["reason"].lower()
+            or "defaulting" in result["reason"].lower()
+        )
 
 
 # ===================================================================
 # Edge case: service with user_token
 # ===================================================================
+
 
 class TestServiceWithUserToken:
     """Tests verifying behavior when user_token is set at construction time."""
@@ -1760,17 +2090,26 @@ class TestServiceWithUserToken:
     @pytest.mark.asyncio
     async def test_export_works_with_token(self, service_with_token, mock_repository):
         """Export still works when user_token is set."""
-        with patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
-            return_value="sqlite",
-        ), patch(
-            "src.services.databricks.lakebase.management.settings"
-        ) as mock_settings, patch(
-            "src.services.databricks.lakebase.management.os.path.isabs", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.exists", return_value=True
-        ), patch(
-            "src.services.databricks.lakebase.management.os.path.getsize", return_value=1024
+        with (
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository.get_database_type",
+                return_value="sqlite",
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.settings"
+            ) as mock_settings,
+            patch(
+                "src.services.databricks.lakebase.management.os.path.isabs",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.exists",
+                return_value=True,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.os.path.getsize",
+                return_value=1024,
+            ),
         ):
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
             mock_repository.create_sqlite_backup.return_value = {
@@ -1778,7 +2117,10 @@ class TestServiceWithUserToken:
                 "backup_path": "/Volumes/c/s/v/backup.db",
                 "backup_size": 512,
             }
-            mock_repository.cleanup_old_backups.return_value = {"success": True, "deleted": []}
+            mock_repository.cleanup_old_backups.return_value = {
+                "success": True,
+                "deleted": [],
+            }
             mock_repository.list_backups.return_value = []
 
             result = await service_with_token.export_to_volume(catalog="c", schema="s")
@@ -1789,6 +2131,7 @@ class TestServiceWithUserToken:
 # ===================================================================
 # Housekeeping Tests
 # ===================================================================
+
 
 class TestRunHousekeeping:
     """Tests for DatabaseManagementService.run_housekeeping."""
@@ -1804,7 +2147,10 @@ class TestRunHousekeeping:
 
     @pytest.fixture
     def service(self, mock_session):
-        from src.services.databricks.lakebase.management import DatabaseManagementService
+        from src.services.databricks.lakebase.management import (
+            DatabaseManagementService,
+        )
+
         return DatabaseManagementService(
             session=mock_session,
             repository=AsyncMock(),
@@ -1824,11 +2170,15 @@ class TestRunHousekeeping:
         async def _iso():
             yield mock_session
 
-        with patch("src.db.session.get_isolated_db_session", side_effect=lambda: _iso()):
+        with patch(
+            "src.db.session.get_isolated_db_session", side_effect=lambda: _iso()
+        ):
             yield
 
     @pytest.mark.asyncio
-    async def test_run_housekeeping_uses_isolated_connection(self, service, mock_session):
+    async def test_run_housekeeping_uses_isolated_connection(
+        self, service, mock_session
+    ):
         """Regression: the purge must run on get_isolated_db_session (a private
         NullPool connection), NOT the shared self.session. On the shared SQLite
         StaticPool connection a concurrent crew commit reset
@@ -1836,37 +2186,46 @@ class TestRunHousekeeping:
         `DELETE FROM executionhistory` tripped 'FOREIGN KEY constraint failed'
         even though every FK child had already been cleared."""
         mock_session.execute = AsyncMock(return_value=MagicMock(rowcount=0))
-        with patch(
-            "src.db.session.get_isolated_db_session"
-        ) as mock_isolated, patch(
-            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value={'executionhistory': 0, 'taskstatus': 0, 'errortrace': 0},
-        ), patch(
-            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
-            new_callable=AsyncMock, return_value=0,
-        ), patch(
-            "src.repositories.billing_repository.BillingRepository.delete_older_than",
-            new_callable=AsyncMock, return_value=0,
-        ), patch(
-            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
-            new_callable=AsyncMock, return_value=0,
-        ), patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository"
-        ) as MockBackupRepo:
+        with (
+            patch("src.db.session.get_isolated_db_session") as mock_isolated,
+            patch(
+                "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value={"executionhistory": 0, "taskstatus": 0, "errortrace": 0},
+            ),
+            patch(
+                "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.repositories.billing_repository.BillingRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository"
+            ) as MockBackupRepo,
+        ):
             from contextlib import asynccontextmanager
 
             @asynccontextmanager
             async def _iso():
                 yield mock_session
+
             mock_isolated.side_effect = lambda: _iso()
             MockBackupRepo.get_database_type.return_value = "sqlite"
 
             result = await service.run_housekeeping("2025-01-01")
 
         assert result["success"] is True
-        mock_isolated.assert_called_once()            # private connection used
-        mock_session.commit.assert_awaited_once()     # commit on the isolated session
+        mock_isolated.assert_called_once()  # private connection used
+        mock_session.commit.assert_awaited_once()  # commit on the isolated session
 
     @pytest.mark.asyncio
     async def test_run_housekeeping_success(self, service, mock_session):
@@ -1875,7 +2234,9 @@ class TestRunHousekeeping:
 
         # The service uses deferred imports, so we patch the class methods directly
         mock_history_result = {
-            'executionhistory': 10, 'taskstatus': 5, 'errortrace': 2,
+            "executionhistory": 10,
+            "taskstatus": 5,
+            "errortrace": 2,
         }
 
         # SQLite path issues PRAGMA defer_foreign_keys first, then trace deletes
@@ -1890,29 +2251,42 @@ class TestRunHousekeeping:
         mock_knowledge = MagicMock(rowcount=6)
 
         mock_session.execute = AsyncMock(
-            side_effect=[mock_pragma, mock_trace_ref, mock_trace_jobid, mock_trace_date,
-                         mock_llm, mock_chat, mock_knowledge]
+            side_effect=[
+                mock_pragma,
+                mock_trace_ref,
+                mock_trace_jobid,
+                mock_trace_date,
+                mock_llm,
+                mock_chat,
+                mock_knowledge,
+            ]
         )
 
-        with _patch(
-            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=mock_history_result,
-        ), _patch(
-            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=20,
-        ), _patch(
-            "src.repositories.billing_repository.BillingRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=7,
-        ), _patch(
-            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=3,
-        ), _patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository"
-        ) as MockBackupRepo:
+        with (
+            _patch(
+                "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=mock_history_result,
+            ),
+            _patch(
+                "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=20,
+            ),
+            _patch(
+                "src.repositories.billing_repository.BillingRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=7,
+            ),
+            _patch(
+                "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=3,
+            ),
+            _patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository"
+            ) as MockBackupRepo,
+        ):
             MockBackupRepo.get_database_type.return_value = "sqlite"
 
             result = await service.run_housekeeping("2025-01-01")
@@ -1965,11 +2339,13 @@ class TestRunHousekeeping:
     async def test_run_housekeeping_zero_deletions(self, service, mock_session):
         """Test housekeeping when no records match the cutoff."""
         mock_history_repo = AsyncMock()
-        mock_history_repo.delete_older_than = AsyncMock(return_value={
-            'executionhistory': 0,
-            'taskstatus': 0,
-            'errortrace': 0,
-        })
+        mock_history_repo.delete_older_than = AsyncMock(
+            return_value={
+                "executionhistory": 0,
+                "taskstatus": 0,
+                "errortrace": 0,
+            }
+        )
 
         mock_logs_repo = AsyncMock()
         mock_logs_repo.delete_older_than = AsyncMock(return_value=0)
@@ -1979,25 +2355,31 @@ class TestRunHousekeeping:
 
         mock_session.execute = AsyncMock(return_value=mock_zero_result)
 
-        with patch(
-            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=mock_history_repo.delete_older_than.return_value,
-        ), patch(
-            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=0,
-        ), patch(
-            "src.repositories.billing_repository.BillingRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=0,
-        ), patch(
-            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=0,
-        ), patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository"
-        ) as MockBackupRepo:
+        with (
+            patch(
+                "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=mock_history_repo.delete_older_than.return_value,
+            ),
+            patch(
+                "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.repositories.billing_repository.BillingRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository"
+            ) as MockBackupRepo,
+        ):
             MockBackupRepo.get_database_type.return_value = "postgres"
 
             result = await service.run_housekeeping("2020-01-01")
@@ -2006,10 +2388,14 @@ class TestRunHousekeeping:
         assert result["total_deleted"] == 0
 
     @pytest.mark.asyncio
-    async def test_run_housekeeping_vacuum_failure_is_non_fatal(self, service, mock_session):
+    async def test_run_housekeeping_vacuum_failure_is_non_fatal(
+        self, service, mock_session
+    ):
         """When SQLite VACUUM fails, housekeeping still succeeds."""
         mock_history_result = {
-            'executionhistory': 1, 'taskstatus': 0, 'errortrace': 0,
+            "executionhistory": 1,
+            "taskstatus": 0,
+            "errortrace": 0,
         }
 
         mock_pragma = MagicMock()
@@ -2023,33 +2409,48 @@ class TestRunHousekeeping:
         mock_chat = MagicMock(rowcount=0)
         mock_knowledge = MagicMock(rowcount=0)
         mock_session.execute = AsyncMock(
-            side_effect=[mock_pragma, mock_trace_ref, mock_trace_jobid, mock_trace_date,
-                         mock_llm, mock_chat, mock_knowledge]
+            side_effect=[
+                mock_pragma,
+                mock_trace_ref,
+                mock_trace_jobid,
+                mock_trace_date,
+                mock_llm,
+                mock_chat,
+                mock_knowledge,
+            ]
         )
         # VACUUM now runs on an AUTOCOMMIT connection (not session.execute) and raises.
         vacuum_conn = AsyncMock()
-        vacuum_conn.exec_driver_sql = AsyncMock(side_effect=RuntimeError("VACUUM locked"))
+        vacuum_conn.exec_driver_sql = AsyncMock(
+            side_effect=RuntimeError("VACUUM locked")
+        )
         mock_session.connection = AsyncMock(return_value=vacuum_conn)
 
-        with patch(
-            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=mock_history_result,
-        ), patch(
-            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=0,
-        ), patch(
-            "src.repositories.billing_repository.BillingRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=0,
-        ), patch(
-            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=0,
-        ), patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository"
-        ) as MockBackupRepo:
+        with (
+            patch(
+                "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=mock_history_result,
+            ),
+            patch(
+                "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.repositories.billing_repository.BillingRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository"
+            ) as MockBackupRepo,
+        ):
             MockBackupRepo.get_database_type.return_value = "sqlite"
 
             result = await service.run_housekeeping("2025-01-01")
@@ -2078,26 +2479,32 @@ class TestRunHousekeeping:
 
         async def _history_delete(self, cutoff):
             call_order.append("history")
-            return {'executionhistory': 6, 'taskstatus': 1, 'errortrace': 1}
+            return {"executionhistory": 6, "taskstatus": 1, "errortrace": 1}
 
         mock_session.execute = AsyncMock(return_value=MagicMock(rowcount=0))
 
-        with patch(
-            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
-            new=_history_delete,
-        ), patch(
-            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=0,
-        ), patch(
-            "src.repositories.billing_repository.BillingRepository.delete_older_than",
-            new=_billing_delete,
-        ), patch(
-            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
-            new=_hitl_delete,
-        ), patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository"
-        ) as MockBackupRepo:
+        with (
+            patch(
+                "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+                new=_history_delete,
+            ),
+            patch(
+                "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.repositories.billing_repository.BillingRepository.delete_older_than",
+                new=_billing_delete,
+            ),
+            patch(
+                "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+                new=_hitl_delete,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository"
+            ) as MockBackupRepo,
+        ):
             MockBackupRepo.get_database_type.return_value = "postgres"
 
             result = await service.run_housekeeping("2025-01-01")
@@ -2110,7 +2517,9 @@ class TestRunHousekeeping:
         assert call_order.index("hitl") < call_order.index("history")
 
     @pytest.mark.asyncio
-    async def test_run_housekeeping_deletes_traces_by_job_id(self, service, mock_session):
+    async def test_run_housekeeping_deletes_traces_by_job_id(
+        self, service, mock_session
+    ):
         """Regression: execution_trace links to executionhistory by BOTH run_id
         and job_id. Real data has run_id NULL with job_id set, so housekeeping
         MUST issue a DELETE on execution_trace filtered by job_id — otherwise
@@ -2128,25 +2537,31 @@ class TestRunHousekeeping:
 
         mock_session.execute = AsyncMock(side_effect=_capture)
 
-        with patch(
-            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value={'executionhistory': 0, 'taskstatus': 0, 'errortrace': 0},
-        ), patch(
-            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=0,
-        ), patch(
-            "src.repositories.billing_repository.BillingRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=0,
-        ), patch(
-            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=0,
-        ), patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository"
-        ) as MockBackupRepo:
+        with (
+            patch(
+                "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value={"executionhistory": 0, "taskstatus": 0, "errortrace": 0},
+            ),
+            patch(
+                "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.repositories.billing_repository.BillingRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository"
+            ) as MockBackupRepo,
+        ):
             MockBackupRepo.get_database_type.return_value = "postgres"
 
             result = await service.run_housekeeping("2025-01-01")
@@ -2154,12 +2569,14 @@ class TestRunHousekeeping:
         assert result["success"] is True
         # A DELETE against execution_trace keyed on job_id must have been issued
         trace_deletes = [s for s in executed_sql if "DELETE FROM execution_trace" in s]
-        assert any("job_id" in s for s in trace_deletes), (
-            f"expected an execution_trace delete filtered by job_id, got: {trace_deletes}"
-        )
+        assert any(
+            "job_id" in s for s in trace_deletes
+        ), f"expected an execution_trace delete filtered by job_id, got: {trace_deletes}"
 
     @pytest.mark.asyncio
-    async def test_run_housekeeping_purges_chat_history_and_knowledge(self, service, mock_session):
+    async def test_run_housekeeping_purges_chat_history_and_knowledge(
+        self, service, mock_session
+    ):
         """Regression: housekeeping must also purge chat_history and
         knowledge_embeddings (both grew unbounded — chat_history was the largest
         table on disk). documentation_embeddings is intentionally NOT purged.
@@ -2175,22 +2592,31 @@ class TestRunHousekeeping:
 
         mock_session.execute = AsyncMock(side_effect=_capture)
 
-        with patch(
-            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value={'executionhistory': 0, 'taskstatus': 0, 'errortrace': 0},
-        ), patch(
-            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
-            new_callable=AsyncMock, return_value=0,
-        ), patch(
-            "src.repositories.billing_repository.BillingRepository.delete_older_than",
-            new_callable=AsyncMock, return_value=0,
-        ), patch(
-            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
-            new_callable=AsyncMock, return_value=0,
-        ), patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository"
-        ) as MockBackupRepo:
+        with (
+            patch(
+                "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value={"executionhistory": 0, "taskstatus": 0, "errortrace": 0},
+            ),
+            patch(
+                "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.repositories.billing_repository.BillingRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository"
+            ) as MockBackupRepo,
+        ):
             MockBackupRepo.get_database_type.return_value = "postgres"
 
             result = await service.run_housekeeping("2025-01-01")
@@ -2198,16 +2624,21 @@ class TestRunHousekeeping:
         assert result["success"] is True
         assert "chat_history" in result["deleted"]
         assert "knowledge_embeddings" in result["deleted"]
-        assert any("DELETE FROM chat_history" in s for s in executed_sql), \
-            f"expected a chat_history delete, got: {executed_sql}"
-        assert any("DELETE FROM knowledge_embeddings" in s for s in executed_sql), \
-            f"expected a knowledge_embeddings delete, got: {executed_sql}"
+        assert any(
+            "DELETE FROM chat_history" in s for s in executed_sql
+        ), f"expected a chat_history delete, got: {executed_sql}"
+        assert any(
+            "DELETE FROM knowledge_embeddings" in s for s in executed_sql
+        ), f"expected a knowledge_embeddings delete, got: {executed_sql}"
         # documentation_embeddings must NOT be touched (seeded built-in content)
-        assert not any("DELETE FROM documentation_embeddings" in s for s in executed_sql), \
-            "documentation_embeddings must not be purged by housekeeping"
+        assert not any(
+            "DELETE FROM documentation_embeddings" in s for s in executed_sql
+        ), "documentation_embeddings must not be purged by housekeeping"
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("db_type,expect_pragma", [("sqlite", True), ("postgres", False)])
+    @pytest.mark.parametrize(
+        "db_type,expect_pragma", [("sqlite", True), ("postgres", False)]
+    )
     async def test_run_housekeeping_defers_foreign_keys_on_sqlite(
         self, service, mock_session, db_type, expect_pragma
     ):
@@ -2225,31 +2656,37 @@ class TestRunHousekeeping:
 
         mock_session.execute = AsyncMock(side_effect=_capture)
 
-        with patch(
-            "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value={'executionhistory': 0, 'taskstatus': 0, 'errortrace': 0},
-        ), patch(
-            "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=0,
-        ), patch(
-            "src.repositories.billing_repository.BillingRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=0,
-        ), patch(
-            "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
-            new_callable=AsyncMock,
-            return_value=0,
-        ), patch(
-            "src.services.databricks.lakebase.management.DatabaseBackupRepository"
-        ) as MockBackupRepo:
+        with (
+            patch(
+                "src.repositories.execution_history_repository.ExecutionHistoryRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value={"executionhistory": 0, "taskstatus": 0, "errortrace": 0},
+            ),
+            patch(
+                "src.repositories.execution_logs_repository.ExecutionLogsRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.repositories.billing_repository.BillingRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.repositories.hitl_repository.HITLApprovalRepository.delete_older_than",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "src.services.databricks.lakebase.management.DatabaseBackupRepository"
+            ) as MockBackupRepo,
+        ):
             MockBackupRepo.get_database_type.return_value = db_type
 
             result = await service.run_housekeeping("2025-01-01")
 
         assert result["success"] is True
         issued = any("defer_foreign_keys" in s.lower() for s in executed_sql)
-        assert issued is expect_pragma, (
-            f"db_type={db_type}: expected defer_foreign_keys={expect_pragma}, got {issued}"
-        )
+        assert (
+            issued is expect_pragma
+        ), f"db_type={db_type}: expected defer_foreign_keys={expect_pragma}, got {issued}"

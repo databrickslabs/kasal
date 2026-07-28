@@ -6,14 +6,15 @@ batch_convert_measures endpoints by calling handler functions directly
 with a mocked KPIConversionService.
 """
 
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _patch_service(mock_instance):
     """Patch KPIConversionService constructor to return mock_instance."""
@@ -25,8 +26,8 @@ def _patch_service(mock_instance):
 
 def _make_formats_response():
     from src.schemas.kpi_conversion import (
-        ConversionFormatsResponse,
         ConversionFormat,
+        ConversionFormatsResponse,
         ConversionPath,
     )
 
@@ -40,7 +41,7 @@ def _make_formats_response():
 
 
 def _make_conversion_response(success=True):
-    from src.schemas.kpi_conversion import ConversionResponse, ConversionFormat
+    from src.schemas.kpi_conversion import ConversionFormat, ConversionResponse
 
     return ConversionResponse(
         success=success,
@@ -60,6 +61,7 @@ def _make_validation_response(valid=True):
 # Tests – get_available_formats
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_available_formats_success():
     """get_available_formats returns all formats from service."""
@@ -78,8 +80,9 @@ async def test_get_available_formats_success():
 @pytest.mark.asyncio
 async def test_get_available_formats_service_error_raises_http_500():
     """Service exception is converted to HTTP 500."""
-    from src.api.kpi_conversion_router import get_available_formats
     from fastapi import HTTPException
+
+    from src.api.kpi_conversion_router import get_available_formats
 
     mock_svc = AsyncMock()
     mock_svc.get_available_formats = AsyncMock(side_effect=RuntimeError("db error"))
@@ -96,11 +99,12 @@ async def test_get_available_formats_service_error_raises_http_500():
 # Tests – convert_measure
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_convert_measure_success():
     """convert_measure returns converted data on success."""
     from src.api.kpi_conversion_router import convert_measure
-    from src.schemas.kpi_conversion import ConversionRequest, ConversionFormat
+    from src.schemas.kpi_conversion import ConversionFormat, ConversionRequest
 
     mock_svc = AsyncMock()
     mock_svc.convert = AsyncMock(return_value=_make_conversion_response())
@@ -126,9 +130,10 @@ async def test_convert_measure_success():
 @pytest.mark.asyncio
 async def test_convert_measure_value_error_raises_http_400():
     """ValueError from service is converted to HTTP 400."""
-    from src.api.kpi_conversion_router import convert_measure
-    from src.schemas.kpi_conversion import ConversionRequest, ConversionFormat
     from fastapi import HTTPException
+
+    from src.api.kpi_conversion_router import convert_measure
+    from src.schemas.kpi_conversion import ConversionFormat, ConversionRequest
 
     mock_svc = AsyncMock()
     mock_svc.convert = AsyncMock(side_effect=ValueError("unsupported conversion"))
@@ -150,9 +155,10 @@ async def test_convert_measure_value_error_raises_http_400():
 @pytest.mark.asyncio
 async def test_convert_measure_general_error_raises_http_500():
     """Generic exceptions are converted to HTTP 500."""
-    from src.api.kpi_conversion_router import convert_measure
-    from src.schemas.kpi_conversion import ConversionRequest, ConversionFormat
     from fastapi import HTTPException
+
+    from src.api.kpi_conversion_router import convert_measure
+    from src.schemas.kpi_conversion import ConversionFormat, ConversionRequest
 
     mock_svc = AsyncMock()
     mock_svc.convert = AsyncMock(side_effect=RuntimeError("internal failure"))
@@ -175,7 +181,7 @@ async def test_convert_measure_general_error_raises_http_500():
 async def test_convert_measure_passes_config():
     """Optional config dict is forwarded to service.convert."""
     from src.api.kpi_conversion_router import convert_measure
-    from src.schemas.kpi_conversion import ConversionRequest, ConversionFormat
+    from src.schemas.kpi_conversion import ConversionFormat, ConversionRequest
 
     mock_svc = AsyncMock()
     mock_svc.convert = AsyncMock(return_value=_make_conversion_response())
@@ -199,11 +205,12 @@ async def test_convert_measure_passes_config():
 # Tests – validate_measure
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_validate_measure_valid():
     """validate_measure returns valid=True when service confirms validity."""
     from src.api.kpi_conversion_router import validate_measure
-    from src.schemas.kpi_conversion import ValidateRequest, ConversionFormat
+    from src.schemas.kpi_conversion import ConversionFormat, ValidateRequest
 
     mock_svc = AsyncMock()
     mock_svc.validate = AsyncMock(return_value=_make_validation_response(valid=True))
@@ -223,7 +230,7 @@ async def test_validate_measure_valid():
 async def test_validate_measure_invalid():
     """validate_measure returns valid=False for invalid data."""
     from src.api.kpi_conversion_router import validate_measure
-    from src.schemas.kpi_conversion import ValidateRequest, ConversionFormat
+    from src.schemas.kpi_conversion import ConversionFormat, ValidateRequest
 
     mock_svc = AsyncMock()
     mock_svc.validate = AsyncMock(return_value=_make_validation_response(valid=False))
@@ -239,9 +246,10 @@ async def test_validate_measure_invalid():
 @pytest.mark.asyncio
 async def test_validate_measure_service_error_raises_http_500():
     """Service exception during validation is converted to HTTP 500."""
-    from src.api.kpi_conversion_router import validate_measure
-    from src.schemas.kpi_conversion import ValidateRequest, ConversionFormat
     from fastapi import HTTPException
+
+    from src.api.kpi_conversion_router import validate_measure
+    from src.schemas.kpi_conversion import ConversionFormat, ValidateRequest
 
     mock_svc = AsyncMock()
     mock_svc.validate = AsyncMock(side_effect=Exception("schema error"))
@@ -259,11 +267,12 @@ async def test_validate_measure_service_error_raises_http_500():
 # Tests – batch_convert_measures
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_batch_convert_measures_success():
     """batch_convert_measures returns a list of results."""
     from src.api.kpi_conversion_router import batch_convert_measures
-    from src.schemas.kpi_conversion import ConversionRequest, ConversionFormat
+    from src.schemas.kpi_conversion import ConversionFormat, ConversionRequest
 
     mock_svc = AsyncMock()
     responses = [_make_conversion_response(), _make_conversion_response()]
@@ -292,9 +301,10 @@ async def test_batch_convert_measures_success():
 @pytest.mark.asyncio
 async def test_batch_convert_measures_value_error_raises_400():
     """ValueError during batch conversion is converted to HTTP 400."""
-    from src.api.kpi_conversion_router import batch_convert_measures
-    from src.schemas.kpi_conversion import ConversionRequest, ConversionFormat
     from fastapi import HTTPException
+
+    from src.api.kpi_conversion_router import batch_convert_measures
+    from src.schemas.kpi_conversion import ConversionFormat, ConversionRequest
 
     mock_svc = AsyncMock()
     mock_svc.batch_convert = AsyncMock(side_effect=ValueError("bad format"))
@@ -317,9 +327,10 @@ async def test_batch_convert_measures_value_error_raises_400():
 @pytest.mark.asyncio
 async def test_batch_convert_measures_general_error_raises_500():
     """Generic error during batch conversion is converted to HTTP 500."""
-    from src.api.kpi_conversion_router import batch_convert_measures
-    from src.schemas.kpi_conversion import ConversionRequest, ConversionFormat
     from fastapi import HTTPException
+
+    from src.api.kpi_conversion_router import batch_convert_measures
+    from src.schemas.kpi_conversion import ConversionFormat, ConversionRequest
 
     mock_svc = AsyncMock()
     mock_svc.batch_convert = AsyncMock(side_effect=RuntimeError("crash"))

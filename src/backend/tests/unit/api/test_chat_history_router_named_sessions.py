@@ -3,24 +3,27 @@ Direct-call tests for the named-session chat-history endpoints
 (server-side chat-mode session storage).
 """
 
-import pytest
-from unittest.mock import AsyncMock
+from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from src.api.chat_history_router import (
+    clear_session_running_job,
     create_named_session,
+    delete_session_preview,
+    get_session_preview,
+    get_session_running_job,
     list_named_sessions,
     rename_named_session,
-    update_chat_message,
     save_chat_message,
-    get_session_preview,
     save_session_preview,
-    delete_session_preview,
-    get_session_running_job,
     set_session_running_job,
-    clear_session_running_job,
+    update_chat_message,
 )
 from src.core.exceptions import BadRequestError, NotFoundError
+from src.models.chat_session import ChatSession
 from src.schemas.chat_history import (
     ChatSessionCreateRequest,
     ChatSessionRenameRequest,
@@ -29,8 +32,6 @@ from src.schemas.chat_history import (
     SetRunningJobRequest,
     UpdateMessageRequest,
 )
-from src.models.chat_session import ChatSession
-from datetime import datetime
 
 
 def _ctx(valid=True):

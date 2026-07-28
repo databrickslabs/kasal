@@ -27,15 +27,21 @@ class PowerBIExtractionCreate(PowerBIExtractionBase):
     """Payload for creating a PowerBI extraction record."""
 
     relationships: Optional[List[Dict[str, Any]]] = Field(
-        None, description="Raw relationship rows (from/to table+column, cardinality)")
+        None, description="Raw relationship rows (from/to table+column, cardinality)"
+    )
     measures: Optional[List[Dict[str, Any]]] = Field(
-        None, description="Raw measures with DAX expressions")
+        None, description="Raw measures with DAX expressions"
+    )
     admin_tables: Optional[Dict[str, Any]] = Field(
-        None, description="Admin/TMDL table metadata {table: {columns, mquery, measures}}")
+        None,
+        description="Admin/TMDL table metadata {table: {columns, mquery, measures}}",
+    )
     report_definition: Optional[Dict[str, Any]] = Field(
-        None, description="Report visual bindings / definition")
+        None, description="Report visual bindings / definition"
+    )
     proposed_config: Optional[Dict[str, Any]] = Field(
-        None, description="Derived pipeline_config")
+        None, description="Derived pipeline_config"
+    )
     warnings: Optional[List[str]] = Field(None, description="Extraction warnings")
 
     relationships_count: Optional[int] = Field(None)

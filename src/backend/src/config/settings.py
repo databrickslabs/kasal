@@ -1,11 +1,11 @@
-from typing import Any, Dict, List, Optional, Union
 import os
-
-from src.core.paths import BACKEND_ROOT
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import AnyHttpUrl, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from src.core.paths import BACKEND_ROOT
 
 
 class Settings(BaseSettings):
@@ -13,11 +13,18 @@ class Settings(BaseSettings):
     PROJECT_DESCRIPTION: str = "A modern backend API for the Kasal application"
     VERSION: str = "0.1.0"
     API_V1_STR: str = "/api/v1"
-    
+
     # BACKEND_CORS_ORIGINS is a comma-separated list of origins
     # e.g: "http://localhost,http://localhost:8080"
     BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3002", "http://127.0.0.1:3002", "http://localhost:5173", "http://127.0.0.1:5173"]
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3002",
+        "http://127.0.0.1:3002",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
@@ -28,7 +35,9 @@ class Settings(BaseSettings):
         raise ValueError(v)
 
     # Database settings
-    DATABASE_TYPE: str = os.getenv("DATABASE_TYPE", "postgres")  # 'postgres' or 'sqlite'
+    DATABASE_TYPE: str = os.getenv(
+        "DATABASE_TYPE", "postgres"
+    )  # 'postgres' or 'sqlite'
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "postgres"
@@ -36,7 +45,7 @@ class Settings(BaseSettings):
     POSTGRES_PORT: str = "5432"
     DATABASE_URI: Optional[str] = None
     SYNC_DATABASE_URI: Optional[str] = None
-    
+
     # Database file path for SQLite.
     #
     # The default is ABSOLUTE on purpose. It used to be "./app.db", which
@@ -52,10 +61,10 @@ class Settings(BaseSettings):
     def assemble_db_connection(cls, v: Optional[str], info) -> Any:
         if isinstance(v, str):
             return v
-        
+
         # Check database type to determine URI format
         db_type = info.data.get("DATABASE_TYPE", "postgres")
-        
+
         if db_type.lower() == "sqlite":
             sqlite_path = info.data.get("SQLITE_DB_PATH", str(BACKEND_ROOT / "app.db"))
             return f"sqlite+aiosqlite:///{sqlite_path}"
@@ -67,10 +76,10 @@ class Settings(BaseSettings):
     def assemble_sync_db_connection(cls, v: Optional[str], info) -> Any:
         if isinstance(v, str):
             return v
-        
+
         # Check database type to determine URI format
         db_type = info.data.get("DATABASE_TYPE", "postgres")
-        
+
         if db_type.lower() == "sqlite":
             sqlite_path = info.data.get("SQLITE_DB_PATH", str(BACKEND_ROOT / "app.db"))
             return f"sqlite:///{sqlite_path}"
@@ -80,7 +89,7 @@ class Settings(BaseSettings):
 
     # API Documentation
     DOCS_ENABLED: bool = True
-    
+
     # Logging
     # Support both old LOG_LEVEL and new KASAL_LOG_LEVEL environment variables
     LOG_LEVEL: str = os.getenv("KASAL_LOG_LEVEL", os.getenv("LOG_LEVEL", "INFO"))
@@ -102,7 +111,9 @@ class Settings(BaseSettings):
     # Caches LLM completions/embeddings to cut latency and cost on repeated
     # identical calls. CrewAI uses LiteLLM under the hood, so enabling this
     # transparently benefits crew execution too.
-    LITELLM_CACHE_ENABLED: bool = os.getenv("LITELLM_CACHE_ENABLED", "true").lower() == "true"
+    LITELLM_CACHE_ENABLED: bool = (
+        os.getenv("LITELLM_CACHE_ENABLED", "true").lower() == "true"
+    )
     # Backend: "disk" (default), "local" (in-memory), "redis", or "s3".
     # Defaults to "disk" because crews run in fresh subprocesses — an in-memory
     # ("local") cache is cold on every run and only helps repeats within a single
@@ -119,7 +130,9 @@ class Settings(BaseSettings):
     # Redis connection (only used when LITELLM_CACHE_TYPE == "redis").
     LITELLM_CACHE_REDIS_HOST: Optional[str] = os.getenv("LITELLM_CACHE_REDIS_HOST")
     LITELLM_CACHE_REDIS_PORT: Optional[str] = os.getenv("LITELLM_CACHE_REDIS_PORT")
-    LITELLM_CACHE_REDIS_PASSWORD: Optional[str] = os.getenv("LITELLM_CACHE_REDIS_PASSWORD")
+    LITELLM_CACHE_REDIS_PASSWORD: Optional[str] = os.getenv(
+        "LITELLM_CACHE_REDIS_PASSWORD"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -128,4 +141,4 @@ class Settings(BaseSettings):
     )
 
 
-settings = Settings() 
+settings = Settings()

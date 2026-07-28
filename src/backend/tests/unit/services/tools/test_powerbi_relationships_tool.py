@@ -4,11 +4,13 @@ Unit tests for services/tools/custom/powerbi_relationships_tool.py
 Tests Power BI Relationships extraction tool for CrewAI.
 """
 
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
+
 from src.services.tools.powerbi_relationships_tool import (
     PowerBIRelationshipsSchema,
-    PowerBIRelationshipsTool
+    PowerBIRelationshipsTool,
 )
 
 
@@ -30,7 +32,7 @@ class TestPowerBIRelationshipsSchema:
             target_catalog="analytics",
             target_schema="powerbi",
             include_inactive=True,
-            skip_system_tables=False
+            skip_system_tables=False,
         )
 
         assert schema.target_catalog == "analytics"
@@ -41,10 +43,20 @@ class TestPowerBIRelationshipsSchema:
     def test_schema_excludes_connection_and_auth_plumbing(self):
         """Connection/auth values are injected from tool_configs, not LLM-fillable"""
         forbidden = {
-            "workspace_id", "dataset_id", "tenant_id", "client_id",
-            "client_secret", "username", "password", "auth_method",
-            "access_token", "token", "api_key", "llm_token",
-            "llm_workspace_url", "llm_model",
+            "workspace_id",
+            "dataset_id",
+            "tenant_id",
+            "client_id",
+            "client_secret",
+            "username",
+            "password",
+            "auth_method",
+            "access_token",
+            "token",
+            "api_key",
+            "llm_token",
+            "llm_workspace_url",
+            "llm_model",
         }
         assert forbidden.isdisjoint(PowerBIRelationshipsSchema.model_fields.keys())
 
@@ -98,7 +110,9 @@ FOREIGN KEY (CustomerKey) REFERENCES customer(CustomerKey);
 ```
 """
 
-        with patch.object(tool, '_extract_relationships', new_callable=AsyncMock) as mock_extract:
+        with patch.object(
+            tool, "_extract_relationships", new_callable=AsyncMock
+        ) as mock_extract:
             mock_extract.return_value = mock_result
 
             result = await tool._extract_relationships(
@@ -107,12 +121,12 @@ FOREIGN KEY (CustomerKey) REFERENCES customer(CustomerKey);
                 auth_config={
                     "tenant_id": "tenant789",
                     "client_id": "client012",
-                    "client_secret": "secret345"
+                    "client_secret": "secret345",
                 },
                 target_catalog="main",
                 target_schema="default",
                 include_inactive=False,
-                skip_system_tables=True
+                skip_system_tables=True,
             )
 
             assert "Sales to Product" in result
@@ -127,15 +141,13 @@ FOREIGN KEY (CustomerKey) REFERENCES customer(CustomerKey);
             dataset_id="dataset456",
             tenant_id="tenant789",
             client_id="client012",
-            client_secret="secret345"
+            client_secret="secret345",
         )
 
         assert "error" in result.lower()
         assert "workspace_id" in result.lower()
 
-
-
-    @patch('src.services.tools.powerbi_auth_utils.validate_auth_config')
+    @patch("src.services.tools.powerbi_auth_utils.validate_auth_config")
     def test_run_with_invalid_auth_config(self, mock_validate):
         """Test that invalid auth config returns error"""
         tool = PowerBIRelationshipsTool()
@@ -148,7 +160,7 @@ FOREIGN KEY (CustomerKey) REFERENCES customer(CustomerKey);
             dataset_id="dataset456",
             tenant_id="invalid",
             client_id="invalid",
-            client_secret="invalid"
+            client_secret="invalid",
         )
 
         assert "error" in result.lower()

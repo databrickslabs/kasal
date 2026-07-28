@@ -12,17 +12,19 @@ Target lines: 434-460 (UserContext setup), 480-484 (lakebase activation),
               787-788 (callbacks set), 792-805 (result with inputs),
               822-824 (timeout/error), 842-891 (exception path)
 """
+
 import asyncio
 import logging
 import os
 import sys
-import pytest
-from unittest.mock import AsyncMock, MagicMock, Mock, patch, call
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helper: mock subprocess logging infrastructure
 # ---------------------------------------------------------------------------
+
 
 def _make_subprocess_logger():
     mock_logger = MagicMock()
@@ -37,15 +39,26 @@ def _make_subprocess_logger():
 def _call_run_crew_in_process_with_mocks(config, exec_id="test-exec-1234-5678"):
     """Helper to call run_crew_in_process with common mocked dependencies."""
     from src.services.agent_builder.process_executor import run_crew_in_process
+
     mock_logger = _make_subprocess_logger()
 
-    with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-               return_value=mock_logger), \
-         patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-               return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-         patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-         patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-         patch("psutil.Process") as mock_psutil:
+    with (
+        patch(
+            "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+            return_value=mock_logger,
+        ),
+        patch(
+            "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+            return_value=(
+                sys.stdout,
+                sys.stderr,
+                MagicMock(getvalue=MagicMock(return_value="")),
+            ),
+        ),
+        patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+        patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
+        patch("psutil.Process") as mock_psutil,
+    ):
         mock_psutil.return_value.children.return_value = []
         mock_psutil.return_value.is_running.return_value = False
         result = run_crew_in_process(exec_id, config)
@@ -92,10 +105,15 @@ class TestRunCrewInProcessAdvanced:
         mock_group_ctx = MagicMock()
         mock_group_ctx.primary_group_id = "grp-with-token"
 
-        with patch("src.utils.user_context.GroupContext", return_value=mock_group_ctx), \
-             patch("src.utils.user_context.UserContext.set_group_context") as mock_set, \
-             patch("src.utils.user_context.UserContext.set_user_token") as mock_set_tok, \
-             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_group_ctx):
+        with (
+            patch("src.utils.user_context.GroupContext", return_value=mock_group_ctx),
+            patch("src.utils.user_context.UserContext.set_group_context") as mock_set,
+            patch("src.utils.user_context.UserContext.set_user_token") as mock_set_tok,
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_group_ctx,
+            ),
+        ):
             result = _call_run_crew_in_process_with_mocks(config, "exec-with-token")
 
         assert result["status"] == "FAILED"  # Fails at crew prep
@@ -115,11 +133,19 @@ class TestRunCrewInProcessAdvanced:
         mock_group_ctx = MagicMock()
         mock_group_ctx.primary_group_id = "grp-lb"
 
-        with patch("src.utils.user_context.GroupContext", return_value=mock_group_ctx), \
-             patch("src.utils.user_context.UserContext.set_group_context"), \
-             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_group_ctx), \
-             patch("src.db.database_router.activate_lakebase_in_subprocess",
-                   new_callable=AsyncMock, return_value=True):
+        with (
+            patch("src.utils.user_context.GroupContext", return_value=mock_group_ctx),
+            patch("src.utils.user_context.UserContext.set_group_context"),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_group_ctx,
+            ),
+            patch(
+                "src.db.database_router.activate_lakebase_in_subprocess",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+        ):
             result = _call_run_crew_in_process_with_mocks(config, "exec-lb-act")
 
         assert result["status"] == "FAILED"
@@ -135,11 +161,19 @@ class TestRunCrewInProcessAdvanced:
         mock_group_ctx = MagicMock()
         mock_group_ctx.primary_group_id = "grp-lb-err"
 
-        with patch("src.utils.user_context.GroupContext", return_value=mock_group_ctx), \
-             patch("src.utils.user_context.UserContext.set_group_context"), \
-             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_group_ctx), \
-             patch("src.db.database_router.activate_lakebase_in_subprocess",
-                   new_callable=AsyncMock, side_effect=Exception("lb error")):
+        with (
+            patch("src.utils.user_context.GroupContext", return_value=mock_group_ctx),
+            patch("src.utils.user_context.UserContext.set_group_context"),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_group_ctx,
+            ),
+            patch(
+                "src.db.database_router.activate_lakebase_in_subprocess",
+                new_callable=AsyncMock,
+                side_effect=Exception("lb error"),
+            ),
+        ):
             result = _call_run_crew_in_process_with_mocks(config, "exec-lb-err")
 
         assert result["status"] == "FAILED"
@@ -158,10 +192,15 @@ class TestRunCrewInProcessAdvanced:
         mock_group_ctx.primary_group_id = "async-grp"
 
         # Patch the verification to return the mock group context
-        with patch("src.utils.user_context.GroupContext", return_value=mock_group_ctx), \
-             patch("src.utils.user_context.UserContext.set_group_context"), \
-             patch("src.utils.user_context.UserContext.set_user_token"), \
-             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_group_ctx):
+        with (
+            patch("src.utils.user_context.GroupContext", return_value=mock_group_ctx),
+            patch("src.utils.user_context.UserContext.set_group_context"),
+            patch("src.utils.user_context.UserContext.set_user_token"),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_group_ctx,
+            ),
+        ):
             result = _call_run_crew_in_process_with_mocks(config, "exec-async-ctx")
 
         assert result["status"] == "FAILED"
@@ -203,9 +242,14 @@ class TestRunCrewInProcessAdvanced:
         mock_group_ctx = MagicMock()
         mock_group_ctx.primary_group_id = "different-group"  # Doesn't match
 
-        with patch("src.utils.user_context.GroupContext", return_value=mock_group_ctx), \
-             patch("src.utils.user_context.UserContext.set_group_context"), \
-             patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_group_ctx):
+        with (
+            patch("src.utils.user_context.GroupContext", return_value=mock_group_ctx),
+            patch("src.utils.user_context.UserContext.set_group_context"),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_group_ctx,
+            ),
+        ):
             result = _call_run_crew_in_process_with_mocks(config, "exec-verify-fail")
 
         assert result["status"] == "FAILED"
@@ -218,7 +262,9 @@ class TestRunCrewInProcessAdvanced:
             "group_id": "grp-setup-err",
         }
 
-        with patch("src.utils.user_context.GroupContext", side_effect=RuntimeError("ctx error")):
+        with patch(
+            "src.utils.user_context.GroupContext", side_effect=RuntimeError("ctx error")
+        ):
             result = _call_run_crew_in_process_with_mocks(config, "exec-ctx-err")
 
         assert result["status"] == "FAILED"
@@ -241,8 +287,10 @@ class TestRunCrewInProcessAdvanced:
         from src.services.agent_builder.process_executor import run_crew_in_process
 
         # Mock to cause failure at earliest possible point after validation
-        with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   side_effect=Exception("logging failed")):
+        with patch(
+            "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+            side_effect=Exception("logging failed"),
+        ):
             result = run_crew_in_process("exec-logfail", {"agents": [], "tasks": []})
 
         assert result["status"] == "FAILED"
@@ -267,6 +315,7 @@ class TestRunCrewInProcessAdvanced:
 # Test run_crew_in_process error recovery paths
 # ---------------------------------------------------------------------------
 
+
 class TestRunCrewInProcessConfigLogging:
     """Tests for config logging edge cases."""
 
@@ -277,13 +326,23 @@ class TestRunCrewInProcessConfigLogging:
         config = {"agents": [], "tasks": []}
         inputs = {"key1": "value1", "key2": 42}
 
-        with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   return_value=_make_subprocess_logger()), \
-             patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                   return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-             patch("psutil.Process") as mock_psutil:
+        with (
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=_make_subprocess_logger(),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
+            patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+            patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
+            patch("psutil.Process") as mock_psutil,
+        ):
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-dict-inputs", config, inputs=inputs)
 
@@ -296,13 +355,23 @@ class TestRunCrewInProcessConfigLogging:
         config = {"agents": [], "tasks": []}
         inputs = "raw string input"
 
-        with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   return_value=_make_subprocess_logger()), \
-             patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                   return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-             patch("psutil.Process") as mock_psutil:
+        with (
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=_make_subprocess_logger(),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
+            patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+            patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
+            patch("psutil.Process") as mock_psutil,
+        ):
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-str-inputs2", config, inputs=inputs)
 
@@ -315,13 +384,23 @@ class TestRunCrewInProcessErrorPaths:
         """FAILED results from exceptions include traceback info."""
         from src.services.agent_builder.process_executor import run_crew_in_process
 
-        with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   return_value=_make_subprocess_logger()), \
-             patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                   return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-             patch("psutil.Process") as mock_psutil:
+        with (
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=_make_subprocess_logger(),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
+            patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+            patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
+            patch("psutil.Process") as mock_psutil,
+        ):
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-traceback", {"agents": [], "tasks": []})
 

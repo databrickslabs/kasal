@@ -22,9 +22,9 @@ from collections.abc import Callable
 from inspect import Parameter, signature
 from typing import Any
 
+from pydantic import BaseModel
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import (
-    BaseModel,
-    BaseModel as PydanticBaseModel,
     ConfigDict,
     Field,
     GetCoreSchemaHandler,
@@ -64,7 +64,7 @@ def strip_composite_description_prefix(description: str) -> str:
     """Undo a previously composed description block (idempotency guard)."""
     match = _COMPOSITE_PREFIX_RE.match(description)
     if match:
-        return description[match.end():]
+        return description[match.end() :]
     return description
 
 
@@ -94,7 +94,8 @@ def build_schema_hint(args_schema: type[BaseModel]) -> str:
         return ""
     required = set(schema.get("required", []))
     parts = [
-        f"{name}: {spec.get('type', 'any')}" + ("" if name in required else " (optional)")
+        f"{name}: {spec.get('type', 'any')}"
+        + ("" if name in required else " (optional)")
         for name, spec in props.items()
     ]
     return f" Expected arguments: {', '.join(parts)}."
@@ -104,24 +105,34 @@ def _default_cache_function(_args: Any = None, _result: Any = None) -> bool:
     return True
 
 
-def _schema_from_callable(func: Callable[..., Any], model_name: str) -> type[PydanticBaseModel]:
+def _schema_from_callable(
+    func: Callable[..., Any], model_name: str
+) -> type[PydanticBaseModel]:
     fields: dict[str, Any] = {}
     for param_name, param in signature(func).parameters.items():
         if param_name in ("self", "return"):
             continue
         if param.kind in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD):
             continue
-        annotation = param.annotation if param.annotation is not Parameter.empty else Any
+        annotation = (
+            param.annotation if param.annotation is not Parameter.empty else Any
+        )
         default = ... if param.default is Parameter.empty else param.default
         fields[param_name] = (annotation, default)
     return create_model(model_name, **fields)
 
 
-def _schema_from_json_schema(spec: dict[str, Any], model_name: str) -> type[PydanticBaseModel]:
+def _schema_from_json_schema(
+    spec: dict[str, Any], model_name: str
+) -> type[PydanticBaseModel]:
     """Build a pydantic model from a plain JSON-schema dict (primitive types)."""
     type_map = {
-        "string": str, "integer": int, "number": float,
-        "boolean": bool, "array": list, "object": dict,
+        "string": str,
+        "integer": int,
+        "number": float,
+        "boolean": bool,
+        "array": list,
+        "object": dict,
     }
     required = set(spec.get("required", []))
     fields: dict[str, Any] = {}
@@ -153,7 +164,9 @@ def _format_tool_output_for_agent(tool: Any, raw_result: Any) -> str:
         return raw_result if isinstance(raw_result, str) else str(raw_result)
     try:
         validation_input = raw_result
-        if isinstance(raw_result, BaseModel) and not isinstance(raw_result, result_schema):
+        if isinstance(raw_result, BaseModel) and not isinstance(
+            raw_result, result_schema
+        ):
             validation_input = raw_result.model_dump()
         return result_schema.model_validate(validation_input).model_dump_json()
     except Exception:
@@ -196,7 +209,11 @@ class CrewStructuredTool(BaseModel):
 
     @property
     def args(self) -> dict[str, Any]:
-        return self.args_schema.model_json_schema().get("properties", {}) if self.args_schema else {}
+        return (
+            self.args_schema.model_json_schema().get("properties", {})
+            if self.args_schema
+            else {}
+        )
 
 
 class BaseTool(BaseModel, ABC):
@@ -310,7 +327,9 @@ class BaseTool(BaseModel, ABC):
             return _schema_from_json_schema(v, f"{cls.__name__}Result")
         if v is None:
             annotation = signature(cls._run).return_annotation
-            if isinstance(annotation, type) and issubclass(annotation, PydanticBaseModel):
+            if isinstance(annotation, type) and issubclass(
+                annotation, PydanticBaseModel
+            ):
                 return annotation
             return None
         return v

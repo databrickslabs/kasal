@@ -17,6 +17,7 @@ Two defects this guards:
    whenever it KNOWS the model: an agent may claim a window the provider cannot
    honour, and trimming too late is a hard failure rather than a degraded one.
 """
+
 import pytest
 
 from src.core.events.bus import event_bus
@@ -87,7 +88,9 @@ def test_a_known_model_keeps_the_table_window_even_if_the_agent_claims_more():
 
     llm = _llm("Qwen3-Coder-30B-A3B-Instruct")
     assert llm._model_window_is_known()
-    assert llm._effective_context_window(_Agent(999_999)) == llm.get_context_window_size()
+    assert (
+        llm._effective_context_window(_Agent(999_999)) == llm.get_context_window_size()
+    )
 
 
 def test_configured_window_stops_the_needless_shredding():
@@ -155,8 +158,8 @@ def test_event_is_registered_all_the_way_to_a_trace_row():
 
     from src.services.otel_tracing.db_exporter import SPAN_NAME_MAP
     from src.services.otel_tracing.event_bridge import (
-        _EVENT_SPAN_MAP,
         _EVENT_CLASSES,
+        _EVENT_SPAN_MAP,
     )
 
     span_name, event_type = _EVENT_SPAN_MAP["ContextCompactionEvent"]
@@ -166,9 +169,9 @@ def test_event_is_registered_all_the_way_to_a_trace_row():
     # register()'s source. The source-scan version broke the moment the list was
     # hoisted out of the method into a module constant — it was asserting on
     # where the code happened to live, not on what it does.
-    assert "ContextCompactionEvent" in {name for _module, name in _EVENT_CLASSES}, (
-        "mapped but not subscribed: the bridge never receives it"
-    )
+    assert "ContextCompactionEvent" in {
+        name for _module, name in _EVENT_CLASSES
+    }, "mapped but not subscribed: the bridge never receives it"
 
 
 # ---------------------------------------------------------------------------

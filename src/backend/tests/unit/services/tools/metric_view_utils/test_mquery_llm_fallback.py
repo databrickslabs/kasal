@@ -1,6 +1,7 @@
 """Tests for the M-Query → SQL LLM fallback module."""
-import json
+
 import asyncio
+import json
 from collections import OrderedDict
 from unittest.mock import AsyncMock, patch
 
@@ -11,8 +12,8 @@ from src.services.tools.metric_view_utils.mquery_llm_fallback import (
     _content_hash,
     _parse_response,
     _validate_source_sql,
-    translate_mquery_to_sql,
     recover_sources_with_llm,
+    translate_mquery_to_sql,
 )
 from src.services.tools.metric_view_utils.mquery_parser import (
     looks_like_raw_mquery,
@@ -62,7 +63,9 @@ class TestParseResponse:
         assert p["success"] and p["source_sql"] == "SELECT * FROM a.b"
 
     def test_markdown_fenced(self):
-        p = _parse_response('```json\n{"success":true,"source_sql":"SELECT * FROM a.b"}\n```')
+        p = _parse_response(
+            '```json\n{"success":true,"source_sql":"SELECT * FROM a.b"}\n```'
+        )
         assert p["success"]
 
     def test_garbage_is_failure(self):
@@ -75,27 +78,41 @@ class TestTranslateMQueryToSql:
         return asyncio.run(coro)
 
     def test_success_path(self):
-        fake = json.dumps({
-            "success": True, "source_sql": "SELECT * FROM sales.fact_sales",
-            "source_table": "sales.fact_sales", "confidence": "high",
-        })
-        with patch.object(mllm, "_call_llm", new=AsyncMock(return_value={"content": fake})):
+        fake = json.dumps(
+            {
+                "success": True,
+                "source_sql": "SELECT * FROM sales.fact_sales",
+                "source_table": "sales.fact_sales",
+                "confidence": "high",
+            }
+        )
+        with patch.object(
+            mllm, "_call_llm", new=AsyncMock(return_value={"content": fake})
+        ):
             res = self._run(translate_mquery_to_sql("FT_Sales", RAW_M))
         assert res["success"] and res["source_sql"] == "SELECT * FROM sales.fact_sales"
 
     def test_llm_output_with_m_leftover_rejected(self):
         fake = json.dumps({"success": True, "source_sql": "let x in x"})
-        with patch.object(mllm, "_call_llm", new=AsyncMock(return_value={"content": fake})):
+        with patch.object(
+            mllm, "_call_llm", new=AsyncMock(return_value={"content": fake})
+        ):
             res = self._run(translate_mquery_to_sql("T", RAW_M))
         assert res["success"] is False
 
     def test_llm_failure_is_fail_open(self):
-        with patch.object(mllm, "_call_llm", new=AsyncMock(return_value={"content": None, "error": "boom"})):
+        with patch.object(
+            mllm,
+            "_call_llm",
+            new=AsyncMock(return_value={"content": None, "error": "boom"}),
+        ):
             res = self._run(translate_mquery_to_sql("T", RAW_M))
         assert res["success"] is False
 
     def test_cache_hit_skips_second_call(self):
-        fake = json.dumps({"success": True, "source_sql": "SELECT * FROM a.b", "source_table": "a.b"})
+        fake = json.dumps(
+            {"success": True, "source_sql": "SELECT * FROM a.b", "source_table": "a.b"}
+        )
         cache = OrderedDict()
         mock = AsyncMock(return_value={"content": fake})
         with patch.object(mllm, "_call_llm", new=mock):
@@ -110,11 +127,27 @@ class TestRecoverSourcesWithLlm:
 
     def test_only_raw_m_entries_are_translated(self):
         entries = [
-            {"table_name": "FT_Sales", "transpiled_sql": RAW_M, "validation_passed": "Yes"},
-            {"table_name": "FT_SQL", "transpiled_sql": EMBEDDED_SQL, "validation_passed": "Yes"},
+            {
+                "table_name": "FT_Sales",
+                "transpiled_sql": RAW_M,
+                "validation_passed": "Yes",
+            },
+            {
+                "table_name": "FT_SQL",
+                "transpiled_sql": EMBEDDED_SQL,
+                "validation_passed": "Yes",
+            },
         ]
-        fake = json.dumps({"success": True, "source_sql": "SELECT * FROM sales.fact_sales", "source_table": "sales.fact_sales"})
-        with patch.object(mllm, "_call_llm", new=AsyncMock(return_value={"content": fake})):
+        fake = json.dumps(
+            {
+                "success": True,
+                "source_sql": "SELECT * FROM sales.fact_sales",
+                "source_table": "sales.fact_sales",
+            }
+        )
+        with patch.object(
+            mllm, "_call_llm", new=AsyncMock(return_value={"content": fake})
+        ):
             out, n = self._run(recover_sources_with_llm(entries))
         assert n == 1
         # raw-M entry rewritten, SQL entry untouched
@@ -122,8 +155,14 @@ class TestRecoverSourcesWithLlm:
         assert out[1]["transpiled_sql"] == EMBEDDED_SQL
 
     def test_untranslatable_entry_left_unchanged(self):
-        entries = [{"table_name": "FT", "transpiled_sql": RAW_M, "validation_passed": "Yes"}]
-        with patch.object(mllm, "_call_llm", new=AsyncMock(return_value={"content": None, "error": "x"})):
+        entries = [
+            {"table_name": "FT", "transpiled_sql": RAW_M, "validation_passed": "Yes"}
+        ]
+        with patch.object(
+            mllm,
+            "_call_llm",
+            new=AsyncMock(return_value={"content": None, "error": "x"}),
+        ):
             out, n = self._run(recover_sources_with_llm(entries))
         assert n == 0
         assert out[0]["transpiled_sql"] == RAW_M

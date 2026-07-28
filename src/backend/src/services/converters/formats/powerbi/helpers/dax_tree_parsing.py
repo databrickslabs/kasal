@@ -4,7 +4,8 @@ Extends the generic tree parsing generator to handle DAX-specific measure genera
 """
 
 import re
-from ....base.models import KPI, KPIDefinition, DAXMeasure
+
+from ....base.models import KPI, DAXMeasure, KPIDefinition
 from ....common.transformers.tree_parsing import BaseTreeParsingGenerator
 from ..yaml_to_dax import DAXGenerator
 
@@ -42,7 +43,9 @@ class TreeParsingDAXGenerator(BaseTreeParsingGenerator[DAXMeasure], DAXGenerator
         """
         return self.generate_dax_measure(definition, kpi)
 
-    def _generate_calculated_measure(self, definition: KPIDefinition, kpi: KPI) -> DAXMeasure:
+    def _generate_calculated_measure(
+        self, definition: KPIDefinition, kpi: KPI
+    ) -> DAXMeasure:
         """
         Generate a calculated measure with dependencies inlined.
 
@@ -56,34 +59,31 @@ class TreeParsingDAXGenerator(BaseTreeParsingGenerator[DAXMeasure], DAXGenerator
         measure_name = self.formula_translator.create_measure_name(kpi, definition)
 
         # Resolve dependencies inline (all dependencies expanded into single formula)
-        resolved_formula = self.dependency_resolver.resolve_formula_inline(kpi.technical_name)
+        resolved_formula = self.dependency_resolver.resolve_formula_inline(
+            kpi.technical_name
+        )
 
         # Apply filters and constant selection if specified
         resolved_filters = self.filter_resolver.resolve_filters(definition, kpi)
         dax_formula = self._add_filters_to_dax(
-            resolved_formula,
-            resolved_filters,
-            kpi.source_table or 'Table',
-            kpi
+            resolved_formula, resolved_filters, kpi.source_table or "Table", kpi
         )
 
         # Apply display sign if needed (SAP BW visualization property)
-        if hasattr(kpi, 'display_sign') and kpi.display_sign == -1:
+        if hasattr(kpi, "display_sign") and kpi.display_sign == -1:
             dax_formula = f"-1 * ({dax_formula})"
-        elif hasattr(kpi, 'display_sign') and kpi.display_sign != 1:
+        elif hasattr(kpi, "display_sign") and kpi.display_sign != 1:
             dax_formula = f"{kpi.display_sign} * ({dax_formula})"
 
         return DAXMeasure(
             name=measure_name,
             description=kpi.description or f"Calculated measure for {measure_name}",
             dax_formula=dax_formula,
-            original_kbi=kpi
+            original_kbi=kpi,
         )
 
     def _generate_calculated_measure_with_references(
-        self,
-        definition: KPIDefinition,
-        kpi: KPI
+        self, definition: KPIDefinition, kpi: KPI
     ) -> DAXMeasure:
         """
         Generate a calculated measure that references other measures by name.
@@ -102,38 +102,39 @@ class TreeParsingDAXGenerator(BaseTreeParsingGenerator[DAXMeasure], DAXGenerator
 
         # Get dependencies
         formula = kpi.formula
-        dependencies = self.dependency_resolver.dependency_graph.get(kpi.technical_name, [])
+        dependencies = self.dependency_resolver.dependency_graph.get(
+            kpi.technical_name, []
+        )
 
         # Replace measure names with DAX measure references
         resolved_formula = formula
         for dep in dependencies:
             dep_kbi = self.dependency_resolver.measure_registry[dep]
-            dep_measure_name = self.formula_translator.create_measure_name(dep_kbi, definition)
+            dep_measure_name = self.formula_translator.create_measure_name(
+                dep_kbi, definition
+            )
             # Replace with proper DAX measure reference
             resolved_formula = re.sub(
-                r'\b' + re.escape(dep) + r'\b',
-                f'[{dep_measure_name}]',
-                resolved_formula
+                r"\b" + re.escape(dep) + r"\b",
+                f"[{dep_measure_name}]",
+                resolved_formula,
             )
 
         # Apply filters and constant selection if specified
         resolved_filters = self.filter_resolver.resolve_filters(definition, kpi)
         dax_formula = self._add_filters_to_dax(
-            resolved_formula,
-            resolved_filters,
-            kpi.source_table or 'Table',
-            kpi
+            resolved_formula, resolved_filters, kpi.source_table or "Table", kpi
         )
 
         # Apply display sign if needed (SAP BW visualization property)
-        if hasattr(kpi, 'display_sign') and kpi.display_sign == -1:
+        if hasattr(kpi, "display_sign") and kpi.display_sign == -1:
             dax_formula = f"-1 * ({dax_formula})"
-        elif hasattr(kpi, 'display_sign') and kpi.display_sign != 1:
+        elif hasattr(kpi, "display_sign") and kpi.display_sign != 1:
             dax_formula = f"{kpi.display_sign} * ({dax_formula})"
 
         return DAXMeasure(
             name=measure_name,
             description=kpi.description or f"Calculated measure for {measure_name}",
             dax_formula=dax_formula,
-            original_kbi=kpi
+            original_kbi=kpi,
         )

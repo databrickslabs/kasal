@@ -1,4 +1,5 @@
 """Tests for constants.py — compiled regex patterns."""
+
 from __future__ import annotations
 
 import pytest
@@ -18,7 +19,6 @@ from src.services.tools.metric_view_utils.constants import (
     RE_SIMPLE_SUMX,
     RE_SUMX_FILTER,
 )
-
 
 # ── RE_AGG_COL ──────────────────────────────────────────────────────
 
@@ -275,7 +275,7 @@ class TestReSimpleSum:
 
 class TestReSumxFilter:
     def test_matches_sumx_filter(self):
-        expr = "SUMX(FILTER(orders, orders[status] = \"active\"), orders[amount])"
+        expr = 'SUMX(FILTER(orders, orders[status] = "active"), orders[amount])'
         m = RE_SUMX_FILTER.search(expr)
         assert m is not None
         assert m.group(1) == "orders"

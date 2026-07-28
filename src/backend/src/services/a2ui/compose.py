@@ -410,7 +410,9 @@ def answer_cites_sources(text: str) -> bool:
     return bool(text) and bool(_SOURCE_MARKERS.search(text))
 
 
-def presentation_design_lint(payload: Any, answer_has_sources: bool = False) -> List[str]:
+def presentation_design_lint(
+    payload: Any, answer_has_sources: bool = False
+) -> List[str]:
     """Deterministic design critique of a VALID presentation surface (no LLM).
 
     Returns human-readable findings when the deck is visually flat, thin, or has
@@ -486,7 +488,8 @@ def presentation_design_lint(payload: Any, answer_has_sources: bool = False) -> 
         text_kids = [
             k
             for k in kids
-            if isinstance(k, dict) and k.get("component") in ("Text", "Markdown", "List")
+            if isinstance(k, dict)
+            and k.get("component") in ("Text", "Markdown", "List")
         ]
         if len(text_kids) == 1 and text_kids[0].get("component") == "Text":
             thin += 1

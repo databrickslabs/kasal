@@ -83,7 +83,11 @@ class TestUpsertCrewTaskCheckpoint:
     @pytest.mark.asyncio
     async def test_rewrite_of_same_index_is_idempotent(self, repository, mock_session):
         execution = make_execution(
-            {"crew_task_checkpoint": {"completed": {"0": {"index": 0, "output_raw": "old"}}}}
+            {
+                "crew_task_checkpoint": {
+                    "completed": {"0": {"index": 0, "output_raw": "old"}}
+                }
+            }
         )
         set_lookup_result(mock_session, execution)
 
@@ -127,7 +131,9 @@ class TestClearCrewTaskCheckpoint:
         mock_session.flush.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_clears_to_none_when_nothing_else_stored(self, repository, mock_session):
+    async def test_clears_to_none_when_nothing_else_stored(
+        self, repository, mock_session
+    ):
         execution = make_execution({"crew_task_checkpoint": {"completed": {}}})
         set_lookup_result(mock_session, execution)
         ok = await repository.clear_crew_task_checkpoint("job-1")

@@ -2,30 +2,37 @@
 Supplemental coverage-boosting tests for the remaining uncovered lines.
 """
 
-import pytest
 import uuid
-from unittest.mock import MagicMock, AsyncMock, patch, Mock
 from contextlib import asynccontextmanager
-from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-from src.services.flow_builder.flow_runner_service import FlowRunnerService
+import pytest
+from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from src.schemas.flow_execution import FlowExecutionStatus
 from src.services.flow_builder.exceptions import FlowPausedForApprovalException
-
+from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_service():
     db = MagicMock(spec=AsyncSession)
     with patch("src.services.flow_builder.flow_runner_service.FlowExecutionService"):
         with patch("src.services.flow_builder.flow_runner_service.FlowRepository"):
             with patch("src.services.flow_builder.flow_runner_service.TaskRepository"):
-                with patch("src.services.flow_builder.flow_runner_service.AgentRepository"):
-                    with patch("src.services.flow_builder.flow_runner_service.ToolRepository"):
-                        with patch("src.services.flow_builder.flow_runner_service.CrewRepository"):
+                with patch(
+                    "src.services.flow_builder.flow_runner_service.AgentRepository"
+                ):
+                    with patch(
+                        "src.services.flow_builder.flow_runner_service.ToolRepository"
+                    ):
+                        with patch(
+                            "src.services.flow_builder.flow_runner_service.CrewRepository"
+                        ):
                             return FlowRunnerService(db)
 
 
@@ -44,6 +51,7 @@ async def _smart_ctx():
 # _run_flow_execution - additional coverage
 # ---------------------------------------------------------------------------
 
+
 class TestRunFlowExecutionAdditional:
 
     @pytest.mark.asyncio
@@ -52,20 +60,35 @@ class TestRunFlowExecutionAdditional:
         svc = _make_service()
         mock_session = MagicMock(spec=AsyncSession)
 
-        with patch.object(FlowRunnerService, "_safe_session", new=_safe_ctx), \
-             patch("src.services.flow_builder.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.services.flow_builder.flow_runner_service.BackendFlow") as MockBF, \
-             patch("src.services.flow_builder.flow_runner_service.FlowRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.TaskRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.AgentRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ToolRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.CrewRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_smart_ctx), \
-             patch("src.services.settings.models.ModelConfigService") as MockModelSvc, \
-             patch.object(svc, "_emit_error_span", new=AsyncMock()):
+        with (
+            patch.object(FlowRunnerService, "_safe_session", new=_safe_ctx),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+            ) as MockFlowSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service.BackendFlow"
+            ) as MockBF,
+            patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
+            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
+            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
+            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
+            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as MockApiSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                new=_smart_ctx,
+            ),
+            patch("src.services.settings.models.ModelConfigService") as MockModelSvc,
+            patch.object(svc, "_emit_error_span", new=AsyncMock()),
+        ):
 
             flow_svc = MagicMock()
             flow_svc.update_execution_status = AsyncMock()
@@ -74,12 +97,16 @@ class TestRunFlowExecutionAdditional:
             # BackendFlow loads from DB
             bf = MagicMock()
             bf.config = {}
-            bf.load_flow = AsyncMock(return_value={
-                "nodes": [{"id": "n1"}],
-                "edges": [],
-                "flow_config": {"startingPoints": [{"nodeId": "n1"}]}
-            })
-            bf.kickoff = AsyncMock(return_value={"success": True, "result": "done", "flow_uuid": None})
+            bf.load_flow = AsyncMock(
+                return_value={
+                    "nodes": [{"id": "n1"}],
+                    "edges": [],
+                    "flow_config": {"startingPoints": [{"nodeId": "n1"}]},
+                }
+            )
+            bf.kickoff = AsyncMock(
+                return_value={"success": True, "result": "done", "flow_uuid": None}
+            )
             MockBF.return_value = bf
 
             MockApiSvc.get_provider_api_key = AsyncMock(return_value=None)
@@ -92,7 +119,7 @@ class TestRunFlowExecutionAdditional:
                 execution_id=1,
                 flow_id=fid,
                 job_id="job-load-db",
-                config={}  # No nodes - triggers DB load
+                config={},  # No nodes - triggers DB load
             )
 
         assert result.get("success") is True
@@ -108,23 +135,38 @@ class TestRunFlowExecutionAdditional:
             message="pause",
             execution_id="job-hitl2",
             crew_sequence=0,
-            flow_uuid=None  # No flow_uuid
+            flow_uuid=None,  # No flow_uuid
         )
 
-        with patch.object(FlowRunnerService, "_safe_session", new=_safe_ctx), \
-             patch("src.services.flow_builder.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.services.flow_builder.flow_runner_service.BackendFlow") as MockBF, \
-             patch("src.services.flow_builder.flow_runner_service.FlowRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.TaskRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.AgentRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ToolRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.CrewRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_smart_ctx), \
-             patch("src.services.settings.models.ModelConfigService") as MockModelSvc, \
-             patch.object(svc, "_emit_error_span", new=AsyncMock()):
+        with (
+            patch.object(FlowRunnerService, "_safe_session", new=_safe_ctx),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+            ) as MockFlowSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service.BackendFlow"
+            ) as MockBF,
+            patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
+            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
+            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
+            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
+            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as MockApiSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                new=_smart_ctx,
+            ),
+            patch("src.services.settings.models.ModelConfigService") as MockModelSvc,
+            patch.object(svc, "_emit_error_span", new=AsyncMock()),
+        ):
 
             flow_svc = MagicMock()
             flow_svc.update_execution_status = AsyncMock()
@@ -145,7 +187,7 @@ class TestRunFlowExecutionAdditional:
                 execution_id=1,
                 flow_id=fid,
                 job_id="job-hitl2",
-                config={"nodes": [{"id": "n1"}]}
+                config={"nodes": [{"id": "n1"}]},
             )
 
         assert result.get("paused_for_approval") is True
@@ -156,24 +198,41 @@ class TestRunFlowExecutionAdditional:
         """Outer exception handler + status update also fails (line 1079-1093)."""
         svc = _make_service()
 
-        with patch.object(FlowRunnerService, "_safe_session", new=_safe_ctx), \
-             patch("src.services.flow_builder.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.services.flow_builder.flow_runner_service.BackendFlow") as MockBF, \
-             patch("src.services.flow_builder.flow_runner_service.FlowRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.TaskRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.AgentRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ToolRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.CrewRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_smart_ctx), \
-             patch("src.services.settings.models.ModelConfigService") as MockModelSvc, \
-             patch.object(svc, "_emit_error_span", new=AsyncMock()):
+        with (
+            patch.object(FlowRunnerService, "_safe_session", new=_safe_ctx),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+            ) as MockFlowSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service.BackendFlow"
+            ) as MockBF,
+            patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
+            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
+            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
+            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
+            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as MockApiSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                new=_smart_ctx,
+            ),
+            patch("src.services.settings.models.ModelConfigService") as MockModelSvc,
+            patch.object(svc, "_emit_error_span", new=AsyncMock()),
+        ):
 
             # Make update_execution_status raise to trigger outer handler
             flow_svc = MagicMock()
-            flow_svc.update_execution_status = AsyncMock(side_effect=RuntimeError("db fail"))
+            flow_svc.update_execution_status = AsyncMock(
+                side_effect=RuntimeError("db fail")
+            )
             MockFlowSvc.return_value = flow_svc
 
             bf = MagicMock()
@@ -191,7 +250,7 @@ class TestRunFlowExecutionAdditional:
                 execution_id=1,
                 flow_id=fid,
                 job_id="job-outer-err",
-                config={"nodes": [{"id": "n1"}]}
+                config={"nodes": [{"id": "n1"}]},
             )
 
         assert result.get("success") is False
@@ -201,20 +260,35 @@ class TestRunFlowExecutionAdditional:
         """Tests the API key setting path (lines 794-804) when providers found."""
         svc = _make_service()
 
-        with patch.object(FlowRunnerService, "_safe_session", new=_safe_ctx), \
-             patch("src.services.flow_builder.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.services.flow_builder.flow_runner_service.BackendFlow") as MockBF, \
-             patch("src.services.flow_builder.flow_runner_service.FlowRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.TaskRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.AgentRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ToolRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.CrewRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_smart_ctx), \
-             patch("src.services.settings.models.ModelConfigService") as MockModelSvc, \
-             patch.object(svc, "_emit_error_span", new=AsyncMock()):
+        with (
+            patch.object(FlowRunnerService, "_safe_session", new=_safe_ctx),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+            ) as MockFlowSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service.BackendFlow"
+            ) as MockBF,
+            patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
+            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
+            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
+            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
+            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as MockApiSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                new=_smart_ctx,
+            ),
+            patch("src.services.settings.models.ModelConfigService") as MockModelSvc,
+            patch.object(svc, "_emit_error_span", new=AsyncMock()),
+        ):
 
             flow_svc = MagicMock()
             flow_svc.update_execution_status = AsyncMock()
@@ -222,7 +296,9 @@ class TestRunFlowExecutionAdditional:
 
             bf = MagicMock()
             bf.config = {}
-            bf.kickoff = AsyncMock(return_value={"success": True, "result": "ok", "flow_uuid": None})
+            bf.kickoff = AsyncMock(
+                return_value={"success": True, "result": "ok", "flow_uuid": None}
+            )
             MockBF.return_value = bf
 
             # Return a provider so we hit the API key setting code
@@ -238,7 +314,7 @@ class TestRunFlowExecutionAdditional:
                 execution_id=1,
                 flow_id=fid,
                 job_id="job-api-key",
-                config={"nodes": [{"id": "n1"}], "model": "gpt-4"}
+                config={"nodes": [{"id": "n1"}], "model": "gpt-4"},
             )
 
         assert result.get("success") is True
@@ -248,21 +324,36 @@ class TestRunFlowExecutionAdditional:
         """Tests checkpoint save path when flow_uuid present (lines 979-990)."""
         svc = _make_service()
 
-        with patch.object(FlowRunnerService, "_safe_session", new=_safe_ctx), \
-             patch("src.services.flow_builder.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.services.flow_builder.flow_runner_service.BackendFlow") as MockBF, \
-             patch("src.services.flow_builder.flow_runner_service.FlowRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.TaskRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.AgentRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ToolRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.CrewRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_smart_ctx), \
-             patch("src.services.settings.models.ModelConfigService") as MockModelSvc, \
-             patch("src.services.execution.history.ExecutionHistoryService") as MockHist, \
-             patch.object(svc, "_emit_error_span", new=AsyncMock()):
+        with (
+            patch.object(FlowRunnerService, "_safe_session", new=_safe_ctx),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+            ) as MockFlowSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service.BackendFlow"
+            ) as MockBF,
+            patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
+            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
+            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
+            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
+            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as MockApiSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                new=_smart_ctx,
+            ),
+            patch("src.services.settings.models.ModelConfigService") as MockModelSvc,
+            patch("src.services.execution.history.ExecutionHistoryService") as MockHist,
+            patch.object(svc, "_emit_error_span", new=AsyncMock()),
+        ):
 
             flow_svc = MagicMock()
             flow_svc.update_execution_status = AsyncMock()
@@ -270,11 +361,13 @@ class TestRunFlowExecutionAdditional:
 
             bf = MagicMock()
             bf.config = {}
-            bf.kickoff = AsyncMock(return_value={
-                "success": True,
-                "result": {"data": "ok"},
-                "flow_uuid": "uuid-checkpoint-1"  # Has flow_uuid
-            })
+            bf.kickoff = AsyncMock(
+                return_value={
+                    "success": True,
+                    "result": {"data": "ok"},
+                    "flow_uuid": "uuid-checkpoint-1",  # Has flow_uuid
+                }
+            )
             MockBF.return_value = bf
 
             MockApiSvc.get_provider_api_key = AsyncMock(return_value=None)
@@ -291,7 +384,7 @@ class TestRunFlowExecutionAdditional:
                 execution_id=1,
                 flow_id=fid,
                 job_id="job-checkpoint",
-                config={"nodes": [{"id": "n1"}]}
+                config={"nodes": [{"id": "n1"}]},
             )
 
         assert result.get("success") is True
@@ -303,6 +396,7 @@ class TestRunFlowExecutionAdditional:
 # _run_dynamic_flow – outer exception handler (lines 646-660)
 # ---------------------------------------------------------------------------
 
+
 class TestRunDynamicFlowOuter:
 
     @pytest.mark.asyncio
@@ -310,23 +404,38 @@ class TestRunDynamicFlowOuter:
         """Outer exception in _run_dynamic_flow (line 646-660)."""
         svc = _make_service()
 
-        with patch.object(FlowRunnerService, "_safe_session", new=_safe_ctx), \
-             patch("src.services.flow_builder.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF, \
-             patch("src.services.flow_builder.flow_runner_service.FlowRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.TaskRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.AgentRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ToolRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.CrewRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_smart_ctx), \
-             patch.object(svc, "_emit_error_span", new=AsyncMock()):
+        with (
+            patch.object(FlowRunnerService, "_safe_session", new=_safe_ctx),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+            ) as MockFlowSvc,
+            patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
+            patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
+            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
+            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
+            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
+            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as MockApiSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                new=_smart_ctx,
+            ),
+            patch.object(svc, "_emit_error_span", new=AsyncMock()),
+        ):
 
             flow_svc = MagicMock()
             # Outer exception: update_execution_status raises on PREPARING
-            flow_svc.update_execution_status = AsyncMock(side_effect=RuntimeError("outer db fail"))
+            flow_svc.update_execution_status = AsyncMock(
+                side_effect=RuntimeError("outer db fail")
+            )
             MockFlowSvc.return_value = flow_svc
 
             bf = MagicMock()
@@ -337,7 +446,7 @@ class TestRunDynamicFlowOuter:
             result = await svc._run_dynamic_flow(
                 execution_id=1,
                 job_id="job-outer",
-                config={"nodes": [{"id": "n1"}], "edges": [], "flow_config": {}}
+                config={"nodes": [{"id": "n1"}], "edges": [], "flow_config": {}},
             )
 
         assert result.get("success") is False
@@ -347,23 +456,37 @@ class TestRunDynamicFlowOuter:
         """Outer exception + outer status update also fails (line 657-658)."""
         svc = _make_service()
 
-        with patch.object(FlowRunnerService, "_safe_session", new=_safe_ctx), \
-             patch("src.services.flow_builder.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF, \
-             patch("src.services.flow_builder.flow_runner_service.FlowRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.TaskRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.AgentRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ToolRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.CrewRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.services.flow_builder.flow_runner_service._smart_db_session") as mock_smart, \
-             patch.object(svc, "_emit_error_span", new=AsyncMock()):
+        with (
+            patch.object(FlowRunnerService, "_safe_session", new=_safe_ctx),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+            ) as MockFlowSvc,
+            patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
+            patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
+            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
+            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
+            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
+            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as MockApiSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session"
+            ) as mock_smart,
+            patch.object(svc, "_emit_error_span", new=AsyncMock()),
+        ):
 
             # Primary session fails on PREPARING
             flow_svc = MagicMock()
-            flow_svc.update_execution_status = AsyncMock(side_effect=RuntimeError("outer db fail"))
+            flow_svc.update_execution_status = AsyncMock(
+                side_effect=RuntimeError("outer db fail")
+            )
             MockFlowSvc.return_value = flow_svc
 
             bf = MagicMock()
@@ -373,14 +496,16 @@ class TestRunDynamicFlowOuter:
 
             # Smart session also fails
             fail_ctx = MagicMock()
-            fail_ctx.__aenter__ = AsyncMock(side_effect=RuntimeError("smart session fail"))
+            fail_ctx.__aenter__ = AsyncMock(
+                side_effect=RuntimeError("smart session fail")
+            )
             fail_ctx.__aexit__ = AsyncMock(return_value=False)
             mock_smart.return_value = fail_ctx
 
             result = await svc._run_dynamic_flow(
                 execution_id=1,
                 job_id="job-outer2",
-                config={"nodes": [{"id": "n1"}], "edges": [], "flow_config": {}}
+                config={"nodes": [{"id": "n1"}], "edges": [], "flow_config": {}},
             )
 
         assert result.get("success") is False
@@ -390,6 +515,7 @@ class TestRunDynamicFlowOuter:
 # flow_runner_service - run_flow resume scenario
 # ---------------------------------------------------------------------------
 
+
 class TestRunFlowResumeScenario:
 
     @pytest.mark.asyncio
@@ -397,12 +523,22 @@ class TestRunFlowResumeScenario:
         """Resume scenario where existing execution is found (lines 311-322)."""
         svc = _make_service()
 
-        with patch("src.services.flow_builder.flow_runner_service.FlowExecutionService"):
+        with patch(
+            "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+        ):
             with patch("src.services.flow_builder.flow_runner_service.FlowRepository"):
-                with patch("src.services.flow_builder.flow_runner_service.TaskRepository"):
-                    with patch("src.services.flow_builder.flow_runner_service.AgentRepository"):
-                        with patch("src.services.flow_builder.flow_runner_service.ToolRepository"):
-                            with patch("src.services.flow_builder.flow_runner_service.CrewRepository"):
+                with patch(
+                    "src.services.flow_builder.flow_runner_service.TaskRepository"
+                ):
+                    with patch(
+                        "src.services.flow_builder.flow_runner_service.AgentRepository"
+                    ):
+                        with patch(
+                            "src.services.flow_builder.flow_runner_service.ToolRepository"
+                        ):
+                            with patch(
+                                "src.services.flow_builder.flow_runner_service.CrewRepository"
+                            ):
                                 svc = FlowRunnerService(MagicMock(spec=AsyncSession))
 
         existing_execution = MagicMock()
@@ -416,8 +552,14 @@ class TestRunFlowResumeScenario:
 
         flow_result = {"success": True, "result": "done"}
 
-        with patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository") as MockExecRepo, \
-             patch.object(svc, "_run_dynamic_flow", new=AsyncMock(return_value=flow_result)):
+        with (
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+            ) as MockExecRepo,
+            patch.object(
+                svc, "_run_dynamic_flow", new=AsyncMock(return_value=flow_result)
+            ),
+        ):
 
             repo_inst = MagicMock()
             # Integer PK passed: job_id lookup misses, int-PK fallback finds it.
@@ -432,7 +574,7 @@ class TestRunFlowResumeScenario:
                     "nodes": [{"id": "n1"}],
                     "edges": [],
                     "resume_from_execution_id": 115,
-                }
+                },
             )
 
         assert result["status"] == FlowExecutionStatus.COMPLETED
@@ -442,7 +584,10 @@ class TestRunFlowResumeScenario:
 # flow_methods.py supplemental tests
 # ---------------------------------------------------------------------------
 
-from src.services.flow_builder.modules.flow_methods import FlowMethodFactory, extract_final_answer
+from src.services.flow_builder.modules.flow_methods import (
+    FlowMethodFactory,
+    extract_final_answer,
+)
 
 
 class TestFlowMethodsSupplemental:
@@ -451,7 +596,7 @@ class TestFlowMethodsSupplemental:
         """Test list of dicts where each dict has content with Final Answer."""
         items = [
             {"content": "thinking... Final Answer: answer1"},
-            {"content": "more Final Answer: answer2"}
+            {"content": "more Final Answer: answer2"},
         ]
         result = extract_final_answer([items])
         # Should extract answer from at least one item
@@ -465,9 +610,11 @@ class TestFlowMethodsSupplemental:
 
     def test_extract_final_answer_non_indexable(self):
         """Result is not a sequence - fallback to str."""
+
         class NonIndexable:
             def __str__(self):
                 return "not indexable"
+
         result = extract_final_answer(NonIndexable())
         assert "not indexable" in result
 
@@ -479,7 +626,7 @@ class TestFlowMethodsSupplemental:
             crew_name="My Crew",
             crew_sequence=0,
             is_starting_point=True,
-            checkpoint_output=None
+            checkpoint_output=None,
         )
 
         class ObjState:
@@ -502,7 +649,7 @@ class TestFlowMethodsSupplemental:
             crew_name="My Crew",
             crew_sequence=0,
             is_starting_point=True,
-            checkpoint_output=None
+            checkpoint_output=None,
         )
 
         mock_self = MagicMock()
@@ -519,7 +666,7 @@ class TestFlowMethodsSupplemental:
             crew_name="My Crew",
             crew_sequence=0,
             is_starting_point=True,
-            checkpoint_output=None
+            checkpoint_output=None,
         )
 
         mock_self = MagicMock()
@@ -537,7 +684,7 @@ class TestFlowMethodsSupplemental:
             crew_sequence=1,
             is_starting_point=False,
             method_condition="starting_point_0",
-            checkpoint_output="listener output"
+            checkpoint_output="listener output",
         )
 
         mock_self = MagicMock()
@@ -555,8 +702,9 @@ class TestFlowMethodsSupplemental:
 # task_config.py supplemental tests
 # ---------------------------------------------------------------------------
 
-from src.services.flow_builder.modules.task_adapter import TaskConfig
 from types import SimpleNamespace
+
+from src.services.flow_builder.modules.task_adapter import TaskConfig
 
 
 class TestTaskConfigSupplemental:
@@ -568,20 +716,13 @@ class TestTaskConfigSupplemental:
         task_id = str(uuid.uuid4())
 
         task_data = SimpleNamespace(
-            name="Task",
-            description="desc",
-            agent_id=None,  # No agent_id
-            id=task_id
+            name="Task", description="desc", agent_id=None, id=task_id  # No agent_id
         )
 
         # Flow data with edges connecting agent to task
         flow_data = SimpleNamespace(
             edges=[
-                {
-                    "source": f"agent-{agent_id}",
-                    "target": f"task-{task_id}",
-                    "id": "e1"
-                }
+                {"source": f"agent-{agent_id}", "target": f"task-{task_id}", "id": "e1"}
             ]
         )
 
@@ -591,8 +732,10 @@ class TestTaskConfigSupplemental:
 
         mock_agent = MagicMock()
 
-        with patch("src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
-                   new=AsyncMock(return_value=mock_agent)):
+        with patch(
+            "src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
+            new=AsyncMock(return_value=mock_agent),
+        ):
             result = await TaskConfig._resolve_agent_for_task(
                 task_data, flow_data, {"agent": agent_repo}
             )
@@ -606,19 +749,12 @@ class TestTaskConfigSupplemental:
         task_id = str(uuid.uuid4())
 
         task_data = SimpleNamespace(
-            name="Task",
-            description="desc",
-            agent_id=None,
-            id=task_id
+            name="Task", description="desc", agent_id=None, id=task_id
         )
 
         flow_data = SimpleNamespace(
             edges=[
-                {
-                    "source": f"agent-{agent_id}",
-                    "target": f"task-{task_id}",
-                    "id": "e1"
-                }
+                {"source": f"agent-{agent_id}", "target": f"task-{task_id}", "id": "e1"}
             ]
         )
 
@@ -659,6 +795,7 @@ class TestTaskConfigSupplemental:
         )
 
         from src.services.execution.runtime import BaseAgent
+
         mock_agent = MagicMock(spec=BaseAgent)
         mock_agent.role = "Tester"
         mock_agent.tools = []
@@ -666,8 +803,12 @@ class TestTaskConfigSupplemental:
 
         mock_task = MagicMock()
 
-        with patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()), \
-             patch.object(TaskConfig, "_resolve_agent_for_task", new=AsyncMock(return_value=None)):
+        with (
+            patch.object(TaskConfig, "_configure_task_tools", new=AsyncMock()),
+            patch.object(
+                TaskConfig, "_resolve_agent_for_task", new=AsyncMock(return_value=None)
+            ),
+        ):
             result = await TaskConfig.configure_task(task_data, agent=mock_agent)
 
         # Returns None since no agent was provided at top level
@@ -693,6 +834,7 @@ class TestTaskConfigSupplemental:
         )
 
         from src.services.execution.runtime import BaseAgent
+
         mock_agent = MagicMock(spec=BaseAgent)
         mock_agent.role = "Tester"
         mock_agent.tools = []
@@ -709,13 +851,19 @@ class TestTaskConfigSupplemental:
         async def mock_session_ctx():
             yield AsyncMock()
 
-        with patch("src.db.session.request_scoped_session", return_value=mock_session_ctx()), \
-             patch("src.services.settings.api_keys.ApiKeysService"), \
-             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
+        with (
+            patch(
+                "src.db.session.request_scoped_session", return_value=mock_session_ctx()
+            ),
+            patch("src.services.settings.api_keys.ApiKeysService"),
+            patch("src.services.tools.tool_factory.ToolFactory") as MockTF,
+        ):
             MockTF.create = AsyncMock(return_value=mock_factory)
 
             await TaskConfig._configure_task_tools(task_data, mock_agent, None)
 
         # Should have called create_tool with the override
-        mock_factory.create_tool.assert_called_once_with("42", tool_config_override={"spaceId": "my-space"})
+        mock_factory.create_tool.assert_called_once_with(
+            "42", tool_config_override={"spaceId": "my-space"}
+        )
         assert mock_tool in mock_agent.tools

@@ -7,8 +7,9 @@ unit-tested separately; this exercises the wiring inside process_starting_points
 """
 
 import uuid
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
 
@@ -20,7 +21,7 @@ async def test_recovers_mcp_from_current_task_into_agent_build():
     crew_id = str(uuid.uuid4())
     agent_id = str(uuid.uuid4())
 
-    flow_config = {'startingPoints': [{'taskId': stale_task_id, 'crewId': crew_id}]}
+    flow_config = {"startingPoints": [{"taskId": stale_task_id, "crewId": crew_id}]}
 
     crew = MagicMock()
     crew.name = "Search Crew"
@@ -45,13 +46,19 @@ async def test_recovers_mcp_from_current_task_into_agent_build():
         return current_task if str(tid) == current_task_id else stale_task
 
     repos = {
-        'crew': AsyncMock(get=AsyncMock(return_value=crew)),
-        'task': AsyncMock(get=AsyncMock(side_effect=_task_get)),
-        'agent': AsyncMock(get=AsyncMock(return_value=MagicMock(role="Researcher"))),
+        "crew": AsyncMock(get=AsyncMock(return_value=crew)),
+        "task": AsyncMock(get=AsyncMock(side_effect=_task_get)),
+        "agent": AsyncMock(get=AsyncMock(return_value=MagicMock(role="Researcher"))),
     }
 
-    with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-         patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config:
+    with (
+        patch(
+            "src.services.flow_builder.modules.agent_adapter.AgentConfig"
+        ) as mock_agent_config,
+        patch(
+            "src.services.flow_builder.modules.task_adapter.TaskConfig"
+        ) as mock_task_config,
+    ):
         agent_obj = MagicMock(role="Researcher")
         mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=agent_obj)
         task_obj = MagicMock(agent=agent_obj)
@@ -62,7 +69,9 @@ async def test_recovers_mcp_from_current_task_into_agent_build():
         # The recovered MCP_SERVERS must reach the agent build via crew_tool_configs.
         assert mock_agent_config.configure_agent_and_tools.await_count == 1
         _, kwargs = mock_agent_config.configure_agent_and_tools.call_args
-        assert kwargs.get('crew_tool_configs', {}).get('MCP_SERVERS') == {"servers": ["example-mcp"]}
+        assert kwargs.get("crew_tool_configs", {}).get("MCP_SERVERS") == {
+            "servers": ["example-mcp"]
+        }
 
 
 @pytest.mark.asyncio
@@ -74,7 +83,7 @@ async def test_mcp_recovery_swallows_errors_and_continues():
     crew_id = str(uuid.uuid4())
     agent_id = str(uuid.uuid4())
 
-    flow_config = {'startingPoints': [{'taskId': stale_task_id, 'crewId': crew_id}]}
+    flow_config = {"startingPoints": [{"taskId": stale_task_id, "crewId": crew_id}]}
 
     crew = MagicMock()
     crew.name = "Search Crew"
@@ -95,20 +104,28 @@ async def test_mcp_recovery_swallows_errors_and_continues():
         return stale_task
 
     repos = {
-        'crew': AsyncMock(get=AsyncMock(return_value=crew)),
-        'task': AsyncMock(get=AsyncMock(side_effect=_task_get)),
-        'agent': AsyncMock(get=AsyncMock(return_value=MagicMock(role="Researcher"))),
+        "crew": AsyncMock(get=AsyncMock(return_value=crew)),
+        "task": AsyncMock(get=AsyncMock(side_effect=_task_get)),
+        "agent": AsyncMock(get=AsyncMock(return_value=MagicMock(role="Researcher"))),
     }
 
-    with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-         patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config:
+    with (
+        patch(
+            "src.services.flow_builder.modules.agent_adapter.AgentConfig"
+        ) as mock_agent_config,
+        patch(
+            "src.services.flow_builder.modules.task_adapter.TaskConfig"
+        ) as mock_task_config,
+    ):
         agent_obj = MagicMock(role="Researcher")
         mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=agent_obj)
-        mock_task_config.configure_task = AsyncMock(return_value=MagicMock(agent=agent_obj))
+        mock_task_config.configure_task = AsyncMock(
+            return_value=MagicMock(agent=agent_obj)
+        )
 
         # Must not raise — the recovery error is swallowed and the build continues.
         await FlowProcessorManager.process_starting_points(flow_config, {}, repos)
 
         assert mock_agent_config.configure_agent_and_tools.await_count == 1
         _, kwargs = mock_agent_config.configure_agent_and_tools.call_args
-        assert 'MCP_SERVERS' not in (kwargs.get('crew_tool_configs') or {})
+        assert "MCP_SERVERS" not in (kwargs.get("crew_tool_configs") or {})

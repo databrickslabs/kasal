@@ -7,18 +7,19 @@ Targets uncovered lines: 83, 100, 108, 121-127, 131-136, 140-146, 150, 156-194,
 """
 
 import pytest
+
+from src.services.converters.base.models import KPI
 from src.services.converters.formats.sql.models import (
-    SQLDialect,
     SQLAggregationType,
-    SQLJoinType,
-    SQLQuery,
-    SQLMeasure,
-    SQLStructure,
     SQLDefinition,
+    SQLDialect,
+    SQLJoinType,
+    SQLMeasure,
+    SQLQuery,
+    SQLStructure,
     SQLTranslationOptions,
     SQLTranslationResult,
 )
-from src.services.converters.base.models import KPI
 
 
 def make_kpi(technical_name="sales", formula="amount", **kwargs):

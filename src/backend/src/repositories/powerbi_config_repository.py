@@ -1,6 +1,6 @@
-from typing import Optional
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +27,9 @@ class PowerBIConfigRepository(BaseRepository[PowerBIConfig]):
         """
         super().__init__(PowerBIConfig, session)
 
-    async def get_active_config(self, group_id: Optional[str] = None) -> Optional[PowerBIConfig]:
+    async def get_active_config(
+        self, group_id: Optional[str] = None
+    ) -> Optional[PowerBIConfig]:
         """
         Get the currently active Power BI configuration for the specified group.
         If multiple active configurations exist, returns the most recently updated one.
@@ -82,13 +84,13 @@ class PowerBIConfigRepository(BaseRepository[PowerBIConfig]):
             raise TypeError("config_data cannot be None")
 
         # First deactivate any existing active configurations for this group
-        group_id = config_data.get('group_id')
+        group_id = config_data.get("group_id")
         await self.deactivate_all(group_id=group_id)
 
         # Map 'enabled' from API schema to 'is_enabled' in database model
         db_data = config_data.copy()
-        if 'enabled' in db_data:
-            db_data['is_enabled'] = db_data.pop('enabled')
+        if "enabled" in db_data:
+            db_data["is_enabled"] = db_data.pop("enabled")
 
         # Create the new configuration
         db_config = PowerBIConfig(**db_data)

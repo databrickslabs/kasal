@@ -11,25 +11,26 @@ Covers:
 - PowerBIContextConfigBulkResponse: list composition
 - PowerBIContextConfigDict: optional dict fields, defaults to None
 """
-import pytest
+
 from datetime import datetime, timezone
+
+import pytest
 from pydantic import ValidationError
 
 from src.schemas.powerbi_context_config import (
     PowerBIBusinessMappingBase,
     PowerBIBusinessMappingCreate,
-    PowerBIBusinessMappingUpdate,
     PowerBIBusinessMappingInDB,
     PowerBIBusinessMappingResponse,
-    PowerBIFieldSynonymBase,
-    PowerBIFieldSynonymCreate,
-    PowerBIFieldSynonymUpdate,
-    PowerBIFieldSynonymInDB,
-    PowerBIFieldSynonymResponse,
+    PowerBIBusinessMappingUpdate,
     PowerBIContextConfigBulkResponse,
     PowerBIContextConfigDict,
+    PowerBIFieldSynonymBase,
+    PowerBIFieldSynonymCreate,
+    PowerBIFieldSynonymInDB,
+    PowerBIFieldSynonymResponse,
+    PowerBIFieldSynonymUpdate,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -71,6 +72,7 @@ def _synonym_in_db(**overrides) -> dict:
 # BusinessMappingBase
 # ---------------------------------------------------------------------------
 
+
 class TestPowerBIBusinessMappingBase:
 
     def test_valid_minimal(self):
@@ -91,9 +93,7 @@ class TestPowerBIBusinessMappingBase:
         assert m.description == "Total revenue minus cost of goods sold"
 
     def test_description_defaults_to_none(self):
-        m = PowerBIBusinessMappingBase(
-            natural_term="x", dax_expression="y"
-        )
+        m = PowerBIBusinessMappingBase(natural_term="x", dax_expression="y")
         assert m.description is None
 
     def test_missing_natural_term_raises(self):
@@ -131,6 +131,7 @@ class TestPowerBIBusinessMappingBase:
 # ---------------------------------------------------------------------------
 # BusinessMappingCreate
 # ---------------------------------------------------------------------------
+
 
 class TestPowerBIBusinessMappingCreate:
 
@@ -176,6 +177,7 @@ class TestPowerBIBusinessMappingCreate:
 # BusinessMappingUpdate
 # ---------------------------------------------------------------------------
 
+
 class TestPowerBIBusinessMappingUpdate:
 
     def test_empty_update_is_valid(self):
@@ -208,6 +210,7 @@ class TestPowerBIBusinessMappingUpdate:
 # ---------------------------------------------------------------------------
 # BusinessMappingInDB / Response
 # ---------------------------------------------------------------------------
+
 
 class TestPowerBIBusinessMappingInDB:
 
@@ -244,6 +247,7 @@ class TestPowerBIBusinessMappingInDB:
 # ---------------------------------------------------------------------------
 # FieldSynonymBase
 # ---------------------------------------------------------------------------
+
 
 class TestPowerBIFieldSynonymBase:
 
@@ -284,6 +288,7 @@ class TestPowerBIFieldSynonymBase:
 # ---------------------------------------------------------------------------
 # FieldSynonymCreate / Update / InDB / Response
 # ---------------------------------------------------------------------------
+
 
 class TestPowerBIFieldSynonymCreate:
 
@@ -352,11 +357,14 @@ class TestPowerBIFieldSynonymInDB:
 # PowerBIContextConfigBulkResponse
 # ---------------------------------------------------------------------------
 
+
 class TestPowerBIContextConfigBulkResponse:
 
     def _make_bulk(self, num_mappings=2, num_synonyms=1):
         mappings = [
-            PowerBIBusinessMappingResponse(**_mapping_in_db(id=i, natural_term=f"term_{i}"))
+            PowerBIBusinessMappingResponse(
+                **_mapping_in_db(id=i, natural_term=f"term_{i}")
+            )
             for i in range(num_mappings)
         ]
         synonyms = [
@@ -374,37 +382,37 @@ class TestPowerBIContextConfigBulkResponse:
         assert len(bulk.field_synonyms) == 1
 
     def test_empty_lists_are_valid(self):
-        bulk = PowerBIContextConfigBulkResponse(
-            business_mappings=[], field_synonyms=[]
-        )
+        bulk = PowerBIContextConfigBulkResponse(business_mappings=[], field_synonyms=[])
         assert bulk.business_mappings == []
         assert bulk.field_synonyms == []
 
     def test_missing_business_mappings_raises(self):
         with pytest.raises(ValidationError) as exc_info:
-            PowerBIContextConfigBulkResponse(
-                field_synonyms=[]
-            )
+            PowerBIContextConfigBulkResponse(field_synonyms=[])
         fields = {e["loc"][0] for e in exc_info.value.errors()}
         assert "business_mappings" in fields
 
     def test_missing_field_synonyms_raises(self):
         with pytest.raises(ValidationError) as exc_info:
-            PowerBIContextConfigBulkResponse(
-                business_mappings=[]
-            )
+            PowerBIContextConfigBulkResponse(business_mappings=[])
         fields = {e["loc"][0] for e in exc_info.value.errors()}
         assert "field_synonyms" in fields
 
     def test_types_in_lists(self):
         bulk = self._make_bulk(num_mappings=3, num_synonyms=2)
-        assert all(isinstance(m, PowerBIBusinessMappingResponse) for m in bulk.business_mappings)
-        assert all(isinstance(s, PowerBIFieldSynonymResponse) for s in bulk.field_synonyms)
+        assert all(
+            isinstance(m, PowerBIBusinessMappingResponse)
+            for m in bulk.business_mappings
+        )
+        assert all(
+            isinstance(s, PowerBIFieldSynonymResponse) for s in bulk.field_synonyms
+        )
 
 
 # ---------------------------------------------------------------------------
 # PowerBIContextConfigDict
 # ---------------------------------------------------------------------------
+
 
 class TestPowerBIContextConfigDict:
 

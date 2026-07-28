@@ -16,14 +16,15 @@ Date: 2026
 
 import asyncio
 import base64
+import json
 import logging
 import re
-import json
-from typing import Any, Optional, Type, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set, Type
+
+import httpx
+from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
-from pydantic import BaseModel, Field, PrivateAttr
-import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class PowerBIReportReferencesSchema(BaseModel):
     # ===== POWER BI CONFIGURATION =====
     report_id: Optional[str] = Field(
         None,
-        description="[Power BI] Single Report ID (GUID) to extract references from. Leave empty to analyze all reports using the pre-configured dataset."
+        description="[Power BI] Single Report ID (GUID) to extract references from. Leave empty to analyze all reports using the pre-configured dataset.",
     )
 
     # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
@@ -45,15 +46,15 @@ class PowerBIReportReferencesSchema(BaseModel):
     # ===== OUTPUT OPTIONS =====
     output_format: str = Field(
         "markdown",
-        description="[Output] Output format: 'markdown', 'json', or 'matrix' (default: 'markdown')."
+        description="[Output] Output format: 'markdown', 'json', or 'matrix' (default: 'markdown').",
     )
     include_visual_details: bool = Field(
         True,
-        description="[Output] Include detailed visual configurations (default: True)."
+        description="[Output] Include detailed visual configurations (default: True).",
     )
     group_by: str = Field(
         "page",
-        description="[Output] Group results by: 'page', 'measure', or 'table' (default: 'page')."
+        description="[Output] Group results by: 'page', 'measure', or 'table' (default: 'page').",
     )
 
 
@@ -104,17 +105,22 @@ class PowerBIReportReferencesTool(BaseTool):
     def __init__(self, **kwargs: Any) -> None:
         """Initialize the tool with configuration."""
         import uuid
+
         instance_id = str(uuid.uuid4())[:8]
 
-        logger.info(f"[PowerBIReportReferencesTool.__init__] Instance ID: {instance_id}")
-        logger.info(f"[PowerBIReportReferencesTool.__init__] kwargs keys: {list(kwargs.keys())}")
+        logger.info(
+            f"[PowerBIReportReferencesTool.__init__] Instance ID: {instance_id}"
+        )
+        logger.info(
+            f"[PowerBIReportReferencesTool.__init__] kwargs keys: {list(kwargs.keys())}"
+        )
 
         # Helper to check if a value is a placeholder that should be treated as empty
         def is_placeholder_value(value: Any) -> bool:
             if not isinstance(value, str):
                 return False
             # Check for {placeholder} patterns
-            if re.search(r'^\{[a-z_]+\}$', value):
+            if re.search(r"^\{[a-z_]+\}$", value):
                 return True
             return False
 
@@ -122,7 +128,9 @@ class PowerBIReportReferencesTool(BaseTool):
         def get_filtered_value(key: str, default: Any = None) -> Any:
             value = kwargs.get(key, default)
             if is_placeholder_value(value):
-                logger.info(f"[PowerBIReportReferencesTool.__init__] Filtering placeholder for {key}: {value}")
+                logger.info(
+                    f"[PowerBIReportReferencesTool.__init__] Filtering placeholder for {key}: {value}"
+                )
                 return default
             return value
 
@@ -144,7 +152,9 @@ class PowerBIReportReferencesTool(BaseTool):
             "access_token": get_filtered_value("access_token"),
             # Output options
             "output_format": get_filtered_value("output_format", "markdown"),
-            "include_visual_details": get_filtered_value("include_visual_details", True),
+            "include_visual_details": get_filtered_value(
+                "include_visual_details", True
+            ),
             "group_by": get_filtered_value("group_by", "page"),
             "mode": get_filtered_value("mode", "static"),
         }
@@ -153,12 +163,17 @@ class PowerBIReportReferencesTool(BaseTool):
         if execution_inputs:
             resolved_config = {}
             for key, value in default_config.items():
-                resolved_config[key] = self._resolve_placeholder(value, execution_inputs)
+                resolved_config[key] = self._resolve_placeholder(
+                    value, execution_inputs
+                )
             default_config = resolved_config
 
         # Log configuration (mask secrets)
-        safe_config = {k: v if 'secret' not in k.lower() and 'token' not in k.lower() else '***'
-                       for k, v in default_config.items() if v is not None}
+        safe_config = {
+            k: v if "secret" not in k.lower() and "token" not in k.lower() else "***"
+            for k, v in default_config.items()
+            if v is not None
+        }
         logger.info(f"[PowerBIReportReferencesTool] Config: {safe_config}")
 
         # Call parent init
@@ -174,7 +189,7 @@ class PowerBIReportReferencesTool(BaseTool):
         if not isinstance(value, str):
             return value
 
-        placeholders = re.findall(r'\{(\w+)\}', value)
+        placeholders = re.findall(r"\{(\w+)\}", value)
         if not placeholders:
             return value
 
@@ -182,18 +197,22 @@ class PowerBIReportReferencesTool(BaseTool):
         for placeholder in placeholders:
             if placeholder in execution_inputs:
                 replacement = str(execution_inputs[placeholder])
-                resolved_value = resolved_value.replace(f'{{{placeholder}}}', replacement)
+                resolved_value = resolved_value.replace(
+                    f"{{{placeholder}}}", replacement
+                )
 
         return resolved_value
 
     def _run(self, **kwargs: Any) -> str:
         """Execute report references extraction."""
         try:
-            instance_id = getattr(self, '_instance_id', 'UNKNOWN')
-            logger.info(f"[PowerBIReportReferencesTool] Instance {instance_id} - _run() called")
+            instance_id = getattr(self, "_instance_id", "UNKNOWN")
+            logger.info(
+                f"[PowerBIReportReferencesTool] Instance {instance_id} - _run() called"
+            )
 
             # Extract execution_inputs
-            execution_inputs = kwargs.pop('execution_inputs', {})
+            execution_inputs = kwargs.pop("execution_inputs", {})
 
             # Filter placeholder values
             def is_placeholder(value: Any) -> bool:
@@ -202,19 +221,24 @@ class PowerBIReportReferencesTool(BaseTool):
                 patterns = ["your_", "placeholder", "example_", "xxx", "insert_", "<"]
                 if any(p in value.lower() for p in patterns):
                     return True
-                if re.search(r'^\{[a-z_]+\}$', value):
+                if re.search(r"^\{[a-z_]+\}$", value):
                     return True
                 return False
 
             filtered_kwargs = {
-                k: v for k, v in kwargs.items()
+                k: v
+                for k, v in kwargs.items()
                 if v is not None and not is_placeholder(v)
             }
 
             # Log what was filtered
-            filtered_out = {k: v for k, v in kwargs.items() if v is not None and is_placeholder(v)}
+            filtered_out = {
+                k: v for k, v in kwargs.items() if v is not None and is_placeholder(v)
+            }
             if filtered_out:
-                logger.info(f"[PowerBIReportReferencesTool] Filtered out placeholder kwargs: {list(filtered_out.keys())}")
+                logger.info(
+                    f"[PowerBIReportReferencesTool] Filtered out placeholder kwargs: {list(filtered_out.keys())}"
+                )
 
             # Merge with defaults - IMPORTANT: default_config must be second to override agent's values
             merged_kwargs = {**filtered_kwargs, **self._default_config}
@@ -223,7 +247,9 @@ class PowerBIReportReferencesTool(BaseTool):
             if execution_inputs:
                 resolved_kwargs = {}
                 for key, value in merged_kwargs.items():
-                    resolved_kwargs[key] = self._resolve_placeholder(value, execution_inputs)
+                    resolved_kwargs[key] = self._resolve_placeholder(
+                        value, execution_inputs
+                    )
                 merged_kwargs = resolved_kwargs
 
             # Extract and validate parameters
@@ -248,11 +274,19 @@ class PowerBIReportReferencesTool(BaseTool):
             logger.info("=" * 80)
             logger.info(f"  tenant_id: {auth_config.get('tenant_id')}")
             logger.info(f"  client_id: {auth_config.get('client_id')}")
-            logger.info(f"  client_secret: {'*' * len(auth_config.get('client_secret') or '') if auth_config.get('client_secret') else 'None'}")
+            logger.info(
+                f"  client_secret: {'*' * len(auth_config.get('client_secret') or '') if auth_config.get('client_secret') else 'None'}"
+            )
             logger.info(f"  username: {auth_config.get('username')}")
-            logger.info(f"  password: {'*' * len(auth_config.get('password') or '') if auth_config.get('password') else 'None'}")
-            logger.info(f"  auth_method: {auth_config.get('auth_method')} (type: {type(auth_config.get('auth_method'))})")
-            logger.info(f"  access_token: {'*' * 10 if auth_config.get('access_token') else 'None'}")
+            logger.info(
+                f"  password: {'*' * len(auth_config.get('password') or '') if auth_config.get('password') else 'None'}"
+            )
+            logger.info(
+                f"  auth_method: {auth_config.get('auth_method')} (type: {type(auth_config.get('auth_method'))})"
+            )
+            logger.info(
+                f"  access_token: {'*' * 10 if auth_config.get('access_token') else 'None'}"
+            )
             logger.info("=" * 80)
 
             # Log which authentication method will be used (auto-detect if not specified)
@@ -261,17 +295,26 @@ class PowerBIReportReferencesTool(BaseTool):
                 # Replicate AadService._determine_auth_method() logic
                 if auth_config.get("access_token"):
                     detected_auth_method = "user_oauth (pre-obtained token)"
-                elif (auth_config.get("client_id") and auth_config.get("client_secret") and
-                      auth_config.get("tenant_id")):
+                elif (
+                    auth_config.get("client_id")
+                    and auth_config.get("client_secret")
+                    and auth_config.get("tenant_id")
+                ):
                     detected_auth_method = "service_principal (auto-detected)"
-                elif (auth_config.get("username") and auth_config.get("password") and
-                      auth_config.get("client_id") and auth_config.get("tenant_id")):
+                elif (
+                    auth_config.get("username")
+                    and auth_config.get("password")
+                    and auth_config.get("client_id")
+                    and auth_config.get("tenant_id")
+                ):
                     detected_auth_method = "service_account (auto-detected)"
                 else:
                     detected_auth_method = "UNKNOWN - insufficient credentials"
 
             logger.info("=" * 80)
-            logger.info("[PowerBIReportReferencesTool] 🔑 AUTHENTICATION METHOD DETECTION")
+            logger.info(
+                "[PowerBIReportReferencesTool] 🔑 AUTHENTICATION METHOD DETECTION"
+            )
             logger.info("=" * 80)
             logger.info(f"  Detected auth method: {detected_auth_method}")
             logger.info("=" * 80)
@@ -280,7 +323,7 @@ class PowerBIReportReferencesTool(BaseTool):
             def has_unresolved_placeholder(value: Any) -> bool:
                 if not isinstance(value, str):
                     return False
-                return bool(re.search(r'\{[a-z_]+\}', value))
+                return bool(re.search(r"\{[a-z_]+\}", value))
 
             # Check for unresolved placeholders
             unresolved = []
@@ -299,8 +342,10 @@ class PowerBIReportReferencesTool(BaseTool):
                     unresolved.append(param_name)
 
             if unresolved:
-                mode = merged_kwargs.get('mode', 'unknown')
-                logger.error(f"[PowerBIReportReferencesTool] Unresolved placeholders: {unresolved}")
+                mode = merged_kwargs.get("mode", "unknown")
+                logger.error(
+                    f"[PowerBIReportReferencesTool] Unresolved placeholders: {unresolved}"
+                )
                 return (
                     f"Error: Unresolved placeholder(s) detected: {', '.join(unresolved)}\n\n"
                     f"**Debug Info**:\n"
@@ -322,34 +367,43 @@ class PowerBIReportReferencesTool(BaseTool):
 
             # Validate authentication using shared utility (filters out placeholders)
             clean_auth_config = {
-                k: v for k, v in auth_config.items()
+                k: v
+                for k, v in auth_config.items()
                 if v and not has_unresolved_placeholder(v)
             }
             from src.services.tools.powerbi_auth_utils import validate_auth_config
+
             is_valid, error_msg = validate_auth_config(clean_auth_config)
             if not is_valid:
                 return f"Error: {error_msg}\n\nService Principal requires Report.ReadWrite.All permission."
 
             # Run async extraction
-            result = self._run_sync(self._extract_report_references(
-                workspace_id=workspace_id,
-                dataset_id=dataset_id,
-                report_id=report_id,
-                auth_config=clean_auth_config,
-                output_format=merged_kwargs.get("output_format", "markdown"),
-                include_visual_details=merged_kwargs.get("include_visual_details", True),
-                group_by=merged_kwargs.get("group_by", "page"),
-            ))
+            result = self._run_sync(
+                self._extract_report_references(
+                    workspace_id=workspace_id,
+                    dataset_id=dataset_id,
+                    report_id=report_id,
+                    auth_config=clean_auth_config,
+                    output_format=merged_kwargs.get("output_format", "markdown"),
+                    include_visual_details=merged_kwargs.get(
+                        "include_visual_details", True
+                    ),
+                    group_by=merged_kwargs.get("group_by", "page"),
+                )
+            )
 
             return result
 
         except Exception as e:
-            logger.error(f"[PowerBIReportReferencesTool] Error: {str(e)}", exc_info=True)
+            logger.error(
+                f"[PowerBIReportReferencesTool] Error: {str(e)}", exc_info=True
+            )
             return f"Error: {str(e)}"
 
     def _run_sync(self, coro):
         """Run async coroutine from sync context (ContextVars preserved)."""
         from src.services.tools.async_bridge import run_async_with_context
+
         return run_async_with_context(coro)
 
     async def _extract_report_references(
@@ -381,11 +435,13 @@ class PowerBIReportReferencesTool(BaseTool):
 
             for report in all_reports:
                 if report.get("datasetId") == dataset_id:
-                    reports_to_analyze.append({
-                        "id": report.get("id"),
-                        "name": report.get("name", "Unknown"),
-                        "webUrl": report.get("webUrl", ""),
-                    })
+                    reports_to_analyze.append(
+                        {
+                            "id": report.get("id"),
+                            "name": report.get("name", "Unknown"),
+                            "webUrl": report.get("webUrl", ""),
+                        }
+                    )
 
             if not reports_to_analyze:
                 return (
@@ -399,15 +455,19 @@ class PowerBIReportReferencesTool(BaseTool):
                     "- Service Principal lacks access to view reports\n"
                 )
 
-            logger.info(f"Found {len(reports_to_analyze)} report(s) using dataset {dataset_id}")
+            logger.info(
+                f"Found {len(reports_to_analyze)} report(s) using dataset {dataset_id}"
+            )
         else:
             # Single report mode
             assert report_id is not None
-            reports_to_analyze.append({
-                "id": report_id,
-                "name": "Single Report",
-                "webUrl": self._build_report_url(workspace_id, report_id),
-            })
+            reports_to_analyze.append(
+                {
+                    "id": report_id,
+                    "name": "Single Report",
+                    "webUrl": self._build_report_url(workspace_id, report_id),
+                }
+            )
 
         # Step 3: Process each report
         all_report_results: List[Dict[str, Any]] = []
@@ -420,19 +480,25 @@ class PowerBIReportReferencesTool(BaseTool):
             logger.info(f"Processing report: {rname} ({rid})")
 
             try:
-                report_parts = await self._fetch_report_definition(workspace_id, rid, token)
+                report_parts = await self._fetch_report_definition(
+                    workspace_id, rid, token
+                )
 
                 if not report_parts:
-                    failed_reports.append({
-                        "id": rid,
-                        "name": rname,
-                        "error": "Could not fetch report definition (not PBIR format or access denied)"
-                    })
+                    failed_reports.append(
+                        {
+                            "id": rid,
+                            "name": rname,
+                            "error": "Could not fetch report definition (not PBIR format or access denied)",
+                        }
+                    )
                     continue
 
                 # Log all paths for debugging
                 all_paths = [p.get("path", "") for p in report_parts]
-                logger.info(f"[Report {rname}] Definition has {len(report_parts)} parts: {all_paths}")
+                logger.info(
+                    f"[Report {rname}] Definition has {len(report_parts)} parts: {all_paths}"
+                )
 
                 # Parse report structure
                 parsed_report_info = self._parse_report_info(report_parts)
@@ -445,13 +511,17 @@ class PowerBIReportReferencesTool(BaseTool):
                     debug_info = {
                         "parts_count": len(report_parts),
                         "paths": all_paths[:30],  # First 30 paths for debugging
-                        "note": "Report definition found but no pages detected. May not be PBIR format."
+                        "note": "Report definition found but no pages detected. May not be PBIR format.",
                     }
-                    logger.warning(f"[Report {rname}] No pages found. Paths: {all_paths}")
+                    logger.warning(
+                        f"[Report {rname}] No pages found. Paths: {all_paths}"
+                    )
 
                 # Add page URLs
                 for page in pages:
-                    page["url"] = self._build_page_url(workspace_id, rid, page.get("id", ""))
+                    page["url"] = self._build_page_url(
+                        workspace_id, rid, page.get("id", "")
+                    )
 
                 # Extract visual references
                 visual_references = self._extract_visual_references(visuals)
@@ -462,7 +532,8 @@ class PowerBIReportReferencesTool(BaseTool):
                 result_entry = {
                     "report_id": rid,
                     "report_name": rname,
-                    "report_url": report_info.get("webUrl") or self._build_report_url(workspace_id, rid),
+                    "report_url": report_info.get("webUrl")
+                    or self._build_report_url(workspace_id, rid),
                     "report_info": parsed_report_info,
                     "pages": pages,
                     "visual_references": visual_references,
@@ -477,11 +548,7 @@ class PowerBIReportReferencesTool(BaseTool):
 
             except Exception as e:
                 logger.warning(f"Error processing report {rname}: {e}", exc_info=True)
-                failed_reports.append({
-                    "id": rid,
-                    "name": rname,
-                    "error": str(e)
-                })
+                failed_reports.append({"id": rid, "name": rname, "error": str(e)})
 
         if not all_report_results:
             return (
@@ -489,8 +556,8 @@ class PowerBIReportReferencesTool(BaseTool):
                 f"**Workspace**: `{workspace_id}`\n"
                 f"**Dataset**: `{dataset_id or 'N/A'}`\n\n"
                 "Error: Could not process any reports.\n\n"
-                "**Failed Reports**:\n" +
-                "\n".join([f"- {r['name']}: {r['error']}" for r in failed_reports])
+                "**Failed Reports**:\n"
+                + "\n".join([f"- {r['name']}: {r['error']}" for r in failed_reports])
             )
 
         # Step 4: Generate output
@@ -504,8 +571,12 @@ class PowerBIReportReferencesTool(BaseTool):
             )
         else:
             return self._format_markdown_output_multi(
-                workspace_id, dataset_id, all_report_results, failed_reports,
-                include_visual_details, group_by
+                workspace_id,
+                dataset_id,
+                all_report_results,
+                failed_reports,
+                include_visual_details,
+                group_by,
             )
 
     def _build_report_url(self, workspace_id: str, report_id: str) -> str:
@@ -529,7 +600,7 @@ class PowerBIReportReferencesTool(BaseTool):
 
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -553,7 +624,7 @@ class PowerBIReportReferencesTool(BaseTool):
 
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         async with httpx.AsyncClient(timeout=180.0) as client:
@@ -576,18 +647,26 @@ class PowerBIReportReferencesTool(BaseTool):
                         status = poll_data.get("status", "")
 
                         if status == "Succeeded":
-                            logger.info(f"Report definition fetch succeeded after {attempt + 1} poll(s)")
+                            logger.info(
+                                f"Report definition fetch succeeded after {attempt + 1} poll(s)"
+                            )
                             result_url = location + "/result"
-                            result_response = await client.get(result_url, headers=headers)
+                            result_response = await client.get(
+                                result_url, headers=headers
+                            )
                             result_response.raise_for_status()
                             definition = result_response.json()
                             parts = definition.get("definition", {}).get("parts", [])
                             # Log the paths found for debugging
                             if parts:
                                 paths = [p.get("path", "") for p in parts[:20]]
-                                logger.info(f"Report definition paths (first 20): {paths}")
+                                logger.info(
+                                    f"Report definition paths (first 20): {paths}"
+                                )
                             else:
-                                logger.warning(f"Report definition returned no parts for report {report_id}")
+                                logger.warning(
+                                    f"Report definition returned no parts for report {report_id}"
+                                )
                             return parts
                         elif status == "Failed":
                             error = poll_data.get("error", {})
@@ -605,7 +684,9 @@ class PowerBIReportReferencesTool(BaseTool):
                         paths = [p.get("path", "") for p in parts[:20]]
                         logger.info(f"Report definition paths (first 20): {paths}")
                     else:
-                        logger.warning(f"Report definition returned no parts for report {report_id}")
+                        logger.warning(
+                            f"Report definition returned no parts for report {report_id}"
+                        )
                     return parts
                 else:
                     logger.error(f"Unexpected status code: {response.status_code}")
@@ -613,7 +694,9 @@ class PowerBIReportReferencesTool(BaseTool):
                     return []
 
             except httpx.HTTPStatusError as e:
-                logger.error(f"HTTP error: {e.response.status_code} - {e.response.text}")
+                logger.error(
+                    f"HTTP error: {e.response.status_code} - {e.response.text}"
+                )
                 return []
             except Exception as e:
                 logger.error(f"Error fetching report definition: {e}")
@@ -643,7 +726,9 @@ class PowerBIReportReferencesTool(BaseTool):
 
         # Log all paths for debugging if no pages found
         all_paths = [part.get("path", "") for part in report_parts]
-        logger.info(f"[_parse_pages] Total parts: {len(report_parts)}, paths: {all_paths[:10]}...")
+        logger.info(
+            f"[_parse_pages] Total parts: {len(report_parts)}, paths: {all_paths[:10]}..."
+        )
 
         # Method 1: Look for separate page.json files
         for part in report_parts:
@@ -654,9 +739,13 @@ class PowerBIReportReferencesTool(BaseTool):
             # Patterns: definition/pages/{pageId}/page.json, pages/{pageId}/page.json,
             # report/pages/{pageId}.json, etc.
             is_page_file = (
-                ("/pages/" in path_lower and path_lower.endswith("/page.json")) or
-                ("/pages/" in path_lower and path_lower.endswith(".json") and "visual" not in path_lower) or
-                (path_lower.endswith("/page.json"))
+                ("/pages/" in path_lower and path_lower.endswith("/page.json"))
+                or (
+                    "/pages/" in path_lower
+                    and path_lower.endswith(".json")
+                    and "visual" not in path_lower
+                )
+                or (path_lower.endswith("/page.json"))
             )
 
             if is_page_file:
@@ -672,40 +761,60 @@ class PowerBIReportReferencesTool(BaseTool):
                     # Try to find "pages" in path
                     if "pages" in path_parts:
                         page_id_idx = path_parts.index("pages") + 1
-                        page_id = path_parts[page_id_idx] if page_id_idx < len(path_parts) else None
+                        page_id = (
+                            path_parts[page_id_idx]
+                            if page_id_idx < len(path_parts)
+                            else None
+                        )
                     elif "Pages" in path_parts:
                         page_id_idx = path_parts.index("Pages") + 1
-                        page_id = path_parts[page_id_idx] if page_id_idx < len(path_parts) else None
+                        page_id = (
+                            path_parts[page_id_idx]
+                            if page_id_idx < len(path_parts)
+                            else None
+                        )
                     else:
                         # Fallback: use the folder name before page.json
                         page_id = path_parts[-2] if len(path_parts) >= 2 else "unknown"
 
-                    pages.append({
-                        "id": page_id,
-                        "name": page_data.get("name", page_id),
-                        "displayName": page_data.get("displayName", page_data.get("name", page_id)),
-                        "ordinal": page_data.get("ordinal", 0),
-                        "config": page_data
-                    })
+                    pages.append(
+                        {
+                            "id": page_id,
+                            "name": page_data.get("name", page_id),
+                            "displayName": page_data.get(
+                                "displayName", page_data.get("name", page_id)
+                            ),
+                            "ordinal": page_data.get("ordinal", 0),
+                            "config": page_data,
+                        }
+                    )
 
-                    logger.info(f"Found page: {page_data.get('displayName', page_id)} from path: {path}")
+                    logger.info(
+                        f"Found page: {page_data.get('displayName', page_id)} from path: {path}"
+                    )
 
                 except Exception as e:
                     logger.warning(f"Error parsing page from {path}: {e}")
 
         # Method 2: If no pages found, try parsing from report.json (embedded format)
         if not pages:
-            logger.info("[_parse_pages] No separate page files found, trying embedded format in report.json")
+            logger.info(
+                "[_parse_pages] No separate page files found, trying embedded format in report.json"
+            )
             pages = self._parse_pages_from_report_json(report_parts)
 
         if not pages:
-            logger.warning(f"[_parse_pages] No pages found in either format. All paths: {all_paths}")
+            logger.warning(
+                f"[_parse_pages] No pages found in either format. All paths: {all_paths}"
+            )
 
         # Sort pages by ordinal
         pages.sort(key=lambda p: p.get("ordinal", 0))
         return pages
 
-    def _parse_pages_from_report_json(self, report_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _parse_pages_from_report_json(
+        self, report_parts: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Parse pages embedded in report.json (older PBIR format)."""
         pages = []
 
@@ -719,7 +828,9 @@ class PowerBIReportReferencesTool(BaseTool):
                     content = base64.b64decode(payload).decode("utf-8")
                     report_data = json.loads(content)
 
-                    logger.info(f"[_parse_pages_from_report_json] Parsing report.json, keys: {list(report_data.keys())}")
+                    logger.info(
+                        f"[_parse_pages_from_report_json] Parsing report.json, keys: {list(report_data.keys())}"
+                    )
 
                     # Look for pages in various possible locations
                     pages_data = None
@@ -734,34 +845,55 @@ class PowerBIReportReferencesTool(BaseTool):
                         pages_data = report_data["reportPages"]
 
                     if pages_data and isinstance(pages_data, list):
-                        logger.info(f"[_parse_pages_from_report_json] Found {len(pages_data)} pages in report.json")
+                        logger.info(
+                            f"[_parse_pages_from_report_json] Found {len(pages_data)} pages in report.json"
+                        )
                         for idx, page_data in enumerate(pages_data):
                             if isinstance(page_data, dict):
-                                page_id = page_data.get("name") or page_data.get("id") or f"page_{idx}"
-                                pages.append({
-                                    "id": page_id,
-                                    "name": page_data.get("name", page_id),
-                                    "displayName": page_data.get("displayName", page_data.get("name", page_id)),
-                                    "ordinal": page_data.get("ordinal", idx),
-                                    "config": page_data
-                                })
-                                logger.info(f"Found embedded page: {page_data.get('displayName', page_id)}")
+                                page_id = (
+                                    page_data.get("name")
+                                    or page_data.get("id")
+                                    or f"page_{idx}"
+                                )
+                                pages.append(
+                                    {
+                                        "id": page_id,
+                                        "name": page_data.get("name", page_id),
+                                        "displayName": page_data.get(
+                                            "displayName",
+                                            page_data.get("name", page_id),
+                                        ),
+                                        "ordinal": page_data.get("ordinal", idx),
+                                        "config": page_data,
+                                    }
+                                )
+                                logger.info(
+                                    f"Found embedded page: {page_data.get('displayName', page_id)}"
+                                )
                     else:
                         # Log what we did find for debugging
-                        logger.warning(f"[_parse_pages_from_report_json] No pages array found. report.json structure: {list(report_data.keys())}")
+                        logger.warning(
+                            f"[_parse_pages_from_report_json] No pages array found. report.json structure: {list(report_data.keys())}"
+                        )
                         # Log first level values that might be arrays
                         for key, value in report_data.items():
                             if isinstance(value, list):
-                                logger.info(f"  Found array '{key}' with {len(value)} items")
+                                logger.info(
+                                    f"  Found array '{key}' with {len(value)} items"
+                                )
                             elif isinstance(value, dict):
-                                logger.info(f"  Found dict '{key}' with keys: {list(value.keys())[:5]}")
+                                logger.info(
+                                    f"  Found dict '{key}' with keys: {list(value.keys())[:5]}"
+                                )
 
                 except Exception as e:
                     logger.warning(f"Error parsing report.json for pages: {e}")
 
         return pages
 
-    def _parse_visuals(self, report_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _parse_visuals(
+        self, report_parts: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Parse visual definitions from PBIR structure.
 
         Supports two PBIR formats:
@@ -778,9 +910,8 @@ class PowerBIReportReferencesTool(BaseTool):
             # Look for visual.json files with flexible path matching
             # Patterns: definition/pages/{pageId}/visuals/{visualId}/visual.json
             is_visual_file = (
-                ("/visuals/" in path_lower and path_lower.endswith("/visual.json")) or
-                ("/visuals/" in path_lower and path_lower.endswith(".json"))
-            )
+                "/visuals/" in path_lower and path_lower.endswith("/visual.json")
+            ) or ("/visuals/" in path_lower and path_lower.endswith(".json"))
 
             if is_visual_file:
                 try:
@@ -795,45 +926,73 @@ class PowerBIReportReferencesTool(BaseTool):
                     page_id = None
                     if "pages" in path_parts:
                         page_id_idx = path_parts.index("pages") + 1
-                        page_id = path_parts[page_id_idx] if page_id_idx < len(path_parts) else None
+                        page_id = (
+                            path_parts[page_id_idx]
+                            if page_id_idx < len(path_parts)
+                            else None
+                        )
                     elif "Pages" in path_parts:
                         page_id_idx = path_parts.index("Pages") + 1
-                        page_id = path_parts[page_id_idx] if page_id_idx < len(path_parts) else None
+                        page_id = (
+                            path_parts[page_id_idx]
+                            if page_id_idx < len(path_parts)
+                            else None
+                        )
 
                     # Find visual ID
                     visual_id = None
                     if "visuals" in path_parts:
                         visual_id_idx = path_parts.index("visuals") + 1
-                        visual_id = path_parts[visual_id_idx] if visual_id_idx < len(path_parts) else None
+                        visual_id = (
+                            path_parts[visual_id_idx]
+                            if visual_id_idx < len(path_parts)
+                            else None
+                        )
                     elif "Visuals" in path_parts:
                         visual_id_idx = path_parts.index("Visuals") + 1
-                        visual_id = path_parts[visual_id_idx] if visual_id_idx < len(path_parts) else None
+                        visual_id = (
+                            path_parts[visual_id_idx]
+                            if visual_id_idx < len(path_parts)
+                            else None
+                        )
                     else:
                         # Fallback: use folder name before visual.json
-                        visual_id = path_parts[-2] if len(path_parts) >= 2 else "unknown"
+                        visual_id = (
+                            path_parts[-2] if len(path_parts) >= 2 else "unknown"
+                        )
 
-                    visuals.append({
-                        "id": visual_id,
-                        "page_id": page_id,
-                        "type": visual_data.get("visual", {}).get("visualType", "unknown"),
-                        "name": visual_data.get("name", visual_id),
-                        "config": visual_data
-                    })
+                    visuals.append(
+                        {
+                            "id": visual_id,
+                            "page_id": page_id,
+                            "type": visual_data.get("visual", {}).get(
+                                "visualType", "unknown"
+                            ),
+                            "name": visual_data.get("name", visual_id),
+                            "config": visual_data,
+                        }
+                    )
 
-                    logger.debug(f"Found visual: {visual_id} (type: {visual_data.get('visual', {}).get('visualType', 'unknown')}) from path: {path}")
+                    logger.debug(
+                        f"Found visual: {visual_id} (type: {visual_data.get('visual', {}).get('visualType', 'unknown')}) from path: {path}"
+                    )
 
                 except Exception as e:
                     logger.warning(f"Error parsing visual from {path}: {e}")
 
         # Method 2: If no visuals found, try parsing from report.json (embedded format)
         if not visuals:
-            logger.info("[_parse_visuals] No separate visual files found, trying embedded format in report.json")
+            logger.info(
+                "[_parse_visuals] No separate visual files found, trying embedded format in report.json"
+            )
             visuals = self._parse_visuals_from_report_json(report_parts)
 
         logger.info(f"[_parse_visuals] Found {len(visuals)} visuals total")
         return visuals
 
-    def _parse_visuals_from_report_json(self, report_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _parse_visuals_from_report_json(
+        self, report_parts: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Parse visuals embedded in report.json (older PBIR format)."""
         visuals = []
 
@@ -875,7 +1034,11 @@ class PowerBIReportReferencesTool(BaseTool):
                                     if not isinstance(vis_data, dict):
                                         continue
 
-                                    visual_id = vis_data.get("name") or vis_data.get("id") or f"visual_{vis_idx}"
+                                    visual_id = (
+                                        vis_data.get("name")
+                                        or vis_data.get("id")
+                                        or f"visual_{vis_idx}"
+                                    )
 
                                     # Extract visual type and parsed config
                                     visual_type = "unknown"
@@ -887,45 +1050,74 @@ class PowerBIReportReferencesTool(BaseTool):
                                         if isinstance(config_str, str):
                                             try:
                                                 parsed_config = json.loads(config_str)
-                                                visual_type = parsed_config.get("singleVisual", {}).get("visualType", "unknown")
+                                                visual_type = parsed_config.get(
+                                                    "singleVisual", {}
+                                                ).get("visualType", "unknown")
                                             except json.JSONDecodeError:
-                                                logger.warning(f"Failed to parse config for visual {visual_id}")
+                                                logger.warning(
+                                                    f"Failed to parse config for visual {visual_id}"
+                                                )
                                         elif isinstance(config_str, dict):
                                             parsed_config = config_str
-                                            visual_type = parsed_config.get("singleVisual", {}).get("visualType", "unknown")
+                                            visual_type = parsed_config.get(
+                                                "singleVisual", {}
+                                            ).get("visualType", "unknown")
                                     elif "visualType" in vis_data:
-                                        visual_type = vis_data.get("visualType", "unknown")
+                                        visual_type = vis_data.get(
+                                            "visualType", "unknown"
+                                        )
                                         parsed_config = vis_data
-                                    elif "visual" in vis_data and isinstance(vis_data["visual"], dict):
-                                        visual_type = vis_data["visual"].get("visualType", "unknown")
+                                    elif "visual" in vis_data and isinstance(
+                                        vis_data["visual"], dict
+                                    ):
+                                        visual_type = vis_data["visual"].get(
+                                            "visualType", "unknown"
+                                        )
                                         parsed_config = vis_data
 
                                     # Log first visual's parsed config structure for debugging
                                     if vis_idx == 0:
-                                        logger.info(f"[_parse_visuals_from_report_json] First visual parsed_config keys: {list(parsed_config.keys())}")
+                                        logger.info(
+                                            f"[_parse_visuals_from_report_json] First visual parsed_config keys: {list(parsed_config.keys())}"
+                                        )
                                         if "singleVisual" in parsed_config:
                                             sv = parsed_config["singleVisual"]
-                                            logger.info(f"[_parse_visuals_from_report_json] singleVisual keys: {list(sv.keys()) if isinstance(sv, dict) else 'not a dict'}")
-                                            if isinstance(sv, dict) and "prototypeQuery" in sv:
+                                            logger.info(
+                                                f"[_parse_visuals_from_report_json] singleVisual keys: {list(sv.keys()) if isinstance(sv, dict) else 'not a dict'}"
+                                            )
+                                            if (
+                                                isinstance(sv, dict)
+                                                and "prototypeQuery" in sv
+                                            ):
                                                 pq = sv["prototypeQuery"]
-                                                logger.info(f"[_parse_visuals_from_report_json] prototypeQuery keys: {list(pq.keys()) if isinstance(pq, dict) else 'not a dict'}")
+                                                logger.info(
+                                                    f"[_parse_visuals_from_report_json] prototypeQuery keys: {list(pq.keys()) if isinstance(pq, dict) else 'not a dict'}"
+                                                )
 
-                                    visuals.append({
-                                        "id": visual_id,
-                                        "page_id": page_id,
-                                        "type": visual_type,
-                                        "name": vis_data.get("name", visual_id),
-                                        "config": parsed_config  # Store the PARSED config, not the raw vis_data
-                                    })
+                                    visuals.append(
+                                        {
+                                            "id": visual_id,
+                                            "page_id": page_id,
+                                            "type": visual_type,
+                                            "name": vis_data.get("name", visual_id),
+                                            "config": parsed_config,  # Store the PARSED config, not the raw vis_data
+                                        }
+                                    )
 
-                        logger.info(f"[_parse_visuals_from_report_json] Found {len(visuals)} embedded visuals")
+                        logger.info(
+                            f"[_parse_visuals_from_report_json] Found {len(visuals)} embedded visuals"
+                        )
 
                 except Exception as e:
-                    logger.warning(f"Error parsing report.json for visuals: {e}", exc_info=True)
+                    logger.warning(
+                        f"Error parsing report.json for visuals: {e}", exc_info=True
+                    )
 
         return visuals
 
-    def _extract_visual_references(self, visuals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _extract_visual_references(
+        self, visuals: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Extract measure/table references from visual configurations."""
         references = []
 
@@ -937,37 +1129,55 @@ class PowerBIReportReferencesTool(BaseTool):
             if isinstance(config, str):
                 try:
                     config = json.loads(config)
-                    logger.debug(f"[_extract_visual_references] Parsed config string for visual {visual.get('id')}")
+                    logger.debug(
+                        f"[_extract_visual_references] Parsed config string for visual {visual.get('id')}"
+                    )
                 except json.JSONDecodeError:
-                    logger.warning(f"[_extract_visual_references] Failed to parse config string for visual {visual.get('id')}")
+                    logger.warning(
+                        f"[_extract_visual_references] Failed to parse config string for visual {visual.get('id')}"
+                    )
                     config = {}
 
             # Log the config structure for debugging (first visual only to avoid spam)
             if visuals.index(visual) == 0:
                 config_keys = list(config.keys()) if isinstance(config, dict) else []
-                logger.info(f"[_extract_visual_references] First visual config keys: {config_keys}")
+                logger.info(
+                    f"[_extract_visual_references] First visual config keys: {config_keys}"
+                )
                 if "singleVisual" in config:
                     sv = config["singleVisual"]
                     sv_keys = list(sv.keys()) if isinstance(sv, dict) else []
-                    logger.info(f"[_extract_visual_references] singleVisual keys: {sv_keys}")
+                    logger.info(
+                        f"[_extract_visual_references] singleVisual keys: {sv_keys}"
+                    )
                     if isinstance(sv, dict):
                         # Log prototypeQuery structure
                         if "prototypeQuery" in sv:
                             pq = sv["prototypeQuery"]
                             pq_keys = list(pq.keys()) if isinstance(pq, dict) else []
-                            logger.info(f"[_extract_visual_references] prototypeQuery keys: {pq_keys}")
+                            logger.info(
+                                f"[_extract_visual_references] prototypeQuery keys: {pq_keys}"
+                            )
                             if isinstance(pq, dict):
                                 from_clause = pq.get("From", [])
                                 select_clause = pq.get("Select", [])
-                                logger.info(f"[_extract_visual_references] prototypeQuery.From: {len(from_clause)} items, Select: {len(select_clause)} items")
+                                logger.info(
+                                    f"[_extract_visual_references] prototypeQuery.From: {len(from_clause)} items, Select: {len(select_clause)} items"
+                                )
                                 if from_clause:
-                                    logger.info(f"[_extract_visual_references] First From item: {from_clause[0] if from_clause else 'none'}")
+                                    logger.info(
+                                        f"[_extract_visual_references] First From item: {from_clause[0] if from_clause else 'none'}"
+                                    )
                                 if select_clause:
-                                    logger.info(f"[_extract_visual_references] First Select item: {select_clause[0] if select_clause else 'none'}")
+                                    logger.info(
+                                        f"[_extract_visual_references] First Select item: {select_clause[0] if select_clause else 'none'}"
+                                    )
                         # Log projections structure
                         if "projections" in sv:
                             proj = sv["projections"]
-                            logger.info(f"[_extract_visual_references] projections keys: {list(proj.keys()) if isinstance(proj, dict) else 'not a dict'}")
+                            logger.info(
+                                f"[_extract_visual_references] projections keys: {list(proj.keys()) if isinstance(proj, dict) else 'not a dict'}"
+                            )
 
             # Try different config structures
             visual_config = config.get("visual", {})
@@ -985,15 +1195,21 @@ class PowerBIReportReferencesTool(BaseTool):
 
             # Method 2: Parse visualContainerObjects (for filters, slicers)
             container_objects = visual_config.get("visualContainerObjects", {})
-            self._extract_from_container_objects(container_objects, measures, tables, columns)
+            self._extract_from_container_objects(
+                container_objects, measures, tables, columns
+            )
 
             # Method 3: Parse prototypeQuery (legacy format)
             prototype_query = visual_config.get("prototypeQuery", {})
-            self._extract_from_prototype_query(prototype_query, measures, tables, columns)
+            self._extract_from_prototype_query(
+                prototype_query, measures, tables, columns
+            )
 
             # Method 4: Parse dataTransforms (data bindings)
             data_transforms = visual_config.get("dataTransforms", {})
-            self._extract_from_data_transforms(data_transforms, measures, tables, columns)
+            self._extract_from_data_transforms(
+                data_transforms, measures, tables, columns
+            )
 
             # Method 5: Deep search for any field references in config
             self._deep_search_references(visual_config, measures, tables, columns)
@@ -1011,11 +1227,15 @@ class PowerBIReportReferencesTool(BaseTool):
 
                 # Extract from prototypeQuery
                 prototype_query = single_visual.get("prototypeQuery", {})
-                self._extract_from_prototype_query(prototype_query, measures, tables, columns)
+                self._extract_from_prototype_query(
+                    prototype_query, measures, tables, columns
+                )
 
             # Log extraction results for first visual
             if visuals.index(visual) == 0:
-                logger.info(f"[_extract_visual_references] First visual extraction results - tables: {tables}, measures: {measures}, columns: {columns}")
+                logger.info(
+                    f"[_extract_visual_references] First visual extraction results - tables: {tables}, measures: {measures}, columns: {columns}"
+                )
 
             # Clean up extracted values - remove trailing parentheses
             def clean_value(val: str) -> str:
@@ -1028,15 +1248,17 @@ class PowerBIReportReferencesTool(BaseTool):
             cleaned_tables = sorted(set(clean_value(t) for t in tables))
             cleaned_columns = sorted(set(clean_value(c) for c in columns))
 
-            references.append({
-                "visual_id": visual.get("id"),
-                "page_id": visual.get("page_id"),
-                "visual_type": visual.get("type"),
-                "visual_name": visual.get("name"),
-                "measures": cleaned_measures,
-                "tables": cleaned_tables,
-                "columns": cleaned_columns,
-            })
+            references.append(
+                {
+                    "visual_id": visual.get("id"),
+                    "page_id": visual.get("page_id"),
+                    "visual_type": visual.get("type"),
+                    "visual_name": visual.get("name"),
+                    "measures": cleaned_measures,
+                    "tables": cleaned_tables,
+                    "columns": cleaned_columns,
+                }
+            )
 
         return references
 
@@ -1045,7 +1267,7 @@ class PowerBIReportReferencesTool(BaseTool):
         query_def: Dict[str, Any],
         measures: Set[str],
         tables: Set[str],
-        columns: Set[str]
+        columns: Set[str],
     ) -> None:
         """Extract references from queryDefinition structure."""
         # Check From clause for tables
@@ -1082,7 +1304,7 @@ class PowerBIReportReferencesTool(BaseTool):
         container_objects: Dict[str, Any],
         measures: Set[str],
         tables: Set[str],
-        columns: Set[str]
+        columns: Set[str],
     ) -> None:
         """Extract references from visualContainerObjects (filters, slicers)."""
         for _key, value in container_objects.items():
@@ -1094,14 +1316,16 @@ class PowerBIReportReferencesTool(BaseTool):
                         for _prop_name, prop_value in props.items():
                             if isinstance(prop_value, dict):
                                 expr = prop_value.get("expr", {})
-                                self._extract_from_expression(expr, measures, tables, columns)
+                                self._extract_from_expression(
+                                    expr, measures, tables, columns
+                                )
 
     def _extract_from_projections(
         self,
         projections: Dict[str, Any],
         measures: Set[str],
         tables: Set[str],
-        columns: Set[str]
+        columns: Set[str],
     ) -> None:
         """Extract references from projections structure (embedded format)."""
         # Projections can contain various roles like Values, Category, Series, etc.
@@ -1157,7 +1381,7 @@ class PowerBIReportReferencesTool(BaseTool):
         prototype_query: Dict[str, Any],
         measures: Set[str],
         tables: Set[str],
-        columns: Set[str]
+        columns: Set[str],
     ) -> None:
         """Extract references from prototypeQuery (Power BI format)."""
         # Extract tables from "From" clause
@@ -1225,7 +1449,7 @@ class PowerBIReportReferencesTool(BaseTool):
         data_transforms: Dict[str, Any],
         measures: Set[str],
         tables: Set[str],
-        columns: Set[str]
+        columns: Set[str],
     ) -> None:
         """Extract references from dataTransforms."""
         # Check selects
@@ -1270,7 +1494,7 @@ class PowerBIReportReferencesTool(BaseTool):
         expr: Dict[str, Any],
         measures: Set[str],
         tables: Set[str],
-        columns: Set[str]
+        columns: Set[str],
     ) -> None:
         """Recursively extract references from expression trees."""
         if not isinstance(expr, dict):
@@ -1313,7 +1537,7 @@ class PowerBIReportReferencesTool(BaseTool):
         measures: Set[str],
         tables: Set[str],
         columns: Set[str],
-        depth: int = 0
+        depth: int = 0,
     ) -> None:
         """Deep search for field references in any structure."""
         if depth > 15:  # Prevent infinite recursion
@@ -1351,20 +1575,24 @@ class PowerBIReportReferencesTool(BaseTool):
                 elif key_lower == "displayname":
                     if isinstance(value, str) and "." in value:
                         parts = value.split(".")
-                        if len(parts) >= 2 and not parts[0].startswith("Sum") and not parts[0].startswith("Count"):
+                        if (
+                            len(parts) >= 2
+                            and not parts[0].startswith("Sum")
+                            and not parts[0].startswith("Count")
+                        ):
                             tables.add(parts[0])
 
                 # Recurse
-                self._deep_search_references(value, measures, tables, columns, depth + 1)
+                self._deep_search_references(
+                    value, measures, tables, columns, depth + 1
+                )
 
         elif isinstance(obj, list):
             for item in obj:
                 self._deep_search_references(item, measures, tables, columns, depth + 1)
 
     def _build_cross_reference(
-        self,
-        pages: List[Dict[str, Any]],
-        visual_references: List[Dict[str, Any]]
+        self, pages: List[Dict[str, Any]], visual_references: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Build cross-reference matrix showing usage across pages."""
         # Build page lookup
@@ -1471,7 +1699,9 @@ class PowerBIReportReferencesTool(BaseTool):
             for page in pages:
                 output.append(f"### {page['displayName']}\n")
 
-                page_visuals = [v for v in visual_references if v["page_id"] == page["id"]]
+                page_visuals = [
+                    v for v in visual_references if v["page_id"] == page["id"]
+                ]
 
                 if not page_visuals:
                     output.append("*No visuals with data bindings on this page*\n")
@@ -1507,7 +1737,9 @@ class PowerBIReportReferencesTool(BaseTool):
                         tables = ", ".join(vis.get("tables", [])[:3])
                         if len(vis.get("tables", [])) > 3:
                             tables += "..."
-                        output.append(f"| {vis['visual_name'] or vis['visual_id'][:8]} | {vis['visual_type']} | {measures} | {tables} |")
+                        output.append(
+                            f"| {vis['visual_name'] or vis['visual_id'][:8]} | {vis['visual_type']} | {measures} | {tables} |"
+                        )
                     output.append("")
 
         elif group_by == "measure":
@@ -1546,7 +1778,9 @@ class PowerBIReportReferencesTool(BaseTool):
         output.append("| Measure | # Pages | Pages |")
         output.append("|---------|---------|-------|")
         measure_pages = cross_ref.get("measure_pages", {})
-        for measure in sorted(measure_pages.keys(), key=lambda m: -len(measure_pages[m])):
+        for measure in sorted(
+            measure_pages.keys(), key=lambda m: -len(measure_pages[m])
+        ):
             pages_list = measure_pages[measure]
             pages_str = ", ".join(pages_list[:3])
             if len(pages_list) > 3:
@@ -1589,12 +1823,14 @@ class PowerBIReportReferencesTool(BaseTool):
         # Clean pages for output
         clean_pages = []
         for p in pages:
-            clean_pages.append({
-                "id": p["id"],
-                "name": p["name"],
-                "displayName": p["displayName"],
-                "ordinal": p.get("ordinal", 0)
-            })
+            clean_pages.append(
+                {
+                    "id": p["id"],
+                    "name": p["name"],
+                    "displayName": p["displayName"],
+                    "ordinal": p.get("ordinal", 0),
+                }
+            )
 
         result = {
             "workspace_id": workspace_id,
@@ -1608,7 +1844,7 @@ class PowerBIReportReferencesTool(BaseTool):
                 "visual_count": len(visual_references),
                 "unique_measures": len(cross_ref.get("measure_pages", {})),
                 "unique_tables": len(cross_ref.get("table_pages", {})),
-            }
+            },
         }
 
         return json.dumps(result, indent=2)
@@ -1719,7 +1955,9 @@ class PowerBIReportReferencesTool(BaseTool):
             nvisuals = len(r["visual_references"])
             nmeasures = len(r["cross_ref"].get("measure_pages", {}))
             ntables = len(r["cross_ref"].get("table_pages", {}))
-            output.append(f"| {rname} | {npages} | {nvisuals} | {nmeasures} | {ntables} | [Open]({rurl}) |")
+            output.append(
+                f"| {rname} | {npages} | {nvisuals} | {nmeasures} | {ntables} | [Open]({rurl}) |"
+            )
         output.append("")
 
         # Failed reports
@@ -1747,9 +1985,13 @@ class PowerBIReportReferencesTool(BaseTool):
             output.append("|---|-----------|---------|------|")
 
             for idx, page in enumerate(pages, 1):
-                page_visuals = [v for v in visual_references if v["page_id"] == page["id"]]
+                page_visuals = [
+                    v for v in visual_references if v["page_id"] == page["id"]
+                ]
                 page_url = page.get("url", rurl)
-                output.append(f"| {idx} | {page['displayName']} | {len(page_visuals)} | [Open]({page_url}) |")
+                output.append(
+                    f"| {idx} | {page['displayName']} | {len(page_visuals)} | [Open]({page_url}) |"
+                )
             output.append("")
 
             if group_by == "page":
@@ -1758,7 +2000,9 @@ class PowerBIReportReferencesTool(BaseTool):
                     page_url = page.get("url", rurl)
                     output.append(f"#### [{page['displayName']}]({page_url})\n")
 
-                    page_visuals = [v for v in visual_references if v["page_id"] == page["id"]]
+                    page_visuals = [
+                        v for v in visual_references if v["page_id"] == page["id"]
+                    ]
 
                     if not page_visuals:
                         output.append("*No visuals with data bindings on this page*\n")
@@ -1794,7 +2038,9 @@ class PowerBIReportReferencesTool(BaseTool):
                             tables_str = ", ".join(vis.get("tables", [])[:3])
                             if len(vis.get("tables", [])) > 3:
                                 tables_str += "..."
-                            output.append(f"| {vis.get('visual_name') or vis.get('visual_id', '')[:8]} | {vis.get('visual_type', 'unknown')} | {measures_str} | {tables_str} |")
+                            output.append(
+                                f"| {vis.get('visual_name') or vis.get('visual_id', '')[:8]} | {vis.get('visual_type', 'unknown')} | {measures_str} | {tables_str} |"
+                            )
                         output.append("")
 
             elif group_by == "measure":
@@ -1806,7 +2052,9 @@ class PowerBIReportReferencesTool(BaseTool):
                     output.append(f"**Used in {len(pages_list)} page(s)**:")
                     for pname in pages_list:
                         # Find page URL
-                        page_obj = next((p for p in pages if p["displayName"] == pname), None)
+                        page_obj = next(
+                            (p for p in pages if p["displayName"] == pname), None
+                        )
                         if page_obj:
                             output.append(f"- [{pname}]({page_obj.get('url', rurl)})")
                         else:
@@ -1822,7 +2070,9 @@ class PowerBIReportReferencesTool(BaseTool):
                     output.append(f"**Referenced in {len(pages_list)} page(s)**:")
                     for pname in pages_list:
                         # Find page URL
-                        page_obj = next((p for p in pages if p["displayName"] == pname), None)
+                        page_obj = next(
+                            (p for p in pages if p["displayName"] == pname), None
+                        )
                         if page_obj:
                             output.append(f"- [{pname}]({page_obj.get('url', rurl)})")
                         else:
@@ -1855,7 +2105,9 @@ class PowerBIReportReferencesTool(BaseTool):
         output.append("### Measures by Report Usage\n")
         output.append("| Measure | # Reports | Reports |")
         output.append("|---------|-----------|---------|")
-        for measure in sorted(measure_reports.keys(), key=lambda m: -len(measure_reports[m])):
+        for measure in sorted(
+            measure_reports.keys(), key=lambda m: -len(measure_reports[m])
+        ):
             reports = measure_reports[measure]
             reports_str = ", ".join(reports[:3])
             if len(reports) > 3:
@@ -1906,14 +2158,16 @@ class PowerBIReportReferencesTool(BaseTool):
                     if v.get("page_id") == page_id
                 ]
 
-                clean_pages.append({
-                    "id": page_id,
-                    "name": p["name"],
-                    "displayName": p["displayName"],
-                    "ordinal": p.get("ordinal", 0),
-                    "url": p.get("url", ""),
-                    "visuals": page_visuals,
-                })
+                clean_pages.append(
+                    {
+                        "id": page_id,
+                        "name": p["name"],
+                        "displayName": p["displayName"],
+                        "ordinal": p.get("ordinal", 0),
+                        "url": p.get("url", ""),
+                        "visuals": page_visuals,
+                    }
+                )
 
             report_entry = {
                 "report_id": r["report_id"],
@@ -1960,10 +2214,12 @@ class PowerBIReportReferencesTool(BaseTool):
                 "reports_analyzed": len(all_report_results),
                 "reports_failed": len(failed_reports),
                 "total_pages": sum(len(r["pages"]) for r in all_report_results),
-                "total_visuals": sum(len(r["visual_references"]) for r in all_report_results),
+                "total_visuals": sum(
+                    len(r["visual_references"]) for r in all_report_results
+                ),
                 "unique_measures": len(global_measures),
                 "unique_tables": len(global_tables),
-            }
+            },
         }
 
         return json.dumps(result, indent=2)

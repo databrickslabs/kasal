@@ -3,18 +3,20 @@ Extended tests for database_management_router.py to cover missing lines.
 Focuses on: get_lakebase_service dependency, streaming migration, error branches,
 enable_lakebase with auto-resolved endpoint, and permission check error path.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.api.database_management_router import (
-    get_lakebase_service,
-    enable_lakebase_without_migration,
     check_database_management_permission,
+    enable_lakebase_without_migration,
     export_database,
+    get_database_info,
+    get_lakebase_service,
     import_database,
     list_backups,
-    get_database_info,
 )
 from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.schemas.database_management import (
@@ -40,6 +42,7 @@ class Ctx:
 
 # ── get_lakebase_service dependency ──────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_get_lakebase_service_creates_service():
     """get_lakebase_service extracts user_token and user_email."""
@@ -48,12 +51,13 @@ async def test_get_lakebase_service_creates_service():
     raw_request = MagicMock()
     ctx = Ctx(group_email="admin@x", access_token="mytoken")
 
-    with patch(
-        "src.utils.databricks_auth.extract_user_token_from_request",
-        return_value="extracted_token",
-    ), patch(
-        "src.services.databricks.lakebase.service.LakebaseService"
-    ) as MockSvc:
+    with (
+        patch(
+            "src.utils.databricks_auth.extract_user_token_from_request",
+            return_value="extracted_token",
+        ),
+        patch("src.services.databricks.lakebase.service.LakebaseService") as MockSvc,
+    ):
         MockSvc.return_value = MagicMock(spec=LakebaseService)
         svc = get_lakebase_service(
             session=MagicMock(), raw_request=raw_request, group_context=ctx
@@ -63,6 +67,7 @@ async def test_get_lakebase_service_creates_service():
 
 
 # ── export: no user_token warning branch ─────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_export_no_user_token_warning():
@@ -96,6 +101,7 @@ async def test_export_service_failure_raises_kasal_error():
 
 # ── import: error path ────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_import_service_failure_raises_kasal_error():
     """import_database raises KasalError when service reports failure."""
@@ -118,6 +124,7 @@ async def test_import_service_failure_raises_kasal_error():
 
 
 # ── list_backups: non-admin and error path ────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_list_backups_non_system_admin_raises_forbidden():
@@ -144,6 +151,7 @@ async def test_list_backups_service_failure_raises_kasal_error():
 
 # ── get_database_info error path ──────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_get_database_info_failure_raises_kasal_error():
     """get_database_info raises KasalError when service fails."""
@@ -158,6 +166,7 @@ async def test_get_database_info_failure_raises_kasal_error():
 
 
 # ── check_database_management_permission: exception path ─────────────────────
+
 
 @pytest.mark.asyncio
 async def test_check_permission_exception_in_databricks_apps():
@@ -185,6 +194,7 @@ async def test_check_permission_exception_outside_databricks_apps():
     with patch.dict("os.environ", {}, clear=True):
         # Ensure DATABRICKS_APP_NAME is not set
         import os
+
         os.environ.pop("DATABRICKS_APP_NAME", None)
         result = await check_database_management_permission(
             service=svc, session=AsyncMock(), group_context=ctx
@@ -194,6 +204,7 @@ async def test_check_permission_exception_outside_databricks_apps():
 
 
 # ── enable_lakebase: auto-resolve endpoint ────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_enable_lakebase_auto_resolve_endpoint_success():
@@ -237,10 +248,12 @@ async def test_enable_lakebase_auto_resolve_no_instance_raises_bad_request():
 
 # ── debug endpoints: non-debug mode ──────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_debug_permissions_returns_404_when_not_debug():
     """debug_permissions raises 404 when DEBUG_MODE is False."""
     from fastapi import HTTPException
+
     from src.api.database_management_router import debug_permissions
     from src.config.settings import settings as app_settings
 
@@ -258,6 +271,7 @@ async def test_debug_permissions_returns_404_when_not_debug():
 async def test_debug_headers_returns_404_when_not_debug():
     """debug_headers raises 404 when DEBUG_MODE is False."""
     from fastapi import HTTPException
+
     from src.api.database_management_router import debug_headers
     from src.config.settings import settings as app_settings
 

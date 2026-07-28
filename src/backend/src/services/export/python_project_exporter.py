@@ -2,10 +2,11 @@
 Python Project exporter for CrewAI crews.
 """
 
-from typing import Dict, Any, List
+from typing import Any, Dict, List
+
 from .base_exporter import BaseExporter
-from .yaml_generator import YAMLGenerator
 from .code_generator import CodeGenerator
+from .yaml_generator import YAMLGenerator
 
 
 class PythonProjectExporter(BaseExporter):
@@ -16,7 +17,9 @@ class PythonProjectExporter(BaseExporter):
         self.yaml_generator = YAMLGenerator()
         self.code_generator = CodeGenerator()
 
-    async def export(self, crew_data: Dict[str, Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    async def export(
+        self, crew_data: Dict[str, Any], options: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         Export crew as Python project with standard CrewAI structure
 
@@ -27,16 +30,16 @@ class PythonProjectExporter(BaseExporter):
         Returns:
             Dictionary with files list and metadata
         """
-        crew_name = crew_data.get('name', 'crew')
+        crew_name = crew_data.get("name", "crew")
         sanitized_name = self._sanitize_name(crew_name)
-        agents = crew_data.get('agents', [])
-        tasks = crew_data.get('tasks', [])
+        agents = crew_data.get("agents", [])
+        tasks = crew_data.get("tasks", [])
 
         # Extract options
-        include_custom_tools = options.get('include_custom_tools', True)
-        include_comments = options.get('include_comments', True)
-        include_tests = options.get('include_tests', True)
-        model_override = options.get('model_override')
+        include_custom_tools = options.get("include_custom_tools", True)
+        include_comments = options.get("include_comments", True)
+        include_tests = options.get("include_tests", True)
+        model_override = options.get("model_override")
 
         # Get all tools used
         tools = self._get_unique_tools(agents, tasks)
@@ -46,67 +49,55 @@ class PythonProjectExporter(BaseExporter):
 
         # 1. README.md
         readme = self._generate_readme(crew_name, sanitized_name, agents, tasks)
-        files.append({
-            'path': 'README.md',
-            'content': readme,
-            'type': 'markdown'
-        })
+        files.append({"path": "README.md", "content": readme, "type": "markdown"})
 
         # 2. requirements.txt
         requirements = self._generate_requirements(tools)
-        files.append({
-            'path': 'requirements.txt',
-            'content': requirements,
-            'type': 'text'
-        })
+        files.append(
+            {"path": "requirements.txt", "content": requirements, "type": "text"}
+        )
 
         # 3. .env.example
         env_example = self._generate_env_example()
-        files.append({
-            'path': '.env.example',
-            'content': env_example,
-            'type': 'text'
-        })
+        files.append({"path": ".env.example", "content": env_example, "type": "text"})
 
         # 4. .gitignore
         gitignore = self._generate_gitignore()
-        files.append({
-            'path': '.gitignore',
-            'content': gitignore,
-            'type': 'text'
-        })
+        files.append({"path": ".gitignore", "content": gitignore, "type": "text"})
 
         # 5. src/{crew_name}/__init__.py
         init_py = f'"""{crew_name.replace("_", " ").title()} CrewAI Project"""\n\n__version__ = "0.1.0"\n'
-        files.append({
-            'path': f'src/{sanitized_name}/__init__.py',
-            'content': init_py,
-            'type': 'python'
-        })
+        files.append(
+            {
+                "path": f"src/{sanitized_name}/__init__.py",
+                "content": init_py,
+                "type": "python",
+            }
+        )
 
         # 6. src/{crew_name}/config/agents.yaml
         agents_yaml = self.yaml_generator.generate_agents_yaml(
-            agents,
-            model_override=model_override,
-            include_comments=include_comments
+            agents, model_override=model_override, include_comments=include_comments
         )
-        files.append({
-            'path': f'src/{sanitized_name}/config/agents.yaml',
-            'content': agents_yaml,
-            'type': 'yaml'
-        })
+        files.append(
+            {
+                "path": f"src/{sanitized_name}/config/agents.yaml",
+                "content": agents_yaml,
+                "type": "yaml",
+            }
+        )
 
         # 7. src/{crew_name}/config/tasks.yaml
         tasks_yaml = self.yaml_generator.generate_tasks_yaml(
-            tasks,
-            agents,
-            include_comments=include_comments
+            tasks, agents, include_comments=include_comments
         )
-        files.append({
-            'path': f'src/{sanitized_name}/config/tasks.yaml',
-            'content': tasks_yaml,
-            'type': 'yaml'
-        })
+        files.append(
+            {
+                "path": f"src/{sanitized_name}/config/tasks.yaml",
+                "content": tasks_yaml,
+                "type": "yaml",
+            }
+        )
 
         # 8. src/{crew_name}/crew.py
         crew_code = self.code_generator.generate_crew_code(
@@ -114,73 +105,80 @@ class PythonProjectExporter(BaseExporter):
             agents,
             tasks,
             tools,
-            process_type='sequential',
+            process_type="sequential",
             include_comments=include_comments,
-            for_notebook=False
+            for_notebook=False,
         )
-        files.append({
-            'path': f'src/{sanitized_name}/crew.py',
-            'content': crew_code,
-            'type': 'python'
-        })
+        files.append(
+            {
+                "path": f"src/{sanitized_name}/crew.py",
+                "content": crew_code,
+                "type": "python",
+            }
+        )
 
         # 9. src/{crew_name}/main.py
         main_code = self.code_generator.generate_main_code(
             sanitized_name,
-            sample_inputs={'topic': 'Your research topic here'},
+            sample_inputs={"topic": "Your research topic here"},
             include_comments=include_comments,
-            for_notebook=False
+            for_notebook=False,
         )
-        files.append({
-            'path': f'src/{sanitized_name}/main.py',
-            'content': main_code,
-            'type': 'python'
-        })
+        files.append(
+            {
+                "path": f"src/{sanitized_name}/main.py",
+                "content": main_code,
+                "type": "python",
+            }
+        )
 
         # 10. src/{crew_name}/tools/__init__.py (if custom tools)
-        if include_custom_tools and any(tool not in ['SerperDevTool', 'ScrapeWebsiteTool', 'DallETool'] for tool in tools):
-            tools_init = '"""Custom tools for the crew"""\n\n# Import your custom tools here\n'
-            files.append({
-                'path': f'src/{sanitized_name}/tools/__init__.py',
-                'content': tools_init,
-                'type': 'python'
-            })
+        if include_custom_tools and any(
+            tool not in ["SerperDevTool", "ScrapeWebsiteTool", "DallETool"]
+            for tool in tools
+        ):
+            tools_init = (
+                '"""Custom tools for the crew"""\n\n# Import your custom tools here\n'
+            )
+            files.append(
+                {
+                    "path": f"src/{sanitized_name}/tools/__init__.py",
+                    "content": tools_init,
+                    "type": "python",
+                }
+            )
 
         # 11. tests/test_crew.py (if include_tests)
         if include_tests:
             test_code = self._generate_test_code(sanitized_name)
-            files.append({
-                'path': 'tests/test_crew.py',
-                'content': test_code,
-                'type': 'python'
-            })
+            files.append(
+                {"path": "tests/test_crew.py", "content": test_code, "type": "python"}
+            )
 
             # tests/__init__.py
-            files.append({
-                'path': 'tests/__init__.py',
-                'content': '"""Tests for the crew"""\n',
-                'type': 'python'
-            })
+            files.append(
+                {
+                    "path": "tests/__init__.py",
+                    "content": '"""Tests for the crew"""\n',
+                    "type": "python",
+                }
+            )
 
         # 12. output/.gitkeep (to preserve output directory)
-        files.append({
-            'path': 'output/.gitkeep',
-            'content': '',
-            'type': 'text'
-        })
+        files.append({"path": "output/.gitkeep", "content": "", "type": "text"})
 
         return {
-            'crew_id': str(crew_data.get('id', '')),
-            'crew_name': crew_name,
-            'export_format': 'python_project',
-            'files': files,
-            'metadata': {
-                'agents_count': len(agents),
-                'tasks_count': len(tasks),
-                'tools_count': len(tools),
-                'sanitized_name': sanitized_name,
+            "crew_id": str(crew_data.get("id", "")),
+            "crew_name": crew_name,
+            "export_format": "python_project",
+            "files": files,
+            "metadata": {
+                "agents_count": len(agents),
+                "tasks_count": len(tasks),
+                "tools_count": len(tools),
+                "sanitized_name": sanitized_name,
             },
-            'generated_at': self._get_timestamp()
+            "generated_at": self._get_timestamp(),
         }
 
     def _generate_readme(
@@ -188,7 +186,7 @@ class PythonProjectExporter(BaseExporter):
         crew_name: str,
         sanitized_name: str,
         agents: List[Dict[str, Any]],
-        tasks: List[Dict[str, Any]]
+        tasks: List[Dict[str, Any]],
     ) -> str:
         """Generate README.md content"""
         readme = f"""# {crew_name.replace('_', ' ').title()}
@@ -304,16 +302,16 @@ This project is exported from Kasal and follows your organization's licensing te
     def _generate_requirements(self, tools: List[str]) -> str:
         """Generate requirements.txt content"""
         requirements = [
-            'crewai[tools]>=1.9.3',  # [tools] extra installs crewai-tools
-            'pydantic>=2.0.0',
-            'python-dotenv>=1.0.0',
+            "crewai[tools]>=1.9.3",  # [tools] extra installs crewai-tools
+            "pydantic>=2.0.0",
+            "python-dotenv>=1.0.0",
         ]
 
         # Add tool-specific dependencies
-        if 'SerperDevTool' in tools:
-            requirements.append('# SerperDevTool (included via crewai[tools])')
+        if "SerperDevTool" in tools:
+            requirements.append("# SerperDevTool (included via crewai[tools])")
 
-        return '\n'.join(requirements) + '\n'
+        return "\n".join(requirements) + "\n"
 
     def _generate_env_example(self) -> str:
         """Generate .env.example content"""
@@ -384,9 +382,9 @@ Thumbs.db
 
     def _generate_test_code(self, sanitized_name: str) -> str:
         """Generate test_crew.py content"""
-        class_name = ''.join(word.capitalize() for word in sanitized_name.split('_'))
-        if not class_name.endswith('Crew'):
-            class_name += 'Crew'
+        class_name = "".join(word.capitalize() for word in sanitized_name.split("_"))
+        if not class_name.endswith("Crew"):
+            class_name += "Crew"
 
         return f"""\"\"\"
 Unit tests for {sanitized_name}

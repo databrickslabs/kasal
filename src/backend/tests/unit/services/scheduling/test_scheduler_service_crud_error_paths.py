@@ -17,23 +17,29 @@ Targets uncovered paths:
   - shutdown (empty tasks, running tasks)
 """
 
-import pytest
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_service():
     mock_session = MagicMock()
-    with patch("src.services.scheduling.scheduler.ScheduleRepository") as mock_repo, \
-         patch("src.services.scheduling.scheduler.ExecutionHistoryRepository") as mock_hist_repo:
+    with (
+        patch("src.services.scheduling.scheduler.ScheduleRepository") as mock_repo,
+        patch(
+            "src.services.scheduling.scheduler.ExecutionHistoryRepository"
+        ) as mock_hist_repo,
+    ):
         mock_repo.return_value = AsyncMock()
         mock_hist_repo.return_value = AsyncMock()
         from src.services.scheduling.scheduler import SchedulerService
+
         svc = SchedulerService(mock_session)
         svc.repository = AsyncMock()
         svc.execution_history_repository = AsyncMock()
@@ -47,7 +53,9 @@ def _make_group_context(group_id="grp-1", email="user@example.com"):
     return gc
 
 
-def _make_schedule(id=1, name="Test", cron="0 * * * *", is_active=True, group_id="grp-1"):
+def _make_schedule(
+    id=1, name="Test", cron="0 * * * *", is_active=True, group_id="grp-1"
+):
     s = MagicMock()
     s.id = id
     s.name = name
@@ -68,7 +76,11 @@ def _make_schedule(id=1, name="Test", cron="0 * * * *", is_active=True, group_id
 def _make_schedule_create(name="Test", cron="0 * * * *"):
     sc = MagicMock()
     sc.cron_expression = cron
-    sc.model_dump.return_value = {"name": name, "cron_expression": cron, "is_active": True}
+    sc.model_dump.return_value = {
+        "name": name,
+        "cron_expression": cron,
+        "is_active": True,
+    }
     return sc
 
 
@@ -82,6 +94,7 @@ def _make_schedule_update(cron="0 * * * *"):
 # create_schedule
 # ---------------------------------------------------------------------------
 
+
 class TestCreateSchedule:
     @pytest.mark.asyncio
     async def test_create_schedule_success(self):
@@ -91,8 +104,13 @@ class TestCreateSchedule:
 
         svc.repository.create = AsyncMock(return_value=mock_schedule)
 
-        with patch("src.services.scheduling.scheduler.calculate_next_run_from_last", return_value=datetime.now(timezone.utc)), \
-             patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp:
+        with (
+            patch(
+                "src.services.scheduling.scheduler.calculate_next_run_from_last",
+                return_value=datetime.now(timezone.utc),
+            ),
+            patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp,
+        ):
             mock_resp.model_validate.return_value = MagicMock(id=1, name="My Schedule")
             result = await svc.create_schedule(schedule_data)
         svc.repository.create.assert_awaited_once()
@@ -105,8 +123,13 @@ class TestCreateSchedule:
         mock_schedule = _make_schedule(group_id="grp-42")
         svc.repository.create = AsyncMock(return_value=mock_schedule)
 
-        with patch("src.services.scheduling.scheduler.calculate_next_run_from_last", return_value=datetime.now(timezone.utc)), \
-             patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp:
+        with (
+            patch(
+                "src.services.scheduling.scheduler.calculate_next_run_from_last",
+                return_value=datetime.now(timezone.utc),
+            ),
+            patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp,
+        ):
             mock_resp.model_validate.return_value = MagicMock(group_id="grp-42")
             result = await svc.create_schedule(schedule_data, gc)
         # Verify group_id was set in the dict passed to create
@@ -117,9 +140,12 @@ class TestCreateSchedule:
     async def test_create_schedule_invalid_cron_raises_bad_request(self):
         svc = _make_service()
         schedule_data = _make_schedule_create(cron="invalid-cron")
-        with patch("src.services.scheduling.scheduler.calculate_next_run_from_last",
-                   side_effect=ValueError("bad cron")):
+        with patch(
+            "src.services.scheduling.scheduler.calculate_next_run_from_last",
+            side_effect=ValueError("bad cron"),
+        ):
             from src.core.exceptions import BadRequestError
+
             with pytest.raises(BadRequestError):
                 await svc.create_schedule(schedule_data)
 
@@ -128,8 +154,12 @@ class TestCreateSchedule:
         svc = _make_service()
         schedule_data = _make_schedule_create()
         svc.repository.create = AsyncMock(side_effect=RuntimeError("db failure"))
-        with patch("src.services.scheduling.scheduler.calculate_next_run_from_last", return_value=datetime.now(timezone.utc)):
+        with patch(
+            "src.services.scheduling.scheduler.calculate_next_run_from_last",
+            return_value=datetime.now(timezone.utc),
+        ):
             from src.core.exceptions import KasalError
+
             with pytest.raises(KasalError):
                 await svc.create_schedule(schedule_data)
 
@@ -138,8 +168,11 @@ class TestCreateSchedule:
 # create_schedule_from_execution
 # ---------------------------------------------------------------------------
 
+
 class TestCreateScheduleFromExecution:
-    def _make_schedule_from_exec_data(self, exec_id="exec-1", name="Sched", cron="0 * * * *", is_active=True):
+    def _make_schedule_from_exec_data(
+        self, exec_id="exec-1", name="Sched", cron="0 * * * *", is_active=True
+    ):
         d = MagicMock()
         d.execution_id = exec_id
         d.name = name
@@ -150,9 +183,12 @@ class TestCreateScheduleFromExecution:
     @pytest.mark.asyncio
     async def test_execution_not_found_raises_not_found(self):
         svc = _make_service()
-        svc.execution_history_repository.get_execution_by_id = AsyncMock(return_value=None)
+        svc.execution_history_repository.get_execution_by_id = AsyncMock(
+            return_value=None
+        )
         data = self._make_schedule_from_exec_data()
         from src.core.exceptions import NotFoundError
+
         with pytest.raises(NotFoundError):
             await svc.create_schedule_from_execution(data)
 
@@ -160,12 +196,22 @@ class TestCreateScheduleFromExecution:
     async def test_crew_execution_missing_agents_raises_bad_request(self):
         svc = _make_service()
         mock_exec = MagicMock()
-        mock_exec.inputs = {"agents_yaml": {}, "tasks_yaml": {}, "execution_type": "crew"}
+        mock_exec.inputs = {
+            "agents_yaml": {},
+            "tasks_yaml": {},
+            "execution_type": "crew",
+        }
         mock_exec.execution_type = "crew"
-        svc.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_exec)
+        svc.execution_history_repository.get_execution_by_id = AsyncMock(
+            return_value=mock_exec
+        )
         data = self._make_schedule_from_exec_data()
         from src.core.exceptions import BadRequestError
-        with patch("src.services.scheduling.scheduler.calculate_next_run_from_last", return_value=datetime.now(timezone.utc)):
+
+        with patch(
+            "src.services.scheduling.scheduler.calculate_next_run_from_last",
+            return_value=datetime.now(timezone.utc),
+        ):
             with pytest.raises(BadRequestError):
                 await svc.create_schedule_from_execution(data)
 
@@ -179,12 +225,19 @@ class TestCreateScheduleFromExecution:
             "execution_type": "crew",
         }
         mock_exec.execution_type = "crew"
-        svc.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_exec)
+        svc.execution_history_repository.get_execution_by_id = AsyncMock(
+            return_value=mock_exec
+        )
         mock_schedule = _make_schedule()
         svc.repository.create = AsyncMock(return_value=mock_schedule)
         data = self._make_schedule_from_exec_data()
-        with patch("src.services.scheduling.scheduler.calculate_next_run_from_last", return_value=datetime.now(timezone.utc)), \
-             patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp:
+        with (
+            patch(
+                "src.services.scheduling.scheduler.calculate_next_run_from_last",
+                return_value=datetime.now(timezone.utc),
+            ),
+            patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp,
+        ):
             mock_resp.model_validate.return_value = MagicMock(id=1)
             result = await svc.create_schedule_from_execution(data)
         svc.repository.create.assert_awaited_once()
@@ -196,10 +249,16 @@ class TestCreateScheduleFromExecution:
         mock_exec.inputs = {"execution_type": "flow", "nodes": [], "edges": []}
         mock_exec.execution_type = "flow"
         mock_exec.flow_id = None
-        svc.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_exec)
+        svc.execution_history_repository.get_execution_by_id = AsyncMock(
+            return_value=mock_exec
+        )
         data = self._make_schedule_from_exec_data()
         from src.core.exceptions import BadRequestError
-        with patch("src.services.scheduling.scheduler.calculate_next_run_from_last", return_value=datetime.now(timezone.utc)):
+
+        with patch(
+            "src.services.scheduling.scheduler.calculate_next_run_from_last",
+            return_value=datetime.now(timezone.utc),
+        ):
             with pytest.raises(BadRequestError):
                 await svc.create_schedule_from_execution(data)
 
@@ -218,12 +277,19 @@ class TestCreateScheduleFromExecution:
         }
         mock_exec.execution_type = "flow"
         mock_exec.flow_id = "flow-uuid"
-        svc.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_exec)
+        svc.execution_history_repository.get_execution_by_id = AsyncMock(
+            return_value=mock_exec
+        )
         mock_schedule = _make_schedule()
         svc.repository.create = AsyncMock(return_value=mock_schedule)
         data = self._make_schedule_from_exec_data()
-        with patch("src.services.scheduling.scheduler.calculate_next_run_from_last", return_value=datetime.now(timezone.utc)), \
-             patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp:
+        with (
+            patch(
+                "src.services.scheduling.scheduler.calculate_next_run_from_last",
+                return_value=datetime.now(timezone.utc),
+            ),
+            patch("src.services.scheduling.scheduler.ScheduleResponse") as mock_resp,
+        ):
             mock_resp.model_validate.return_value = MagicMock(id=1)
             result = await svc.create_schedule_from_execution(data)
         svc.repository.create.assert_awaited_once()
@@ -232,6 +298,7 @@ class TestCreateScheduleFromExecution:
 # ---------------------------------------------------------------------------
 # get_all_schedules
 # ---------------------------------------------------------------------------
+
 
 class TestGetAllSchedules:
     @pytest.mark.asyncio
@@ -268,6 +335,7 @@ class TestGetAllSchedules:
 # get_schedule_by_id
 # ---------------------------------------------------------------------------
 
+
 class TestGetScheduleById:
     @pytest.mark.asyncio
     async def test_found_returns_response(self):
@@ -284,6 +352,7 @@ class TestGetScheduleById:
         svc = _make_service()
         svc.repository.find_by_id = AsyncMock(return_value=None)
         from src.core.exceptions import NotFoundError
+
         with pytest.raises(NotFoundError):
             await svc.get_schedule_by_id(999)
 
@@ -291,6 +360,7 @@ class TestGetScheduleById:
 # ---------------------------------------------------------------------------
 # get_schedule_by_id_with_group_check
 # ---------------------------------------------------------------------------
+
 
 class TestGetScheduleByIdWithGroupCheck:
     @pytest.mark.asyncio
@@ -310,6 +380,7 @@ class TestGetScheduleByIdWithGroupCheck:
         gc = _make_group_context("grp-1")
         svc.repository.find_by_id = AsyncMock(return_value=mock_sched)
         from src.core.exceptions import NotFoundError
+
         with pytest.raises(NotFoundError):
             await svc.get_schedule_by_id_with_group_check(7, gc)
 
@@ -318,6 +389,7 @@ class TestGetScheduleByIdWithGroupCheck:
         svc = _make_service()
         svc.repository.find_by_id = AsyncMock(return_value=None)
         from src.core.exceptions import NotFoundError
+
         with pytest.raises(NotFoundError):
             await svc.get_schedule_by_id_with_group_check(999)
 
@@ -325,6 +397,7 @@ class TestGetScheduleByIdWithGroupCheck:
 # ---------------------------------------------------------------------------
 # update_schedule
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateSchedule:
     @pytest.mark.asyncio
@@ -344,6 +417,7 @@ class TestUpdateSchedule:
         svc.repository.update = AsyncMock(return_value=None)
         su = _make_schedule_update()
         from src.core.exceptions import NotFoundError
+
         with pytest.raises(NotFoundError):
             await svc.update_schedule(999, su)
 
@@ -353,6 +427,7 @@ class TestUpdateSchedule:
         svc.repository.update = AsyncMock(side_effect=ValueError("bad value"))
         su = _make_schedule_update()
         from src.core.exceptions import BadRequestError
+
         with pytest.raises(BadRequestError):
             await svc.update_schedule(1, su)
 
@@ -362,6 +437,7 @@ class TestUpdateSchedule:
         svc.repository.update = AsyncMock(side_effect=RuntimeError("db down"))
         su = _make_schedule_update()
         from src.core.exceptions import KasalError
+
         with pytest.raises(KasalError):
             await svc.update_schedule(1, su)
 
@@ -369,6 +445,7 @@ class TestUpdateSchedule:
 # ---------------------------------------------------------------------------
 # update_schedule_with_group_check
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateScheduleWithGroupCheck:
     @pytest.mark.asyncio
@@ -392,6 +469,7 @@ class TestUpdateScheduleWithGroupCheck:
         svc.repository.find_by_id = AsyncMock(return_value=existing)
         su = _make_schedule_update()
         from src.core.exceptions import NotFoundError
+
         with pytest.raises(NotFoundError):
             await svc.update_schedule_with_group_check(10, su, gc)
 
@@ -401,6 +479,7 @@ class TestUpdateScheduleWithGroupCheck:
         svc.repository.find_by_id = AsyncMock(return_value=None)
         su = _make_schedule_update()
         from src.core.exceptions import NotFoundError
+
         with pytest.raises(NotFoundError):
             await svc.update_schedule_with_group_check(999, su)
 
@@ -408,6 +487,7 @@ class TestUpdateScheduleWithGroupCheck:
 # ---------------------------------------------------------------------------
 # delete_schedule
 # ---------------------------------------------------------------------------
+
 
 class TestDeleteSchedule:
     @pytest.mark.asyncio
@@ -422,6 +502,7 @@ class TestDeleteSchedule:
         svc = _make_service()
         svc.repository.delete = AsyncMock(return_value=False)
         from src.core.exceptions import NotFoundError
+
         with pytest.raises(NotFoundError):
             await svc.delete_schedule(999)
 
@@ -430,6 +511,7 @@ class TestDeleteSchedule:
         svc = _make_service()
         svc.repository.delete = AsyncMock(side_effect=RuntimeError("db error"))
         from src.core.exceptions import KasalError
+
         with pytest.raises(KasalError):
             await svc.delete_schedule(1)
 
@@ -437,6 +519,7 @@ class TestDeleteSchedule:
 # ---------------------------------------------------------------------------
 # delete_schedule_with_group_check
 # ---------------------------------------------------------------------------
+
 
 class TestDeleteScheduleWithGroupCheck:
     @pytest.mark.asyncio
@@ -456,6 +539,7 @@ class TestDeleteScheduleWithGroupCheck:
         existing = _make_schedule(id=1, group_id="grp-OTHER")
         svc.repository.find_by_id = AsyncMock(return_value=existing)
         from src.core.exceptions import NotFoundError
+
         with pytest.raises(NotFoundError):
             await svc.delete_schedule_with_group_check(1, gc)
 
@@ -464,6 +548,7 @@ class TestDeleteScheduleWithGroupCheck:
         svc = _make_service()
         svc.repository.find_by_id = AsyncMock(return_value=None)
         from src.core.exceptions import NotFoundError
+
         with pytest.raises(NotFoundError):
             await svc.delete_schedule_with_group_check(999)
 
@@ -471,6 +556,7 @@ class TestDeleteScheduleWithGroupCheck:
 # ---------------------------------------------------------------------------
 # toggle_schedule
 # ---------------------------------------------------------------------------
+
 
 class TestToggleSchedule:
     @pytest.mark.asyncio
@@ -488,6 +574,7 @@ class TestToggleSchedule:
         svc = _make_service()
         svc.repository.toggle_active = AsyncMock(return_value=None)
         from src.core.exceptions import NotFoundError
+
         with pytest.raises(NotFoundError):
             await svc.toggle_schedule(999)
 
@@ -496,6 +583,7 @@ class TestToggleSchedule:
         svc = _make_service()
         svc.repository.toggle_active = AsyncMock(side_effect=RuntimeError("db error"))
         from src.core.exceptions import KasalError
+
         with pytest.raises(KasalError):
             await svc.toggle_schedule(1)
 
@@ -503,6 +591,7 @@ class TestToggleSchedule:
 # ---------------------------------------------------------------------------
 # toggle_schedule_with_group_check
 # ---------------------------------------------------------------------------
+
 
 class TestToggleScheduleWithGroupCheck:
     @pytest.mark.asyncio
@@ -524,6 +613,7 @@ class TestToggleScheduleWithGroupCheck:
         existing = _make_schedule(id=5, group_id="grp-OTHER")
         svc.repository.find_by_id = AsyncMock(return_value=existing)
         from src.core.exceptions import NotFoundError
+
         with pytest.raises(NotFoundError):
             await svc.toggle_schedule_with_group_check(5, gc)
 
@@ -532,6 +622,7 @@ class TestToggleScheduleWithGroupCheck:
         svc = _make_service()
         svc.repository.find_by_id = AsyncMock(return_value=None)
         from src.core.exceptions import NotFoundError
+
         with pytest.raises(NotFoundError):
             await svc.toggle_schedule_with_group_check(999)
 
@@ -539,6 +630,7 @@ class TestToggleScheduleWithGroupCheck:
 # ---------------------------------------------------------------------------
 # shutdown
 # ---------------------------------------------------------------------------
+
 
 class TestSchedulerShutdownExtra:
     @pytest.mark.asyncio
@@ -555,7 +647,11 @@ class TestSchedulerShutdownExtra:
     @pytest.mark.asyncio
     async def test_shutdown_clears_running_tasks(self):
         svc = _make_service()
-        svc._running_tasks.add(MagicMock(cancel=MagicMock(), done=MagicMock(return_value=False)))
-        svc._running_tasks.add(MagicMock(cancel=MagicMock(), done=MagicMock(return_value=False)))
+        svc._running_tasks.add(
+            MagicMock(cancel=MagicMock(), done=MagicMock(return_value=False))
+        )
+        svc._running_tasks.add(
+            MagicMock(cancel=MagicMock(), done=MagicMock(return_value=False))
+        )
         await svc.shutdown()
         assert len(svc._running_tasks) == 0

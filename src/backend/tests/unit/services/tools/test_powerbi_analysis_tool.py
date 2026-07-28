@@ -13,8 +13,9 @@ Strategy:
 import base64
 import json
 import re
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.tools.powerbi_analysis_tool import (
     PowerBIAnalysisSchema,
@@ -77,6 +78,7 @@ def _mock_cache_service_ctx(mock_service):
 # Schema tests
 # ===========================================================================
 
+
 class TestPowerBIAnalysisSchema:
     """Validate the Pydantic input schema."""
 
@@ -92,9 +94,19 @@ class TestPowerBIAnalysisSchema:
         # Regression (LLM-015): auth/connection/LLM plumbing must never be
         # LLM-fillable — it is injected via tool_configs in __init__.
         forbidden = {
-            "tenant_id", "client_id", "client_secret", "username", "password",
-            "auth_method", "access_token", "workspace_id", "dataset_id",
-            "report_id", "llm_workspace_url", "llm_token", "llm_model",
+            "tenant_id",
+            "client_id",
+            "client_secret",
+            "username",
+            "password",
+            "auth_method",
+            "access_token",
+            "workspace_id",
+            "dataset_id",
+            "report_id",
+            "llm_workspace_url",
+            "llm_token",
+            "llm_model",
         }
         assert not forbidden & set(PowerBIAnalysisSchema.model_fields)
 
@@ -106,9 +118,7 @@ class TestPowerBIAnalysisSchema:
         assert "Complete CGR" in schema.business_mappings
 
     def test_field_synonyms_field(self):
-        schema = PowerBIAnalysisSchema(
-            field_synonyms={"revenue": ["sales", "income"]}
-        )
+        schema = PowerBIAnalysisSchema(field_synonyms={"revenue": ["sales", "income"]})
         assert schema.field_synonyms["revenue"] == ["sales", "income"]
 
     def test_active_filters_field(self):
@@ -141,6 +151,7 @@ class TestPowerBIAnalysisSchema:
 # ===========================================================================
 # Initialisation tests
 # ===========================================================================
+
 
 class TestPowerBIAnalysisToolInit:
     """Tests for __init__ and _default_config population."""
@@ -203,6 +214,7 @@ class TestPowerBIAnalysisToolInit:
 # Placeholder detection tests
 # ===========================================================================
 
+
 class TestIsPlaceholderValue:
     """Tests for _is_placeholder_value helper."""
 
@@ -217,11 +229,17 @@ class TestIsPlaceholderValue:
 
     def test_real_uuid_returns_false(self):
         # A real UUID should NOT be detected as placeholder
-        assert self.tool._is_placeholder_value("a1b2c3d4-e5f6-7890-abcd-ef1234567890") is False
+        assert (
+            self.tool._is_placeholder_value("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+            is False
+        )
 
     def test_numeric_placeholder_pattern_detected(self):
         # 12345678-1234-1234-1234-123456789012 → all digits → placeholder
-        assert self.tool._is_placeholder_value("12345678-1234-1234-1234-123456789012") is True
+        assert (
+            self.tool._is_placeholder_value("12345678-1234-1234-1234-123456789012")
+            is True
+        )
 
     def test_your_here_pattern(self):
         assert self.tool._is_placeholder_value("your_workspace_here") is True
@@ -239,7 +257,12 @@ class TestIsPlaceholderValue:
         assert self.tool._is_placeholder_value("https://example.com/api") is True
 
     def test_https_your_pattern(self):
-        assert self.tool._is_placeholder_value("https://your-workspace.azuredatabricks.net") is True
+        assert (
+            self.tool._is_placeholder_value(
+                "https://your-workspace.azuredatabricks.net"
+            )
+            is True
+        )
 
     def test_real_secret_returns_false(self):
         assert self.tool._is_placeholder_value("RealS3cr3tV@lue!2024xyz") is False
@@ -251,6 +274,7 @@ class TestIsPlaceholderValue:
 # ===========================================================================
 # _run validation tests (synchronous, no actual API calls)
 # ===========================================================================
+
 
 class TestRunValidation:
     """Tests for _run method validation branches."""
@@ -326,7 +350,7 @@ class TestRunValidation:
         )
         with patch(
             "src.services.tools.powerbi_analysis_tool._run_async_in_sync_context",
-            return_value="mocked result"
+            return_value="mocked result",
         ):
             result = tool._run()
         assert result == "mocked result"
@@ -336,11 +360,14 @@ class TestRunValidation:
 # Config merging tests
 # ===========================================================================
 
+
 class TestConfigMerging:
     """Test that default_config values take precedence over runtime kwargs for auth params."""
 
     def test_default_workspace_takes_precedence(self):
-        tool = PowerBIAnalysisTool(workspace_id=WS_ID, dataset_id=DS_ID, access_token=ACCESS_TOKEN)
+        tool = PowerBIAnalysisTool(
+            workspace_id=WS_ID, dataset_id=DS_ID, access_token=ACCESS_TOKEN
+        )
         # This just tests that the default_config has the right value
         assert tool._default_config["workspace_id"] == WS_ID
 
@@ -366,6 +393,7 @@ class TestConfigMerging:
 # _extract_measures_from_dax tests
 # ===========================================================================
 
+
 class TestExtractMeasuresFromDax:
     """Tests for the _extract_measures_from_dax helper method."""
 
@@ -374,7 +402,9 @@ class TestExtractMeasuresFromDax:
 
     def test_single_measure_found(self):
         dax = "EVALUATE SUMMARIZE(Sales, [Total Revenue])"
-        measures = self.tool._extract_measures_from_dax(dax, ["Total Revenue", "Profit"])
+        measures = self.tool._extract_measures_from_dax(
+            dax, ["Total Revenue", "Profit"]
+        )
         assert "Total Revenue" in measures
 
     def test_multiple_measures_found(self):
@@ -423,6 +453,7 @@ class TestExtractMeasuresFromDax:
 # _format_output tests
 # ===========================================================================
 
+
 class TestFormatOutput:
     """Tests for the _format_output method."""
 
@@ -434,7 +465,12 @@ class TestFormatOutput:
             "dataset_id": DS_ID,
             "model_context": {"measures": [], "tables": [], "relationships": []},
             "generated_dax": None,
-            "dax_execution": {"success": False, "data": [], "row_count": 0, "error": None},
+            "dax_execution": {
+                "success": False,
+                "data": [],
+                "row_count": 0,
+                "error": None,
+            },
             "visual_references": [],
             "errors": [],
             "dax_attempts": [],
@@ -531,8 +567,20 @@ class TestFormatOutput:
             **self.base_results,
             "generated_dax": "EVALUATE Sales",
             "dax_attempts": [
-                {"attempt": 1, "dax": "bad dax", "success": False, "error": "syntax error", "row_count": 0},
-                {"attempt": 2, "dax": "EVALUATE Sales", "success": True, "error": None, "row_count": 5},
+                {
+                    "attempt": 1,
+                    "dax": "bad dax",
+                    "success": False,
+                    "error": "syntax error",
+                    "row_count": 0,
+                },
+                {
+                    "attempt": 2,
+                    "dax": "EVALUATE Sales",
+                    "success": True,
+                    "error": None,
+                    "row_count": 5,
+                },
             ],
         }
         result = self.tool._format_output(results, "markdown")
@@ -542,6 +590,7 @@ class TestFormatOutput:
 # ===========================================================================
 # _parse_tmdl_for_filters tests
 # ===========================================================================
+
 
 class TestParseTmdlForFilters:
     """Tests for _parse_tmdl_for_filters — reads report.json from base64 parts."""
@@ -570,7 +619,7 @@ class TestParseTmdlForFilters:
     def test_non_report_json_path_ignored(self):
         part = self._make_part(
             "definition/pages/page1/page.json",
-            {"filters": '[{"expression": {"Column": {}}}]'}
+            {"filters": '[{"expression": {"Column": {}}}]'},
         )
         result = self.tool._parse_tmdl_for_filters([part])
         assert result == {}
@@ -580,17 +629,22 @@ class TestParseTmdlForFilters:
             "expression": {
                 "Column": {
                     "Expression": {"SourceRef": {"Entity": "Sales"}},
-                    "Property": "Region"
+                    "Property": "Region",
                 }
             },
             "filter": {
-                "Where": [{"Condition": {"In": {"Values": [[{"Literal": {"Value": "'North'"}}]]}}}]
+                "Where": [
+                    {
+                        "Condition": {
+                            "In": {"Values": [[{"Literal": {"Value": "'North'"}}]]}
+                        }
+                    }
+                ]
             },
-            "type": "Categorical"
+            "type": "Categorical",
         }
         part = self._make_part(
-            "definition/report.json",
-            {"filters": json.dumps([filter_def])}
+            "definition/report.json", {"filters": json.dumps([filter_def])}
         )
         result = self.tool._parse_tmdl_for_filters([part])
         assert "Sales[Region]" in result
@@ -599,6 +653,7 @@ class TestParseTmdlForFilters:
 # ===========================================================================
 # _extract_filter_from_definition tests
 # ===========================================================================
+
 
 class TestExtractFilterFromDefinition:
     """Tests for _extract_filter_from_definition helper."""
@@ -611,7 +666,7 @@ class TestExtractFilterFromDefinition:
             "expression": {
                 "Column": {
                     "Expression": {"SourceRef": {"Entity": table}},
-                    "Property": column
+                    "Property": column,
                 }
             },
             "filter": {"Where": where_clauses or []},
@@ -625,12 +680,9 @@ class TestExtractFilterFromDefinition:
     def test_missing_table_returns_none(self):
         filter_def = {
             "expression": {
-                "Column": {
-                    "Expression": {"SourceRef": {}},
-                    "Property": "Region"
-                }
+                "Column": {"Expression": {"SourceRef": {}}, "Property": "Region"}
             },
-            "filter": {"Where": []}
+            "filter": {"Where": []},
         }
         name, desc = self.tool._extract_filter_from_definition(filter_def)
         assert name is None
@@ -651,6 +703,7 @@ class TestExtractFilterFromDefinition:
 # _parse_filter_condition tests
 # ===========================================================================
 
+
 class TestParseFilterCondition:
     """Tests for _parse_filter_condition."""
 
@@ -667,7 +720,7 @@ class TestParseFilterCondition:
                 "Expression": {
                     "In": {
                         "Expressions": [],
-                        "Values": [[{"Literal": {"Value": "null"}}]]
+                        "Values": [[{"Literal": {"Value": "null"}}]],
                     }
                 }
             }
@@ -678,10 +731,7 @@ class TestParseFilterCondition:
 
     def test_in_condition_detected(self):
         condition = {
-            "In": {
-                "Expressions": [],
-                "Values": [[{"Literal": {"Value": "'Italy'"}}]]
-            }
+            "In": {"Expressions": [], "Values": [[{"Literal": {"Value": "'Italy'"}}]]}
         }
         result = self.tool._parse_filter_condition(condition)
         assert isinstance(result, str)
@@ -691,6 +741,7 @@ class TestParseFilterCondition:
 # ===========================================================================
 # _parse_tmdl_for_measures_and_tables tests
 # ===========================================================================
+
 
 class TestParseTmdlForMeasuresAndTables:
     """Tests for the TMDL parser helper."""
@@ -743,7 +794,10 @@ class TestParseTmdlForMeasuresAndTables:
         assert any("LocalDateTable" in t["name"] for t in tables)
 
     def test_invalid_base64_gracefully_handled(self):
-        part = {"path": "definition/tables/Broken.tmdl", "payload": "not-valid-base64!!!"}
+        part = {
+            "path": "definition/tables/Broken.tmdl",
+            "payload": "not-valid-base64!!!",
+        }
         measures, tables = self.tool._parse_tmdl_for_measures_and_tables([part], {})
         # Should not raise; returns empty
         assert isinstance(measures, list)
@@ -753,6 +807,7 @@ class TestParseTmdlForMeasuresAndTables:
 # ===========================================================================
 # _run_async_in_sync_context tests
 # ===========================================================================
+
 
 class TestRunAsyncInSyncContext:
     """Tests for the module-level async runner utility."""
@@ -783,6 +838,7 @@ class TestRunAsyncInSyncContext:
 # Integration-style tests with mocked async pipeline
 # ===========================================================================
 
+
 class TestRunWithMockedPipeline:
     """Test _run end-to-end with all async dependencies mocked."""
 
@@ -790,7 +846,7 @@ class TestRunWithMockedPipeline:
         tool = _make_tool()
         with patch(
             "src.services.tools.powerbi_analysis_tool._run_async_in_sync_context",
-            return_value="Analysis complete"
+            return_value="Analysis complete",
         ):
             result = tool._run()
         assert isinstance(result, str)
@@ -800,7 +856,7 @@ class TestRunWithMockedPipeline:
         tool = _make_tool()
         with patch(
             "src.services.tools.powerbi_analysis_tool._run_async_in_sync_context",
-            side_effect=Exception("network failure")
+            side_effect=Exception("network failure"),
         ):
             result = tool._run()
         assert "error" in result.lower() or "network failure" in result.lower()
@@ -810,7 +866,7 @@ class TestRunWithMockedPipeline:
         json_output = json.dumps({"status": "ok"})
         with patch(
             "src.services.tools.powerbi_analysis_tool._run_async_in_sync_context",
-            return_value=json_output
+            return_value=json_output,
         ):
             result = tool._run()
         assert result == json_output
@@ -827,7 +883,7 @@ class TestRunWithMockedPipeline:
         )
         with patch(
             "src.services.tools.powerbi_analysis_tool._run_async_in_sync_context",
-            return_value="ok"
+            return_value="ok",
         ):
             result = tool._run()
         assert result == "ok"
@@ -845,8 +901,10 @@ class TestAnalysisPipelineAsync:
 
     def setup_method(self):
         self.tool = PowerBIAnalysisTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
-            access_token=ACCESS_TOKEN, user_question="Revenue?"
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            access_token=ACCESS_TOKEN,
+            user_question="Revenue?",
         )
 
     def _run(self, coro):
@@ -859,7 +917,9 @@ class TestAnalysisPipelineAsync:
             "dataset_id": DS_ID,
             "output_format": "markdown",
         }
-        with patch.object(self.tool, "_get_access_token", side_effect=Exception("auth fail")):
+        with patch.object(
+            self.tool, "_get_access_token", side_effect=Exception("auth fail")
+        ):
             result = self._run(self.tool._execute_analysis_pipeline(config))
         assert isinstance(result, str)
         assert "auth" in result.lower() or "error" in result.lower()
@@ -867,7 +927,13 @@ class TestAnalysisPipelineAsync:
     def test_cache_hit_skips_extraction(self):
         """When cache has data, extraction should be skipped."""
         cached = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "relationships": [],
             "schema": {"tables": [{"name": "Sales", "columns": []}], "columns": []},
             "sample_data": {},
@@ -886,12 +952,28 @@ class TestAnalysisPipelineAsync:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(return_value=None)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE Sales"), \
-             patch.object(self.tool, "_execute_dax_query", return_value={
-                 "success": True, "data": [], "row_count": 0, "columns": [], "error": None
-             }):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE Sales"
+            ),
+            patch.object(
+                self.tool,
+                "_execute_dax_query",
+                return_value={
+                    "success": True,
+                    "data": [],
+                    "row_count": 0,
+                    "columns": [],
+                    "error": None,
+                },
+            ),
+        ):
 
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
@@ -918,8 +1000,14 @@ class TestAnalysisPipelineAsync:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(return_value=None)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+        ):
 
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
@@ -932,8 +1020,10 @@ class TestAnalysisPipelineRetryLogic:
 
     def setup_method(self):
         self.tool = PowerBIAnalysisTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
-            access_token=ACCESS_TOKEN, user_question="Revenue?"
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            access_token=ACCESS_TOKEN,
+            user_question="Revenue?",
         )
 
     def _run(self, coro):
@@ -961,17 +1051,36 @@ class TestAnalysisPipelineRetryLogic:
     def test_dax_failure_then_success_on_retry(self):
         """Test that when first DAX attempt fails, second attempt succeeds."""
         cached = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "relationships": [],
             "schema": {"tables": [{"name": "Sales", "columns": []}], "columns": []},
             "sample_data": {},
         }
         config = self._make_config()
 
-        fail_result = {"success": False, "error": "DAX syntax error", "row_count": 0, "data": [], "columns": []}
-        success_result = {"success": True, "data": [{"[Revenue]": 100}], "row_count": 1, "columns": ["[Revenue]"], "error": None}
+        fail_result = {
+            "success": False,
+            "error": "DAX syntax error",
+            "row_count": 0,
+            "data": [],
+            "columns": [],
+        }
+        success_result = {
+            "success": True,
+            "data": [{"[Revenue]": 100}],
+            "row_count": 1,
+            "columns": ["[Revenue]"],
+            "error": None,
+        }
 
         execution_call_count = [0]
+
         async def execute_side(*args):
             if execution_call_count[0] == 0:
                 execution_call_count[0] += 1
@@ -980,11 +1089,23 @@ class TestAnalysisPipelineRetryLogic:
 
         mock_service = self._mock_cache_and_factory(cached)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_generate_dax_with_self_correction", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", side_effect=execute_side):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"
+            ),
+            patch.object(
+                self.tool,
+                "_generate_dax_with_self_correction",
+                return_value="EVALUATE {[Revenue]}",
+            ),
+            patch.object(self.tool, "_execute_dax_query", side_effect=execute_side),
+        ):
 
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
@@ -993,33 +1114,67 @@ class TestAnalysisPipelineRetryLogic:
     def test_all_retries_fail_returns_error_in_output(self):
         """Test that all retries failing is handled gracefully."""
         cached = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "relationships": [],
             "schema": {"tables": [{"name": "Sales", "columns": []}], "columns": []},
             "sample_data": {},
         }
         config = self._make_config(max_dax_retries=2)
 
-        fail_result = {"success": False, "error": "Persistent DAX error", "row_count": 0, "data": [], "columns": []}
+        fail_result = {
+            "success": False,
+            "error": "Persistent DAX error",
+            "row_count": 0,
+            "data": [],
+            "columns": [],
+        }
 
         mock_service = self._mock_cache_and_factory(cached)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_generate_dax_with_self_correction", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value=fail_result):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"
+            ),
+            patch.object(
+                self.tool,
+                "_generate_dax_with_self_correction",
+                return_value="EVALUATE {[Revenue]}",
+            ),
+            patch.object(self.tool, "_execute_dax_query", return_value=fail_result),
+        ):
 
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
         assert isinstance(result, str)
         # Should contain error information
-        assert "Persistent DAX error" in result or "Failed" in result or "error" in result.lower()
+        assert (
+            "Persistent DAX error" in result
+            or "Failed" in result
+            or "error" in result.lower()
+        )
 
     def test_no_dax_generated_is_handled(self):
         """Test that None DAX generated is handled gracefully."""
         cached = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "relationships": [],
             "schema": {"tables": [{"name": "Sales", "columns": []}], "columns": []},
             "sample_data": {},
@@ -1028,9 +1183,15 @@ class TestAnalysisPipelineRetryLogic:
 
         mock_service = self._mock_cache_and_factory(cached)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value=None):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(self.tool, "_generate_dax_with_llm", return_value=None),
+        ):
 
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
@@ -1039,22 +1200,46 @@ class TestAnalysisPipelineRetryLogic:
     def test_visual_references_searched_when_measures_used(self):
         """Test that visual references are searched when enabled and measures found in DAX."""
         cached = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "relationships": [],
             "schema": {"tables": [{"name": "Sales", "columns": []}], "columns": []},
             "sample_data": {},
         }
         config = self._make_config(max_dax_retries=1, include_visual_references=True)
 
-        success_result = {"success": True, "data": [], "row_count": 0, "columns": [], "error": None}
+        success_result = {
+            "success": True,
+            "data": [],
+            "row_count": 0,
+            "columns": [],
+            "error": None,
+        }
 
         mock_service = self._mock_cache_and_factory(cached)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value=success_result), \
-             patch.object(self.tool, "_find_visual_references", return_value=[{"report_name": "Test Report", "measure": "Revenue"}]):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"
+            ),
+            patch.object(self.tool, "_execute_dax_query", return_value=success_result),
+            patch.object(
+                self.tool,
+                "_find_visual_references",
+                return_value=[{"report_name": "Test Report", "measure": "Revenue"}],
+            ),
+        ):
 
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
@@ -1064,7 +1249,13 @@ class TestAnalysisPipelineRetryLogic:
     def test_exception_in_dax_attempt_continues(self):
         """Test that an exception in one attempt is caught and retried."""
         cached = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "relationships": [],
             "schema": {"tables": [{"name": "Sales", "columns": []}], "columns": []},
             "sample_data": {},
@@ -1072,21 +1263,40 @@ class TestAnalysisPipelineRetryLogic:
         config = self._make_config(max_dax_retries=2)
 
         call_count = [0]
+
         async def generate_side(*args, **kwargs):
             if call_count[0] == 0:
                 call_count[0] += 1
                 raise Exception("LLM call failed")
             return "EVALUATE {[Revenue]}"
 
-        success_result = {"success": True, "data": [], "row_count": 0, "columns": [], "error": None}
+        success_result = {
+            "success": True,
+            "data": [],
+            "row_count": 0,
+            "columns": [],
+            "error": None,
+        }
 
         mock_service = self._mock_cache_and_factory(cached)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_generate_dax_with_llm", side_effect=generate_side), \
-             patch.object(self.tool, "_generate_dax_with_self_correction", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value=success_result):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", side_effect=generate_side
+            ),
+            patch.object(
+                self.tool,
+                "_generate_dax_with_self_correction",
+                return_value="EVALUATE {[Revenue]}",
+            ),
+            patch.object(self.tool, "_execute_dax_query", return_value=success_result),
+        ):
 
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
@@ -1104,8 +1314,18 @@ class TestFetchColumnMetadataForTable:
 
     def test_successful_response_returns_columns(self):
         rows = [
-            {"[ExplicitName]": "Amount", "[DataType]": "2", "[IsHidden]": False, "[Description]": ""},
-            {"[ExplicitName]": "Region", "[DataType]": "6", "[IsHidden]": False, "[Description]": ""},
+            {
+                "[ExplicitName]": "Amount",
+                "[DataType]": "2",
+                "[IsHidden]": False,
+                "[Description]": "",
+            },
+            {
+                "[ExplicitName]": "Region",
+                "[DataType]": "6",
+                "[IsHidden]": False,
+                "[Description]": "",
+            },
         ]
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -1117,7 +1337,10 @@ class TestFetchColumnMetadataForTable:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._fetch_column_metadata_for_table(
                     WS_ID, DS_ID, ACCESS_TOKEN, "Sales", {}
@@ -1141,7 +1364,10 @@ class TestFetchColumnMetadataForTable:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._fetch_column_metadata_for_table(
                     WS_ID, DS_ID, ACCESS_TOKEN, "Sales", {}
@@ -1156,7 +1382,10 @@ class TestFetchColumnMetadataForTable:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._fetch_column_metadata_for_table(
                     WS_ID, DS_ID, ACCESS_TOKEN, "Sales", {}
@@ -1181,12 +1410,21 @@ class TestEnrichModelContextWithInfoColumns:
             "measures": [],
         }
         columns_metadata = [
-            {"column_name": "Amount", "data_type": "2", "is_hidden": False, "description": "Revenue amount"}
+            {
+                "column_name": "Amount",
+                "data_type": "2",
+                "is_hidden": False,
+                "description": "Revenue amount",
+            }
         ]
         config = {"enable_info_columns": True, "skip_system_tables": True}
 
-        with patch.object(self.tool, "_fetch_column_metadata_for_table", return_value=columns_metadata):
-            with patch.object(self.tool, "_fetch_sample_column_values", return_value={}):
+        with patch.object(
+            self.tool, "_fetch_column_metadata_for_table", return_value=columns_metadata
+        ):
+            with patch.object(
+                self.tool, "_fetch_sample_column_values", return_value={}
+            ):
                 result = self._run(
                     self.tool._enrich_model_context_with_metadata(
                         model_context, WS_ID, DS_ID, ACCESS_TOKEN, config
@@ -1211,12 +1449,19 @@ class TestEnrichModelContextWithInfoColumns:
         config = {"enable_info_columns": True, "skip_system_tables": True}
 
         call_count = [0]
+
         async def mock_fetch_columns(*args, **kwargs):
             call_count[0] += 1
             return []
 
-        with patch.object(self.tool, "_fetch_column_metadata_for_table", side_effect=mock_fetch_columns):
-            with patch.object(self.tool, "_fetch_sample_column_values", return_value={}):
+        with patch.object(
+            self.tool,
+            "_fetch_column_metadata_for_table",
+            side_effect=mock_fetch_columns,
+        ):
+            with patch.object(
+                self.tool, "_fetch_sample_column_values", return_value={}
+            ):
                 result = self._run(
                     self.tool._enrich_model_context_with_metadata(
                         model_context, WS_ID, DS_ID, ACCESS_TOKEN, config
@@ -1247,7 +1492,9 @@ class TestFetchSampleColumnValues:
     def test_id_columns_skipped(self):
         """Columns with 'id' or 'key' suffix are skipped."""
         model_context = {
-            "tables": [{"name": "Sales", "columns": ["customer_id", "date_key", "Amount"]}]
+            "tables": [
+                {"name": "Sales", "columns": ["customer_id", "date_key", "Amount"]}
+            ]
         }
 
         success_result = {"success": True, "data": [{"[Amount]": 100}]}
@@ -1264,12 +1511,13 @@ class TestFetchSampleColumnValues:
         assert "Sales[customer_id]" not in result
 
     def test_successful_query_populates_sample_values(self):
-        model_context = {
-            "tables": [{"name": "Sales", "columns": ["Region"]}]
-        }
+        model_context = {"tables": [{"name": "Sales", "columns": ["Region"]}]}
 
         async def mock_execute(*args):
-            return {"success": True, "data": [{"[Region]": "North"}, {"[Region]": "South"}]}
+            return {
+                "success": True,
+                "data": [{"[Region]": "North"}, {"[Region]": "South"}],
+            }
 
         with patch.object(self.tool, "_execute_dax_query", side_effect=mock_execute):
             result = self._run(
@@ -1282,11 +1530,11 @@ class TestFetchSampleColumnValues:
         assert result["Sales[Region]"]["type"] == "categorical"
 
     def test_failed_query_skipped_gracefully(self):
-        model_context = {
-            "tables": [{"name": "Sales", "columns": ["Region"]}]
-        }
+        model_context = {"tables": [{"name": "Sales", "columns": ["Region"]}]}
 
-        with patch.object(self.tool, "_execute_dax_query", side_effect=Exception("query failed")):
+        with patch.object(
+            self.tool, "_execute_dax_query", side_effect=Exception("query failed")
+        ):
             result = self._run(
                 self.tool._fetch_sample_column_values(
                     WS_ID, DS_ID, ACCESS_TOKEN, model_context, {}
@@ -1310,20 +1558,22 @@ class TestAnalysisHelperMethods:
 
     def test_parse_tmdl_simple_table(self):
         import base64 as _b64
+
         content = "table Sales\n\tcolumn Amount\n"
         part = {
             "path": "definition/tables/Sales.tmdl",
-            "payload": _b64.b64encode(content.encode()).decode()
+            "payload": _b64.b64encode(content.encode()).decode(),
         }
         measures, tables = self.tool._parse_tmdl_for_measures_and_tables([part], {})
         assert any(t["name"] == "Sales" for t in tables)
 
     def test_parse_tmdl_skips_system_tables(self):
         import base64 as _b64
+
         content = "table LocalDateTable_xyz\n\tcolumn Date\n"
         part = {
             "path": "definition/tables/LocalDateTable_xyz.tmdl",
-            "payload": _b64.b64encode(content.encode()).decode()
+            "payload": _b64.b64encode(content.encode()).decode(),
         }
         measures, tables = self.tool._parse_tmdl_for_measures_and_tables(
             [part], {"skip_system_tables": True}
@@ -1334,6 +1584,7 @@ class TestAnalysisHelperMethods:
 # ===========================================================================
 # _generate_simple_dax tests
 # ===========================================================================
+
 
 class TestGenerateSimpleDax:
     """Tests for _generate_simple_dax — fallback DAX generation without LLM."""
@@ -1347,7 +1598,13 @@ class TestGenerateSimpleDax:
 
     def test_returns_evaluate_query(self):
         model_context = {
-            "measures": [{"name": "Total Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}]
+            "measures": [
+                {
+                    "name": "Total Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ]
         }
         result = self.tool._generate_simple_dax("What is revenue?", model_context)
         assert result is not None
@@ -1357,8 +1614,16 @@ class TestGenerateSimpleDax:
     def test_keyword_matching_finds_best_measure(self):
         model_context = {
             "measures": [
-                {"name": "Total Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"},
-                {"name": "Customer Count", "table": "Customers", "expression": "COUNTROWS(Customers)"},
+                {
+                    "name": "Total Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                },
+                {
+                    "name": "Customer Count",
+                    "table": "Customers",
+                    "expression": "COUNTROWS(Customers)",
+                },
             ]
         }
         result = self.tool._generate_simple_dax("how many customers?", model_context)
@@ -1367,8 +1632,16 @@ class TestGenerateSimpleDax:
     def test_fallback_to_first_measure_when_no_match(self):
         model_context = {
             "measures": [
-                {"name": "Total Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"},
-                {"name": "Units", "table": "Products", "expression": "SUM(Products[Qty])"},
+                {
+                    "name": "Total Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                },
+                {
+                    "name": "Units",
+                    "table": "Products",
+                    "expression": "SUM(Products[Qty])",
+                },
             ]
         }
         result = self.tool._generate_simple_dax("something unrelated", model_context)
@@ -1376,7 +1649,15 @@ class TestGenerateSimpleDax:
         assert "Total Revenue" in result
 
     def test_summarizecolumns_in_output(self):
-        model_context = {"measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}]}
+        model_context = {
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ]
+        }
         result = self.tool._generate_simple_dax("test?", model_context)
         assert "SUMMARIZECOLUMNS" in result
 
@@ -1385,6 +1666,7 @@ class TestGenerateSimpleDax:
 # _extract_dax_from_llm_response tests
 # ===========================================================================
 
+
 class TestExtractDaxFromLlmResponse:
     """Tests for _extract_dax_from_llm_response — parse DAX from LLM output."""
 
@@ -1392,7 +1674,7 @@ class TestExtractDaxFromLlmResponse:
         self.tool = PowerBIAnalysisTool()
 
     def test_plain_evaluate_extracted(self):
-        content = "EVALUATE\nSUMMARIZECOLUMNS(\n    \"Result\", [Total Revenue]\n)"
+        content = 'EVALUATE\nSUMMARIZECOLUMNS(\n    "Result", [Total Revenue]\n)'
         result = self.tool._extract_dax_from_llm_response(content)
         assert "EVALUATE" in result
         assert "SUMMARIZECOLUMNS" in result
@@ -1404,7 +1686,9 @@ class TestExtractDaxFromLlmResponse:
         assert "EVALUATE" in result
 
     def test_text_before_evaluate_stripped(self):
-        content = "Here is your DAX query:\n\nEVALUATE\nSUMMARIZECOLUMNS(\n    \"R\", [M]\n)"
+        content = (
+            'Here is your DAX query:\n\nEVALUATE\nSUMMARIZECOLUMNS(\n    "R", [M]\n)'
+        )
         result = self.tool._extract_dax_from_llm_response(content)
         assert result.upper().startswith("EVALUATE")
 
@@ -1418,7 +1702,7 @@ class TestExtractDaxFromLlmResponse:
         assert isinstance(result, str)
 
     def test_markdown_with_explanation_after_removed(self):
-        content = "EVALUATE\nSUMMARIZECOLUMNS(\"R\", [M]\n)\n**Key Changes Made:**\n1. Fixed syntax"
+        content = 'EVALUATE\nSUMMARIZECOLUMNS("R", [M]\n)\n**Key Changes Made:**\n1. Fixed syntax'
         result = self.tool._extract_dax_from_llm_response(content)
         assert "EVALUATE" in result
 
@@ -1427,6 +1711,7 @@ class TestExtractDaxFromLlmResponse:
 # _auto_wrap_with_report_filters tests
 # ===========================================================================
 
+
 class TestAutoWrapWithReportFilters:
     """Tests for _auto_wrap_with_report_filters — DAX filter wrapping."""
 
@@ -1434,36 +1719,36 @@ class TestAutoWrapWithReportFilters:
         self.tool = PowerBIAnalysisTool()
 
     def test_no_filters_returns_original(self):
-        dax = "EVALUATE SUMMARIZECOLUMNS(\"R\", [Revenue])"
+        dax = 'EVALUATE SUMMARIZECOLUMNS("R", [Revenue])'
         result = self.tool._auto_wrap_with_report_filters(dax, {"active_filters": {}})
         assert result == dax
 
     def test_empty_active_filters_returns_original(self):
-        dax = "EVALUATE\nSUMMARIZECOLUMNS(\"R\", [Revenue])"
+        dax = 'EVALUATE\nSUMMARIZECOLUMNS("R", [Revenue])'
         result = self.tool._auto_wrap_with_report_filters(dax, {})
         assert result == dax
 
     def test_filter_added_for_not_null(self):
-        dax = "EVALUATE\nSUMMARIZECOLUMNS(\"R\", [Revenue])"
+        dax = 'EVALUATE\nSUMMARIZECOLUMNS("R", [Revenue])'
         config = {"active_filters": {"Sales[Region]": "NOT NULL"}}
         result = self.tool._auto_wrap_with_report_filters(dax, config)
         assert "CALCULATETABLE" in result or "ISBLANK" in result
 
     def test_filter_skipped_when_already_in_dax(self):
-        dax = "EVALUATE\nCALCULATETABLE(\n    SUMMARIZECOLUMNS(\"R\", [Revenue]),\n    Sales[Region] = \"North\"\n)"
+        dax = 'EVALUATE\nCALCULATETABLE(\n    SUMMARIZECOLUMNS("R", [Revenue]),\n    Sales[Region] = "North"\n)'
         config = {"active_filters": {"Sales[Region]": "NOT NULL"}}
         result = self.tool._auto_wrap_with_report_filters(dax, config)
         # The filter name is in the dax, so it should be skipped
         assert isinstance(result, str)
 
     def test_equals_filter_generates_condition(self):
-        dax = "EVALUATE\nSUMMARIZECOLUMNS(\"R\", [Revenue])"
+        dax = 'EVALUATE\nSUMMARIZECOLUMNS("R", [Revenue])'
         config = {"active_filters": {"MyTable[Status]": "= 'Active'"}}
         result = self.tool._auto_wrap_with_report_filters(dax, config)
         assert "CALCULATETABLE" in result
 
     def test_already_calculatetable_merges_filters(self):
-        dax = "EVALUATE\nCALCULATETABLE(\n    SUMMARIZECOLUMNS(\"R\", [Revenue]),\n    AnotherTable[X] = 1\n)"
+        dax = 'EVALUATE\nCALCULATETABLE(\n    SUMMARIZECOLUMNS("R", [Revenue]),\n    AnotherTable[X] = 1\n)'
         config = {"active_filters": {"NewTable[Y]": "= 'Italy'"}}
         result = self.tool._auto_wrap_with_report_filters(dax, config)
         assert "CALCULATETABLE" in result
@@ -1472,6 +1757,7 @@ class TestAutoWrapWithReportFilters:
 # ===========================================================================
 # _generate_dax_filter_condition tests
 # ===========================================================================
+
 
 class TestGenerateDaxFilterCondition:
     """Tests for _generate_dax_filter_condition."""
@@ -1485,7 +1771,9 @@ class TestGenerateDaxFilterCondition:
         assert "FALSE" in result
 
     def test_not_starts_with_returns_left(self):
-        result = self.tool._generate_dax_filter_condition("Sales[Code]", "NOT STARTS WITH '7'")
+        result = self.tool._generate_dax_filter_condition(
+            "Sales[Code]", "NOT STARTS WITH '7'"
+        )
         assert "LEFT" in result
         assert "7" in result
 
@@ -1511,6 +1799,7 @@ class TestGenerateDaxFilterCondition:
 # _parse_filter_condition extended tests
 # ===========================================================================
 
+
 class TestParseFilterConditionExtended:
     """Extended tests for _parse_filter_condition."""
 
@@ -1523,7 +1812,7 @@ class TestParseFilterConditionExtended:
                 "Expression": {
                     "In": {
                         "Expressions": [],
-                        "Values": [[{"Literal": {"Value": "null"}}]]
+                        "Values": [[{"Literal": {"Value": "null"}}]],
                     }
                 }
             }
@@ -1537,7 +1826,10 @@ class TestParseFilterConditionExtended:
                 "Expression": {
                     "In": {
                         "Expressions": [],
-                        "Values": [[{"Literal": {"Value": "'North'"}}], [{"Literal": {"Value": "'South'"}}]]
+                        "Values": [
+                            [{"Literal": {"Value": "'North'"}}],
+                            [{"Literal": {"Value": "'South'"}}],
+                        ],
                     }
                 }
             }
@@ -1549,11 +1841,7 @@ class TestParseFilterConditionExtended:
     def test_not_starts_with_condition(self):
         condition = {
             "Not": {
-                "Expression": {
-                    "StartsWith": {
-                        "Right": {"Literal": {"Value": "'7'"}}
-                    }
-                }
+                "Expression": {"StartsWith": {"Right": {"Literal": {"Value": "'7'"}}}}
             }
         }
         result = self.tool._parse_filter_condition(condition)
@@ -1562,10 +1850,7 @@ class TestParseFilterConditionExtended:
 
     def test_in_single_value_returns_equals(self):
         condition = {
-            "In": {
-                "Expressions": [],
-                "Values": [[{"Literal": {"Value": "'Italy'"}}]]
-            }
+            "In": {"Expressions": [], "Values": [[{"Literal": {"Value": "'Italy'"}}]]}
         }
         result = self.tool._parse_filter_condition(condition)
         assert "= 'Italy'" in result
@@ -1577,7 +1862,7 @@ class TestParseFilterConditionExtended:
                 "Values": [
                     [{"Literal": {"Value": "'A'"}}],
                     [{"Literal": {"Value": "'B'"}}],
-                ]
+                ],
             }
         }
         result = self.tool._parse_filter_condition(condition)
@@ -1585,10 +1870,7 @@ class TestParseFilterConditionExtended:
 
     def test_comparison_equals(self):
         condition = {
-            "Comparison": {
-                "ComparisonKind": 0,
-                "Right": {"Literal": {"Value": "100"}}
-            }
+            "Comparison": {"ComparisonKind": 0, "Right": {"Literal": {"Value": "100"}}}
         }
         result = self.tool._parse_filter_condition(condition)
         assert "=" in result
@@ -1596,10 +1878,7 @@ class TestParseFilterConditionExtended:
 
     def test_comparison_greater_than(self):
         condition = {
-            "Comparison": {
-                "ComparisonKind": 2,
-                "Right": {"Literal": {"Value": "50"}}
-            }
+            "Comparison": {"ComparisonKind": 2, "Right": {"Literal": {"Value": "50"}}}
         }
         result = self.tool._parse_filter_condition(condition)
         assert ">" in result
@@ -1615,6 +1894,7 @@ class TestParseFilterConditionExtended:
 # ===========================================================================
 # _extract_filters_from_tmdl_content tests
 # ===========================================================================
+
 
 class TestExtractFiltersFromTmdlContent:
     """Tests for _extract_filters_from_tmdl_content."""
@@ -1632,7 +1912,9 @@ class TestExtractFiltersFromTmdlContent:
         assert result == {}
 
     def test_filter_with_equals_extracted(self):
-        content = "overview section\n    filter 'Region' on 'Sales'[Region] = \"North\"\n"
+        content = (
+            "overview section\n    filter 'Region' on 'Sales'[Region] = \"North\"\n"
+        )
         result = self.tool._extract_filters_from_tmdl_content(content, "overview")
         assert "Region" in result
         assert result["Region"] == "North"
@@ -1646,6 +1928,7 @@ class TestExtractFiltersFromTmdlContent:
 # ===========================================================================
 # _build_enriched_semantic_context tests
 # ===========================================================================
+
 
 class TestBuildEnrichedSemanticContext:
     """Tests for _build_enriched_semantic_context."""
@@ -1670,7 +1953,13 @@ class TestBuildEnrichedSemanticContext:
     def test_measures_included(self):
         model_context = {
             "tables": [{"name": "Sales", "columns": []}],
-            "measures": [{"name": "Total Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Total Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "relationships": [],
         }
         result = self.tool._build_enriched_semantic_context(model_context, {})
@@ -1705,7 +1994,9 @@ class TestBuildEnrichedSemanticContext:
 
     def test_conversation_history_included(self):
         model_context = {"tables": [], "measures": [], "relationships": []}
-        config = {"conversation_history": [{"question": "What is revenue?", "answer": "100M"}]}
+        config = {
+            "conversation_history": [{"question": "What is revenue?", "answer": "100M"}]
+        }
         result = self.tool._build_enriched_semantic_context(model_context, config)
         assert "CONVERSATION HISTORY" in result
         assert "What is revenue?" in result
@@ -1716,8 +2007,11 @@ class TestBuildEnrichedSemanticContext:
             "measures": [],
             "relationships": [],
             "sample_values": {
-                "Sales[Region]": {"type": "categorical", "sample_values": ["North", "South"]}
-            }
+                "Sales[Region]": {
+                    "type": "categorical",
+                    "sample_values": ["North", "South"],
+                }
+            },
         }
         result = self.tool._build_enriched_semantic_context(model_context, {})
         assert "SAMPLE DATA VALUES" in result
@@ -1728,7 +2022,12 @@ class TestBuildEnrichedSemanticContext:
             "tables": [{"name": "Sales"}, {"name": "Date"}],
             "measures": [],
             "relationships": [
-                {"from_table": "Sales", "from_column": "DateKey", "to_table": "Date", "to_column": "DateKey"}
+                {
+                    "from_table": "Sales",
+                    "from_column": "DateKey",
+                    "to_table": "Date",
+                    "to_column": "DateKey",
+                }
             ],
         }
         result = self.tool._build_enriched_semantic_context(model_context, {})
@@ -1749,7 +2048,13 @@ class TestBuildEnrichedSemanticContext:
 
     def test_column_types_shown(self):
         model_context = {
-            "tables": [{"name": "Sales", "columns": ["Amount"], "column_types": {"Amount": "Decimal"}}],
+            "tables": [
+                {
+                    "name": "Sales",
+                    "columns": ["Amount"],
+                    "column_types": {"Amount": "Decimal"},
+                }
+            ],
             "measures": [],
             "relationships": [],
         }
@@ -1776,6 +2081,7 @@ class TestBuildEnrichedSemanticContext:
 # _parse_report_pages and _parse_report_visuals tests
 # ===========================================================================
 
+
 class TestParseReportPages:
     """Tests for _parse_report_pages."""
 
@@ -1784,6 +2090,7 @@ class TestParseReportPages:
 
     def _make_page_part(self, page_id, page_data):
         import base64 as _b64
+
         payload = _b64.b64encode(json.dumps(page_data).encode()).decode()
         return {"path": f"definition/pages/{page_id}/page.json", "payload": payload}
 
@@ -1792,15 +2099,21 @@ class TestParseReportPages:
         assert result == []
 
     def test_page_json_parsed(self):
-        part = self._make_page_part("Page1", {"name": "Overview", "displayName": "Overview", "ordinal": 0})
+        part = self._make_page_part(
+            "Page1", {"name": "Overview", "displayName": "Overview", "ordinal": 0}
+        )
         result = self.tool._parse_report_pages([part])
         assert len(result) == 1
         assert result[0]["id"] == "Page1"
 
     def test_pages_sorted_by_ordinal(self):
         parts = [
-            self._make_page_part("P2", {"name": "P2", "displayName": "Page 2", "ordinal": 1}),
-            self._make_page_part("P1", {"name": "P1", "displayName": "Page 1", "ordinal": 0}),
+            self._make_page_part(
+                "P2", {"name": "P2", "displayName": "Page 2", "ordinal": 1}
+            ),
+            self._make_page_part(
+                "P1", {"name": "P1", "displayName": "Page 1", "ordinal": 0}
+            ),
         ]
         result = self.tool._parse_report_pages(parts)
         assert result[0]["id"] == "P1"
@@ -1812,6 +2125,7 @@ class TestParseReportPages:
             ]
         }
         import base64 as _b64
+
         payload = _b64.b64encode(json.dumps(report_data).encode()).decode()
         part = {"path": "report.json", "payload": payload}
         result = self.tool._parse_report_pages([part])
@@ -1831,8 +2145,12 @@ class TestParseReportVisuals:
 
     def _make_visual_part(self, page_id, visual_id, visual_data):
         import base64 as _b64
+
         payload = _b64.b64encode(json.dumps(visual_data).encode()).decode()
-        return {"path": f"definition/pages/{page_id}/visuals/{visual_id}/visual.json", "payload": payload}
+        return {
+            "path": f"definition/pages/{page_id}/visuals/{visual_id}/visual.json",
+            "payload": payload,
+        }
 
     def test_empty_parts_returns_empty(self):
         result = self.tool._parse_report_visuals([])
@@ -1853,7 +2171,10 @@ class TestParseReportVisuals:
         assert result[0]["type"] == "unknown"
 
     def test_invalid_base64_skipped(self):
-        part = {"path": "definition/pages/P1/visuals/V1/visual.json", "payload": "!!invalid!!"}
+        part = {
+            "path": "definition/pages/P1/visuals/V1/visual.json",
+            "payload": "!!invalid!!",
+        }
         result = self.tool._parse_report_visuals([part])
         assert isinstance(result, list)
 
@@ -1861,6 +2182,7 @@ class TestParseReportVisuals:
 # ===========================================================================
 # _extract_measures_from_visual and _find_measures_in_dict tests
 # ===========================================================================
+
 
 class TestExtractMeasuresFromVisual:
     """Tests for _extract_measures_from_visual and _find_measures_in_dict."""
@@ -1887,20 +2209,12 @@ class TestExtractMeasuresFromVisual:
         assert "Total Revenue" in result
 
     def test_measure_name_found(self):
-        visual = {
-            "config": {
-                "measures": [{"measure": {"name": "Profit Margin"}}]
-            }
-        }
+        visual = {"config": {"measures": [{"measure": {"name": "Profit Margin"}}]}}
         result = self.tool._extract_measures_from_visual(visual)
         assert "Profit Margin" in result
 
     def test_uppercase_measure_key(self):
-        visual = {
-            "config": {
-                "Measure": {"Property": "Revenue"}
-            }
-        }
+        visual = {"config": {"Measure": {"Property": "Revenue"}}}
         result = self.tool._extract_measures_from_visual(visual)
         assert "Revenue" in result
 
@@ -1916,15 +2230,7 @@ class TestExtractMeasuresFromVisual:
         assert result == []
 
     def test_nested_measure_reference_found(self):
-        visual = {
-            "config": {
-                "level1": {
-                    "level2": {
-                        "measure": "Revenue"
-                    }
-                }
-            }
-        }
+        visual = {"config": {"level1": {"level2": {"measure": "Revenue"}}}}
         result = self.tool._extract_measures_from_visual(visual)
         assert "Revenue" in result
 
@@ -1945,6 +2251,7 @@ class TestExtractMeasuresFromVisual:
 # ===========================================================================
 # _build_page_url tests
 # ===========================================================================
+
 
 class TestBuildPageUrl:
     """Tests for _build_page_url."""
@@ -1974,6 +2281,7 @@ class TestBuildPageUrl:
 # _parse_pages_from_report_json tests
 # ===========================================================================
 
+
 class TestAnalysisToolParsePagesFromReportJson:
     """Tests for _parse_pages_from_report_json."""
 
@@ -1982,7 +2290,11 @@ class TestAnalysisToolParsePagesFromReportJson:
 
     def _make_part(self, path, data):
         import base64 as _b64
-        return {"path": path, "payload": _b64.b64encode(json.dumps(data).encode()).decode()}
+
+        return {
+            "path": path,
+            "payload": _b64.b64encode(json.dumps(data).encode()).decode(),
+        }
 
     def test_empty_parts_returns_empty(self):
         assert self.tool._parse_pages_from_report_json([]) == []
@@ -2016,6 +2328,7 @@ class TestAnalysisToolParsePagesFromReportJson:
 # _parse_visuals_from_report_json tests
 # ===========================================================================
 
+
 class TestAnalysisToolParseVisualsFromReportJson:
     """Tests for _parse_visuals_from_report_json."""
 
@@ -2024,7 +2337,11 @@ class TestAnalysisToolParseVisualsFromReportJson:
 
     def _make_part(self, path, data):
         import base64 as _b64
-        return {"path": path, "payload": _b64.b64encode(json.dumps(data).encode()).decode()}
+
+        return {
+            "path": path,
+            "payload": _b64.b64encode(json.dumps(data).encode()).decode(),
+        }
 
     def test_empty_parts_returns_empty(self):
         assert self.tool._parse_visuals_from_report_json([]) == []
@@ -2035,8 +2352,12 @@ class TestAnalysisToolParseVisualsFromReportJson:
                 {
                     "name": "p1",
                     "visualContainers": [
-                        {"name": "v1", "visualType": "card", "config": {"singleVisual": {"visualType": "card"}}}
-                    ]
+                        {
+                            "name": "v1",
+                            "visualType": "card",
+                            "config": {"singleVisual": {"visualType": "card"}},
+                        }
+                    ],
                 }
             ]
         }
@@ -2050,9 +2371,7 @@ class TestAnalysisToolParseVisualsFromReportJson:
             "pages": [
                 {
                     "name": "p1",
-                    "visuals": [
-                        {"name": "v1", "config": json.dumps(config_dict)}
-                    ]
+                    "visuals": [{"name": "v1", "config": json.dumps(config_dict)}],
                 }
             ]
         }
@@ -2071,6 +2390,7 @@ class TestAnalysisToolParseVisualsFromReportJson:
 # _emit_llm_trace tests
 # ===========================================================================
 
+
 class TestEmitLlmTrace:
     """Tests for _emit_llm_trace — tracing utility."""
 
@@ -2079,7 +2399,9 @@ class TestEmitLlmTrace:
 
     def test_no_trace_context_does_not_raise(self):
         # No trace_context attribute set
-        self.tool._emit_llm_trace("test event", "prompt text", "model-name", "generate_dax")
+        self.tool._emit_llm_trace(
+            "test event", "prompt text", "model-name", "generate_dax"
+        )
 
     def test_trace_context_without_job_id_skips(self):
         self.tool.trace_context = {"group_context": {}}
@@ -2090,7 +2412,9 @@ class TestEmitLlmTrace:
         self.tool.trace_context = {"job_id": "test-job-123", "group_context": {}}
         mock_queue = MagicMock()
         mock_queue.put_nowait = MagicMock()
-        with patch("src.services.tools.powerbi_analysis_tool.PowerBIAnalysisTool._emit_llm_trace") as _:
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.PowerBIAnalysisTool._emit_llm_trace"
+        ) as _:
             # Just confirm no exception is raised
             pass
 
@@ -2099,12 +2423,15 @@ class TestEmitLlmTrace:
         self.tool.trace_context = {"job_id": "job-123", "group_context": {}}
         # The method does a lazy import inside - just call it and confirm no propagation
         # If the import fails it's caught internally
-        self.tool._emit_llm_trace("ctx", "prompt", "model", "op", response="response text")
+        self.tool._emit_llm_trace(
+            "ctx", "prompt", "model", "op", response="response text"
+        )
 
 
 # ===========================================================================
 # Async method tests: _fetch_tmdl_via_fabric
 # ===========================================================================
+
 
 class TestFetchTmdlViaFabric:
     """Tests for _fetch_tmdl_via_fabric with mocked httpx."""
@@ -2127,8 +2454,13 @@ class TestFetchTmdlViaFabric:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN))
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN)
+            )
 
         assert result is not None
         assert isinstance(result, list)
@@ -2142,8 +2474,13 @@ class TestFetchTmdlViaFabric:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN))
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN)
+            )
 
         assert result is None
 
@@ -2153,8 +2490,13 @@ class TestFetchTmdlViaFabric:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("connection error"))
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN))
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN)
+            )
 
         assert result is None
 
@@ -2168,8 +2510,13 @@ class TestFetchTmdlViaFabric:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN))
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN)
+            )
 
         assert result is None
 
@@ -2177,6 +2524,7 @@ class TestFetchTmdlViaFabric:
 # ===========================================================================
 # Async method tests: _execute_dax_query
 # ===========================================================================
+
 
 class TestExecuteDaxQuery:
     """Tests for _execute_dax_query."""
@@ -2191,9 +2539,7 @@ class TestExecuteDaxQuery:
         rows = [{"[Region]": "North", "[Revenue]": 100}]
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "results": [{"tables": [{"rows": rows}]}]
-        }
+        mock_response.json.return_value = {"results": [{"tables": [{"rows": rows}]}]}
         mock_response.raise_for_status = MagicMock()
 
         mock_client = MagicMock()
@@ -2201,9 +2547,14 @@ class TestExecuteDaxQuery:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales")
+                self.tool._execute_dax_query(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"
+                )
             )
 
         assert result["success"] is True
@@ -2221,9 +2572,14 @@ class TestExecuteDaxQuery:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales")
+                self.tool._execute_dax_query(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"
+                )
             )
 
         assert result["success"] is False
@@ -2239,7 +2595,10 @@ class TestExecuteDaxQuery:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "BAD DAX")
             )
@@ -2249,19 +2608,27 @@ class TestExecuteDaxQuery:
 
     def test_http_status_error(self):
         import httpx as _httpx
+
         mock_response_obj = MagicMock()
         mock_response_obj.status_code = 400
         mock_response_obj.text = "Bad Request"
-        err = _httpx.HTTPStatusError("400", request=MagicMock(), response=mock_response_obj)
+        err = _httpx.HTTPStatusError(
+            "400", request=MagicMock(), response=mock_response_obj
+        )
 
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=err)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales")
+                self.tool._execute_dax_query(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"
+                )
             )
 
         assert result["success"] is False
@@ -2273,9 +2640,14 @@ class TestExecuteDaxQuery:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales")
+                self.tool._execute_dax_query(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"
+                )
             )
 
         assert result["success"] is False
@@ -2285,6 +2657,7 @@ class TestExecuteDaxQuery:
 # ===========================================================================
 # _fetch_column_metadata tests (backward-compatible empty method)
 # ===========================================================================
+
 
 class TestFetchColumnMetadata:
     """Tests for _fetch_column_metadata."""
@@ -2303,6 +2676,7 @@ class TestFetchColumnMetadata:
 # _fetch_relationships tests
 # ===========================================================================
 
+
 class TestFetchRelationshipsAnalysisTool:
     """Tests for _fetch_relationships."""
 
@@ -2314,8 +2688,14 @@ class TestFetchRelationshipsAnalysisTool:
 
     def test_successful_relationships_parsed(self):
         rows = [
-            {"[ID]": 1, "[FromTable]": "Sales", "[FromColumn]": "DateKey",
-             "[ToTable]": "Date", "[ToColumn]": "DateKey", "[IsActive]": True}
+            {
+                "[ID]": 1,
+                "[FromTable]": "Sales",
+                "[FromColumn]": "DateKey",
+                "[ToTable]": "Date",
+                "[ToColumn]": "DateKey",
+                "[IsActive]": True,
+            }
         ]
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -2327,8 +2707,13 @@ class TestFetchRelationshipsAnalysisTool:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._fetch_relationships(WS_ID, DS_ID, ACCESS_TOKEN, {}))
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._fetch_relationships(WS_ID, DS_ID, ACCESS_TOKEN, {})
+            )
 
         assert len(result) == 1
         assert result[0]["from_table"] == "Sales"
@@ -2339,15 +2724,26 @@ class TestFetchRelationshipsAnalysisTool:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._fetch_relationships(WS_ID, DS_ID, ACCESS_TOKEN, {}))
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._fetch_relationships(WS_ID, DS_ID, ACCESS_TOKEN, {})
+            )
 
         assert result == []
 
     def test_system_table_filtered_when_skip_enabled(self):
         rows = [
-            {"[ID]": 1, "[FromTable]": "LocalDateTable_abc", "[FromColumn]": "Date",
-             "[ToTable]": "Sales", "[ToColumn]": "DateKey", "[IsActive]": True}
+            {
+                "[ID]": 1,
+                "[FromTable]": "LocalDateTable_abc",
+                "[FromColumn]": "Date",
+                "[ToTable]": "Sales",
+                "[ToColumn]": "DateKey",
+                "[IsActive]": True,
+            }
         ]
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -2359,19 +2755,36 @@ class TestFetchRelationshipsAnalysisTool:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._fetch_relationships(WS_ID, DS_ID, ACCESS_TOKEN, {"skip_system_tables": True})
+                self.tool._fetch_relationships(
+                    WS_ID, DS_ID, ACCESS_TOKEN, {"skip_system_tables": True}
+                )
             )
 
         assert len(result) == 0
 
     def test_duplicate_relationship_ids_deduplicated(self):
         rows = [
-            {"[ID]": 1, "[FromTable]": "Sales", "[FromColumn]": "DateKey",
-             "[ToTable]": "Date", "[ToColumn]": "DateKey", "[IsActive]": True},
-            {"[ID]": 1, "[FromTable]": "Sales", "[FromColumn]": "DateKey",
-             "[ToTable]": "Date", "[ToColumn]": "DateKey", "[IsActive]": True},
+            {
+                "[ID]": 1,
+                "[FromTable]": "Sales",
+                "[FromColumn]": "DateKey",
+                "[ToTable]": "Date",
+                "[ToColumn]": "DateKey",
+                "[IsActive]": True,
+            },
+            {
+                "[ID]": 1,
+                "[FromTable]": "Sales",
+                "[FromColumn]": "DateKey",
+                "[ToTable]": "Date",
+                "[ToColumn]": "DateKey",
+                "[IsActive]": True,
+            },
         ]
         mock_response = MagicMock()
         mock_response.json.return_value = {"results": [{"tables": [{"rows": rows}]}]}
@@ -2382,8 +2795,13 @@ class TestFetchRelationshipsAnalysisTool:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
-            result = self._run(self.tool._fetch_relationships(WS_ID, DS_ID, ACCESS_TOKEN, {}))
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            result = self._run(
+                self.tool._fetch_relationships(WS_ID, DS_ID, ACCESS_TOKEN, {})
+            )
 
         assert len(result) == 1
 
@@ -2391,6 +2809,7 @@ class TestFetchRelationshipsAnalysisTool:
 # ===========================================================================
 # _format_output extended tests (json with visual refs having page info)
 # ===========================================================================
+
 
 class TestFormatOutputExtended:
     """Extended tests for edge cases in _format_output."""
@@ -2403,7 +2822,12 @@ class TestFormatOutputExtended:
             "dataset_id": DS_ID,
             "model_context": {"measures": [], "tables": [], "relationships": []},
             "generated_dax": None,
-            "dax_execution": {"success": False, "data": [], "row_count": 0, "error": None},
+            "dax_execution": {
+                "success": False,
+                "data": [],
+                "row_count": 0,
+                "error": None,
+            },
             "visual_references": [],
             "errors": [],
             "dax_attempts": [],
@@ -2465,7 +2889,13 @@ class TestFormatOutputExtended:
             **self.base_results,
             "generated_dax": "EVALUATE Sales",
             "dax_attempts": [
-                {"attempt": 1, "dax": "EVALUATE Sales", "success": True, "error": None, "row_count": 5},
+                {
+                    "attempt": 1,
+                    "dax": "EVALUATE Sales",
+                    "success": True,
+                    "error": None,
+                    "row_count": 5,
+                },
             ],
         }
         # Single attempt should not show retry history
@@ -2486,6 +2916,7 @@ class TestFormatOutputExtended:
 # _generate_dax_with_llm fallback tests (no LLM credentials)
 # ===========================================================================
 
+
 class TestGenerateDaxWithLlmFallback:
     """Test _generate_dax_with_llm fallback path (no LLM credentials)."""
 
@@ -2497,11 +2928,19 @@ class TestGenerateDaxWithLlmFallback:
 
     def test_no_llm_credentials_falls_back_to_simple(self):
         model_context = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "tables": [],
         }
         config = {}  # No llm_workspace_url or llm_token
-        result = self._run(self.tool._generate_dax_with_llm("Revenue?", model_context, config))
+        result = self._run(
+            self.tool._generate_dax_with_llm("Revenue?", model_context, config)
+        )
         # Should fall back to _generate_simple_dax
         assert result is not None
         assert "EVALUATE" in result
@@ -2509,13 +2948,21 @@ class TestGenerateDaxWithLlmFallback:
     def test_no_measures_with_no_llm_returns_none(self):
         model_context = {"measures": [], "tables": []}
         config = {}
-        result = self._run(self.tool._generate_dax_with_llm("Revenue?", model_context, config))
+        result = self._run(
+            self.tool._generate_dax_with_llm("Revenue?", model_context, config)
+        )
         # No measures → None from simple dax
         assert result is None
 
     def test_llm_http_error_falls_back_to_simple(self):
         model_context = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "tables": [],
         }
         config = {
@@ -2534,9 +2981,14 @@ class TestGenerateDaxWithLlmFallback:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("LLM unreachable"))
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             with patch.object(self.tool, "_emit_llm_trace"):
-                result = self._run(self.tool._generate_dax_with_llm("Revenue?", model_context, config))
+                result = self._run(
+                    self.tool._generate_dax_with_llm("Revenue?", model_context, config)
+                )
 
         # Should fall back to simple DAX
         assert result is not None
@@ -2546,6 +2998,7 @@ class TestGenerateDaxWithLlmFallback:
 # ===========================================================================
 # Context enrichment merge logic in _run
 # ===========================================================================
+
 
 class TestRunContextEnrichmentMerge:
     """Test JSON string parsing of context enrichment fields in _run."""
@@ -2559,7 +3012,7 @@ class TestRunContextEnrichmentMerge:
         )
         with patch(
             "src.services.tools.powerbi_analysis_tool._run_async_in_sync_context",
-            return_value="ok"
+            return_value="ok",
         ):
             result = tool._run(business_mappings='{"Complete CGR": "expr"}')
         assert result == "ok"
@@ -2573,7 +3026,7 @@ class TestRunContextEnrichmentMerge:
         )
         with patch(
             "src.services.tools.powerbi_analysis_tool._run_async_in_sync_context",
-            return_value="ok"
+            return_value="ok",
         ):
             result = tool._run(business_mappings="not valid json")
         assert isinstance(result, str)
@@ -2582,6 +3035,7 @@ class TestRunContextEnrichmentMerge:
 # ===========================================================================
 # _fetch_model_via_admin_scanner tests
 # ===========================================================================
+
 
 class TestFetchModelViaAdminScanner:
     """Tests for _fetch_model_via_admin_scanner."""
@@ -2630,7 +3084,10 @@ class TestFetchModelViaAdminScanner:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=resp)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             measures, tables = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -2646,7 +3103,10 @@ class TestFetchModelViaAdminScanner:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=resp)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             measures, tables = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -2660,7 +3120,10 @@ class TestFetchModelViaAdminScanner:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             measures, tables = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -2693,10 +3156,18 @@ class TestFetchModelViaAdminScanner:
         mock_client.post = AsyncMock(side_effect=post_side)
         mock_client.get = AsyncMock(side_effect=get_side)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
-            with patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            with patch(
+                "src.services.tools.powerbi_analysis_tool.asyncio.sleep",
+                return_value=None,
+            ):
                 measures, tables = self._run(
-                    self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
+                    self.tool._fetch_model_via_admin_scanner(
+                        WS_ID, DS_ID, ACCESS_TOKEN, {}
+                    )
                 )
 
         assert measures == []
@@ -2706,19 +3177,28 @@ class TestFetchModelViaAdminScanner:
         post_resp = self._make_response(200, {"id": "scan-abc"})
         poll_resp = self._make_response(200, {"status": "Succeeded"})
         result_data = {
-            "workspaces": [{
-                "id": WS_ID,
-                "datasets": [{
-                    "id": DS_ID,
-                    "tables": [{
-                        "name": "Sales",
-                        "columns": [{"name": "Amount"}, {"name": "Region"}],
-                        "measures": [
-                            {"name": "Revenue", "expression": "SUM(Sales[Amount])"}
-                        ]
-                    }]
-                }]
-            }]
+            "workspaces": [
+                {
+                    "id": WS_ID,
+                    "datasets": [
+                        {
+                            "id": DS_ID,
+                            "tables": [
+                                {
+                                    "name": "Sales",
+                                    "columns": [{"name": "Amount"}, {"name": "Region"}],
+                                    "measures": [
+                                        {
+                                            "name": "Revenue",
+                                            "expression": "SUM(Sales[Amount])",
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
         }
         result_resp = self._make_response(200, result_data)
 
@@ -2736,10 +3216,18 @@ class TestFetchModelViaAdminScanner:
         mock_client.post = AsyncMock(return_value=post_resp)
         mock_client.get = AsyncMock(side_effect=get_side)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
-            with patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            with patch(
+                "src.services.tools.powerbi_analysis_tool.asyncio.sleep",
+                return_value=None,
+            ):
                 measures, tables = self._run(
-                    self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
+                    self.tool._fetch_model_via_admin_scanner(
+                        WS_ID, DS_ID, ACCESS_TOKEN, {}
+                    )
                 )
 
         assert len(tables) == 1
@@ -2751,6 +3239,7 @@ class TestFetchModelViaAdminScanner:
 # ===========================================================================
 # _fetch_model_via_powerbi_dax tests
 # ===========================================================================
+
 
 class TestFetchModelViaDAX:
     """Tests for _fetch_model_via_powerbi_dax."""
@@ -2774,7 +3263,10 @@ class TestFetchModelViaDAX:
         mock_instance = MagicMock()
         mock_instance.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_instance):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_instance,
+        ):
             measures, tables = self._run(
                 self.tool._fetch_model_via_powerbi_dax(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -2786,7 +3278,10 @@ class TestFetchModelViaDAX:
         mock_instance = MagicMock()
         mock_instance.post = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_instance):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_instance,
+        ):
             measures, tables = self._run(
                 self.tool._fetch_model_via_powerbi_dax(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -2805,9 +3300,14 @@ class TestFetchModelViaDAX:
         mock_instance = MagicMock()
         mock_instance.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_instance):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_instance,
+        ):
             measures, tables = self._run(
-                self.tool._fetch_model_via_powerbi_dax(WS_ID, DS_ID, ACCESS_TOKEN, {"skip_system_tables": True})
+                self.tool._fetch_model_via_powerbi_dax(
+                    WS_ID, DS_ID, ACCESS_TOKEN, {"skip_system_tables": True}
+                )
             )
 
         # LocalDateTable should be skipped
@@ -2817,6 +3317,7 @@ class TestFetchModelViaDAX:
 # ===========================================================================
 # _find_visual_references tests
 # ===========================================================================
+
 
 class TestFindVisualReferences:
     """Tests for _find_visual_references."""
@@ -2828,14 +3329,18 @@ class TestFindVisualReferences:
         return asyncio.run(coro)
 
     def test_exception_returns_empty_list(self):
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient") as mock_cls:
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient"
+        ) as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
             mock_client.get = AsyncMock(side_effect=Exception("network error"))
 
             result = self._run(
-                self.tool._find_visual_references(WS_ID, DS_ID, ACCESS_TOKEN, ["Total Revenue"])
+                self.tool._find_visual_references(
+                    WS_ID, DS_ID, ACCESS_TOKEN, ["Total Revenue"]
+                )
             )
 
         assert result == []
@@ -2843,18 +3348,29 @@ class TestFindVisualReferences:
     def test_no_matching_reports_returns_empty(self):
         reports_resp = MagicMock()
         reports_resp.raise_for_status = MagicMock()
-        reports_resp.json.return_value = {"value": [
-            {"id": "r1", "name": "Other Report", "datasetId": "different-ds", "webUrl": "https://powerbi.com/r/1"}
-        ]}
+        reports_resp.json.return_value = {
+            "value": [
+                {
+                    "id": "r1",
+                    "name": "Other Report",
+                    "datasetId": "different-ds",
+                    "webUrl": "https://powerbi.com/r/1",
+                }
+            ]
+        }
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient") as mock_cls:
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient"
+        ) as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
             mock_client.get = AsyncMock(return_value=reports_resp)
 
             result = self._run(
-                self.tool._find_visual_references(WS_ID, DS_ID, ACCESS_TOKEN, ["Total Revenue"])
+                self.tool._find_visual_references(
+                    WS_ID, DS_ID, ACCESS_TOKEN, ["Total Revenue"]
+                )
             )
 
         assert result == []
@@ -2862,9 +3378,16 @@ class TestFindVisualReferences:
     def test_report_with_matching_dataset_returns_refs(self):
         reports_resp = MagicMock()
         reports_resp.raise_for_status = MagicMock()
-        reports_resp.json.return_value = {"value": [
-            {"id": "r1", "name": "Sales Report", "datasetId": DS_ID, "webUrl": "https://powerbi.com/r/1"}
-        ]}
+        reports_resp.json.return_value = {
+            "value": [
+                {
+                    "id": "r1",
+                    "name": "Sales Report",
+                    "datasetId": DS_ID,
+                    "webUrl": "https://powerbi.com/r/1",
+                }
+            ]
+        }
 
         # Fabric API for report definition fails → fallback ref
         def_resp = MagicMock()
@@ -2876,7 +3399,9 @@ class TestFindVisualReferences:
                 return reports_resp
             return def_resp
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient") as mock_cls:
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient"
+        ) as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -2884,7 +3409,9 @@ class TestFindVisualReferences:
             mock_client.post = AsyncMock(return_value=def_resp)
 
             result = self._run(
-                self.tool._find_visual_references(WS_ID, DS_ID, ACCESS_TOKEN, ["Total Revenue"])
+                self.tool._find_visual_references(
+                    WS_ID, DS_ID, ACCESS_TOKEN, ["Total Revenue"]
+                )
             )
 
         # Should have at least one fallback reference
@@ -2894,6 +3421,7 @@ class TestFindVisualReferences:
 # ===========================================================================
 # _generate_dax_with_self_correction tests (fallback path without LLM)
 # ===========================================================================
+
 
 class TestGenerateDaxWithSelfCorrection:
     """Tests for _generate_dax_with_self_correction."""
@@ -2905,17 +3433,27 @@ class TestGenerateDaxWithSelfCorrection:
         return asyncio.run(coro)
 
     def test_no_llm_credentials_returns_none(self):
-        model_context = {"measures": [{"name": "Revenue", "table": "Sales"}], "tables": []}
+        model_context = {
+            "measures": [{"name": "Revenue", "table": "Sales"}],
+            "tables": [],
+        }
         config = {}  # No LLM creds
-        previous = [{"attempt": 1, "dax": "EVALUATE Sales", "success": False, "error": "err"}]
+        previous = [
+            {"attempt": 1, "dax": "EVALUATE Sales", "success": False, "error": "err"}
+        ]
 
         result = self._run(
-            self.tool._generate_dax_with_self_correction("Revenue?", model_context, config, previous)
+            self.tool._generate_dax_with_self_correction(
+                "Revenue?", model_context, config, previous
+            )
         )
         assert result is None
 
     def test_llm_exception_returns_none(self):
-        model_context = {"measures": [{"name": "Revenue", "table": "Sales"}], "tables": []}
+        model_context = {
+            "measures": [{"name": "Revenue", "table": "Sales"}],
+            "tables": [],
+        }
         config = {
             "llm_workspace_url": "https://databricks.example.com",
             "llm_token": "token",
@@ -2926,16 +3464,28 @@ class TestGenerateDaxWithSelfCorrection:
             "conversation_history": [],
             "visible_tables": [],
         }
-        previous = [{"attempt": 1, "dax": "EVALUATE Sales", "success": False, "error": "syntax error"}]
+        previous = [
+            {
+                "attempt": 1,
+                "dax": "EVALUATE Sales",
+                "success": False,
+                "error": "syntax error",
+            }
+        ]
 
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("LLM unreachable"))
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._generate_dax_with_self_correction("Revenue?", model_context, config, previous)
+                self.tool._generate_dax_with_self_correction(
+                    "Revenue?", model_context, config, previous
+                )
             )
 
         assert result is None
@@ -2944,6 +3494,7 @@ class TestGenerateDaxWithSelfCorrection:
 # ===========================================================================
 # _enrich_model_context_with_metadata tests
 # ===========================================================================
+
 
 class TestEnrichModelContextWithMetadata:
     """Tests for _enrich_model_context_with_metadata."""
@@ -2977,9 +3528,16 @@ class TestEnrichModelContextWithMetadata:
             "measures": [],
         }
         config = {"enable_info_columns": False}
-        sample_values = {"Sales[Region]": {"type": "categorical", "sample_values": ["North", "South"]}}
+        sample_values = {
+            "Sales[Region]": {
+                "type": "categorical",
+                "sample_values": ["North", "South"],
+            }
+        }
 
-        with patch.object(self.tool, "_fetch_sample_column_values", return_value=sample_values):
+        with patch.object(
+            self.tool, "_fetch_sample_column_values", return_value=sample_values
+        ):
             result = self._run(
                 self.tool._enrich_model_context_with_metadata(
                     model_context, WS_ID, DS_ID, ACCESS_TOKEN, config
@@ -2996,7 +3554,11 @@ class TestEnrichModelContextWithMetadata:
         }
         config = {"enable_info_columns": False}
 
-        with patch.object(self.tool, "_fetch_sample_column_values", side_effect=Exception("fetch error")):
+        with patch.object(
+            self.tool,
+            "_fetch_sample_column_values",
+            side_effect=Exception("fetch error"),
+        ):
             # Should not raise
             result = self._run(
                 self.tool._enrich_model_context_with_metadata(
@@ -3011,14 +3573,17 @@ class TestEnrichModelContextWithMetadata:
 # _run_async_in_sync_context with running event loop (lines 50-53)
 # ===========================================================================
 
+
 class TestRunAsyncInSyncContextRunningLoop:
     """Test _run_async_in_sync_context when a running event loop already exists."""
 
     def test_runs_via_executor_when_loop_exists(self):
         """Covers lines 50-53: running loop path via ThreadPoolExecutor."""
+
         async def outer():
             async def inner_coro():
                 return 42
+
             result = _run_async_in_sync_context(inner_coro())
             return result
 
@@ -3029,6 +3594,7 @@ class TestRunAsyncInSyncContextRunningLoop:
 # ===========================================================================
 # Context enrichment logging branches (lines 402, 428-429, 461, 463)
 # ===========================================================================
+
 
 class TestContextEnrichmentLoggingBranches:
     """Cover the logging branches triggered by non-empty business_mappings,
@@ -3049,7 +3615,7 @@ class TestContextEnrichmentLoggingBranches:
         field_synonyms so the conditional logger.info calls execute."""
         with patch(
             "src.services.tools.powerbi_analysis_tool._run_async_in_sync_context",
-            return_value="ok"
+            return_value="ok",
         ):
             result = self.tool._run()
         assert result == "ok"
@@ -3058,7 +3624,7 @@ class TestContextEnrichmentLoggingBranches:
         """Triggers lines 461 and 463 by setting username and password."""
         with patch(
             "src.services.tools.powerbi_analysis_tool._run_async_in_sync_context",
-            return_value="ok"
+            return_value="ok",
         ):
             result = self.tool._run()
         assert result == "ok"
@@ -3068,13 +3634,16 @@ class TestContextEnrichmentLoggingBranches:
 # Cache hit with report_id + default_filters (lines 581-589)
 # ===========================================================================
 
+
 class TestCacheHitWithDefaultFilters:
     """Test pipeline when cache hit includes default_filters for a report_id."""
 
     def setup_method(self):
         self.tool = PowerBIAnalysisTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
-            access_token=ACCESS_TOKEN, user_question="Revenue?"
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            access_token=ACCESS_TOKEN,
+            user_question="Revenue?",
         )
 
     def _run(self, coro):
@@ -3103,7 +3672,13 @@ class TestCacheHitWithDefaultFilters:
     def test_cache_hit_with_default_filters_merges_into_config(self):
         """Lines 581-589: cached_metadata has default_filters; they should be merged."""
         cached = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "relationships": [],
             "schema": {"tables": [{"name": "Sales", "columns": []}], "columns": []},
             "sample_data": {},
@@ -3112,12 +3687,28 @@ class TestCacheHitWithDefaultFilters:
         config = self._make_config()
         mock_service = self._make_cache_ctx(cached)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value={
-                 "success": True, "data": [], "row_count": 0, "columns": [], "error": None
-             }):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"
+            ),
+            patch.object(
+                self.tool,
+                "_execute_dax_query",
+                return_value={
+                    "success": True,
+                    "data": [],
+                    "row_count": 0,
+                    "columns": [],
+                    "error": None,
+                },
+            ),
+        ):
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
         assert isinstance(result, str)
@@ -3125,7 +3716,13 @@ class TestCacheHitWithDefaultFilters:
     def test_cache_hit_with_empty_default_filters_still_works(self):
         """Lines 581-589: cached_metadata has default_filters=None, skips merge."""
         cached = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "relationships": [],
             "schema": {"tables": [{"name": "Sales", "columns": []}], "columns": []},
             "sample_data": {},
@@ -3134,12 +3731,28 @@ class TestCacheHitWithDefaultFilters:
         config = self._make_config()
         mock_service = self._make_cache_ctx(cached)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value={
-                 "success": True, "data": [], "row_count": 0, "columns": [], "error": None
-             }):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"
+            ),
+            patch.object(
+                self.tool,
+                "_execute_dax_query",
+                return_value={
+                    "success": True,
+                    "data": [],
+                    "row_count": 0,
+                    "columns": [],
+                    "error": None,
+                },
+            ),
+        ):
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
         assert isinstance(result, str)
@@ -3147,7 +3760,13 @@ class TestCacheHitWithDefaultFilters:
     def test_cache_hit_with_user_filters_overrides_cached_filters(self):
         """Lines 584-588: user-provided active_filters take precedence over cached."""
         cached = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "relationships": [],
             "schema": {"tables": [{"name": "Sales", "columns": []}], "columns": []},
             "sample_data": {},
@@ -3156,12 +3775,28 @@ class TestCacheHitWithDefaultFilters:
         config = self._make_config(active_filters={"Sales[BU]": "Germany"})
         mock_service = self._make_cache_ctx(cached)
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value={
-                 "success": True, "data": [], "row_count": 0, "columns": [], "error": None
-             }):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"
+            ),
+            patch.object(
+                self.tool,
+                "_execute_dax_query",
+                return_value={
+                    "success": True,
+                    "data": [],
+                    "row_count": 0,
+                    "columns": [],
+                    "error": None,
+                },
+            ),
+        ):
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
         assert isinstance(result, str)
@@ -3172,14 +3807,17 @@ class TestCacheHitWithDefaultFilters:
 # (lines 592, 613-614, 620-637, 666-671)
 # ===========================================================================
 
+
 class TestCacheMissPipelineExtractAndSave:
     """Tests for cache-miss path: extract model context, enrich, extract
     default filters from report, and save to cache."""
 
     def setup_method(self):
         self.tool = PowerBIAnalysisTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
-            access_token=ACCESS_TOKEN, user_question="Revenue?"
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            access_token=ACCESS_TOKEN,
+            user_question="Revenue?",
         )
 
     def _run(self, coro):
@@ -3206,7 +3844,9 @@ class TestCacheMissPipelineExtractAndSave:
 
     def _model_ctx(self):
         return {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(...)"}],
+            "measures": [
+                {"name": "Revenue", "table": "Sales", "expression": "SUM(...)"}
+            ],
             "relationships": [],
             "tables": [{"name": "Sales", "columns": []}],
             "columns": [],
@@ -3219,14 +3859,32 @@ class TestCacheMissPipelineExtractAndSave:
         mock_service = self._make_cache_miss_ctx()
         model_ctx = self._model_ctx()
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_extract_model_context", return_value=model_ctx), \
-             patch.object(self.tool, "_enrich_model_context_with_metadata", return_value=model_ctx), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value={
-                 "success": True, "data": [], "row_count": 0, "columns": [], "error": None
-             }):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(self.tool, "_extract_model_context", return_value=model_ctx),
+            patch.object(
+                self.tool, "_enrich_model_context_with_metadata", return_value=model_ctx
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"
+            ),
+            patch.object(
+                self.tool,
+                "_execute_dax_query",
+                return_value={
+                    "success": True,
+                    "data": [],
+                    "row_count": 0,
+                    "columns": [],
+                    "error": None,
+                },
+            ),
+        ):
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
         assert isinstance(result, str)
@@ -3237,14 +3895,34 @@ class TestCacheMissPipelineExtractAndSave:
         mock_service = self._make_cache_miss_ctx()
         model_ctx = self._model_ctx()
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_extract_model_context", return_value=model_ctx), \
-             patch.object(self.tool, "_enrich_model_context_with_metadata", side_effect=Exception("enrich fail")), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value={
-                 "success": True, "data": [], "row_count": 0, "columns": [], "error": None
-             }):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(self.tool, "_extract_model_context", return_value=model_ctx),
+            patch.object(
+                self.tool,
+                "_enrich_model_context_with_metadata",
+                side_effect=Exception("enrich fail"),
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"
+            ),
+            patch.object(
+                self.tool,
+                "_execute_dax_query",
+                return_value={
+                    "success": True,
+                    "data": [],
+                    "row_count": 0,
+                    "columns": [],
+                    "error": None,
+                },
+            ),
+        ):
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
         assert isinstance(result, str)
@@ -3255,15 +3933,37 @@ class TestCacheMissPipelineExtractAndSave:
         mock_service = self._make_cache_miss_ctx()
         model_ctx = self._model_ctx()
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_extract_model_context", return_value=model_ctx), \
-             patch.object(self.tool, "_enrich_model_context_with_metadata", return_value=model_ctx), \
-             patch.object(self.tool, "_extract_default_filters", return_value={"Sales[BU]": "Italy"}), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value={
-                 "success": True, "data": [], "row_count": 0, "columns": [], "error": None
-             }):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(self.tool, "_extract_model_context", return_value=model_ctx),
+            patch.object(
+                self.tool, "_enrich_model_context_with_metadata", return_value=model_ctx
+            ),
+            patch.object(
+                self.tool,
+                "_extract_default_filters",
+                return_value={"Sales[BU]": "Italy"},
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"
+            ),
+            patch.object(
+                self.tool,
+                "_execute_dax_query",
+                return_value={
+                    "success": True,
+                    "data": [],
+                    "row_count": 0,
+                    "columns": [],
+                    "error": None,
+                },
+            ),
+        ):
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
         assert isinstance(result, str)
@@ -3274,15 +3974,37 @@ class TestCacheMissPipelineExtractAndSave:
         mock_service = self._make_cache_miss_ctx()
         model_ctx = self._model_ctx()
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_extract_model_context", return_value=model_ctx), \
-             patch.object(self.tool, "_enrich_model_context_with_metadata", return_value=model_ctx), \
-             patch.object(self.tool, "_extract_default_filters", side_effect=Exception("filter fail")), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value={
-                 "success": True, "data": [], "row_count": 0, "columns": [], "error": None
-             }):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(self.tool, "_extract_model_context", return_value=model_ctx),
+            patch.object(
+                self.tool, "_enrich_model_context_with_metadata", return_value=model_ctx
+            ),
+            patch.object(
+                self.tool,
+                "_extract_default_filters",
+                side_effect=Exception("filter fail"),
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"
+            ),
+            patch.object(
+                self.tool,
+                "_execute_dax_query",
+                return_value={
+                    "success": True,
+                    "data": [],
+                    "row_count": 0,
+                    "columns": [],
+                    "error": None,
+                },
+            ),
+        ):
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
         assert isinstance(result, str)
@@ -3297,14 +4019,32 @@ class TestCacheMissPipelineExtractAndSave:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock(side_effect=Exception("db error"))
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_extract_model_context", return_value=model_ctx), \
-             patch.object(self.tool, "_enrich_model_context_with_metadata", return_value=model_ctx), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value={
-                 "success": True, "data": [], "row_count": 0, "columns": [], "error": None
-             }):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(self.tool, "_extract_model_context", return_value=model_ctx),
+            patch.object(
+                self.tool, "_enrich_model_context_with_metadata", return_value=model_ctx
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"
+            ),
+            patch.object(
+                self.tool,
+                "_execute_dax_query",
+                return_value={
+                    "success": True,
+                    "data": [],
+                    "row_count": 0,
+                    "columns": [],
+                    "error": None,
+                },
+            ),
+        ):
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
         assert isinstance(result, str)
@@ -3314,9 +4054,19 @@ class TestCacheMissPipelineExtractAndSave:
         config = self._make_config()
         mock_service = self._make_cache_miss_ctx()
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_extract_model_context", side_effect=Exception("extraction failed")):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool,
+                "_extract_model_context",
+                side_effect=Exception("extraction failed"),
+            ),
+        ):
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
         assert isinstance(result, str)
@@ -3326,13 +4076,16 @@ class TestCacheMissPipelineExtractAndSave:
 # Non-dict execution result defense (lines 710-711)
 # ===========================================================================
 
+
 class TestNonDictExecutionResult:
     """Test pipeline when _execute_dax_query returns a non-dict value."""
 
     def setup_method(self):
         self.tool = PowerBIAnalysisTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
-            access_token=ACCESS_TOKEN, user_question="Revenue?"
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            access_token=ACCESS_TOKEN,
+            user_question="Revenue?",
         )
 
     def _run(self, coro):
@@ -3341,7 +4094,13 @@ class TestNonDictExecutionResult:
     def test_non_dict_result_handled_gracefully(self):
         """Lines 710-711: execution_result is not a dict → defensive check fires."""
         cached = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "relationships": [],
             "schema": {"tables": [{"name": "Sales", "columns": []}], "columns": []},
             "sample_data": {},
@@ -3360,10 +4119,20 @@ class TestNonDictExecutionResult:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock()
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value="invalid-string-result"):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"
+            ),
+            patch.object(
+                self.tool, "_execute_dax_query", return_value="invalid-string-result"
+            ),
+        ):
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
         assert isinstance(result, str)
@@ -3373,13 +4142,16 @@ class TestNonDictExecutionResult:
 # Visual reference error path (lines 779-781)
 # ===========================================================================
 
+
 class TestVisualReferenceErrorPath:
     """Test that visual reference errors are caught and appended."""
 
     def setup_method(self):
         self.tool = PowerBIAnalysisTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
-            access_token=ACCESS_TOKEN, user_question="Revenue?"
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            access_token=ACCESS_TOKEN,
+            user_question="Revenue?",
         )
 
     def _run(self, coro):
@@ -3388,7 +4160,13 @@ class TestVisualReferenceErrorPath:
     def test_visual_reference_exception_appended_to_errors(self):
         """Lines 779-781: _find_visual_references raises → error appended."""
         cached = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "relationships": [],
             "schema": {"tables": [{"name": "Sales", "columns": []}], "columns": []},
             "sample_data": {},
@@ -3407,13 +4185,33 @@ class TestVisualReferenceErrorPath:
         mock_service.build_metadata_dict = MagicMock(return_value={})
         mock_service.save_metadata = AsyncMock()
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value={
-                 "success": True, "data": [], "row_count": 0, "columns": [], "error": None
-             }), \
-             patch.object(self.tool, "_find_visual_references", side_effect=Exception("visual search failed")):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"
+            ),
+            patch.object(
+                self.tool,
+                "_execute_dax_query",
+                return_value={
+                    "success": True,
+                    "data": [],
+                    "row_count": 0,
+                    "columns": [],
+                    "error": None,
+                },
+            ),
+            patch.object(
+                self.tool,
+                "_find_visual_references",
+                side_effect=Exception("visual search failed"),
+            ),
+        ):
             result = self._run(self.tool._execute_analysis_pipeline(config))
 
         assert isinstance(result, str)
@@ -3422,6 +4220,7 @@ class TestVisualReferenceErrorPath:
 # ===========================================================================
 # _extract_model_context fallback paths (lines 818-820, 828-829, 837-844)
 # ===========================================================================
+
 
 class TestExtractModelContextFallbacks:
     """Test _extract_model_context with Fabric unavailable and admin scanner paths."""
@@ -3434,13 +4233,19 @@ class TestExtractModelContextFallbacks:
 
     def test_fabric_unavailable_falls_to_admin_scanner(self):
         """Lines 828-836: TMDL returns None → admin scanner called."""
-        with patch.object(self.tool, "_get_fabric_token", return_value="fabric_token"), \
-             patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=None), \
-             patch.object(self.tool, "_fetch_model_via_admin_scanner", return_value=(
-                 [{"name": "Revenue", "table": "Sales", "expression": "SUM(...)"}],
-                 [{"name": "Sales", "columns": []}]
-             )), \
-             patch.object(self.tool, "_fetch_relationships", return_value=[]):
+        with (
+            patch.object(self.tool, "_get_fabric_token", return_value="fabric_token"),
+            patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=None),
+            patch.object(
+                self.tool,
+                "_fetch_model_via_admin_scanner",
+                return_value=(
+                    [{"name": "Revenue", "table": "Sales", "expression": "SUM(...)"}],
+                    [{"name": "Sales", "columns": []}],
+                ),
+            ),
+            patch.object(self.tool, "_fetch_relationships", return_value=[]),
+        ):
             result = self._run(
                 self.tool._extract_model_context(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -3449,13 +4254,19 @@ class TestExtractModelContextFallbacks:
 
     def test_fabric_unavailable_admin_scanner_empty_falls_to_dax(self):
         """Lines 837-844: TMDL=None AND admin scanner empty → DAX fallback."""
-        with patch.object(self.tool, "_get_fabric_token", return_value="fabric_token"), \
-             patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=None), \
-             patch.object(self.tool, "_fetch_model_via_admin_scanner", return_value=([], [])), \
-             patch.object(self.tool, "_fetch_model_via_powerbi_dax", return_value=(
-                 [], [{"name": "Sales"}]
-             )), \
-             patch.object(self.tool, "_fetch_relationships", return_value=[]):
+        with (
+            patch.object(self.tool, "_get_fabric_token", return_value="fabric_token"),
+            patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=None),
+            patch.object(
+                self.tool, "_fetch_model_via_admin_scanner", return_value=([], [])
+            ),
+            patch.object(
+                self.tool,
+                "_fetch_model_via_powerbi_dax",
+                return_value=([], [{"name": "Sales"}]),
+            ),
+            patch.object(self.tool, "_fetch_relationships", return_value=[]),
+        ):
             result = self._run(
                 self.tool._extract_model_context(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -3465,12 +4276,24 @@ class TestExtractModelContextFallbacks:
 
     def test_fabric_token_exception_falls_back_to_powerbi_token(self):
         """Lines 818-820: getting fabric token raises → uses PowerBI token."""
-        config = {"tenant_id": TENANT_ID, "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET}
+        config = {
+            "tenant_id": TENANT_ID,
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+        }
 
-        with patch.object(self.tool, "_get_fabric_token", side_effect=Exception("token fail")), \
-             patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[]) as mock_tmdl, \
-             patch.object(self.tool, "_parse_tmdl_for_measures_and_tables", return_value=([], [])), \
-             patch.object(self.tool, "_fetch_relationships", return_value=[]):
+        with (
+            patch.object(
+                self.tool, "_get_fabric_token", side_effect=Exception("token fail")
+            ),
+            patch.object(
+                self.tool, "_fetch_tmdl_via_fabric", return_value=[]
+            ) as mock_tmdl,
+            patch.object(
+                self.tool, "_parse_tmdl_for_measures_and_tables", return_value=([], [])
+            ),
+            patch.object(self.tool, "_fetch_relationships", return_value=[]),
+        ):
             result = self._run(
                 self.tool._extract_model_context(WS_ID, DS_ID, ACCESS_TOKEN, config)
             )
@@ -3480,14 +4303,24 @@ class TestExtractModelContextFallbacks:
 
     def test_fabric_returns_empty_list_uses_parse_tmdl(self):
         """Lines 827-831: TMDL returns empty list (not None) → parse_tmdl called."""
-        config = {"tenant_id": TENANT_ID, "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET}
-        with patch.object(self.tool, "_get_fabric_token", return_value="token"), \
-             patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[]), \
-             patch.object(self.tool, "_parse_tmdl_for_measures_and_tables", return_value=(
-                 [{"name": "M1", "table": "T1", "expression": "SUM(...)"}],
-                 [{"name": "T1"}]
-             )), \
-             patch.object(self.tool, "_fetch_relationships", return_value=[]):
+        config = {
+            "tenant_id": TENANT_ID,
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+        }
+        with (
+            patch.object(self.tool, "_get_fabric_token", return_value="token"),
+            patch.object(self.tool, "_fetch_tmdl_via_fabric", return_value=[]),
+            patch.object(
+                self.tool,
+                "_parse_tmdl_for_measures_and_tables",
+                return_value=(
+                    [{"name": "M1", "table": "T1", "expression": "SUM(...)"}],
+                    [{"name": "T1"}],
+                ),
+            ),
+            patch.object(self.tool, "_fetch_relationships", return_value=[]),
+        ):
             result = self._run(
                 self.tool._extract_model_context(WS_ID, DS_ID, ACCESS_TOKEN, config)
             )
@@ -3498,6 +4331,7 @@ class TestExtractModelContextFallbacks:
 # ===========================================================================
 # _fetch_tmdl_via_fabric 202 polling branches (lines 899-914)
 # ===========================================================================
+
 
 class TestFetchTmdlViaFabric202Polling:
     """Test _fetch_tmdl_via_fabric long-running operation polling."""
@@ -3520,7 +4354,9 @@ class TestFetchTmdlViaFabric202Polling:
 
         post_response = MagicMock()
         post_response.status_code = 202
-        post_response.headers = {"Location": "https://api.fabric.microsoft.com/v1/operations/op1"}
+        post_response.headers = {
+            "Location": "https://api.fabric.microsoft.com/v1/operations/op1"
+        }
 
         poll_response = MagicMock()
         poll_response.json.return_value = {"status": "Succeeded"}
@@ -3534,8 +4370,16 @@ class TestFetchTmdlViaFabric202Polling:
         mock_client.post = AsyncMock(return_value=post_response)
         mock_client.get = AsyncMock(side_effect=[poll_response, result_response])
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_analysis_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             result = self._run(
                 self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN)
             )
@@ -3549,7 +4393,9 @@ class TestFetchTmdlViaFabric202Polling:
 
         post_response = MagicMock()
         post_response.status_code = 202
-        post_response.headers = {"Location": "https://api.fabric.microsoft.com/v1/operations/op1"}
+        post_response.headers = {
+            "Location": "https://api.fabric.microsoft.com/v1/operations/op1"
+        }
 
         poll_response = MagicMock()
         poll_response.json.return_value = {"status": "Failed", "error": "timeout"}
@@ -3557,8 +4403,16 @@ class TestFetchTmdlViaFabric202Polling:
         mock_client.post = AsyncMock(return_value=post_response)
         mock_client.get = AsyncMock(return_value=poll_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_analysis_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             result = self._run(
                 self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN)
             )
@@ -3575,7 +4429,10 @@ class TestFetchTmdlViaFabric202Polling:
 
         mock_client.post = AsyncMock(return_value=post_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN)
             )
@@ -3588,7 +4445,9 @@ class TestFetchTmdlViaFabric202Polling:
 
         post_response = MagicMock()
         post_response.status_code = 202
-        post_response.headers = {"Location": "https://api.fabric.microsoft.com/v1/operations/op1"}
+        post_response.headers = {
+            "Location": "https://api.fabric.microsoft.com/v1/operations/op1"
+        }
 
         poll_response = MagicMock()
         poll_response.json.return_value = {"status": "Failed"}  # Will break immediately
@@ -3596,8 +4455,16 @@ class TestFetchTmdlViaFabric202Polling:
         mock_client.post = AsyncMock(return_value=post_response)
         mock_client.get = AsyncMock(return_value=poll_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_analysis_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             result = self._run(
                 self.tool._fetch_tmdl_via_fabric(WS_ID, DS_ID, ACCESS_TOKEN)
             )
@@ -3608,6 +4475,7 @@ class TestFetchTmdlViaFabric202Polling:
 # ===========================================================================
 # _fetch_model_via_admin_scanner polling branches (lines 996-1055)
 # ===========================================================================
+
 
 class TestAdminScannerPollingBranches:
     """Test the polling and result parsing branches of _fetch_model_via_admin_scanner."""
@@ -3640,8 +4508,16 @@ class TestAdminScannerPollingBranches:
         mock_client.post = AsyncMock(return_value=scan_response)
         mock_client.get = AsyncMock(return_value=poll_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_analysis_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             result = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -3660,8 +4536,16 @@ class TestAdminScannerPollingBranches:
         mock_client.post = AsyncMock(return_value=scan_response)
         mock_client.get = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_analysis_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             result = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -3682,13 +4566,23 @@ class TestAdminScannerPollingBranches:
         poll_response.json.return_value = {"status": "Succeeded"}
 
         result_response = MagicMock()
-        result_response.raise_for_status = MagicMock(side_effect=Exception("result error"))
+        result_response.raise_for_status = MagicMock(
+            side_effect=Exception("result error")
+        )
 
         mock_client.post = AsyncMock(return_value=scan_response)
         mock_client.get = AsyncMock(side_effect=[poll_response, result_response])
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_analysis_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             result = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -3717,8 +4611,16 @@ class TestAdminScannerPollingBranches:
         mock_client.post = AsyncMock(return_value=scan_response)
         mock_client.get = AsyncMock(side_effect=[poll_response, result_response])
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_analysis_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             result = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -3741,14 +4643,24 @@ class TestAdminScannerPollingBranches:
         result_response = MagicMock()
         result_response.raise_for_status = MagicMock()
         result_response.json.return_value = {
-            "workspaces": [{"id": WS_ID, "datasets": [{"id": "other-ds-id", "tables": []}]}]
+            "workspaces": [
+                {"id": WS_ID, "datasets": [{"id": "other-ds-id", "tables": []}]}
+            ]
         }
 
         mock_client.post = AsyncMock(return_value=scan_response)
         mock_client.get = AsyncMock(side_effect=[poll_response, result_response])
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_analysis_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             result = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -3771,32 +4683,56 @@ class TestAdminScannerPollingBranches:
         result_response = MagicMock()
         result_response.raise_for_status = MagicMock()
         result_response.json.return_value = {
-            "workspaces": [{
-                "id": WS_ID,
-                "datasets": [{
-                    "id": DS_ID,
-                    "tables": [
-                        {"name": "LocalDateTable_xyz", "columns": [], "measures": []},
-                        {"name": "Sales", "columns": [
-                            {"name": "Amount", "isHidden": False},
-                            {"name": "_hidden", "isHidden": True},
-                        ], "measures": [
-                            {"name": "Revenue", "expression": "SUM(Sales[Amount])"},
-                            {"name": "Empty", "expression": ""},
-                        ]},
-                    ]
-                }]
-            }]
+            "workspaces": [
+                {
+                    "id": WS_ID,
+                    "datasets": [
+                        {
+                            "id": DS_ID,
+                            "tables": [
+                                {
+                                    "name": "LocalDateTable_xyz",
+                                    "columns": [],
+                                    "measures": [],
+                                },
+                                {
+                                    "name": "Sales",
+                                    "columns": [
+                                        {"name": "Amount", "isHidden": False},
+                                        {"name": "_hidden", "isHidden": True},
+                                    ],
+                                    "measures": [
+                                        {
+                                            "name": "Revenue",
+                                            "expression": "SUM(Sales[Amount])",
+                                        },
+                                        {"name": "Empty", "expression": ""},
+                                    ],
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ]
         }
 
         mock_client.post = AsyncMock(return_value=scan_response)
         mock_client.get = AsyncMock(side_effect=[poll_response, result_response])
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_analysis_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             measures, tables = self._run(
-                self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN,
-                                                          {"skip_system_tables": True})
+                self.tool._fetch_model_via_admin_scanner(
+                    WS_ID, DS_ID, ACCESS_TOKEN, {"skip_system_tables": True}
+                )
             )
 
         table_names = [t["name"] for t in tables]
@@ -3816,7 +4752,10 @@ class TestAdminScannerPollingBranches:
 
         mock_client.post = AsyncMock(return_value=scan_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -3831,10 +4770,15 @@ class TestAdminScannerPollingBranches:
         mock_request = MagicMock()
         mock_response = MagicMock()
         mock_response.status_code = 500
-        http_error = _httpx.HTTPStatusError("Server Error", request=mock_request, response=mock_response)
+        http_error = _httpx.HTTPStatusError(
+            "Server Error", request=mock_request, response=mock_response
+        )
         mock_client.post = AsyncMock(side_effect=http_error)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._fetch_model_via_admin_scanner(WS_ID, DS_ID, ACCESS_TOKEN, {})
             )
@@ -3846,6 +4790,7 @@ class TestAdminScannerPollingBranches:
 # _parse_tmdl_for_measures_and_tables: measure extraction details
 # (lines 1199, 1230-1241)
 # ===========================================================================
+
 
 class TestParseTmdlMeasureExtraction:
     """Test TMDL parsing with measure expressions containing metadata tags."""
@@ -3897,6 +4842,7 @@ class TestParseTmdlMeasureExtraction:
 # (lines 1372-1388)
 # ===========================================================================
 
+
 class TestEnrichColumnMetadataExceptionHandling:
     """Test error handling in _enrich_model_context_with_metadata per-table."""
 
@@ -3918,14 +4864,28 @@ class TestEnrichColumnMetadataExceptionHandling:
         config = {"enable_info_columns": True, "skip_system_tables": True}
 
         call_count = [0]
+
         async def mock_fetch_columns(ws, ds, token, table_name, cfg):
             call_count[0] += 1
             if table_name == "Sales":
                 raise Exception("fetch failed for Sales")
-            return [{"column_name": "DateKey", "data_type": "DateTime", "is_hidden": False, "description": ""}]
+            return [
+                {
+                    "column_name": "DateKey",
+                    "data_type": "DateTime",
+                    "is_hidden": False,
+                    "description": "",
+                }
+            ]
 
-        with patch.object(self.tool, "_fetch_column_metadata_for_table", side_effect=mock_fetch_columns), \
-             patch.object(self.tool, "_fetch_sample_column_values", return_value={}):
+        with (
+            patch.object(
+                self.tool,
+                "_fetch_column_metadata_for_table",
+                side_effect=mock_fetch_columns,
+            ),
+            patch.object(self.tool, "_fetch_sample_column_values", return_value={}),
+        ):
             result = self._run(
                 self.tool._enrich_model_context_with_metadata(
                     model_context, WS_ID, DS_ID, ACCESS_TOKEN, config
@@ -3943,8 +4903,12 @@ class TestEnrichColumnMetadataExceptionHandling:
         }
         config = {"enable_info_columns": True, "skip_system_tables": True}
 
-        with patch.object(self.tool, "_fetch_column_metadata_for_table", return_value=[]), \
-             patch.object(self.tool, "_fetch_sample_column_values", return_value={}):
+        with (
+            patch.object(
+                self.tool, "_fetch_column_metadata_for_table", return_value=[]
+            ),
+            patch.object(self.tool, "_fetch_sample_column_values", return_value={}),
+        ):
             result = self._run(
                 self.tool._enrich_model_context_with_metadata(
                     model_context, WS_ID, DS_ID, ACCESS_TOKEN, config
@@ -3957,6 +4921,7 @@ class TestEnrichColumnMetadataExceptionHandling:
 # ===========================================================================
 # _extract_default_filters HTTP paths (lines 1424-1497)
 # ===========================================================================
+
 
 class TestExtractDefaultFiltersHttpPaths:
     """Test _extract_default_filters with 202, 200, error HTTP paths."""
@@ -3979,17 +4944,27 @@ class TestExtractDefaultFiltersHttpPaths:
             "expression": {
                 "Column": {
                     "Expression": {"SourceRef": {"Entity": "Sales"}},
-                    "Property": "Region"
+                    "Property": "Region",
                 }
             },
             "filter": {
-                "Where": [{"Condition": {"In": {"Values": [[{"Literal": {"Value": "'North'"}}]]}}}]
-            }
+                "Where": [
+                    {
+                        "Condition": {
+                            "In": {"Values": [[{"Literal": {"Value": "'North'"}}]]}
+                        }
+                    }
+                ]
+            },
         }
-        parts = [{
-            "path": "report.json",
-            "payload": base64.b64encode(json.dumps({"filters": json.dumps([filter_def])}).encode()).decode()
-        }]
+        parts = [
+            {
+                "path": "report.json",
+                "payload": base64.b64encode(
+                    json.dumps({"filters": json.dumps([filter_def])}).encode()
+                ).decode(),
+            }
+        ]
         response_data = {"definition": {"parts": parts}}
 
         mock_client = self._make_client()
@@ -3998,7 +4973,10 @@ class TestExtractDefaultFiltersHttpPaths:
         response.json.return_value = response_data
         mock_client.post = AsyncMock(return_value=response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._extract_default_filters(WS_ID, "report-id", ACCESS_TOKEN)
             )
@@ -4013,7 +4991,10 @@ class TestExtractDefaultFiltersHttpPaths:
         response.json.return_value = {"definition": {"parts": []}}
         mock_client.post = AsyncMock(return_value=response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._extract_default_filters(WS_ID, "report-id", ACCESS_TOKEN)
             )
@@ -4028,7 +5009,10 @@ class TestExtractDefaultFiltersHttpPaths:
         response.text = "Not found"
         mock_client.post = AsyncMock(return_value=response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._extract_default_filters(WS_ID, "report-id", ACCESS_TOKEN)
             )
@@ -4041,23 +5025,35 @@ class TestExtractDefaultFiltersHttpPaths:
             "expression": {
                 "Column": {
                     "Expression": {"SourceRef": {"Entity": "Sales"}},
-                    "Property": "BU"
+                    "Property": "BU",
                 }
             },
             "filter": {
-                "Where": [{"Condition": {"In": {"Values": [[{"Literal": {"Value": "'Italy'"}}]]}}}]
-            }
+                "Where": [
+                    {
+                        "Condition": {
+                            "In": {"Values": [[{"Literal": {"Value": "'Italy'"}}]]}
+                        }
+                    }
+                ]
+            },
         }
-        parts = [{
-            "path": "report.json",
-            "payload": base64.b64encode(json.dumps({"filters": json.dumps([filter_def])}).encode()).decode()
-        }]
+        parts = [
+            {
+                "path": "report.json",
+                "payload": base64.b64encode(
+                    json.dumps({"filters": json.dumps([filter_def])}).encode()
+                ).decode(),
+            }
+        ]
 
         mock_client = self._make_client()
 
         post_response = MagicMock()
         post_response.status_code = 202
-        post_response.headers = {"Location": "https://api.fabric.microsoft.com/operations/op1"}
+        post_response.headers = {
+            "Location": "https://api.fabric.microsoft.com/operations/op1"
+        }
 
         poll_response = MagicMock()
         poll_response.json.return_value = {"status": "Succeeded"}
@@ -4069,8 +5065,16 @@ class TestExtractDefaultFiltersHttpPaths:
         mock_client.post = AsyncMock(return_value=post_response)
         mock_client.get = AsyncMock(side_effect=[poll_response, result_response])
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_analysis_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             result = self._run(
                 self.tool._extract_default_filters(WS_ID, "report-id", ACCESS_TOKEN)
             )
@@ -4086,7 +5090,10 @@ class TestExtractDefaultFiltersHttpPaths:
         post_response.headers = {}
         mock_client.post = AsyncMock(return_value=post_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._extract_default_filters(WS_ID, "report-id", ACCESS_TOKEN)
             )
@@ -4099,7 +5106,9 @@ class TestExtractDefaultFiltersHttpPaths:
 
         post_response = MagicMock()
         post_response.status_code = 202
-        post_response.headers = {"Location": "https://api.fabric.microsoft.com/operations/op1"}
+        post_response.headers = {
+            "Location": "https://api.fabric.microsoft.com/operations/op1"
+        }
 
         poll_response = MagicMock()
         poll_response.json.return_value = {"status": "Failed"}
@@ -4107,8 +5116,16 @@ class TestExtractDefaultFiltersHttpPaths:
         mock_client.post = AsyncMock(return_value=post_response)
         mock_client.get = AsyncMock(return_value=poll_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client), \
-             patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with (
+            patch(
+                "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+                return_value=mock_client,
+            ),
+            patch(
+                "src.services.tools.powerbi_analysis_tool.asyncio.sleep",
+                return_value=None,
+            ),
+        ):
             result = self._run(
                 self.tool._extract_default_filters(WS_ID, "report-id", ACCESS_TOKEN)
             )
@@ -4123,10 +5140,15 @@ class TestExtractDefaultFiltersHttpPaths:
         mock_request = MagicMock()
         mock_response_obj = MagicMock()
         mock_response_obj.status_code = 403
-        http_error = _httpx.HTTPStatusError("Forbidden", request=mock_request, response=mock_response_obj)
+        http_error = _httpx.HTTPStatusError(
+            "Forbidden", request=mock_request, response=mock_response_obj
+        )
         mock_client.post = AsyncMock(side_effect=http_error)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._extract_default_filters(WS_ID, "report-id", ACCESS_TOKEN)
             )
@@ -4138,7 +5160,10 @@ class TestExtractDefaultFiltersHttpPaths:
         mock_client = self._make_client()
         mock_client.post = AsyncMock(side_effect=Exception("connection refused"))
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._extract_default_filters(WS_ID, "report-id", ACCESS_TOKEN)
             )
@@ -4149,6 +5174,7 @@ class TestExtractDefaultFiltersHttpPaths:
 # ===========================================================================
 # _generate_dax_with_llm: HTTP response path (lines 2516-2576)
 # ===========================================================================
+
 
 class TestGenerateDaxWithLlmHttpPath:
     """Test _generate_dax_with_llm when LLM credentials are provided and HTTP succeeds."""
@@ -4176,14 +5202,26 @@ class TestGenerateDaxWithLlmHttpPath:
     def test_successful_llm_call_returns_dax(self):
         """Lines 2516-2576: successful HTTP response → extract DAX and return."""
         model_context = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "tables": [{"name": "Sales", "columns": ["Amount"]}],
             "relationships": [],
         }
         config = self._base_config()
 
         llm_response = {
-            "choices": [{"message": {"content": "EVALUATE\nSUMMARIZECOLUMNS(\n    \"Result\", [Revenue]\n)"}}]
+            "choices": [
+                {
+                    "message": {
+                        "content": 'EVALUATE\nSUMMARIZECOLUMNS(\n    "Result", [Revenue]\n)'
+                    }
+                }
+            ]
         }
 
         mock_client = MagicMock()
@@ -4194,9 +5232,14 @@ class TestGenerateDaxWithLlmHttpPath:
         mock_response.json.return_value = llm_response
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._generate_dax_with_llm("What is revenue?", model_context, config)
+                self.tool._generate_dax_with_llm(
+                    "What is revenue?", model_context, config
+                )
             )
 
         assert result is not None
@@ -4205,14 +5248,26 @@ class TestGenerateDaxWithLlmHttpPath:
     def test_llm_response_with_hallucinated_measure_still_returns(self):
         """Lines 2568-2571: hallucinated measure triggers warning but returns DAX."""
         model_context = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "tables": [{"name": "Sales", "columns": ["Amount"]}],
             "relationships": [],
         }
         config = self._base_config()
 
         llm_response = {
-            "choices": [{"message": {"content": "EVALUATE\nSUMMARIZECOLUMNS(\n    \"R\", [FakeMetric]\n)"}}]
+            "choices": [
+                {
+                    "message": {
+                        "content": 'EVALUATE\nSUMMARIZECOLUMNS(\n    "R", [FakeMetric]\n)'
+                    }
+                }
+            ]
         }
 
         mock_client = MagicMock()
@@ -4223,9 +5278,14 @@ class TestGenerateDaxWithLlmHttpPath:
         mock_response.json.return_value = llm_response
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._generate_dax_with_llm("What is revenue?", model_context, config)
+                self.tool._generate_dax_with_llm(
+                    "What is revenue?", model_context, config
+                )
             )
 
         assert result is not None
@@ -4233,7 +5293,13 @@ class TestGenerateDaxWithLlmHttpPath:
     def test_llm_http_exception_falls_back_to_simple_dax(self):
         """Lines 2578-2581: exception → fallback to _generate_simple_dax."""
         model_context = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "tables": [],
             "relationships": [],
         }
@@ -4244,9 +5310,14 @@ class TestGenerateDaxWithLlmHttpPath:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("HTTP timeout"))
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._generate_dax_with_llm("What is revenue?", model_context, config)
+                self.tool._generate_dax_with_llm(
+                    "What is revenue?", model_context, config
+                )
             )
 
         assert result is not None
@@ -4266,14 +5337,26 @@ class TestGenerateDaxWithLlmHttpPath:
     def test_active_filters_trigger_auto_wrap(self):
         """Line 2574: active_filters present → auto-wrap applied."""
         model_context = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "tables": [{"name": "Sales", "columns": ["Amount", "BU"]}],
             "relationships": [],
         }
         config = self._base_config(active_filters={"Sales[BU]": "Italy"})
 
         llm_response = {
-            "choices": [{"message": {"content": "EVALUATE\nSUMMARIZECOLUMNS(\n    \"R\", [Revenue]\n)"}}]
+            "choices": [
+                {
+                    "message": {
+                        "content": 'EVALUATE\nSUMMARIZECOLUMNS(\n    "R", [Revenue]\n)'
+                    }
+                }
+            ]
         }
 
         mock_client = MagicMock()
@@ -4284,9 +5367,14 @@ class TestGenerateDaxWithLlmHttpPath:
         mock_response.json.return_value = llm_response
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
-                self.tool._generate_dax_with_llm("What is revenue?", model_context, config)
+                self.tool._generate_dax_with_llm(
+                    "What is revenue?", model_context, config
+                )
             )
 
         assert result is not None
@@ -4296,6 +5384,7 @@ class TestGenerateDaxWithLlmHttpPath:
 # _emit_llm_trace with trace_context set (lines 2615-2668)
 # ===========================================================================
 
+
 class TestEmitLlmTraceWithContext:
     """Test _emit_llm_trace when trace_context is set."""
 
@@ -4304,18 +5393,15 @@ class TestEmitLlmTraceWithContext:
 
     def test_emit_trace_exception_does_not_propagate(self):
         """Lines 2666-2668: exception in trace emission is caught."""
-        self.tool.trace_context = {
-            "job_id": "job-err",
-            "group_context": {}
-        }
+        self.tool.trace_context = {"job_id": "job-err", "group_context": {}}
 
-        with patch("src.services.tools.powerbi_analysis_tool.get_trace_queue",
-                   side_effect=Exception("queue unavailable"), create=True):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.get_trace_queue",
+            side_effect=Exception("queue unavailable"),
+            create=True,
+        ):
             self.tool._emit_llm_trace(
-                event_context="Test",
-                prompt="test",
-                model="model",
-                operation="op"
+                event_context="Test", prompt="test", model="model", operation="op"
             )
 
     def test_emit_trace_no_job_id_skips(self):
@@ -4323,13 +5409,13 @@ class TestEmitLlmTraceWithContext:
         self.tool.trace_context = {"group_context": {}}
 
         mock_queue = MagicMock()
-        with patch("src.services.tools.powerbi_analysis_tool.get_trace_queue",
-                   return_value=mock_queue, create=True):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.get_trace_queue",
+            return_value=mock_queue,
+            create=True,
+        ):
             self.tool._emit_llm_trace(
-                event_context="Test",
-                prompt="test",
-                model="model",
-                operation="op"
+                event_context="Test", prompt="test", model="model", operation="op"
             )
 
         mock_queue.put_nowait.assert_not_called()
@@ -4341,13 +5427,13 @@ class TestEmitLlmTraceWithContext:
             del self.tool.trace_context
 
         mock_queue = MagicMock()
-        with patch("src.services.tools.powerbi_analysis_tool.get_trace_queue",
-                   return_value=mock_queue, create=True):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.get_trace_queue",
+            return_value=mock_queue,
+            create=True,
+        ):
             self.tool._emit_llm_trace(
-                event_context="Test",
-                prompt="test",
-                model="model",
-                operation="op"
+                event_context="Test", prompt="test", model="model", operation="op"
             )
 
         mock_queue.put_nowait.assert_not_called()
@@ -4356,20 +5442,24 @@ class TestEmitLlmTraceWithContext:
         """Lines 2621-2664: valid trace_context → get_trace_queue → put_nowait called."""
         self.tool.trace_context = {
             "job_id": "job-abc",
-            "group_context": {"primary_group_id": "g1"}
+            "group_context": {"primary_group_id": "g1"},
         }
 
         mock_queue = MagicMock()
         mock_queue.put_nowait = MagicMock()
 
         # The import is inside the method: "from src.services.trace.queue import get_trace_queue"
-        with patch("src.services.trace.queue.get_trace_queue", return_value=mock_queue, create=True):
+        with patch(
+            "src.services.trace.queue.get_trace_queue",
+            return_value=mock_queue,
+            create=True,
+        ):
             self.tool._emit_llm_trace(
                 event_context="DAX Generation",
                 prompt="Generate DAX",
                 model="model-v1",
                 operation="generate_dax",
-                response="EVALUATE {[Revenue]}"
+                response="EVALUATE {[Revenue]}",
             )
 
         mock_queue.put_nowait.assert_called_once()
@@ -4378,6 +5468,7 @@ class TestEmitLlmTraceWithContext:
 # ===========================================================================
 # _generate_dax_with_self_correction: HTTP success path (lines 2859-2892)
 # ===========================================================================
+
 
 class TestGenerateDaxWithSelfCorrectionHttpSuccess:
     """Test _generate_dax_with_self_correction successful HTTP path."""
@@ -4403,18 +5494,35 @@ class TestGenerateDaxWithSelfCorrectionHttpSuccess:
     def test_successful_llm_correction_returns_dax(self):
         """Lines 2859-2892: successful LLM → extract DAX → return."""
         model_context = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "tables": [{"name": "Sales", "columns": ["Amount"]}],
             "relationships": [],
         }
         config = self._base_config()
-        previous = [{"attempt": 1, "dax": "EVALUATE Sales", "success": False, "error": "syntax error"}]
+        previous = [
+            {
+                "attempt": 1,
+                "dax": "EVALUATE Sales",
+                "success": False,
+                "error": "syntax error",
+            }
+        ]
 
-        mock_completion = AsyncMock(return_value="EVALUATE\nSUMMARIZECOLUMNS(\n    \"R\", [Revenue]\n)")
+        mock_completion = AsyncMock(
+            return_value='EVALUATE\nSUMMARIZECOLUMNS(\n    "R", [Revenue]\n)'
+        )
 
         with patch("src.services.llm.manager.LLMManager.completion", mock_completion):
             result = self._run(
-                self.tool._generate_dax_with_self_correction("Revenue?", model_context, config, previous)
+                self.tool._generate_dax_with_self_correction(
+                    "Revenue?", model_context, config, previous
+                )
             )
 
         assert result is not None
@@ -4423,18 +5531,30 @@ class TestGenerateDaxWithSelfCorrectionHttpSuccess:
     def test_hallucinated_measures_in_correction_still_returns(self):
         """Lines 2887-2889: correction returns DAX with non-existent measure; warning logged."""
         model_context = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "tables": [{"name": "Sales", "columns": ["Amount"]}],
             "relationships": [],
         }
         config = self._base_config()
-        previous = [{"attempt": 1, "dax": "EVALUATE Sales", "success": False, "error": "err"}]
+        previous = [
+            {"attempt": 1, "dax": "EVALUATE Sales", "success": False, "error": "err"}
+        ]
 
-        mock_completion = AsyncMock(return_value="EVALUATE\nSUMMARIZECOLUMNS(\n    \"R\", [NonExistentMeasure]\n)")
+        mock_completion = AsyncMock(
+            return_value='EVALUATE\nSUMMARIZECOLUMNS(\n    "R", [NonExistentMeasure]\n)'
+        )
 
         with patch("src.services.llm.manager.LLMManager.completion", mock_completion):
             result = self._run(
-                self.tool._generate_dax_with_self_correction("Revenue?", model_context, config, previous)
+                self.tool._generate_dax_with_self_correction(
+                    "Revenue?", model_context, config, previous
+                )
             )
 
         assert result is not None
@@ -4443,6 +5563,7 @@ class TestGenerateDaxWithSelfCorrectionHttpSuccess:
 # ===========================================================================
 # _get_measure_page_references HTTP paths (lines 3092-3184)
 # ===========================================================================
+
 
 class TestGetMeasurePageReferences:
     """Test _get_measure_page_references HTTP paths (202 polling, 200 direct, error)."""
@@ -4457,7 +5578,7 @@ class TestGetMeasurePageReferences:
         page_data = {"name": page_id, "displayName": display_name, "ordinal": 0}
         return {
             "path": f"definition/pages/{page_id}/page.json",
-            "payload": base64.b64encode(json.dumps(page_data).encode()).decode()
+            "payload": base64.b64encode(json.dumps(page_data).encode()).decode(),
         }
 
     def test_200_response_returns_refs(self):
@@ -4473,8 +5594,13 @@ class TestGetMeasurePageReferences:
 
         result = self._run(
             self.tool._get_measure_page_references(
-                WS_ID, "report-id", "My Report", "https://report.url",
-                ["Revenue"], ACCESS_TOKEN, outer_client
+                WS_ID,
+                "report-id",
+                "My Report",
+                "https://report.url",
+                ["Revenue"],
+                ACCESS_TOKEN,
+                outer_client,
             )
         )
 
@@ -4490,8 +5616,13 @@ class TestGetMeasurePageReferences:
 
         result = self._run(
             self.tool._get_measure_page_references(
-                WS_ID, "report-id", "My Report", "https://report.url",
-                ["Revenue"], ACCESS_TOKEN, outer_client
+                WS_ID,
+                "report-id",
+                "My Report",
+                "https://report.url",
+                ["Revenue"],
+                ACCESS_TOKEN,
+                outer_client,
             )
         )
 
@@ -4503,7 +5634,9 @@ class TestGetMeasurePageReferences:
 
         post_response = MagicMock()
         post_response.status_code = 202
-        post_response.headers = {"Location": "https://api.fabric.microsoft.com/operations/op1"}
+        post_response.headers = {
+            "Location": "https://api.fabric.microsoft.com/operations/op1"
+        }
 
         poll_response = MagicMock()
         poll_response.json.return_value = {"status": "Succeeded"}
@@ -4516,11 +5649,18 @@ class TestGetMeasurePageReferences:
         outer_client.post = AsyncMock(return_value=post_response)
         outer_client.get = AsyncMock(side_effect=[poll_response, result_response])
 
-        with patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None
+        ):
             result = self._run(
                 self.tool._get_measure_page_references(
-                    WS_ID, "report-id", "My Report", "https://report.url",
-                    ["Revenue"], ACCESS_TOKEN, outer_client
+                    WS_ID,
+                    "report-id",
+                    "My Report",
+                    "https://report.url",
+                    ["Revenue"],
+                    ACCESS_TOKEN,
+                    outer_client,
                 )
             )
 
@@ -4537,8 +5677,13 @@ class TestGetMeasurePageReferences:
 
         result = self._run(
             self.tool._get_measure_page_references(
-                WS_ID, "report-id", "My Report", "https://report.url",
-                ["Revenue"], ACCESS_TOKEN, outer_client
+                WS_ID,
+                "report-id",
+                "My Report",
+                "https://report.url",
+                ["Revenue"],
+                ACCESS_TOKEN,
+                outer_client,
             )
         )
 
@@ -4548,7 +5693,9 @@ class TestGetMeasurePageReferences:
         """Lines 3107-3108: 202 → poll Failed → returns []."""
         post_response = MagicMock()
         post_response.status_code = 202
-        post_response.headers = {"Location": "https://api.fabric.microsoft.com/operations/op1"}
+        post_response.headers = {
+            "Location": "https://api.fabric.microsoft.com/operations/op1"
+        }
 
         poll_response = MagicMock()
         poll_response.json.return_value = {"status": "Failed"}
@@ -4557,11 +5704,18 @@ class TestGetMeasurePageReferences:
         outer_client.post = AsyncMock(return_value=post_response)
         outer_client.get = AsyncMock(return_value=poll_response)
 
-        with patch("src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None):
+        with patch(
+            "src.services.tools.powerbi_analysis_tool.asyncio.sleep", return_value=None
+        ):
             result = self._run(
                 self.tool._get_measure_page_references(
-                    WS_ID, "report-id", "My Report", "https://report.url",
-                    ["Revenue"], ACCESS_TOKEN, outer_client
+                    WS_ID,
+                    "report-id",
+                    "My Report",
+                    "https://report.url",
+                    ["Revenue"],
+                    ACCESS_TOKEN,
+                    outer_client,
                 )
             )
 
@@ -4574,8 +5728,13 @@ class TestGetMeasurePageReferences:
 
         result = self._run(
             self.tool._get_measure_page_references(
-                WS_ID, "report-id", "My Report", "https://report.url",
-                ["Revenue"], ACCESS_TOKEN, outer_client
+                WS_ID,
+                "report-id",
+                "My Report",
+                "https://report.url",
+                ["Revenue"],
+                ACCESS_TOKEN,
+                outer_client,
             )
         )
 
@@ -4592,8 +5751,13 @@ class TestGetMeasurePageReferences:
 
         result = self._run(
             self.tool._get_measure_page_references(
-                WS_ID, "report-id", "My Report", "https://report.url",
-                ["Revenue"], ACCESS_TOKEN, outer_client
+                WS_ID,
+                "report-id",
+                "My Report",
+                "https://report.url",
+                ["Revenue"],
+                ACCESS_TOKEN,
+                outer_client,
             )
         )
 
@@ -4605,7 +5769,7 @@ class TestGetMeasurePageReferences:
         visual_data = {"visual": {"visualType": "card"}}
         visual_part = {
             "path": "definition/pages/Page1/visuals/V1/visual.json",
-            "payload": base64.b64encode(json.dumps(visual_data).encode()).decode()
+            "payload": base64.b64encode(json.dumps(visual_data).encode()).decode(),
         }
 
         response = MagicMock()
@@ -4617,8 +5781,13 @@ class TestGetMeasurePageReferences:
 
         result = self._run(
             self.tool._get_measure_page_references(
-                WS_ID, "report-id", "My Report", "https://report.url",
-                ["Revenue"], ACCESS_TOKEN, outer_client
+                WS_ID,
+                "report-id",
+                "My Report",
+                "https://report.url",
+                ["Revenue"],
+                ACCESS_TOKEN,
+                outer_client,
             )
         )
 
@@ -4630,6 +5799,7 @@ class TestGetMeasurePageReferences:
 # ===========================================================================
 # _parse_report_pages: "Pages" capitalized path (lines 3219-3223)
 # ===========================================================================
+
 
 class TestParseReportPagesCapitalizedPath:
     """Test _parse_report_pages with 'Pages' (capital P) in path."""
@@ -4665,6 +5835,7 @@ class TestParseReportPagesCapitalizedPath:
 # (lines 3301-3313)
 # ===========================================================================
 
+
 class TestParseReportVisualsCapitalizedPaths:
     """Test _parse_report_visuals with 'Pages' and 'Visuals' (capitals) in path."""
 
@@ -4677,7 +5848,7 @@ class TestParseReportVisualsCapitalizedPaths:
         payload = base64.b64encode(json.dumps(visual_data).encode()).decode()
         part = {
             "path": "definition/Pages/Page1/Visuals/Vis1/visual.json",
-            "payload": payload
+            "payload": payload,
         }
 
         result = self.tool._parse_report_visuals([part])
@@ -4697,7 +5868,7 @@ class TestParseReportVisualsCapitalizedPaths:
         # Path with /Visuals/ (capital) - handled by the elif branch at line 3309
         part = {
             "path": "definition/Pages/Page2/Visuals/VisualXYZ/visual.json",
-            "payload": payload
+            "payload": payload,
         }
 
         result = self.tool._parse_report_visuals([part])
@@ -4711,6 +5882,7 @@ class TestParseReportVisualsCapitalizedPaths:
 # _parse_visuals_from_report_json edge cases (lines 3351-3390)
 # ===========================================================================
 
+
 class TestParseVisualsFromReportJsonEdgeCases:
     """Test edge cases in _parse_visuals_from_report_json."""
 
@@ -4720,17 +5892,12 @@ class TestParseVisualsFromReportJsonEdgeCases:
     def _make_part(self, path, data):
         return {
             "path": path,
-            "payload": base64.b64encode(json.dumps(data).encode()).decode()
+            "payload": base64.b64encode(json.dumps(data).encode()).decode(),
         }
 
     def test_non_dict_page_item_skipped(self):
         """Line 3351: non-dict item in pages list is skipped."""
-        data = {
-            "pages": [
-                "not-a-dict",
-                {"name": "p1", "visualContainers": []}
-            ]
-        }
+        data = {"pages": ["not-a-dict", {"name": "p1", "visualContainers": []}]}
         part = self._make_part("report.json", data)
         result = self.tool._parse_visuals_from_report_json([part])
         assert isinstance(result, list)
@@ -4738,13 +5905,17 @@ class TestParseVisualsFromReportJsonEdgeCases:
     def test_visual_with_dict_config(self):
         """Lines 3376-3378: config is already a dict, not a string."""
         data = {
-            "pages": [{
-                "name": "p1",
-                "visuals": [{
-                    "name": "v1",
-                    "config": {"singleVisual": {"visualType": "barChart"}}
-                }]
-            }]
+            "pages": [
+                {
+                    "name": "p1",
+                    "visuals": [
+                        {
+                            "name": "v1",
+                            "config": {"singleVisual": {"visualType": "barChart"}},
+                        }
+                    ],
+                }
+            ]
         }
         part = self._make_part("report.json", data)
         result = self.tool._parse_visuals_from_report_json([part])
@@ -4754,13 +5925,9 @@ class TestParseVisualsFromReportJsonEdgeCases:
     def test_visual_with_invalid_json_config_gets_unknown_type(self):
         """Lines 3374: invalid JSON string config → unknown type."""
         data = {
-            "pages": [{
-                "name": "p1",
-                "visuals": [{
-                    "name": "v1",
-                    "config": "not-valid-json{"
-                }]
-            }]
+            "pages": [
+                {"name": "p1", "visuals": [{"name": "v1", "config": "not-valid-json{"}]}
+            ]
         }
         part = self._make_part("report.json", data)
         result = self.tool._parse_visuals_from_report_json([part])
@@ -4770,13 +5937,7 @@ class TestParseVisualsFromReportJsonEdgeCases:
     def test_visual_with_visual_type_key_directly(self):
         """Lines 3379-3381: visual has 'visualType' directly."""
         data = {
-            "pages": [{
-                "name": "p1",
-                "visuals": [{
-                    "name": "v1",
-                    "visualType": "pie"
-                }]
-            }]
+            "pages": [{"name": "p1", "visuals": [{"name": "v1", "visualType": "pie"}]}]
         }
         part = self._make_part("report.json", data)
         result = self.tool._parse_visuals_from_report_json([part])
@@ -4786,13 +5947,12 @@ class TestParseVisualsFromReportJsonEdgeCases:
     def test_non_dict_visual_item_skipped(self):
         """Line 3362: non-dict visual item is skipped."""
         data = {
-            "pages": [{
-                "name": "p1",
-                "visuals": [
-                    "not-a-dict",
-                    {"name": "v1", "visualType": "card"}
-                ]
-            }]
+            "pages": [
+                {
+                    "name": "p1",
+                    "visuals": ["not-a-dict", {"name": "v1", "visualType": "card"}],
+                }
+            ]
         }
         part = self._make_part("report.json", data)
         result = self.tool._parse_visuals_from_report_json([part])
@@ -4807,12 +5967,14 @@ class TestParseVisualsFromReportJsonEdgeCases:
     def test_fallback_visual_id_when_no_name_or_id(self):
         """Line 3364: visual_id fallback to f'visual_{vis_idx}'."""
         data = {
-            "pages": [{
-                "name": "p1",
-                "visuals": [
-                    {"config": {"singleVisual": {"visualType": "card"}}},
-                ]
-            }]
+            "pages": [
+                {
+                    "name": "p1",
+                    "visuals": [
+                        {"config": {"singleVisual": {"visualType": "card"}}},
+                    ],
+                }
+            ]
         }
         part = self._make_part("report.json", data)
         result = self.tool._parse_visuals_from_report_json([part])
@@ -4823,6 +5985,7 @@ class TestParseVisualsFromReportJsonEdgeCases:
 # ===========================================================================
 # _find_measures_in_dict: aggregation context path (lines 3433-3436)
 # ===========================================================================
+
 
 class TestFindMeasuresInDictAggregation:
     """Test _find_measures_in_dict with aggregation context."""
@@ -4863,6 +6026,7 @@ class TestFindMeasuresInDictAggregation:
 # _format_output: visual references and data formatting (lines 3496-3580)
 # ===========================================================================
 
+
 class TestFormatOutputExtendedBranches:
     """Test _format_output branches for visual refs and data tables."""
 
@@ -4876,24 +6040,43 @@ class TestFormatOutputExtendedBranches:
             "dataset_id": DS_ID,
             "model_context": {"measures": [], "tables": [], "relationships": []},
             "generated_dax": "EVALUATE {[Revenue]}",
-            "dax_execution": dax_exec or {"success": True, "data": [], "row_count": 0, "columns": [], "error": None},
+            "dax_execution": dax_exec
+            or {
+                "success": True,
+                "data": [],
+                "row_count": 0,
+                "columns": [],
+                "error": None,
+            },
             "errors": [],
-            "dax_attempts": dax_attempts or [{"attempt": 1, "dax": "EVALUATE {[Revenue]}", "success": True, "error": None}],
+            "dax_attempts": dax_attempts
+            or [
+                {
+                    "attempt": 1,
+                    "dax": "EVALUATE {[Revenue]}",
+                    "success": True,
+                    "error": None,
+                }
+            ],
             "visual_references": visual_refs or [],
         }
 
     def test_visual_refs_with_page_info_formatted(self):
         """Lines 3539-3548: visual references with page info."""
-        refs = [{
-            "report_name": "Sales Report",
-            "report_url": "https://app.powerbi.com/report1",
-            "page_name": "Overview",
-            "page_url": "https://app.powerbi.com/report1/PageOverview",
-            "measure": "Revenue",
-            "visual_type": "card",
-            "note": ""
-        }]
-        output = self.tool._format_output(self._base_results(visual_refs=refs), "markdown")
+        refs = [
+            {
+                "report_name": "Sales Report",
+                "report_url": "https://app.powerbi.com/report1",
+                "page_name": "Overview",
+                "page_url": "https://app.powerbi.com/report1/PageOverview",
+                "measure": "Revenue",
+                "visual_type": "card",
+                "note": "",
+            }
+        ]
+        output = self.tool._format_output(
+            self._base_results(visual_refs=refs), "markdown"
+        )
 
         assert "Sales Report" in output
         assert "Overview" in output
@@ -4901,24 +6084,36 @@ class TestFormatOutputExtendedBranches:
 
     def test_visual_refs_without_page_info_formatted(self):
         """Lines 3549-3557: visual references with page_name=None → _no_page_ bucket."""
-        refs = [{
-            "report_name": "Sales Report",
-            "report_url": "https://app.powerbi.com/report1",
-            "page_name": None,
-            "page_url": None,
-            "measure": "Revenue",
-            "visual_type": None,
-            "note": "Report uses the same dataset"
-        }]
-        output = self.tool._format_output(self._base_results(visual_refs=refs), "markdown")
+        refs = [
+            {
+                "report_name": "Sales Report",
+                "report_url": "https://app.powerbi.com/report1",
+                "page_name": None,
+                "page_url": None,
+                "measure": "Revenue",
+                "visual_type": None,
+                "note": "Report uses the same dataset",
+            }
+        ]
+        output = self.tool._format_output(
+            self._base_results(visual_refs=refs), "markdown"
+        )
 
         assert "Sales Report" in output
         assert "Revenue" in output
 
     def test_dax_execution_failure_formatted(self):
         """Line 3516: failed execution → error message shown."""
-        dax_exec = {"success": False, "data": [], "row_count": 0, "columns": [], "error": "DAX error"}
-        output = self.tool._format_output(self._base_results(dax_exec=dax_exec), "markdown")
+        dax_exec = {
+            "success": False,
+            "data": [],
+            "row_count": 0,
+            "columns": [],
+            "error": "DAX error",
+        }
+        output = self.tool._format_output(
+            self._base_results(dax_exec=dax_exec), "markdown"
+        )
 
         assert "DAX error" in output or "Failed" in output
 
@@ -4929,9 +6124,11 @@ class TestFormatOutputExtendedBranches:
             "data": [{"[Revenue]": 100}, {"[Revenue]": 200}],
             "row_count": 2,
             "columns": ["[Revenue]"],
-            "error": None
+            "error": None,
         }
-        output = self.tool._format_output(self._base_results(dax_exec=dax_exec), "markdown")
+        output = self.tool._format_output(
+            self._base_results(dax_exec=dax_exec), "markdown"
+        )
 
         assert "100" in output or "Revenue" in output
 
@@ -4942,33 +6139,53 @@ class TestFormatOutputExtendedBranches:
             "data": [{"[R]": i} for i in range(25)],
             "row_count": 25,
             "columns": ["[R]"],
-            "error": None
+            "error": None,
         }
-        output = self.tool._format_output(self._base_results(dax_exec=dax_exec), "markdown")
+        output = self.tool._format_output(
+            self._base_results(dax_exec=dax_exec), "markdown"
+        )
 
         assert "more rows" in output
 
     def test_multiple_retry_attempts_shown(self):
         """Lines 3479-3486: multiple dax_attempts → retry history shown."""
         attempts = [
-            {"attempt": 1, "dax": "EVALUATE bad", "success": False, "error": "syntax error", "row_count": 0},
-            {"attempt": 2, "dax": "EVALUATE {[Revenue]}", "success": True, "error": None, "row_count": 5},
+            {
+                "attempt": 1,
+                "dax": "EVALUATE bad",
+                "success": False,
+                "error": "syntax error",
+                "row_count": 0,
+            },
+            {
+                "attempt": 2,
+                "dax": "EVALUATE {[Revenue]}",
+                "success": True,
+                "error": None,
+                "row_count": 5,
+            },
         ]
-        output = self.tool._format_output(self._base_results(dax_attempts=attempts), "markdown")
+        output = self.tool._format_output(
+            self._base_results(dax_attempts=attempts), "markdown"
+        )
 
         assert "Attempt" in output or "2" in output
 
     def test_visual_ref_with_visual_type_shown(self):
         """Line 3577-3578: visual_types shown when present."""
-        refs = [{
-            "report_name": "R1",
-            "report_url": "https://url",
-            "page_name": "P1",
-            "page_url": "https://url/p1",
-            "measure": "M1",
-            "visual_type": "barChart",
-            "note": ""
-        }]
-        output = self.tool._format_output(self._base_results(visual_refs=refs), "markdown")
+        refs = [
+            {
+                "report_name": "R1",
+                "report_url": "https://url",
+                "page_name": "P1",
+                "page_url": "https://url/p1",
+                "measure": "M1",
+                "visual_type": "barChart",
+                "note": "",
+            }
+        ]
+        output = self.tool._format_output(
+            self._base_results(visual_refs=refs), "markdown"
+        )
 
         assert "barChart" in output or "M1" in output

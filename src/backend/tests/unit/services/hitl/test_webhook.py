@@ -5,22 +5,23 @@ Comprehensive unit tests for services/hitl_webhook_service.py
 import hashlib
 import hmac
 import json
-import pytest
 from datetime import datetime, timezone
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
+import pytest
+
+from src.schemas.hitl import (
+    HITLApprovalStatusEnum,
+    HITLWebhookCreate,
+    HITLWebhookEventEnum,
+    HITLWebhookResponse,
+    HITLWebhookUpdate,
+)
 from src.services.hitl.webhook import (
+    WEBHOOK_TIMEOUT_SECONDS,
+    HITLWebhookNotFoundError,
     HITLWebhookService,
     HITLWebhookServiceError,
-    HITLWebhookNotFoundError,
-    WEBHOOK_TIMEOUT_SECONDS,
-)
-from src.schemas.hitl import (
-    HITLWebhookCreate,
-    HITLWebhookUpdate,
-    HITLWebhookEventEnum,
-    HITLApprovalStatusEnum,
-    HITLWebhookResponse,
 )
 
 
@@ -113,7 +114,9 @@ class TestHITLWebhookServiceInit:
                 svc = HITLWebhookService(session=mock_session)
         MockRepo.assert_called_once_with(mock_session)
 
-    def test_uses_provided_repos(self, mock_session, mock_webhook_repo, mock_approval_repo):
+    def test_uses_provided_repos(
+        self, mock_session, mock_webhook_repo, mock_approval_repo
+    ):
         svc = HITLWebhookService(
             session=mock_session,
             webhook_repository=mock_webhook_repo,
@@ -331,7 +334,9 @@ class TestBuildPayload:
     def test_approval_url_included(self, service):
         approval = _make_approval()
         payload = service._build_payload(
-            approval, HITLWebhookEventEnum.GATE_REACHED, approval_url="https://example.com/approve/10"
+            approval,
+            HITLWebhookEventEnum.GATE_REACHED,
+            approval_url="https://example.com/approve/10",
         )
         assert payload.approval_url == "https://example.com/approve/10"
 
@@ -410,7 +415,9 @@ class TestSendWebhook:
 
         with patch("src.services.hitl.webhook.httpx.AsyncClient") as MockClient:
             instance = AsyncMock()
-            instance.post = AsyncMock(side_effect=httpx.RequestError("connection refused"))
+            instance.post = AsyncMock(
+                side_effect=httpx.RequestError("connection refused")
+            )
             MockClient.return_value.__aenter__ = AsyncMock(return_value=instance)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -478,14 +485,20 @@ class TestSendNotification:
     async def test_returns_true_when_no_webhooks(self, service, mock_webhook_repo):
         mock_webhook_repo.get_for_event = AsyncMock(return_value=[])
         approval = _make_approval()
-        result = await service._send_notification(approval, HITLWebhookEventEnum.GATE_REACHED)
+        result = await service._send_notification(
+            approval, HITLWebhookEventEnum.GATE_REACHED
+        )
         assert result is True
 
     @pytest.mark.asyncio
     async def test_returns_false_on_exception(self, service, mock_webhook_repo):
-        mock_webhook_repo.get_for_event = AsyncMock(side_effect=RuntimeError("db error"))
+        mock_webhook_repo.get_for_event = AsyncMock(
+            side_effect=RuntimeError("db error")
+        )
         approval = _make_approval()
-        result = await service._send_notification(approval, HITLWebhookEventEnum.GATE_REACHED)
+        result = await service._send_notification(
+            approval, HITLWebhookEventEnum.GATE_REACHED
+        )
         assert result is False
 
     @pytest.mark.asyncio
@@ -499,7 +512,9 @@ class TestSendNotification:
 
         response_data = {"status_code": 200, "success": True}
 
-        with patch.object(service, "_send_webhook", new_callable=AsyncMock, return_value=response_data):
+        with patch.object(
+            service, "_send_webhook", new_callable=AsyncMock, return_value=response_data
+        ):
             result = await service._send_notification(
                 approval, HITLWebhookEventEnum.GATE_REACHED
             )
@@ -515,8 +530,12 @@ class TestSendNotification:
         mock_webhook_repo.get_for_event = AsyncMock(return_value=webhooks)
         approval = _make_approval()
 
-        with patch.object(service, "_send_webhook", new_callable=AsyncMock, return_value=None):
-            result = await service._send_notification(approval, HITLWebhookEventEnum.GATE_APPROVED)
+        with patch.object(
+            service, "_send_webhook", new_callable=AsyncMock, return_value=None
+        ):
+            result = await service._send_notification(
+                approval, HITLWebhookEventEnum.GATE_APPROVED
+            )
 
         assert result is False
 
@@ -527,8 +546,12 @@ class TestNotificationPublicMethods:
     @pytest.mark.asyncio
     async def test_send_gate_reached_notification(self, service):
         approval = _make_approval()
-        with patch.object(service, "_send_notification", new_callable=AsyncMock, return_value=True) as mock_notify:
-            result = await service.send_gate_reached_notification(approval, approval_url="https://example.com")
+        with patch.object(
+            service, "_send_notification", new_callable=AsyncMock, return_value=True
+        ) as mock_notify:
+            result = await service.send_gate_reached_notification(
+                approval, approval_url="https://example.com"
+            )
 
         mock_notify.assert_called_once_with(
             approval=approval,
@@ -540,7 +563,9 @@ class TestNotificationPublicMethods:
     @pytest.mark.asyncio
     async def test_send_gate_approved_notification(self, service):
         approval = _make_approval()
-        with patch.object(service, "_send_notification", new_callable=AsyncMock, return_value=True) as mock_notify:
+        with patch.object(
+            service, "_send_notification", new_callable=AsyncMock, return_value=True
+        ) as mock_notify:
             result = await service.send_gate_approved_notification(approval)
 
         mock_notify.assert_called_once_with(
@@ -551,7 +576,9 @@ class TestNotificationPublicMethods:
     @pytest.mark.asyncio
     async def test_send_gate_rejected_notification(self, service):
         approval = _make_approval()
-        with patch.object(service, "_send_notification", new_callable=AsyncMock, return_value=False) as mock_notify:
+        with patch.object(
+            service, "_send_notification", new_callable=AsyncMock, return_value=False
+        ) as mock_notify:
             result = await service.send_gate_rejected_notification(approval)
 
         mock_notify.assert_called_once_with(
@@ -562,7 +589,9 @@ class TestNotificationPublicMethods:
     @pytest.mark.asyncio
     async def test_send_gate_timeout_notification(self, service):
         approval = _make_approval()
-        with patch.object(service, "_send_notification", new_callable=AsyncMock, return_value=True) as mock_notify:
+        with patch.object(
+            service, "_send_notification", new_callable=AsyncMock, return_value=True
+        ) as mock_notify:
             await service.send_gate_timeout_notification(approval)
 
         mock_notify.assert_called_once_with(

@@ -3,15 +3,17 @@ Comprehensive unit tests for User SQLAlchemy model.
 
 Tests the User model in user.py including table structure and utility functions.
 """
-import pytest
+
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, UniqueConstraint
-from sqlalchemy.orm import relationship
 from uuid import UUID
 
-from src.models.user import generate_uuid, User
-from src.models.enums import UserRole, UserStatus
+import pytest
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy.orm import relationship
+
 from src.db.base import Base
+from src.models.enums import UserRole, UserStatus
+from src.models.user import User, generate_uuid
 
 
 class TestGenerateUuid:
@@ -43,7 +45,7 @@ class TestGenerateUuid:
         uuid_str = generate_uuid()
 
         # UUID4 format: 8-4-4-4-12 characters
-        parts = uuid_str.split('-')
+        parts = uuid_str.split("-")
         assert len(parts) == 5
         assert len(parts[0]) == 8
         assert len(parts[1]) == 4
@@ -66,9 +68,17 @@ class TestUser:
     def test_user_columns_exist(self):
         """Test User has expected columns."""
         expected_columns = [
-            'id', 'username', 'email', 'display_name', 'role', 'status',
-            'is_system_admin', 'is_personal_workspace_manager', 'created_at',
-            'updated_at', 'last_login'
+            "id",
+            "username",
+            "email",
+            "display_name",
+            "role",
+            "status",
+            "is_system_admin",
+            "is_personal_workspace_manager",
+            "created_at",
+            "updated_at",
+            "last_login",
         ]
 
         for column_name in expected_columns:
@@ -116,7 +126,7 @@ class TestUser:
         column = role_column.property.columns[0]
         assert isinstance(column, Column)
         # SQLAlchemy Enum column
-        assert hasattr(column.type, 'enum_class')
+        assert hasattr(column.type, "enum_class")
         assert column.default is not None
 
     def test_user_status_column_properties(self):
@@ -125,7 +135,7 @@ class TestUser:
         column = status_column.property.columns[0]
         assert isinstance(column, Column)
         # SQLAlchemy Enum column
-        assert hasattr(column.type, 'enum_class')
+        assert hasattr(column.type, "enum_class")
         assert column.default is not None
 
     def test_user_boolean_columns_properties(self):
@@ -184,7 +194,7 @@ class TestUser:
             role=UserRole.ADMIN,
             status=UserStatus.ACTIVE,
             is_system_admin=True,
-            is_personal_workspace_manager=True
+            is_personal_workspace_manager=True,
         )
 
         assert user.username == "testuser"
@@ -197,10 +207,7 @@ class TestUser:
 
     def test_user_initialization_minimal(self):
         """Test User initialization with minimal required fields."""
-        user = User(
-            username="testuser",
-            email="test@example.com"
-        )
+        user = User(username="testuser", email="test@example.com")
 
         assert user.username == "testuser"
         assert user.email == "test@example.com"
@@ -217,15 +224,15 @@ class TestUserModelProperties:
 
     def test_all_models_have_sqlalchemy_attributes(self):
         """Test User model has SQLAlchemy attributes."""
-        assert hasattr(User, '__table__')
-        assert hasattr(User, '__mapper__')
-        assert hasattr(User, 'metadata')
+        assert hasattr(User, "__table__")
+        assert hasattr(User, "__mapper__")
+        assert hasattr(User, "metadata")
 
     def test_user_has_id_primary_key(self):
         """Test User model has id as primary key."""
         table = User.__table__
         primary_key_columns = [col.name for col in table.primary_key.columns]
-        assert primary_key_columns == ['id']
+        assert primary_key_columns == ["id"]
 
     def test_user_uses_generate_uuid(self):
         """Test User model uses generate_uuid for default id."""
@@ -238,8 +245,8 @@ class TestUserModelProperties:
         status_column = User.status.property.columns[0]
 
         # Check that enum types are used
-        assert hasattr(role_column.type, 'enum_class')
-        assert hasattr(status_column.type, 'enum_class')
+        assert hasattr(role_column.type, "enum_class")
+        assert hasattr(status_column.type, "enum_class")
 
     def test_unique_constraints(self):
         """Test unique constraints on User model."""
@@ -251,8 +258,8 @@ class TestUserModelProperties:
             if column.unique:
                 unique_columns.append(column.name)
 
-        assert 'username' in unique_columns
-        assert 'email' in unique_columns
+        assert "username" in unique_columns
+        assert "email" in unique_columns
 
     def test_indexed_columns(self):
         """Test indexed columns."""
@@ -263,12 +270,12 @@ class TestUserModelProperties:
             if column.index:
                 indexed_columns.append(column.name)
 
-        assert 'username' in indexed_columns
-        assert 'email' in indexed_columns
+        assert "username" in indexed_columns
+        assert "email" in indexed_columns
 
     def test_timezone_aware_datetime_columns(self):
         """Test timezone-aware datetime columns."""
-        user_datetime_columns = ['created_at', 'updated_at', 'last_login']
+        user_datetime_columns = ["created_at", "updated_at", "last_login"]
 
         for col_name in user_datetime_columns:
             column = User.__table__.columns[col_name]

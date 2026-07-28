@@ -10,6 +10,7 @@ import os
 
 from src.core.llm.transport import LLM
 
+
 class VLLMFunctionCallingLLM(LLM):
     """LLM subclass for self-hosted vLLM endpoints.
 
@@ -35,7 +36,9 @@ class VLLMFunctionCallingLLM(LLM):
     ``VLLM_FORCE_TOOL_FIRST_TURN=false``.
     """
 
-    def _prepare_completion_params(self, messages, tools=None, skip_file_processing=False):
+    def _prepare_completion_params(
+        self, messages, tools=None, skip_file_processing=False
+    ):
         """Force a tool call on the FIRST turn so Qwen3-Coder cannot skip attached
         tools and fabricate an answer.
 
@@ -59,7 +62,8 @@ class VLLMFunctionCallingLLM(LLM):
             if params.get("tools") and "tool_choice" not in params:
                 history = params.get("messages") or []
                 already_used_tool = any(
-                    isinstance(m, dict) and (m.get("role") == "tool" or m.get("tool_calls"))
+                    isinstance(m, dict)
+                    and (m.get("role") == "tool" or m.get("tool_calls"))
                     for m in history
                 )
                 if not already_used_tool:

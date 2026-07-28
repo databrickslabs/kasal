@@ -10,10 +10,10 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-import src.services.generation.crews as _mod
 # The chat fast path lives in its own module now; sse_manager is a shared
 # singleton, so patching an attribute on it there reaches every caller.
 import src.services.generation.crew.chat_fast_path as _chat_mod
+import src.services.generation.crews as _mod
 from src.services.generation.crews import CrewGenerationService
 
 # ---------------------------------------------------------------------------
@@ -26,9 +26,7 @@ def _build_service():
     mock_session = Mock()
     with (
         patch("src.services.generation.crews.LLMLogService") as mock_log_svc_cls,
-        patch(
-            "src.services.generation.crews.LLMLogRepository"
-        ) as mock_log_repo_cls,
+        patch("src.services.generation.crews.LLMLogRepository") as mock_log_repo_cls,
         patch(
             "src.services.generation.crews.CrewGeneratorRepository"
         ) as mock_crew_repo_cls,
@@ -161,9 +159,7 @@ class TestInit:
         with (
             patch("src.services.generation.crews.LLMLogService") as log_svc,
             patch("src.services.generation.crews.LLMLogRepository") as log_repo,
-            patch(
-                "src.services.generation.crews.CrewGeneratorRepository"
-            ) as crew_repo,
+            patch("src.services.generation.crews.CrewGeneratorRepository") as crew_repo,
         ):
             svc = CrewGenerationService(mock_session)
 
@@ -2207,7 +2203,9 @@ class TestProgressiveGeneration:
                     "src.services.generation.crew.progressive.CrewGeneratorRepository"
                 )
                 # Patch ToolService
-                p_tool_svc = patch("src.services.generation.crew.progressive.ToolService")
+                p_tool_svc = patch(
+                    "src.services.generation.crew.progressive.ToolService"
+                )
                 # Patch _get_tool_details
                 p_gtd = patch.object(
                     service, "_get_tool_details", new_callable=AsyncMock
@@ -2423,7 +2421,9 @@ class TestProgressiveGeneration:
         """chat_mode_type='chat' + auto_execute=True IS the chat answer run: it
         takes _run_chat_fast_path (single light agent) and never plans a crew."""
         request = self._make_progressive_request(
-            auto_execute=True, chat_mode_type="chat", session_id="chat-1",
+            auto_execute=True,
+            chat_mode_type="chat",
+            session_id="chat-1",
         )
 
         with self._progressive_patches() as m:
@@ -3344,7 +3344,9 @@ class TestProgressiveGeneration:
             process_type="parallel",  # Not sequential, so [:max_tasks]
         )
         # Explicit "2 tasks" request -> max_tasks=2, but plan has 3
-        request = self._make_progressive_request(prompt="find and analyze data in 2 tasks")
+        request = self._make_progressive_request(
+            prompt="find and analyze data in 2 tasks"
+        )
         request.original_prompt = None
         gen_id = "gen-trunc-tasks"
 
@@ -3379,7 +3381,9 @@ class TestProgressiveGeneration:
             process_type="parallel",
         )
         # Explicit "2 tasks" -> Task3 gets truncated, Task2's stale context ref removed
-        request = self._make_progressive_request(prompt="find and analyze data in 2 tasks")
+        request = self._make_progressive_request(
+            prompt="find and analyze data in 2 tasks"
+        )
         request.original_prompt = None
         gen_id = "gen-context-filter"
 
@@ -4010,8 +4014,14 @@ class TestBuildCrewConfigFromGenerated:
     def test_explicit_agent_llm_not_overridden_by_request_model(self):
         """A per-agent model (from generation) wins over the request model."""
         agents = [
-            {"id": "a1", "role": "r", "goal": "g", "backstory": "b", "tools": [],
-             "llm": "databricks-gpt-5"}
+            {
+                "id": "a1",
+                "role": "r",
+                "goal": "g",
+                "backstory": "b",
+                "tools": [],
+                "llm": "databricks-gpt-5",
+            }
         ]
         tasks = [{"id": "t1", "description": "d", "agent_id": "a1"}]
         cfg = CrewGenerationService.build_crew_config_from_generated(
@@ -4028,7 +4038,9 @@ class TestBuildCrewConfigFromGenerated:
         )
         assert "llm" not in cfg["agents_yaml"]["agent_a1"]
 
-    def test_chat_mode_type_drives_reasoning_budget_and_execution_type(self, monkeypatch):
+    def test_chat_mode_type_drives_reasoning_budget_and_execution_type(
+        self, monkeypatch
+    ):
         """The ChatMode answer mode maps to a MODEL reasoning budget (thinking
         effort) + execution_type: chat → single light agent, no extra thinking;
         research → crew at medium effort; deep → crew at high effort. The old
@@ -4100,14 +4112,28 @@ class TestBuildCrewConfigFromGenerated:
         cfg = CrewGenerationService.build_crew_config_from_generated(
             req,
             [{"id": "a1", "role": "r", "tools": ["DatabricksKnowledgeSearchTool"]}],
-            [{"id": "t1", "description": "d", "agent_id": "a1",
-              "tools": ["DatabricksKnowledgeSearchTool"]}],
+            [
+                {
+                    "id": "t1",
+                    "description": "d",
+                    "agent_id": "a1",
+                    "tools": ["DatabricksKnowledgeSearchTool"],
+                }
+            ],
         )
         scope = {"file_paths": paths}
-        assert cfg["agents_yaml"]["agent_a1"]["tool_configs"][
-            "DatabricksKnowledgeSearchTool"] == scope
-        assert cfg["tasks_yaml"]["task_t1"]["tool_configs"][
-            "DatabricksKnowledgeSearchTool"] == scope
+        assert (
+            cfg["agents_yaml"]["agent_a1"]["tool_configs"][
+                "DatabricksKnowledgeSearchTool"
+            ]
+            == scope
+        )
+        assert (
+            cfg["tasks_yaml"]["task_t1"]["tool_configs"][
+                "DatabricksKnowledgeSearchTool"
+            ]
+            == scope
+        )
 
     def test_no_knowledge_file_paths_no_scoping_injected(self):
         """Without attached files, no DatabricksKnowledgeSearchTool scoping is
@@ -4222,6 +4248,7 @@ class TestChatFastPath:
     @staticmethod
     def _req(**kw):
         from src.schemas.crew import CrewStreamingRequest
+
         return CrewStreamingRequest(prompt="p", **kw)
 
     @pytest.mark.asyncio
@@ -4242,14 +4269,19 @@ class TestChatFastPath:
             return_value={"execution_id": "exec-1", "run_name": "Run A"}
         )
         broadcast = AsyncMock()
-        with patch("src.services.execution.service.ExecutionService", MagicMock(return_value=exec_instance)), \
-             patch.object(_chat_mod.sse_manager, "broadcast_to_job", broadcast):
+        with (
+            patch(
+                "src.services.execution.service.ExecutionService",
+                MagicMock(return_value=exec_instance),
+            ),
+            patch.object(_chat_mod.sse_manager, "broadcast_to_job", broadcast),
+        ):
             await svc._run_chat_fast_path(req, None, "gen-1", None)
 
         # Light agent execution launched from a config built WITHOUT generation.
         exec_instance.create_execution.assert_awaited_once()
         crew_config = exec_instance.create_execution.await_args.kwargs["config"]
-        assert crew_config.execution_type == "agent"           # light path
+        assert crew_config.execution_type == "agent"  # light path
         assert crew_config.reasoning is False
         # CrewConfig no longer models the removed planner at all.
         assert not hasattr(crew_config, "planning")
@@ -4276,8 +4308,13 @@ class TestChatFastPath:
         exec_instance = MagicMock()
         exec_instance.create_execution = AsyncMock(side_effect=RuntimeError("boom"))
         broadcast = AsyncMock()
-        with patch("src.services.execution.service.ExecutionService", MagicMock(return_value=exec_instance)), \
-             patch.object(_chat_mod.sse_manager, "broadcast_to_job", broadcast):
+        with (
+            patch(
+                "src.services.execution.service.ExecutionService",
+                MagicMock(return_value=exec_instance),
+            ),
+            patch.object(_chat_mod.sse_manager, "broadcast_to_job", broadcast),
+        ):
             await svc._run_chat_fast_path(req, None, "gen-1", None)
         event = broadcast.await_args.args[1]
         assert event.data.get("execution_error") == "boom"
@@ -4289,8 +4326,10 @@ class TestChatFastPath:
         path and NEVER runs the planning LLM call."""
         svc = CrewGenerationService(MagicMock())
         req = self._req(chat_mode_type="chat", auto_execute=True)
-        with patch.object(svc, "_run_chat_fast_path", new=AsyncMock()) as fast, \
-             patch.object(svc, "_generate_crew_plan", new=AsyncMock()) as plan:
+        with (
+            patch.object(svc, "_run_chat_fast_path", new=AsyncMock()) as fast,
+            patch.object(svc, "_generate_crew_plan", new=AsyncMock()) as plan,
+        ):
             await svc.create_crew_progressive(req, None, "gen-1", mlflow_enabled=False)
         fast.assert_awaited_once()
         plan.assert_not_called()
@@ -4300,8 +4339,14 @@ class TestChatFastPath:
         """research/deep still generate a crew (fast path is chat-only)."""
         svc = CrewGenerationService(MagicMock())
         req = self._req(chat_mode_type="research", auto_execute=True)
-        with patch.object(svc, "_run_chat_fast_path", new=AsyncMock()) as fast, \
-             patch.object(svc, "_generate_crew_plan", new=AsyncMock(return_value={"agents": [], "tasks": []})) as plan:
+        with (
+            patch.object(svc, "_run_chat_fast_path", new=AsyncMock()) as fast,
+            patch.object(
+                svc,
+                "_generate_crew_plan",
+                new=AsyncMock(return_value={"agents": [], "tasks": []}),
+            ) as plan,
+        ):
             await svc.create_crew_progressive(req, None, "gen-1", mlflow_enabled=False)
         fast.assert_not_called()
         plan.assert_awaited_once()

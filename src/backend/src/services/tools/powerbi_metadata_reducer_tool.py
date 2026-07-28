@@ -22,25 +22,25 @@ Date: 2026
 
 import asyncio
 import contextvars
-import logging
 import json
+import logging
 import re
 import time
-from typing import Any, Optional, Type, Dict, List
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List, Optional, Type
 
-from src.services.tools.base import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 
+from src.services.tools.base import BaseTool
 from src.services.tools.tool_session_provider import ToolSessionProvider
 
-from .metadata_reduction.fuzzy_scorer import FuzzyScorer
-from .metadata_reduction.dependency_resolver import MeasureDependencyResolver
-from .metadata_reduction.value_normalizer import ValueNormalizer
-from .metadata_reduction.question_preprocessor import QuestionPreprocessor
-from .metadata_reduction.measure_resolver import MeasureResolver
 from .metadata_reduction.dax_skeleton_builder import DaxSkeletonBuilder
+from .metadata_reduction.dependency_resolver import MeasureDependencyResolver
 from .metadata_reduction.dimension_resolver import DimensionResolver
+from .metadata_reduction.fuzzy_scorer import FuzzyScorer
+from .metadata_reduction.measure_resolver import MeasureResolver
+from .metadata_reduction.question_preprocessor import QuestionPreprocessor
+from .metadata_reduction.value_normalizer import ValueNormalizer
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -70,6 +70,7 @@ def _run_async_in_sync_context(coro):
 
 # ─── Input Schema ───────────────────────────────────────────────────────────
 
+
 class PowerBIMetadataReducerSchema(BaseModel):
     """Input schema for PowerBIMetadataReducerTool.
 
@@ -93,6 +94,7 @@ class PowerBIMetadataReducerSchema(BaseModel):
 
 
 # ─── Tool Class ─────────────────────────────────────────────────────────────
+
 
 class PowerBIMetadataReducerTool(BaseTool):
     """
@@ -121,6 +123,7 @@ class PowerBIMetadataReducerTool(BaseTool):
 
     def __init__(self, **kwargs: Any) -> None:
         import uuid
+
         instance_id = str(uuid.uuid4())[:8]
         logger.info(f"[MetadataReducer.__init__] Instance ID: {instance_id}")
 
@@ -131,7 +134,9 @@ class PowerBIMetadataReducerTool(BaseTool):
             "synonym_boost_min": kwargs.get("synonym_boost_min", 60.0),
             "max_tables": kwargs.get("max_tables", 15),
             "max_measures": kwargs.get("max_measures", 30),
-            "enable_value_normalization": kwargs.get("enable_value_normalization", True),
+            "enable_value_normalization": kwargs.get(
+                "enable_value_normalization", True
+            ),
             "dataset_id": kwargs.get("dataset_id"),
             "workspace_id": kwargs.get("workspace_id"),
             # No "default" here — leave unset so _resolve_group_id can fall
@@ -173,7 +178,9 @@ class PowerBIMetadataReducerTool(BaseTool):
             gc_group = gc.primary_group_id if gc else None
         return (
             config.get("group_id")
-            or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id")
+            or (getattr(self, "trace_context", None) or {})
+            .get("group_context", {})
+            .get("primary_group_id")
             or gc_group
             or "default"
         )
@@ -183,7 +190,9 @@ class PowerBIMetadataReducerTool(BaseTool):
     def _run(self, **kwargs: Any) -> str:
         """Execute the metadata reduction pipeline."""
         try:
-            logger.info(f"[MetadataReducer] ═══ _run() START (instance={self._instance_id}) ═══")
+            logger.info(
+                f"[MetadataReducer] ═══ _run() START (instance={self._instance_id}) ═══"
+            )
             logger.info(
                 f"[MetadataReducer] Config: strategy={self._default_config.get('strategy')}, "
                 f"question='{(self._default_config.get('user_question') or '')[:80]}...', "
@@ -202,7 +211,9 @@ class PowerBIMetadataReducerTool(BaseTool):
             t0 = time.time()
             result = _run_async_in_sync_context(self._execute_reducer_pipeline(config))
             elapsed = time.time() - t0
-            logger.info(f"[MetadataReducer] ═══ _run() DONE in {elapsed:.2f}s (output={len(result)} chars) ═══")
+            logger.info(
+                f"[MetadataReducer] ═══ _run() DONE in {elapsed:.2f}s (output={len(result)} chars) ═══"
+            )
             return result
 
         except Exception as e:
@@ -227,7 +238,9 @@ class PowerBIMetadataReducerTool(BaseTool):
         # Step 1: Parse model context (try JSON first, then cache fallback)
         t1 = time.time()
         model_context = await self._parse_model_context(config)
-        logger.info(f"[MetadataReducer] Step 1 (parse/cache) done in {time.time()-t1:.2f}s")
+        logger.info(
+            f"[MetadataReducer] Step 1 (parse/cache) done in {time.time()-t1:.2f}s"
+        )
         if "error" in model_context:
             return json.dumps(model_context)
 
@@ -248,7 +261,9 @@ class PowerBIMetadataReducerTool(BaseTool):
                 "reduction_pct": 0.0,
                 "reasoning": "Passthrough mode — no reduction applied.",
             }
-            logger.info(f"[MetadataReducer] Passthrough — returning unchanged in {time.time()-pipeline_start:.2f}s")
+            logger.info(
+                f"[MetadataReducer] Passthrough — returning unchanged in {time.time()-pipeline_start:.2f}s"
+            )
             return json.dumps(model_context)
 
         tables = model_context.get("tables", [])
@@ -262,15 +277,21 @@ class PowerBIMetadataReducerTool(BaseTool):
         enrichment_data_raw = config.get("enrichment_data", {})
         if isinstance(enrichment_data_raw, str):
             try:
-                enrichment_data = json.loads(enrichment_data_raw) if enrichment_data_raw else {}
+                enrichment_data = (
+                    json.loads(enrichment_data_raw) if enrichment_data_raw else {}
+                )
             except (json.JSONDecodeError, TypeError):
                 enrichment_data = {}
         else:
             enrichment_data = enrichment_data_raw or {}
 
         if enrichment_data:
-            enriched_counts = self._merge_enrichment_data(tables, measures, columns, enrichment_data)
-            logger.info(f"[MetadataReducer][ENRICHMENT] Merged enrichment data — {enriched_counts}")
+            enriched_counts = self._merge_enrichment_data(
+                tables, measures, columns, enrichment_data
+            )
+            logger.info(
+                f"[MetadataReducer][ENRICHMENT] Merged enrichment data — {enriched_counts}"
+            )
 
         # Step 1b-dim: Resolve dimension keywords → explicit table-qualified column bindings
         # This runs before fuzzy scoring so the skeleton builder has concrete bindings.
@@ -279,7 +300,9 @@ class PowerBIMetadataReducerTool(BaseTool):
         # Step 1c: Parse reference DAX for force-include table/measure names
         reference_dax = config.get("reference_dax", "")
         if isinstance(reference_dax, str) and reference_dax.strip():
-            ref_tables, ref_measures = self._parse_reference_dax(reference_dax, tables, measures)
+            ref_tables, ref_measures = self._parse_reference_dax(
+                reference_dax, tables, measures
+            )
             if ref_tables or ref_measures:
                 logger.info(
                     f"[MetadataReducer][REFERENCE_DAX] Parsed → "
@@ -315,7 +338,9 @@ class PowerBIMetadataReducerTool(BaseTool):
         else:
             business_terms = business_terms_raw or {}
         if business_terms:
-            logger.info(f"[MetadataReducer] Business terms loaded: {list(business_terms.keys())}")
+            logger.info(
+                f"[MetadataReducer] Business terms loaded: {list(business_terms.keys())}"
+            )
 
         # Step 2a: Question preprocessing — extract structured intent
         t2a = time.time()
@@ -336,12 +361,15 @@ class PowerBIMetadataReducerTool(BaseTool):
         )
 
         # Detect question split
-        question_intent = preprocessor.detect_split(question_intent, known_measures=known_measure_names)
+        question_intent = preprocessor.detect_split(
+            question_intent, known_measures=known_measure_names
+        )
         logger.info(f"[MetadataReducer][PREPROCESSOR] Done in {time.time()-t2a:.3f}s")
 
         # Step 1b-dim (continued): now that question_intent is available, resolve dimensions
         dim_keywords = [
-            kw for kw in (getattr(question_intent, "dimensions", []) or [])
+            kw
+            for kw in (getattr(question_intent, "dimensions", []) or [])
             if kw and kw.lower() not in {m.lower() for m in known_measure_names}
         ]
         if dim_keywords:
@@ -353,7 +381,11 @@ class PowerBIMetadataReducerTool(BaseTool):
                     keywords=dim_keywords,
                     selected_tables=tables,
                     sample_data=sample_data,
-                    field_synonyms=field_synonyms_raw if isinstance(field_synonyms_raw, dict) else {},
+                    field_synonyms=(
+                        field_synonyms_raw
+                        if isinstance(field_synonyms_raw, dict)
+                        else {}
+                    ),
                     threshold=0.70,
                 )
             ]
@@ -368,15 +400,34 @@ class PowerBIMetadataReducerTool(BaseTool):
 
         if strategy == "fuzzy":
             # ── Fuzzy-only: deterministic scoring, no LLM ──
-            logger.info(f"[MetadataReducer][FUZZY_SCORING] Starting (threshold={threshold})...")
-            ranked_tables = scorer.rank_tables(tables, user_question, sample_data=sample_data, business_terms=business_terms, question_intent=question_intent)
-            ranked_measures = scorer.rank_measures(measures, user_question, business_terms=business_terms, question_intent=question_intent)
+            logger.info(
+                f"[MetadataReducer][FUZZY_SCORING] Starting (threshold={threshold})..."
+            )
+            ranked_tables = scorer.rank_tables(
+                tables,
+                user_question,
+                sample_data=sample_data,
+                business_terms=business_terms,
+                question_intent=question_intent,
+            )
+            ranked_measures = scorer.rank_measures(
+                measures,
+                user_question,
+                business_terms=business_terms,
+                question_intent=question_intent,
+            )
 
             # Log top fuzzy scores for visibility
             top_tables = [(r["table"]["name"], r["score"]) for r in ranked_tables[:8]]
-            logger.info(f"[MetadataReducer][FUZZY_SCORING] Top table scores: {top_tables}")
-            top_measures_scores = [(r["measure"]["name"], r["score"]) for r in ranked_measures[:8]]
-            logger.info(f"[MetadataReducer][FUZZY_SCORING] Top measure scores: {top_measures_scores}")
+            logger.info(
+                f"[MetadataReducer][FUZZY_SCORING] Top table scores: {top_tables}"
+            )
+            top_measures_scores = [
+                (r["measure"]["name"], r["score"]) for r in ranked_measures[:8]
+            ]
+            logger.info(
+                f"[MetadataReducer][FUZZY_SCORING] Top measure scores: {top_measures_scores}"
+            )
 
             selected_table_names = [
                 r["table"]["name"] for r in ranked_tables if r["score"] >= threshold
@@ -393,9 +444,22 @@ class PowerBIMetadataReducerTool(BaseTool):
         elif strategy == "llm":
             # ── LLM-only: send full catalog to LLM without fuzzy hints ──
             # (LLMManager authenticates internally — no credentials needed)
-            logger.info(f"[MetadataReducer][LLM_SELECTION] LLM-only selection (model={config.get('llm_model')})...")
-            ranked_tables = scorer.rank_tables(tables, user_question, sample_data=sample_data, business_terms=business_terms, question_intent=question_intent)
-            ranked_measures = scorer.rank_measures(measures, user_question, business_terms=business_terms, question_intent=question_intent)
+            logger.info(
+                f"[MetadataReducer][LLM_SELECTION] LLM-only selection (model={config.get('llm_model')})..."
+            )
+            ranked_tables = scorer.rank_tables(
+                tables,
+                user_question,
+                sample_data=sample_data,
+                business_terms=business_terms,
+                question_intent=question_intent,
+            )
+            ranked_measures = scorer.rank_measures(
+                measures,
+                user_question,
+                business_terms=business_terms,
+                question_intent=question_intent,
+            )
             for entry in ranked_tables:
                 entry["likely_relevant"] = False
             selected = await self._llm_select_tables_and_measures(
@@ -412,31 +476,55 @@ class PowerBIMetadataReducerTool(BaseTool):
 
         elif strategy == "combined":
             # ── Combined: fuzzy pre-screening + LLM with hints ──
-            logger.info(f"[MetadataReducer][FUZZY_SCORING] Pre-screening for combined strategy...")
-            ranked_tables = scorer.rank_tables(tables, user_question, sample_data=sample_data, business_terms=business_terms, question_intent=question_intent)
-            ranked_measures = scorer.rank_measures(measures, user_question, business_terms=business_terms, question_intent=question_intent)
+            logger.info(
+                f"[MetadataReducer][FUZZY_SCORING] Pre-screening for combined strategy..."
+            )
+            ranked_tables = scorer.rank_tables(
+                tables,
+                user_question,
+                sample_data=sample_data,
+                business_terms=business_terms,
+                question_intent=question_intent,
+            )
+            ranked_measures = scorer.rank_measures(
+                measures,
+                user_question,
+                business_terms=business_terms,
+                question_intent=question_intent,
+            )
             fuzzy_time = time.time() - t2
 
-            top_tables = [(r["table"]["name"], r["score"], r["likely_relevant"]) for r in ranked_tables[:8]]
-            logger.info(f"[MetadataReducer][FUZZY_SCORING] Done in {fuzzy_time:.2f}s. Top tables: {top_tables}")
+            top_tables = [
+                (r["table"]["name"], r["score"], r["likely_relevant"])
+                for r in ranked_tables[:8]
+            ]
+            logger.info(
+                f"[MetadataReducer][FUZZY_SCORING] Done in {fuzzy_time:.2f}s. Top tables: {top_tables}"
+            )
 
             t3 = time.time()
-            logger.info(f"[MetadataReducer][LLM_SELECTION] Starting (model={config.get('llm_model')})...")
+            logger.info(
+                f"[MetadataReducer][LLM_SELECTION] Starting (model={config.get('llm_model')})..."
+            )
             selected = await self._llm_select_tables_and_measures(
                 user_question, ranked_tables, ranked_measures, config
             )
             selected_table_names = selected.get("tables", [])
             selected_measure_names = selected.get("measures", [])
-            selection_reasoning = selected.get("reasoning", "Combined fuzzy + LLM selection")
+            selection_reasoning = selected.get(
+                "reasoning", "Combined fuzzy + LLM selection"
+            )
             logger.info(
                 f"[MetadataReducer][LLM_SELECTION] Done in {time.time()-t3:.2f}s — "
                 f"selected {len(selected_table_names)} tables: {selected_table_names}, "
                 f"{len(selected_measure_names)} measures: {selected_measure_names}"
             )
         else:
-            return json.dumps({
-                "error": f"Unknown strategy '{strategy}'. Use: fuzzy, llm, combined, or passthrough."
-            })
+            return json.dumps(
+                {
+                    "error": f"Unknown strategy '{strategy}'. Use: fuzzy, llm, combined, or passthrough."
+                }
+            )
 
         # Normalize measure names: LLM returns "[table] name" format but
         # the dependency resolver indexes by bare "name". Strip the prefix.
@@ -449,12 +537,16 @@ class PowerBIMetadataReducerTool(BaseTool):
             for rt in ref_tables:
                 if rt not in selected_table_names:
                     selected_table_names.append(rt)
-            logger.info(f"[MetadataReducer][REFERENCE_DAX] Force-included {len(ref_tables)} tables")
+            logger.info(
+                f"[MetadataReducer][REFERENCE_DAX] Force-included {len(ref_tables)} tables"
+            )
         if ref_measures:
             for rm in ref_measures:
                 if rm not in selected_measure_names:
                     selected_measure_names.append(rm)
-            logger.info(f"[MetadataReducer][REFERENCE_DAX] Force-included {len(ref_measures)} measures")
+            logger.info(
+                f"[MetadataReducer][REFERENCE_DAX] Force-included {len(ref_measures)} measures"
+            )
 
         # Dimension column anchor: if question_intent names a dimension (e.g. "Business Unit")
         # and a table has a column with that exact name, force-include it regardless of
@@ -479,13 +571,21 @@ class PowerBIMetadataReducerTool(BaseTool):
         # Slicer anchor: if a slicer's column matches a question intent dimension or measure,
         # its table must be in context — slicers represent actively used filter axes in the report.
         if question_intent:
-            _slicer_anchor_names = {d.lower() for d in (question_intent.dimensions or [])}
-            _slicer_anchor_names |= {m.lower() for m in (question_intent.measures or [])}
+            _slicer_anchor_names = {
+                d.lower() for d in (question_intent.dimensions or [])
+            }
+            _slicer_anchor_names |= {
+                m.lower() for m in (question_intent.measures or [])
+            }
             if _slicer_anchor_names:
                 for _slicer in slicers:
                     _s_table = _slicer.get("table", "")
                     _s_column = _slicer.get("column", "").lower()
-                    if _s_table and _s_column in _slicer_anchor_names and _s_table not in selected_table_names:
+                    if (
+                        _s_table
+                        and _s_column in _slicer_anchor_names
+                        and _s_table not in selected_table_names
+                    ):
                         if any(t["name"] == _s_table for t in tables):
                             selected_table_names.append(_s_table)
                             logger.info(
@@ -529,7 +629,9 @@ class PowerBIMetadataReducerTool(BaseTool):
         t45 = time.time()
         measure_resolver = MeasureResolver(measures, tables, sample_data=sample_data)
         resolved_measures = measure_resolver.resolve(resolved_measures)
-        logger.info(f"[MetadataReducer][MEASURE_RESOLVER] Done in {time.time()-t45:.3f}s")
+        logger.info(
+            f"[MetadataReducer][MEASURE_RESOLVER] Done in {time.time()-t45:.3f}s"
+        )
 
         # Step 4.6: Auto-include filter_table from FILTERED_MEASURE resolutions.
         # When a measure resolves as FILTERED_MEASURE (e.g. [Score] WHERE Quality Category = "Conformity"),
@@ -537,7 +639,11 @@ class PowerBIMetadataReducerTool(BaseTool):
         _all_table_names_set = {t["name"] for t in tables}
         for _m in resolved_measures:
             _filter_table = _m.get("_resolution", {}).get("filter_table", "")
-            if _filter_table and _filter_table not in selected_table_names and _filter_table in _all_table_names_set:
+            if (
+                _filter_table
+                and _filter_table not in selected_table_names
+                and _filter_table in _all_table_names_set
+            ):
                 selected_table_names.append(_filter_table)
                 logger.info(
                     f"[MetadataReducer][FILTERED_MEASURE_ANCHOR] Auto-included '{_filter_table}' "
@@ -558,7 +664,9 @@ class PowerBIMetadataReducerTool(BaseTool):
 
             # Build column→table lookup with normalized names for fuzzy matching
             # Normalization: lowercase, replace spaces/hyphens with underscores
-            col_to_tables: Dict[str, List[tuple]] = {}  # normalized_col → [(original_col, table_name)]
+            col_to_tables: Dict[str, List[tuple]] = (
+                {}
+            )  # normalized_col → [(original_col, table_name)]
             for t in tables:
                 for col in t.get("columns", []):
                     normalized = col.lower().replace(" ", "_").replace("-", "_")
@@ -571,7 +679,9 @@ class PowerBIMetadataReducerTool(BaseTool):
 
             for filter_key, filter_value in default_filters.items():
                 filter_table = filter_key.split("[")[0] if "[" in filter_key else ""
-                filter_col = filter_key.split("[")[1].rstrip("]") if "[" in filter_key else ""
+                filter_col = (
+                    filter_key.split("[")[1].rstrip("]") if "[" in filter_key else ""
+                )
 
                 if filter_table in all_table_names:
                     # Case 1: Table exists in the full model — include it
@@ -581,11 +691,15 @@ class PowerBIMetadataReducerTool(BaseTool):
                     remapped_filters[filter_key] = filter_value
                 elif filter_col:
                     # Case 2: Phantom table — try to remap column to an actual table
-                    normalized_col = filter_col.lower().replace(" ", "_").replace("-", "_")
+                    normalized_col = (
+                        filter_col.lower().replace(" ", "_").replace("-", "_")
+                    )
                     candidates = col_to_tables.get(normalized_col, [])
 
                     # Prefer tables already in the selected set
-                    kept_candidates = [(c, t) for c, t in candidates if t in selected_table_names]
+                    kept_candidates = [
+                        (c, t) for c, t in candidates if t in selected_table_names
+                    ]
                     if kept_candidates:
                         actual_col, actual_table = kept_candidates[0]
                         new_key = f"{actual_table}[{actual_col}]"
@@ -629,7 +743,8 @@ class PowerBIMetadataReducerTool(BaseTool):
 
         kept_tables = [t for t in tables if t["name"] in kept_table_names_set]
         kept_relationships = [
-            r for r in relationships
+            r
+            for r in relationships
             if r.get("from_table") in kept_table_names_set
             and r.get("to_table") in kept_table_names_set
         ]
@@ -639,12 +754,8 @@ class PowerBIMetadataReducerTool(BaseTool):
             table_name = k.split("[")[0] if "[" in k else k
             if table_name in kept_table_names_set:
                 kept_sample_data[k] = v
-        kept_slicers = [
-            s for s in slicers if s.get("table") in kept_table_names_set
-        ]
-        kept_columns = [
-            c for c in columns if c.get("table") in kept_table_names_set
-        ]
+        kept_slicers = [s for s in slicers if s.get("table") in kept_table_names_set]
+        kept_columns = [c for c in columns if c.get("table") in kept_table_names_set]
         logger.info(
             f"[MetadataReducer][FILTER_REDUCTION] Done in {time.time()-t5:.3f}s — "
             f"{len(kept_tables)} tables, {len(kept_relationships)} relationships, "
@@ -670,9 +781,28 @@ class PowerBIMetadataReducerTool(BaseTool):
                 filter_col_names.add(fk.split("[")[1].rstrip("]"))
 
         # Detect time intelligence from question tokens
-        _time_tokens = {"year", "quarter", "month", "week", "day", "yoy", "mom", "qoq", "wow",
-                        "ytd", "mtd", "qtd", "annual", "monthly", "quarterly", "weekly", "daily"}
-        question_tokens_for_col = scorer.extract_question_tokens(user_question, business_terms=business_terms)
+        _time_tokens = {
+            "year",
+            "quarter",
+            "month",
+            "week",
+            "day",
+            "yoy",
+            "mom",
+            "qoq",
+            "wow",
+            "ytd",
+            "mtd",
+            "qtd",
+            "annual",
+            "monthly",
+            "quarterly",
+            "weekly",
+            "daily",
+        }
+        question_tokens_for_col = scorer.extract_question_tokens(
+            user_question, business_terms=business_terms
+        )
         has_time_intel = bool(set(question_tokens_for_col) & _time_tokens)
 
         original_col_count = sum(len(t.get("columns", [])) for t in kept_tables)
@@ -684,7 +814,8 @@ class PowerBIMetadataReducerTool(BaseTool):
                 kept_relationship_cols=relationship_cols,
                 filter_columns=filter_col_names,
                 has_time_intelligence=has_time_intel,
-                threshold=config.get("synonym_threshold", 70) * 0.7,  # lower threshold for columns
+                threshold=config.get("synonym_threshold", 70)
+                * 0.7,  # lower threshold for columns
             )
         reduced_col_count = sum(len(t.get("columns", [])) for t in kept_tables)
 
@@ -697,8 +828,10 @@ class PowerBIMetadataReducerTool(BaseTool):
                 kept_col_names_by_table.setdefault(tname, set()).add(cname)
 
         kept_columns = [
-            c for c in kept_columns
-            if c.get("name", "") in kept_col_names_by_table.get(c.get("table", ""), set())
+            c
+            for c in kept_columns
+            if c.get("name", "")
+            in kept_col_names_by_table.get(c.get("table", ""), set())
         ]
 
         logger.info(
@@ -710,7 +843,9 @@ class PowerBIMetadataReducerTool(BaseTool):
         t6 = time.time()
         active_filters = config.get("active_filters", {})
         default_filters = model_context.get("default_filters", {})
-        merged_filters = {**default_filters, **active_filters} if active_filters else default_filters
+        merged_filters = (
+            {**default_filters, **active_filters} if active_filters else default_filters
+        )
 
         if merged_filters and config.get("enable_value_normalization", True):
             normalizer = ValueNormalizer()
@@ -728,7 +863,9 @@ class PowerBIMetadataReducerTool(BaseTool):
         else:
             normalized_filters = merged_filters
             normalization_log = []
-            logger.info(f"[MetadataReducer][VALUE_NORMALIZATION] Skipped (no filters or normalization disabled)")
+            logger.info(
+                f"[MetadataReducer][VALUE_NORMALIZATION] Skipped (no filters or normalization disabled)"
+            )
 
         # Step 6b: Build DAX skeleton (optional)
         t6b = time.time()
@@ -749,7 +886,9 @@ class PowerBIMetadataReducerTool(BaseTool):
                 f"notes={dax_skeleton.strategy_notes}"
             )
         else:
-            logger.info(f"[MetadataReducer][DAX_SKELETON] No skeleton built (0 measures)")
+            logger.info(
+                f"[MetadataReducer][DAX_SKELETON] No skeleton built (0 measures)"
+            )
 
         # Step 7: Build reduced output
         kept_table_count = len(kept_tables)
@@ -838,7 +977,9 @@ class PowerBIMetadataReducerTool(BaseTool):
                     f"(report_id='reduced', group={group_id}, dataset={dataset_id})"
                 )
             except Exception as e:
-                logger.warning(f"[MetadataReducer] ✗ Failed to save reduced context to cache: {e}")
+                logger.warning(
+                    f"[MetadataReducer] ✗ Failed to save reduced context to cache: {e}"
+                )
 
         if cache_saved:
             # Return a compact summary instead of the full JSON.
@@ -863,7 +1004,9 @@ class PowerBIMetadataReducerTool(BaseTool):
         else:
             # Cache save failed — fall back to returning full JSON so the
             # agent can still pass it to the DAX tool via model_context_json.
-            logger.warning("[MetadataReducer] Cache save failed — returning full JSON as fallback")
+            logger.warning(
+                "[MetadataReducer] Cache save failed — returning full JSON as fallback"
+            )
             return json.dumps(reduced_output)
 
     # ─── Step 1: Parse Model Context ────────────────────────────────────
@@ -884,28 +1027,40 @@ class PowerBIMetadataReducerTool(BaseTool):
                     parsed = json.loads(raw)
                 except json.JSONDecodeError:
                     # Try to extract JSON from markdown code blocks
-                    json_match = re.search(r"```(?:json)?\s*\n(.*?)\n```", raw, re.DOTALL)
+                    json_match = re.search(
+                        r"```(?:json)?\s*\n(.*?)\n```", raw, re.DOTALL
+                    )
                     if json_match:
                         try:
                             parsed = json.loads(json_match.group(1))
                         except json.JSONDecodeError:
-                            return {"error": "Could not parse model_context_json — invalid JSON."}
+                            return {
+                                "error": "Could not parse model_context_json — invalid JSON."
+                            }
                     else:
-                        return {"error": "Could not parse model_context_json — invalid JSON."}
+                        return {
+                            "error": "Could not parse model_context_json — invalid JSON."
+                        }
                 # Handle double-encoded
                 if isinstance(parsed, str):
                     try:
                         parsed = json.loads(parsed)
                     except json.JSONDecodeError:
-                        return {"error": "model_context_json is double-encoded but inner JSON is invalid."}
+                        return {
+                            "error": "model_context_json is double-encoded but inner JSON is invalid."
+                        }
             elif isinstance(raw, dict):
                 parsed = raw
             else:
-                return {"error": f"model_context_json has unexpected type: {type(raw).__name__}"}
+                return {
+                    "error": f"model_context_json has unexpected type: {type(raw).__name__}"
+                }
 
             # Detect Fetcher compact summary (no tables/measures = just a summary,
             # not real model data). Fall through to cache lookup instead.
-            has_tables = bool(parsed.get("tables") or parsed.get("schema", {}).get("tables"))
+            has_tables = bool(
+                parsed.get("tables") or parsed.get("schema", {}).get("tables")
+            )
             has_measures = bool(parsed.get("measures"))
             if not has_tables and not has_measures:
                 logger.info(
@@ -1038,7 +1193,11 @@ class PowerBIMetadataReducerTool(BaseTool):
                 target = table_map.get(table_name)
                 if target and isinstance(fields, dict):
                     for key, val in fields.items():
-                        if key in ("purpose", "grain", "description") and val and not target.get(key):
+                        if (
+                            key in ("purpose", "grain", "description")
+                            and val
+                            and not target.get(key)
+                        ):
                             target[key] = val
                     counts["tables"] += 1
 
@@ -1131,9 +1290,7 @@ class PowerBIMetadataReducerTool(BaseTool):
             desc = m.get("description", "")
             flag = " ⭐" if score >= config.get("synonym_boost_min", 60.0) else ""
             desc_text = f" — {desc}" if desc else ""
-            measure_catalog_lines.append(
-                f"  - [{table}] {name}{desc_text}{flag}"
-            )
+            measure_catalog_lines.append(f"  - [{table}] {name}{desc_text}{flag}")
 
         prompt = f"""You are a Power BI semantic model analyst. Given a user's business question, select ONLY the tables and measures needed to answer it.
 
@@ -1166,7 +1323,7 @@ Return ONLY valid JSON (no markdown, no explanation):
         llm_confidence_threshold = config.get("llm_confidence_threshold", 0.0)
 
         from src.services.llm.manager import LLMManager
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
 
         logger.info(
             f"[MetadataReducer] LLM call: model={llm_model}, "
@@ -1201,13 +1358,19 @@ Return ONLY valid JSON (no markdown, no explanation):
             )
 
         except Exception as e:
-            logger.warning(f"[MetadataReducer] LLM selection failed, falling back to fuzzy: {e}")
+            logger.warning(
+                f"[MetadataReducer] LLM selection failed, falling back to fuzzy: {e}"
+            )
 
         # Fallback: fuzzy-only selection
         threshold = config.get("synonym_threshold", 70)
         return {
-            "tables": [r["table"]["name"] for r in ranked_tables if r["score"] >= threshold],
-            "measures": [r["measure"]["name"] for r in ranked_measures if r["score"] >= threshold],
+            "tables": [
+                r["table"]["name"] for r in ranked_tables if r["score"] >= threshold
+            ],
+            "measures": [
+                r["measure"]["name"] for r in ranked_measures if r["score"] >= threshold
+            ],
             "reasoning": f"Fuzzy-only fallback (LLM unavailable), threshold={threshold}",
         }
 

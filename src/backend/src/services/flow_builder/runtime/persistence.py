@@ -89,15 +89,13 @@ class SQLiteFlowPersistence(FlowPersistence):
 
     def init_db(self) -> None:
         with sqlite3.connect(self.db_path) as connection:
-            connection.execute(
-                """CREATE TABLE IF NOT EXISTS flow_states (
+            connection.execute("""CREATE TABLE IF NOT EXISTS flow_states (
                        id INTEGER PRIMARY KEY AUTOINCREMENT,
                        flow_uuid TEXT NOT NULL,
                        method_name TEXT NOT NULL,
                        state_json TEXT NOT NULL,
                        created_at TEXT NOT NULL
-                   )"""
-            )
+                   )""")
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_flow_states_uuid "
                 "ON flow_states(flow_uuid)"

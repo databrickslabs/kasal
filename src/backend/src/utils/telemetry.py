@@ -118,7 +118,7 @@ def get_application_name() -> str:
         Application name string: Kasal/<version>
     """
     return f"{KASAL_BASE}/{VERSION}"
-    
+
 
 async def send_logfood_telemetry(
     usage: Dict[str, Any],
@@ -131,10 +131,10 @@ async def send_logfood_telemetry(
 ) -> None:
     """
     Send token usage telemetry to Databricks logfood (Two-Request Pattern).
-    
+
     Makes a lightweight GET request to /api/2.0/serving-endpoints with token
     usage data in custom headers. This gets logged in Databricks logfood.
-    
+
     Args:
         usage: Token usage dict with prompt_tokens, completion_tokens, total_tokens
         model: Model name used for the LLM call
@@ -144,7 +144,7 @@ async def send_logfood_telemetry(
         skip_db_auth: If True, skip authentication methods that require database access
                       (use this when called from callbacks during database transactions)
         user_token: Optional user access token for OBO authentication (preferred over group_context)
-    
+
     Example:
         >>> await send_logfood_telemetry(
         ...     usage={"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
@@ -153,18 +153,22 @@ async def send_logfood_telemetry(
         ...     user_token=user_token
         ... )
     """
-    
+
     try:
         # Import here to avoid circular imports
         from src.utils.databricks_auth import get_auth_context
-        
+
         # Get user token: prefer explicit user_token param, then group_context, then None
-        effective_user_token = user_token or (getattr(group_context, 'user_token', None) if group_context else None)
-        
+        effective_user_token = user_token or (
+            getattr(group_context, "user_token", None) if group_context else None
+        )
+
         # Get authentication using the unified auth chain
         # When skip_db_auth=True, we only use OBO or SPN auth (no database PAT lookup)
-        auth = await get_auth_context(user_token=effective_user_token, skip_db_auth=skip_db_auth)
-        
+        auth = await get_auth_context(
+            user_token=effective_user_token, skip_db_auth=skip_db_auth
+        )
+
         if not auth:
             # DEBUG (not WARNING): this fires per LLM completion and, before the
             # callback-level guard in llm_manager, flooded crew.log at ~300 lines/sec
@@ -175,29 +179,29 @@ async def send_logfood_telemetry(
                 f"tokens={usage.get('total_tokens', 0)} - skipped"
             )
             return
-        
+
         # Generate execution ID if not provided
         exec_id = execution_id or str(uuid.uuid4())
-        
+
         # Build telemetry headers with token usage
         telemetry_headers = {
             "Authorization": f"Bearer {auth.token}",
             "User-Agent": f"{KASAL_BASE}_telemetry/{VERSION}/{product_context}/model={model}/input_tokens={usage.get('prompt_tokens', 0)}/output_tokens={usage.get('completion_tokens', 0)}",
         }
-        
+
         # Make a lightweight GET request (logged in Databricks logfood)
         telemetry_url = f"{auth.workspace_url}/api/2.0/serving-endpoints"
-        
+
         # Format token details
-        prompt_tokens = usage.get('prompt_tokens', 0)
-        completion_tokens = usage.get('completion_tokens', 0)
-        total_tokens = usage.get('total_tokens', 0)
-        
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        total_tokens = usage.get("total_tokens", 0)
+
         async with aiohttp.ClientSession(trust_env=True) as session:
             async with session.get(
                 telemetry_url,
                 headers=telemetry_headers,
-                timeout=aiohttp.ClientTimeout(total=5)
+                timeout=aiohttp.ClientTimeout(total=5),
             ) as response:
                 if response.status == 200:
                     logger.info(
@@ -209,7 +213,7 @@ async def send_logfood_telemetry(
                     logger.warning(
                         f"[LogfoodTelemetry] ✗ Failed (HTTP {response.status}): context={product_context}, model={model} - {text[:200]}"
                     )
-                    
+
     except asyncio.TimeoutError:
         logger.warning("Logfood telemetry request timed out")
     except Exception as e:
@@ -221,17 +225,18 @@ def _extract_token(token_value: str) -> str:
     """Extract access token from either plain token or JSON format."""
     if not token_value:
         return ""
-    
+
     # Check if it's a JSON object (Databricks CLI format)
     token_value = token_value.strip()
-    if token_value.startswith('{'):
+    if token_value.startswith("{"):
         try:
             import json
+
             token_data = json.loads(token_value)
-            return token_data.get('access_token', token_value)
+            return token_data.get("access_token", token_value)
         except (json.JSONDecodeError, TypeError):
             pass
-    
+
     return token_value
 
 
@@ -245,7 +250,7 @@ def send_logfood_telemetry_sync(
 ) -> None:
     """
     Synchronous version of logfood telemetry for non-async contexts (e.g., embeddings).
-    
+
     Args:
         usage: Token usage dict with prompt_tokens, completion_tokens, total_tokens
         model: Model name used
@@ -256,37 +261,37 @@ def send_logfood_telemetry_sync(
     """
     try:
         import requests
-        
+
         # Extract actual token if it's in JSON format (Databricks CLI format)
         actual_token = _extract_token(token)
-        
+
         if not actual_token:
             logger.debug("No valid token found, skipping telemetry")
             return
-        
+
         # Generate execution ID if not provided
         exec_id = execution_id or str(uuid.uuid4())
-        
+
         # Ensure workspace URL has https://
         if not workspace_url.startswith("http"):
             workspace_url = f"https://{workspace_url}"
-        
+
         # Build telemetry headers with token usage
         telemetry_headers = {
             "Authorization": f"Bearer {actual_token}",
             "User-Agent": f"{KASAL_BASE}_telemetry/{VERSION}/{product_context}/model={model}/input_tokens={usage.get('prompt_tokens', 0)}/output_tokens={usage.get('completion_tokens', 0)}",
         }
-        
+
         # Make a lightweight GET request (logged in Databricks logfood)
         telemetry_url = f"{workspace_url}/api/2.0/serving-endpoints"
-        
+
         # Format token details
-        prompt_tokens = usage.get('prompt_tokens', 0)
-        completion_tokens = usage.get('completion_tokens', 0)
-        total_tokens = usage.get('total_tokens', 0)
-        
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        total_tokens = usage.get("total_tokens", 0)
+
         response = requests.get(telemetry_url, headers=telemetry_headers, timeout=5)
-        
+
         if response.status_code == 200:
             logger.info(
                 f"[LogfoodTelemetry] ✓ Sent successfully (sync): context={product_context}, model={model}, "
@@ -296,8 +301,9 @@ def send_logfood_telemetry_sync(
             logger.warning(
                 f"[LogfoodTelemetry] ✗ Failed (HTTP {response.status_code}): context={product_context}, model={model} - {response.text[:200]}"
             )
-            
+
     except Exception as e:
         # Telemetry failures should not affect main flow
-        logger.warning(f"[LogfoodTelemetry] ✗ Failed (sync): context={product_context}, model={model} - {str(e)}")
-
+        logger.warning(
+            f"[LogfoodTelemetry] ✗ Failed (sync): context={product_context}, model={model} - {str(e)}"
+        )

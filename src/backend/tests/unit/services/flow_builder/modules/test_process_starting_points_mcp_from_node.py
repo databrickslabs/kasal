@@ -8,8 +8,9 @@ tool_configs so the flow keeps the crew's MCP servers.
 """
 
 import uuid
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
 
@@ -20,7 +21,7 @@ async def test_merges_mcp_from_crew_node_when_db_task_has_none():
     crew_id = str(uuid.uuid4())
     agent_id = str(uuid.uuid4())
 
-    flow_config = {'startingPoints': [{'taskId': task_id, 'crewId': crew_id}]}
+    flow_config = {"startingPoints": [{"taskId": task_id, "crewId": crew_id}]}
 
     # The crew canvas node for this task carries the chat-saved MCP servers.
     crew = MagicMock()
@@ -30,9 +31,9 @@ async def test_merges_mcp_from_crew_node_when_db_task_has_none():
     crew.task_ids = [task_id]
     crew.nodes = [
         {
-            'id': f'task-{task_id}',
-            'type': 'taskNode',
-            'data': {'tool_configs': {'MCP_SERVERS': {'servers': ['example-mcp']}}},
+            "id": f"task-{task_id}",
+            "type": "taskNode",
+            "data": {"tool_configs": {"MCP_SERVERS": {"servers": ["example-mcp"]}}},
         }
     ]
 
@@ -44,22 +45,32 @@ async def test_merges_mcp_from_crew_node_when_db_task_has_none():
     db_task.tool_configs = {}
 
     repos = {
-        'crew': AsyncMock(get=AsyncMock(return_value=crew)),
-        'task': AsyncMock(get=AsyncMock(return_value=db_task)),
-        'agent': AsyncMock(get=AsyncMock(return_value=MagicMock(role="Researcher"))),
+        "crew": AsyncMock(get=AsyncMock(return_value=crew)),
+        "task": AsyncMock(get=AsyncMock(return_value=db_task)),
+        "agent": AsyncMock(get=AsyncMock(return_value=MagicMock(role="Researcher"))),
     }
 
-    with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-         patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config:
+    with (
+        patch(
+            "src.services.flow_builder.modules.agent_adapter.AgentConfig"
+        ) as mock_agent_config,
+        patch(
+            "src.services.flow_builder.modules.task_adapter.TaskConfig"
+        ) as mock_task_config,
+    ):
         agent_obj = MagicMock(role="Researcher")
         mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=agent_obj)
-        mock_task_config.configure_task = AsyncMock(return_value=MagicMock(agent=agent_obj))
+        mock_task_config.configure_task = AsyncMock(
+            return_value=MagicMock(agent=agent_obj)
+        )
 
         await FlowProcessorManager.process_starting_points(flow_config, {}, repos)
 
         assert mock_agent_config.configure_agent_and_tools.await_count == 1
         _, kwargs = mock_agent_config.configure_agent_and_tools.call_args
-        assert kwargs.get('crew_tool_configs', {}).get('MCP_SERVERS') == {"servers": ["example-mcp"]}
+        assert kwargs.get("crew_tool_configs", {}).get("MCP_SERVERS") == {
+            "servers": ["example-mcp"]
+        }
 
 
 @pytest.mark.asyncio
@@ -70,7 +81,7 @@ async def test_db_task_tool_configs_take_priority_over_node():
     crew_id = str(uuid.uuid4())
     agent_id = str(uuid.uuid4())
 
-    flow_config = {'startingPoints': [{'taskId': task_id, 'crewId': crew_id}]}
+    flow_config = {"startingPoints": [{"taskId": task_id, "crewId": crew_id}]}
 
     crew = MagicMock()
     crew.name = "Crew"
@@ -79,9 +90,9 @@ async def test_db_task_tool_configs_take_priority_over_node():
     crew.task_ids = [task_id]
     crew.nodes = [
         {
-            'id': f'task-{task_id}',
-            'type': 'taskNode',
-            'data': {'tool_configs': {'MCP_SERVERS': {'servers': ['stale-node']}}},
+            "id": f"task-{task_id}",
+            "type": "taskNode",
+            "data": {"tool_configs": {"MCP_SERVERS": {"servers": ["stale-node"]}}},
         }
     ]
 
@@ -89,21 +100,31 @@ async def test_db_task_tool_configs_take_priority_over_node():
     db_task.agent_id = agent_id
     db_task.async_execution = False
     db_task.name = "Task"
-    db_task.tool_configs = {'MCP_SERVERS': {'servers': ['current-db']}}
+    db_task.tool_configs = {"MCP_SERVERS": {"servers": ["current-db"]}}
 
     repos = {
-        'crew': AsyncMock(get=AsyncMock(return_value=crew)),
-        'task': AsyncMock(get=AsyncMock(return_value=db_task)),
-        'agent': AsyncMock(get=AsyncMock(return_value=MagicMock(role="Researcher"))),
+        "crew": AsyncMock(get=AsyncMock(return_value=crew)),
+        "task": AsyncMock(get=AsyncMock(return_value=db_task)),
+        "agent": AsyncMock(get=AsyncMock(return_value=MagicMock(role="Researcher"))),
     }
 
-    with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-         patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config:
+    with (
+        patch(
+            "src.services.flow_builder.modules.agent_adapter.AgentConfig"
+        ) as mock_agent_config,
+        patch(
+            "src.services.flow_builder.modules.task_adapter.TaskConfig"
+        ) as mock_task_config,
+    ):
         agent_obj = MagicMock(role="Researcher")
         mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=agent_obj)
-        mock_task_config.configure_task = AsyncMock(return_value=MagicMock(agent=agent_obj))
+        mock_task_config.configure_task = AsyncMock(
+            return_value=MagicMock(agent=agent_obj)
+        )
 
         await FlowProcessorManager.process_starting_points(flow_config, {}, repos)
 
         _, kwargs = mock_agent_config.configure_agent_and_tools.call_args
-        assert kwargs.get('crew_tool_configs', {}).get('MCP_SERVERS') == {"servers": ["current-db"]}
+        assert kwargs.get("crew_tool_configs", {}).get("MCP_SERVERS") == {
+            "servers": ["current-db"]
+        }

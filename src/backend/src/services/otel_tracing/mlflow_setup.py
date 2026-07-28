@@ -11,13 +11,13 @@ consistent MLflow tracing setup including:
 - Async logging configuration
 - LiteLLM ``tracked_completion`` monkey-patch for span instrumentation
 """
+
 from __future__ import annotations
 
 import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
-
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,9 @@ class MlflowSetupResult:
     auth_method: Optional[str] = None  # "pat", "spn", "default"
     error: Optional[str] = None
     otel_exporter_active: bool = False  # OTel MLflow exporter handles trace creation
-    uc_trace_storage: bool = False  # UC Delta-table trace storage active (native autolog path)
+    uc_trace_storage: bool = (
+        False  # UC Delta-table trace storage active (native autolog path)
+    )
 
 
 async def configure_mlflow_in_subprocess(
@@ -150,7 +152,9 @@ async def configure_mlflow_in_subprocess(
     alog.info(f"[SUBPROCESS] MLflow enabled_for_workspace={enabled_for_workspace}")
 
     if not enabled_for_workspace:
-        alog.info("[SUBPROCESS] MLflow is disabled for this workspace; skipping configuration")
+        alog.info(
+            "[SUBPROCESS] MLflow is disabled for this workspace; skipping configuration"
+        )
         return MlflowSetupResult(enabled=False, tracing_ready=False)
 
     alog.info(f"[SUBPROCESS] Configuring MLflow for execution {execution_id}")
@@ -197,7 +201,9 @@ async def configure_mlflow_in_subprocess(
         try:
             import mlflow
         except ImportError:
-            alog.warning("[SUBPROCESS] MLflow package not installed; skipping configuration")
+            alog.warning(
+                "[SUBPROCESS] MLflow package not installed; skipping configuration"
+            )
             return MlflowSetupResult(
                 enabled=True, tracing_ready=False, error="mlflow not installed"
             )
@@ -243,8 +249,10 @@ async def configure_mlflow_in_subprocess(
                 if _k in os.environ:
                     _pat_backup[_k] = os.environ.pop(_k)
             try:
-                from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
                 from databricks.sdk.useragent import with_product
+
+                from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
+
                 with_product(f"{KASAL_BASE}_{KasalProduct.MLFLOW}", VERSION)
                 w = _WC(host=host, client_id=client_id, client_secret=client_secret)
                 headers = w.config.authenticate()
@@ -286,11 +294,14 @@ async def configure_mlflow_in_subprocess(
         except Exception as spn_err:
             alog.warning(
                 "[SUBPROCESS] SPN extraction failed: %s: %s",
-                type(spn_err).__name__, spn_err,
+                type(spn_err).__name__,
+                spn_err,
             )
 
         if not auth_method:
-            alog.warning("[SUBPROCESS] SPN credential extraction failed — MLflow cannot be configured")
+            alog.warning(
+                "[SUBPROCESS] SPN credential extraction failed — MLflow cannot be configured"
+            )
             return MlflowSetupResult(
                 enabled=True,
                 tracing_ready=False,
@@ -354,7 +365,9 @@ async def configure_mlflow_in_subprocess(
             f"[SUBPROCESS] MLflow trace storage config — catalog={uc_catalog!r}, "
             f"schema={uc_schema!r}, warehouse_id={warehouse_id!r}"
         )
-        trace_location = _build_uc_trace_location(uc_catalog, uc_schema, warehouse_id, alog)
+        trace_location = _build_uc_trace_location(
+            uc_catalog, uc_schema, warehouse_id, alog
+        )
 
         # When UC trace storage is active, spans are written to the
         # `<prefix>_otel_*` Delta tables by MLflow's DatabricksUCTableSpanExporter
@@ -434,6 +447,7 @@ async def configure_mlflow_in_subprocess(
                 break
             except Exception as exp_error:
                 import traceback as _tb
+
                 experiment = None
                 alog.warning(
                     f"[SUBPROCESS] Could not set experiment {_name}: {exp_error}\n"
@@ -449,7 +463,9 @@ async def configure_mlflow_in_subprocess(
             from mlflow.tracing.destination import Databricks as _MlflowDbxDest
 
             if experiment is None:
-                alog.info("[SUBPROCESS] MLflow tracing destination not set (no experiment)")
+                alog.info(
+                    "[SUBPROCESS] MLflow tracing destination not set (no experiment)"
+                )
             elif uc_trace_active:
                 # Do NOT pin the destination to Databricks(experiment_id). That
                 # resolves to an MlflowExperimentLocation, which makes MLflow's
@@ -523,7 +539,9 @@ async def configure_mlflow_in_subprocess(
             else:
                 alog.info("[SUBPROCESS] Autologs configured via tracing service")
         except Exception as autolog_err:
-            alog.warning(f"[SUBPROCESS] Could not enable MLflow autologs: {autolog_err}")
+            alog.warning(
+                f"[SUBPROCESS] Could not enable MLflow autologs: {autolog_err}"
+            )
 
         # -------------------------------------------------------
         # 9. Async logging
@@ -539,9 +557,13 @@ async def configure_mlflow_in_subprocess(
         # is a synchronous upload inside end_trace.
         try:
             mlflow.config.enable_async_logging(False)
-            alog.info("[SUBPROCESS] MLflow async logging DISABLED (synchronous trace upload — required for subprocess lifecycle)")
+            alog.info(
+                "[SUBPROCESS] MLflow async logging DISABLED (synchronous trace upload — required for subprocess lifecycle)"
+            )
         except Exception as async_log_err:
-            alog.info(f"[SUBPROCESS] MLflow async logging config not available: {async_log_err}")
+            alog.info(
+                f"[SUBPROCESS] MLflow async logging config not available: {async_log_err}"
+            )
 
         # Log MLflow state summary
         alog.info(f"[SUBPROCESS] MLflow tracking URI: {mlflow.get_tracking_uri()}")
@@ -670,7 +692,9 @@ async def configure_mlflow_in_subprocess(
                                         f"[SUBPROCESS] LLM Response content is None/empty - "
                                         f"Model: {model}, Duration: {llm_duration:.2f}s"
                                     )
-                                    reasoning = getattr(message, "reasoning_content", None)
+                                    reasoning = getattr(
+                                        message, "reasoning_content", None
+                                    )
                                     if reasoning:
                                         alog.info(
                                             f"[SUBPROCESS] LLM has reasoning_content: "
@@ -731,6 +755,7 @@ def _try_import_mlflow():
     """Import mlflow if available; return None otherwise."""
     try:
         import mlflow  # type: ignore
+
         return mlflow
     except ImportError:
         return None
@@ -794,9 +819,7 @@ def log_mlflow_state(
                     f"[SUBPROCESS] - Last active trace id ({phase}): {get_last()}"
                 )
         except Exception as e:
-            alog.info(
-                f"[SUBPROCESS] - Could not get last trace id ({phase}): {e}"
-            )
+            alog.info(f"[SUBPROCESS] - Could not get last trace id ({phase}): {e}")
     except Exception as e:
         alog.info(f"[SUBPROCESS] - Error logging MLflow state: {e}")
 
@@ -823,15 +846,11 @@ async def capture_trace_and_update_execution(
         from src.services.mlflow.integration import (
             update_execution_trace_id as _update_trace,
         )
-        from src.services.mlflow.tracing import (
-            get_last_active_trace_id as _get_last_id,
-        )
+        from src.services.mlflow.tracing import get_last_active_trace_id as _get_last_id
 
         last_trace_id = _get_last_id()
         if last_trace_id:
-            alog.info(
-                f"[SUBPROCESS] - Last active trace id: {last_trace_id}"
-            )
+            alog.info(f"[SUBPROCESS] - Last active trace id: {last_trace_id}")
             exp = experiment_name or "/Shared/kasal-crew-execution-traces"
             await _update_trace(
                 execution_id=execution_id,
@@ -846,9 +865,7 @@ async def capture_trace_and_update_execution(
             alog.info(f"[SUBPROCESS] - No last active trace id available")
         return last_trace_id
     except Exception as e:
-        alog.warning(
-            f"[SUBPROCESS] - Failed to capture/store trace ID: {e}"
-        )
+        alog.warning(f"[SUBPROCESS] - Failed to capture/store trace ID: {e}")
         return None
 
 
@@ -896,19 +913,13 @@ def set_trace_attributes(
     if span is None or not hasattr(span, "set_attribute"):
         return
     try:
-        span.set_attribute(
-            "execution.name", run_name or _derive_trace_run_name(config)
-        )
+        span.set_attribute("execution.name", run_name or _derive_trace_run_name(config))
         span.set_attribute("execution.version", config.get("version", "1.0"))
         span.set_attribute(
             "execution.process_type", config.get("process", "sequential")
         )
-        span.set_attribute(
-            "execution.agent_count", len(config.get("agents", []))
-        )
-        span.set_attribute(
-            "execution.task_count", len(config.get("tasks", []))
-        )
+        span.set_attribute("execution.agent_count", len(config.get("agents", [])))
+        span.set_attribute("execution.task_count", len(config.get("tasks", [])))
         if config.get("model_name"):
             span.set_attribute("execution.model", config["model_name"])
     except Exception as e:
@@ -941,21 +952,13 @@ def extract_trace_outputs(
             outputs["tasks_output"] = [
                 {
                     "description": (
-                        task.description
-                        if hasattr(task, "description")
-                        else str(task)
+                        task.description if hasattr(task, "description") else str(task)
                     ),
-                    "name": (
-                        task.name if hasattr(task, "name") else "Unknown"
-                    ),
-                    "output": (
-                        task.raw if hasattr(task, "raw") else str(task)
-                    ),
+                    "name": (task.name if hasattr(task, "name") else "Unknown"),
+                    "output": (task.raw if hasattr(task, "raw") else str(task)),
                 }
                 for task in (
-                    result.tasks_output
-                    if hasattr(result, "tasks_output")
-                    else []
+                    result.tasks_output if hasattr(result, "tasks_output") else []
                 )
             ]
         if hasattr(result, "token_usage"):
@@ -984,7 +987,9 @@ def _derive_trace_run_name(
     ``inputs`` rather than at the top level, which is why the previous
     ``config.get("run_name")`` alone produced ``crew_kickoff:Unnamed``.
     """
-    config_inputs = config.get("inputs") if isinstance(config.get("inputs"), dict) else {}
+    config_inputs = (
+        config.get("inputs") if isinstance(config.get("inputs"), dict) else {}
+    )
     arg_inputs = inputs if isinstance(inputs, dict) else {}
     for candidate in (
         config.get("run_name"),
@@ -1032,14 +1037,18 @@ def execute_with_mlflow_trace(
     # When OTel MLflow exporter is active, it handles trace creation —
     # skip the inline wrapper to avoid duplicate traces.
     if mlflow_result.otel_exporter_active:
-        alog.info("[SUBPROCESS] OTel MLflow exporter active, executing without inline trace wrapper")
+        alog.info(
+            "[SUBPROCESS] OTel MLflow exporter active, executing without inline trace wrapper"
+        )
         return kickoff_fn()
 
     # Import the root trace context manager from tracing service
     try:
         from src.services.mlflow.tracing import start_root_trace
     except ImportError:
-        alog.warning("[SUBPROCESS] start_root_trace not available, executing without trace")
+        alog.warning(
+            "[SUBPROCESS] start_root_trace not available, executing without trace"
+        )
         return kickoff_fn()
 
     run_name = _derive_trace_run_name(crew_config, inputs, execution_id)
@@ -1098,13 +1107,17 @@ async def execute_with_mlflow_trace_async(
     # When OTel MLflow exporter is active, it handles trace creation —
     # skip the inline wrapper to avoid duplicate traces.
     if mlflow_result.otel_exporter_active:
-        alog.info("[SUBPROCESS] OTel MLflow exporter active, executing without inline trace wrapper")
+        alog.info(
+            "[SUBPROCESS] OTel MLflow exporter active, executing without inline trace wrapper"
+        )
         return await kickoff_coro_fn(**kickoff_kwargs)
 
     try:
         from src.services.mlflow.tracing import start_root_trace
     except ImportError:
-        alog.warning("[SUBPROCESS] start_root_trace not available, executing without trace")
+        alog.warning(
+            "[SUBPROCESS] start_root_trace not available, executing without trace"
+        )
         return await kickoff_coro_fn(**kickoff_kwargs)
 
     run_name = _derive_trace_run_name(flow_config, inputs, execution_id)
@@ -1159,9 +1172,8 @@ async def post_execution_mlflow_cleanup(
     # 1. Flush MLflow async logging FIRST — autolog traces are queued
     #    asynchronously and must be committed before we can read trace IDs.
     try:
-        from src.services.mlflow.tracing import (
-            flush_async_logging as _flush_mlflow,
-        )
+        from src.services.mlflow.tracing import flush_async_logging as _flush_mlflow
+
         await _flush_mlflow(async_logger=alog)
     except Exception as e:
         alog.warning(f"[SUBPROCESS] MLflow flush error: {e}")
@@ -1185,6 +1197,7 @@ async def post_execution_mlflow_cleanup(
         from src.services.mlflow.integration import (
             flush_and_stop_writers as _flush_stop,
         )
+
         await _flush_stop(async_logger=alog)
     except Exception as e:
         alog.warning(f"[SUBPROCESS] MLflow flush/stop error: {e}")

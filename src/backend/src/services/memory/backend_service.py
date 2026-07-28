@@ -15,7 +15,6 @@ from src.schemas.memory_backend import (
     MemoryBackendType,
     MemoryBackendUpdate,
 )
-from src.services.databricks.workspace.connection import DatabricksConnectionService
 from src.services.databricks.vector_search.index import DatabricksIndexService
 from src.services.databricks.vector_search.setup import (
     DatabricksVectorSearchSetupService,
@@ -23,6 +22,7 @@ from src.services.databricks.vector_search.setup import (
 from src.services.databricks.vector_search.verification import (
     DatabricksVectorSearchVerificationService,
 )
+from src.services.databricks.workspace.connection import DatabricksConnectionService
 
 # Import specialized services
 from src.services.memory.backend_base_service import MemoryBackendBaseService

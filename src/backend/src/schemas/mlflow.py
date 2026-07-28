@@ -1,5 +1,6 @@
-from pydantic import BaseModel
 from typing import Optional
+
+from pydantic import BaseModel
 
 
 class MLflowConfigUpdate(BaseModel):
@@ -8,6 +9,7 @@ class MLflowConfigUpdate(BaseModel):
 
 class MLflowConfigResponse(BaseModel):
     enabled: bool
+
 
 class MLflowEvaluateRequest(BaseModel):
     job_id: str

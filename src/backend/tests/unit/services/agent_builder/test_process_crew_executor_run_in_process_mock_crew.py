@@ -4,13 +4,15 @@ Coverage tests for process_crew_executor.py - Part 9.
 Patches CrewPreparation to return a mock crew, allowing us to cover
 lines 842-1270 inside prepare_and_run().
 """
+
 import asyncio
 import contextlib
 import logging
 import os
 import sys
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 def _make_subprocess_logger():
@@ -37,7 +39,9 @@ def _make_db_session_mock():
 
 
 @contextlib.contextmanager
-def _crew_execution_context(crew, mlflow_result=None, mcp_warnings=None, otel_bridge=None):
+def _crew_execution_context(
+    crew, mlflow_result=None, mcp_warnings=None, otel_bridge=None
+):
     """Context manager that patches all crew execution dependencies."""
     mock_event_bus = MagicMock()
     mock_event_bus.flush = MagicMock(return_value=True)
@@ -68,50 +72,94 @@ def _crew_execution_context(crew, mlflow_result=None, mcp_warnings=None, otel_br
         return kickoff_fn()
 
     patches = [
-        patch("src.services.agent_builder.crew_preparation.CrewPreparation",
-              return_value=mock_crew_prep),
-        patch("src.services.execution.logs.writer_task.LogWriterTask", mock_trace_manager),
-        patch("src.services.execution.kernel.execution_callback.create_execution_callbacks",
-              return_value=(MagicMock(), MagicMock())),
+        patch(
+            "src.services.agent_builder.crew_preparation.CrewPreparation",
+            return_value=mock_crew_prep,
+        ),
+        patch(
+            "src.services.execution.logs.writer_task.LogWriterTask", mock_trace_manager
+        ),
+        patch(
+            "src.services.execution.kernel.execution_callback.create_execution_callbacks",
+            return_value=(MagicMock(), MagicMock()),
+        ),
         patch("src.core.events.event_bus", mock_event_bus),
-        patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace",
-              side_effect=mock_execute_with_mlflow_trace),
-        patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup",
-              new_callable=AsyncMock),
-        patch("src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess",
-              new_callable=AsyncMock, return_value=mock_mlflow_result),
+        patch(
+            "src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace",
+            side_effect=mock_execute_with_mlflow_trace,
+        ),
+        patch(
+            "src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup",
+            new_callable=AsyncMock,
+        ),
+        patch(
+            "src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess",
+            new_callable=AsyncMock,
+            return_value=mock_mlflow_result,
+        ),
         patch("src.services.otel_tracing.shutdown_provider"),
-        patch("src.services.tools.mcp_handler.stop_all_adapters",
-              new_callable=AsyncMock),
-        patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-              return_value=_make_subprocess_logger()),
-        patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-              return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))),
+        patch(
+            "src.services.tools.mcp_handler.stop_all_adapters", new_callable=AsyncMock
+        ),
+        patch(
+            "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+            return_value=_make_subprocess_logger(),
+        ),
+        patch(
+            "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+            return_value=(
+                sys.stdout,
+                sys.stderr,
+                MagicMock(getvalue=MagicMock(return_value="")),
+            ),
+        ),
         patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
-        patch("src.services.execution.logs.context.ExecutionContextFormatter",
-              return_value=MagicMock()),
+        patch(
+            "src.services.execution.logs.context.ExecutionContextFormatter",
+            return_value=MagicMock(),
+        ),
         patch("src.services.execution.logs.context.set_execution_context"),
         patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
-        patch("src.db.database_router.get_smart_db_session",
-              new=_make_db_session_mock()),
-        patch("src.services.databricks.workspace.service.DatabricksService",
-              return_value=MagicMock(
-                  get_databricks_config=AsyncMock(return_value=None))),
-        patch("src.utils.databricks_auth.get_auth_context",
-              new_callable=AsyncMock, return_value=None),
-        patch("src.db.database_router.activate_lakebase_in_subprocess",
-              new_callable=AsyncMock, return_value=False),
+        patch(
+            "src.db.database_router.get_smart_db_session", new=_make_db_session_mock()
+        ),
+        patch(
+            "src.services.databricks.workspace.service.DatabricksService",
+            return_value=MagicMock(get_databricks_config=AsyncMock(return_value=None)),
+        ),
+        patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "src.db.database_router.activate_lakebase_in_subprocess",
+            new_callable=AsyncMock,
+            return_value=False,
+        ),
         patch("src.services.tools.mcp_integration.MCPIntegration.reset_warnings"),
-        patch("src.services.tools.mcp_integration.MCPIntegration.get_warnings",
-              return_value=mcp_warnings or []),
-        patch("src.services.tools.tool_factory.ToolFactory.create",
-              new_callable=AsyncMock, return_value=MagicMock()),
-        patch("psutil.Process", return_value=MagicMock(children=MagicMock(return_value=[]))),
+        patch(
+            "src.services.tools.mcp_integration.MCPIntegration.get_warnings",
+            return_value=mcp_warnings or [],
+        ),
+        patch(
+            "src.services.tools.tool_factory.ToolFactory.create",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
+        patch(
+            "psutil.Process",
+            return_value=MagicMock(children=MagicMock(return_value=[])),
+        ),
     ]
 
     if otel_bridge is not None:
-        patches.append(patch("src.services.otel_tracing.event_bridge.OTelEventBridge",
-                             return_value=otel_bridge))
+        patches.append(
+            patch(
+                "src.services.otel_tracing.event_bridge.OTelEventBridge",
+                return_value=otel_bridge,
+            )
+        )
 
     with contextlib.ExitStack() as stack:
         for p in patches:
@@ -126,9 +174,16 @@ class TestRunCrewInProcessWithMockCrew:
         from src.services.agent_builder.process_executor import run_crew_in_process
 
         config = {
-            "agents": [{"role": "researcher", "goal": "research", "backstory": "expert"}],
-            "tasks": [{"description": "research task", "expected_output": "result",
-                       "agent": "researcher"}],
+            "agents": [
+                {"role": "researcher", "goal": "research", "backstory": "expert"}
+            ],
+            "tasks": [
+                {
+                    "description": "research task",
+                    "expected_output": "result",
+                    "agent": "researcher",
+                }
+            ],
             "group_id": "grp-success",
             "run_name": "Test Crew",
             "version": "1.0",
@@ -231,10 +286,14 @@ class TestRunCrewInProcessWithMockCrew:
         mock_otel_bridge.register = MagicMock()
 
         # Patch create_kasal_tracer_provider to return a non-None provider
-        with _crew_execution_context(mock_crew, otel_bridge=mock_otel_bridge), \
-             patch("src.services.otel_tracing.create_kasal_tracer_provider",
-                   return_value=mock_otel_provider), \
-             patch("opentelemetry.trace.set_tracer_provider"):
+        with (
+            _crew_execution_context(mock_crew, otel_bridge=mock_otel_bridge),
+            patch(
+                "src.services.otel_tracing.create_kasal_tracer_provider",
+                return_value=mock_otel_provider,
+            ),
+            patch("opentelemetry.trace.set_tracer_provider"),
+        ):
             result = run_crew_in_process("exec-otel-bridge", config)
 
         # Either COMPLETED (otel bridge worked) or FAILED (otel setup failed)
@@ -261,52 +320,96 @@ class TestRunCrewInProcessWithMockCrew:
         mock_event_bus.flush = MagicMock(return_value=False)  # Timeout
 
         patches = [
-            patch("src.services.agent_builder.crew_preparation.CrewPreparation",
-                  return_value=MagicMock(prepare=AsyncMock(return_value=True), crew=mock_crew)),
-            patch("src.services.execution.logs.writer_task.LogWriterTask",
-                  MagicMock(ensure_writer_started=AsyncMock())),
-            patch("src.services.execution.kernel.execution_callback.create_execution_callbacks",
-                  return_value=(MagicMock(), MagicMock())),
+            patch(
+                "src.services.agent_builder.crew_preparation.CrewPreparation",
+                return_value=MagicMock(
+                    prepare=AsyncMock(return_value=True), crew=mock_crew
+                ),
+            ),
+            patch(
+                "src.services.execution.logs.writer_task.LogWriterTask",
+                MagicMock(ensure_writer_started=AsyncMock()),
+            ),
+            patch(
+                "src.services.execution.kernel.execution_callback.create_execution_callbacks",
+                return_value=(MagicMock(), MagicMock()),
+            ),
             patch("src.core.events.event_bus", mock_event_bus),
-            patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace",
-                  return_value=mock_result),
-            patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup",
-                  new_callable=AsyncMock),
-            patch("src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess",
-                  new_callable=AsyncMock,
-                  return_value=MagicMock(tracer_provider=None)),
+            patch(
+                "src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace",
+                return_value=mock_result,
+            ),
+            patch(
+                "src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess",
+                new_callable=AsyncMock,
+                return_value=MagicMock(tracer_provider=None),
+            ),
             patch("src.services.otel_tracing.shutdown_provider"),
-            patch("src.services.tools.mcp_handler.stop_all_adapters",
-                  new_callable=AsyncMock),
-            patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                  return_value=_make_subprocess_logger()),
-            patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                  return_value=(sys.stdout, sys.stderr,
-                                MagicMock(getvalue=MagicMock(return_value="")))),
+            patch(
+                "src.services.tools.mcp_handler.stop_all_adapters",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=_make_subprocess_logger(),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
-            patch("src.services.execution.logs.context.ExecutionContextFormatter",
-                  return_value=MagicMock()),
+            patch(
+                "src.services.execution.logs.context.ExecutionContextFormatter",
+                return_value=MagicMock(),
+            ),
             patch("src.services.execution.logs.context.set_execution_context"),
             patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
-            patch("src.db.database_router.get_smart_db_session",
-                  new=_make_db_session_mock()),
-            patch("src.services.databricks.workspace.service.DatabricksService",
-                  return_value=MagicMock(
-                      get_databricks_config=AsyncMock(return_value=None))),
-            patch("src.utils.databricks_auth.get_auth_context",
-                  new_callable=AsyncMock, return_value=None),
-            patch("src.db.database_router.activate_lakebase_in_subprocess",
-                  new_callable=AsyncMock, return_value=False),
+            patch(
+                "src.db.database_router.get_smart_db_session",
+                new=_make_db_session_mock(),
+            ),
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService",
+                return_value=MagicMock(
+                    get_databricks_config=AsyncMock(return_value=None)
+                ),
+            ),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "src.db.database_router.activate_lakebase_in_subprocess",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
             patch("src.services.tools.mcp_integration.MCPIntegration.reset_warnings"),
-            patch("src.services.tools.mcp_integration.MCPIntegration.get_warnings",
-                  return_value=[]),
-            patch("src.services.tools.tool_factory.ToolFactory.create",
-                  new_callable=AsyncMock, return_value=MagicMock()),
-            patch("psutil.Process",
-                  return_value=MagicMock(children=MagicMock(return_value=[]))),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.get_warnings",
+                return_value=[],
+            ),
+            patch(
+                "src.services.tools.tool_factory.ToolFactory.create",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
+            patch(
+                "psutil.Process",
+                return_value=MagicMock(children=MagicMock(return_value=[])),
+            ),
         ]
 
         import contextlib
+
         with contextlib.ExitStack() as stack:
             for p in patches:
                 stack.enter_context(p)

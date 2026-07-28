@@ -3,21 +3,22 @@ Unit tests for src/engines/kasal/helpers/agent_helpers.py
 
 Targets uncovered lines (52% → 85%+).
 """
+
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
 import pytest
 
-from src.utils.model_config import DEFAULT_ENGINE_MODEL
-from unittest.mock import AsyncMock, MagicMock, patch, call
-
 from src.services.agent_builder.agent_adapter import (
-    create_agent,
-    _build_security_preamble,
     _SECURITY_PREAMBLE,
+    _build_security_preamble,
+    create_agent,
 )
-
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 # ---------------------------------------------------------------------------
 # _build_security_preamble
 # ---------------------------------------------------------------------------
+
 
 class TestBuildSecurityPreamble:
     def test_returns_preamble_string(self):
@@ -30,6 +31,7 @@ class TestBuildSecurityPreamble:
 # ---------------------------------------------------------------------------
 # create_agent – helpers / fixtures
 # ---------------------------------------------------------------------------
+
 
 def _base_config(**overrides):
     cfg = {
@@ -50,12 +52,14 @@ async def _make_agent(agent_config=None, config=None, **kwargs):
     if config is None:
         config = {"group_id": "grp-1"}
 
-    with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-         patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-         patch("src.db.session.request_scoped_session") as mock_sess, \
-         patch("src.services.mcp.service.MCPService") as mock_mcp_svc, \
-         patch("src.core.unit_of_work.UnitOfWork") as mock_uow, \
-         patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls:
+    with (
+        patch("src.services.llm.manager.LLMManager") as mock_lm,
+        patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+        patch("src.db.session.request_scoped_session") as mock_sess,
+        patch("src.services.mcp.service.MCPService") as mock_mcp_svc,
+        patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
+        patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls,
+    ):
 
         mock_llm_instance = MagicMock()
         mock_llm_instance.model = agent_config.get("llm", "gpt-4o")
@@ -74,10 +78,7 @@ async def _make_agent(agent_config=None, config=None, **kwargs):
         mock_agent_cls.return_value = mock_agent_instance
 
         agent = await create_agent(
-            agent_key="test_agent",
-            agent_config=agent_config,
-            config=config,
-            **kwargs
+            agent_key="test_agent", agent_config=agent_config, config=config, **kwargs
         )
         return agent, mock_agent_cls, mock_lm
 
@@ -85,6 +86,7 @@ async def _make_agent(agent_config=None, config=None, **kwargs):
 # ---------------------------------------------------------------------------
 # Basic creation
 # ---------------------------------------------------------------------------
+
 
 class TestCreateAgentBasic:
     """Basic agent creation tests."""
@@ -154,12 +156,16 @@ class TestCreateAgentBasic:
 
     @pytest.mark.asyncio
     async def test_agent_key_stored_as_attribute(self):
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+        ):
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -182,6 +188,7 @@ class TestCreateAgentBasic:
 # LLM configuration paths
 # ---------------------------------------------------------------------------
 
+
 class TestCreateAgentLLMConfig:
     """Test LLM configuration branches."""
 
@@ -199,13 +206,17 @@ class TestCreateAgentLLMConfig:
     @pytest.mark.asyncio
     async def test_llm_dict_with_model_key(self):
         cfg = _base_config(llm={"model": "gpt-4o", "temperature": 0.5})
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.core.llm.transport.LLM") as mock_llm_cls:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+            patch("src.core.llm.transport.LLM") as mock_llm_cls,
+        ):
 
             mock_configured = MagicMock()
             mock_configured.model = "gpt-4o"
@@ -233,13 +244,19 @@ class TestCreateAgentLLMConfig:
     @pytest.mark.asyncio
     async def test_llm_dict_databricks_model_gets_retry_llm(self):
         cfg = _base_config(llm={"model": "databricks-meta-llama-4"})
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.services.llm.handlers.databricks_retry_llm.DatabricksRetryLLM") as mock_retry:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+            patch(
+                "src.services.llm.handlers.databricks_retry_llm.DatabricksRetryLLM"
+            ) as mock_retry,
+        ):
 
             mock_configured = MagicMock()
             mock_configured.model = "databricks/databricks-meta-llama-4"
@@ -267,12 +284,16 @@ class TestCreateAgentLLMConfig:
     @pytest.mark.asyncio
     async def test_no_llm_in_config_uses_default(self):
         cfg = {"role": "R", "goal": "G", "backstory": "B"}
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+        ):
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -303,14 +324,20 @@ class TestCreateAgentLLMConfig:
     @pytest.mark.asyncio
     async def test_llm_config_exception_falls_back_to_string(self):
         cfg = _base_config(llm="some-model")
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+        ):
 
-            mock_lm.configure_kasal_llm = AsyncMock(side_effect=Exception("LLM config error"))
+            mock_lm.configure_kasal_llm = AsyncMock(
+                side_effect=Exception("LLM config error")
+            )
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
             mock_session = AsyncMock()
             mock_session.__aenter__ = AsyncMock(return_value=mock_session)
@@ -332,6 +359,7 @@ class TestCreateAgentLLMConfig:
 # Tool resolution
 # ---------------------------------------------------------------------------
 
+
 class TestCreateAgentToolResolution:
     """Tool resolution paths in create_agent."""
 
@@ -346,14 +374,20 @@ class TestCreateAgentToolResolution:
         mock_tool_instance.name = "SearchTool"
         mock_tool_factory.create_tool = MagicMock(return_value=mock_tool_instance)
 
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock) as mock_resolve:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+            patch(
+                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                new_callable=AsyncMock,
+            ) as mock_resolve,
+        ):
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -388,16 +422,24 @@ class TestCreateAgentToolResolution:
         mock_tool_factory = MagicMock()
         mcp_sub1 = MagicMock(name="mcp_sub1")
         mcp_sub2 = MagicMock(name="mcp_sub2")
-        mock_tool_factory.create_tool = MagicMock(return_value=(True, [mcp_sub1, mcp_sub2]))
+        mock_tool_factory.create_tool = MagicMock(
+            return_value=(True, [mcp_sub1, mcp_sub2])
+        )
 
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock) as mock_resolve:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+            patch(
+                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                new_callable=AsyncMock,
+            ) as mock_resolve,
+        ):
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -428,16 +470,24 @@ class TestCreateAgentToolResolution:
         mock_tool_svc = MagicMock()
         mock_tool_svc.get_tool_config_by_name = AsyncMock(return_value={})
         mock_tool_factory = MagicMock()
-        mock_tool_factory.create_tool = MagicMock(return_value=(True, "mcp_service_adapter"))
+        mock_tool_factory.create_tool = MagicMock(
+            return_value=(True, "mcp_service_adapter")
+        )
 
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock) as mock_resolve:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+            patch(
+                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                new_callable=AsyncMock,
+            ) as mock_resolve,
+        ):
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -469,14 +519,20 @@ class TestCreateAgentToolResolution:
         mock_tool_factory = MagicMock()
         mock_tool_factory.create_tool = MagicMock(return_value=None)
 
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock) as mock_resolve:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+            patch(
+                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                new_callable=AsyncMock,
+            ) as mock_resolve,
+        ):
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -506,14 +562,20 @@ class TestCreateAgentToolResolution:
         mock_tool_svc = MagicMock()
         mock_tool_svc.get_tool_config_by_name = AsyncMock(return_value={})
 
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock) as mock_resolve:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+            patch(
+                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                new_callable=AsyncMock,
+            ) as mock_resolve,
+        ):
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -541,6 +603,7 @@ class TestCreateAgentToolResolution:
 # Additional parameter paths
 # ---------------------------------------------------------------------------
 
+
 class TestCreateAgentAdditionalParams:
     """Test optional/additional parameter handling."""
 
@@ -563,7 +626,9 @@ class TestCreateAgentAdditionalParams:
         cfg = _base_config(memory=True)
         agent, mock_cls, _ = await _make_agent(agent_config=cfg)
         call_kwargs = mock_cls.call_args[1]
-        assert "memory" not in call_kwargs  # memory is deliberately NOT propagated to the Agent
+        assert (
+            "memory" not in call_kwargs
+        )  # memory is deliberately NOT propagated to the Agent
 
     @pytest.mark.asyncio
     async def test_reasoning_param(self):
@@ -614,14 +679,20 @@ class TestCreateAgentAdditionalParams:
         mock_genie = MagicMock(name="GenieTool")
         mock_tool_factory.create_tool = MagicMock(return_value=mock_genie)
 
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock) as mock_resolve:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+            patch(
+                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                new_callable=AsyncMock,
+            ) as mock_resolve,
+        ):
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -650,15 +721,21 @@ class TestCreateAgentAdditionalParams:
     async def test_mcp_tools_error_continues(self):
         cfg = _base_config()
 
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+        ):
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
-            mock_mcp.create_mcp_tools_for_agent = AsyncMock(side_effect=Exception("MCP error"))
+            mock_mcp.create_mcp_tools_for_agent = AsyncMock(
+                side_effect=Exception("MCP error")
+            )
             mock_session = AsyncMock()
             mock_session.__aenter__ = AsyncMock(return_value=mock_session)
             mock_session.__aexit__ = AsyncMock(return_value=None)
@@ -679,14 +756,20 @@ class TestCreateAgentAdditionalParams:
 
         mock_tool_svc = MagicMock()
 
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock) as mock_resolve:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+            patch(
+                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                new_callable=AsyncMock,
+            ) as mock_resolve,
+        ):
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -714,13 +797,17 @@ class TestCreateAgentLLMConfigExtended:
     async def test_llm_dict_with_model_and_temperature_override(self):
         """Dict LLM config with temperature set at agent level."""
         cfg = _base_config(llm={"model": "gpt-4o"}, temperature=60)
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.core.llm.transport.LLM") as mock_llm_cls:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+            patch("src.core.llm.transport.LLM") as mock_llm_cls,
+        ):
 
             mock_configured = MagicMock()
             mock_configured.model = "gpt-4o"
@@ -751,13 +838,17 @@ class TestCreateAgentLLMConfigExtended:
     async def test_llm_dict_no_model_key_uses_default(self):
         """Dict LLM config without 'model' key uses gpt-4o default."""
         cfg = _base_config(llm={"temperature": 0.5, "max_tokens": 1000})
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.core.llm.transport.LLM") as mock_llm_cls:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+            patch("src.core.llm.transport.LLM") as mock_llm_cls,
+        ):
 
             mock_configured = MagicMock()
             mock_configured.model = "gpt-4o"
@@ -792,16 +883,24 @@ class TestCreateAgentLLMConfigExtended:
         mock_tool_svc.get_tool_config_by_name = AsyncMock(return_value={})
         mock_tool_factory = MagicMock()
         # Return unexpected format (True, "unexpected_string")
-        mock_tool_factory.create_tool = MagicMock(return_value=(True, "unexpected_not_list"))
+        mock_tool_factory.create_tool = MagicMock(
+            return_value=(True, "unexpected_not_list")
+        )
 
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock) as mock_resolve:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+            patch(
+                "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+                new_callable=AsyncMock,
+            ) as mock_resolve,
+        ):
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -826,12 +925,16 @@ class TestCreateAgentLLMConfigExtended:
     async def test_llm_dict_databricks_prefix_ensured(self):
         """Dict LLM with databricks model delegates prefix handling to LLMManager."""
         cfg = _base_config(llm={"model": "databricks-meta-llama"})
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+        ):
 
             mock_configured = MagicMock()
             mock_configured.model = "databricks/databricks-meta-llama"
@@ -859,13 +962,17 @@ class TestCreateAgentLLMConfigExtended:
     async def test_llm_dict_configured_llm_no_model_attr_fallback(self):
         """When configured_llm doesn't have 'model' attr, uses fallback path."""
         cfg = _base_config(llm={"model": "some-model"})
-        with patch("src.services.llm.manager.LLMManager") as mock_lm, \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.mcp.service.MCPService"), \
-             patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.core.llm.transport.LLM") as mock_llm_cls:
+        with (
+            patch("src.services.llm.manager.LLMManager") as mock_lm,
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.core.unit_of_work.UnitOfWork"),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent"
+            ) as mock_agent_cls,
+            patch("src.core.llm.transport.LLM") as mock_llm_cls,
+        ):
 
             # Return a configured_llm without 'model' attribute
             mock_configured = MagicMock(spec=[])  # no attributes
@@ -900,7 +1007,7 @@ class TestRedactLlmRepr:
                 )
 
         redacted = redact_llm_repr(FakeLLM())
-        assert 'dapi-secret-123' not in redacted
+        assert "dapi-secret-123" not in redacted
         assert "api_key='***REDACTED***'" in redacted
         assert "model='databricks/claude'" in redacted
 

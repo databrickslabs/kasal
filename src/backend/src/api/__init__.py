@@ -5,11 +5,11 @@ from src.api.agentbricks_router import router as agentbricks_router
 
 # Note: Memory management and database management routers removed per SDR request
 from src.api.agents_router import router as agents_router
+from src.api.analytics_export_router import router as analytics_export_router
 from src.api.api_keys_router import router as api_keys_router
-
 from src.api.chat_history_router import router as chat_history_router
-from src.api.workflow_recipe_router import router as workflow_recipe_router
 from src.api.connections_router import router as connections_router
+from src.api.converter_router import router as converter_router
 from src.api.crew_generation_router import router as crew_generation_router
 from src.api.crews_export_router import router as crews_export_router
 from src.api.crews_router import router as crews_router
@@ -22,7 +22,6 @@ from src.api.documentation_embeddings_router import (
     router as documentation_embeddings_router,
 )
 from src.api.engine_config_router import router as engine_config_router
-from src.api.ui_config_router import router as ui_config_router
 from src.api.execution_history_router import router as execution_history_router
 from src.api.execution_logs_router import logs_router as execution_logs_router
 from src.api.execution_logs_router import (
@@ -37,6 +36,7 @@ from src.api.group_router import router as group_router
 from src.api.group_tools_router import router as group_tools_router
 from src.api.healthcheck_router import router as healthcheck_router
 from src.api.hitl_router import router as hitl_router
+from src.api.kpi_conversion_router import router as kpi_conversion_router
 from src.api.logs_router import router as logs_router
 from src.api.mcp_router import router as mcp_router
 from src.api.memory_backend import router as memory_backend_router
@@ -56,10 +56,9 @@ from src.api.tasks_router import router as tasks_router
 from src.api.template_generation_router import router as template_generation_router
 from src.api.templates_router import router as templates_router
 from src.api.tools_router import router as tools_router
+from src.api.ui_config_router import router as ui_config_router
 from src.api.users_router import router as users_router
-from src.api.kpi_conversion_router import router as kpi_conversion_router
-from src.api.converter_router import router as converter_router
-from src.api.analytics_export_router import router as analytics_export_router
+from src.api.workflow_recipe_router import router as workflow_recipe_router
 
 # Create the main API router
 api_router = APIRouter()

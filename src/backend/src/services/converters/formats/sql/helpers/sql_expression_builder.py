@@ -8,11 +8,12 @@ All SQL expression building, aggregations, filters, and dialect-specific
 formatting are consolidated here for easy maintenance and extension.
 """
 
-from enum import Enum
-from typing import Dict, List, Optional, Any, Tuple, Callable
-import re
 import logging
-from ..models import SQLDialect, SQLAggregationType
+import re
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from ..models import SQLAggregationType, SQLDialect
 
 
 class SQLExpressionEngine:
@@ -113,7 +114,7 @@ class SQLExpressionEngine:
         agg_type: SQLAggregationType,
         column_name: str,
         table_name: str,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Build SQL aggregation expression.
@@ -142,14 +143,16 @@ class SQLExpressionEngine:
             return self.aggregation_builders[agg_type](column_name, table_name, context)
         else:
             # Fallback to SUM
-            self.logger.warning(f"Unknown aggregation type {agg_type}, falling back to SUM")
+            self.logger.warning(
+                f"Unknown aggregation type {agg_type}, falling back to SUM"
+            )
             return self._build_sum(column_name, table_name, context)
 
     def build_filter(
         self,
         filter_expr: str,
         table_name: str,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Build SQL filter expression (WHERE clause).
@@ -177,9 +180,7 @@ class SQLExpressionEngine:
         return self._build_filter_expression(filter_expr, table_name, context)
 
     def build_case_when(
-        self,
-        conditions: List[Tuple[str, Any]],
-        else_value: Any = None
+        self, conditions: List[Tuple[str, Any]], else_value: Any = None
     ) -> str:
         """
         Build CASE WHEN expression.
@@ -214,7 +215,7 @@ class SQLExpressionEngine:
         function_name: str,
         partition_by: Optional[List[str]] = None,
         order_by: Optional[List[Tuple[str, str]]] = None,
-        frame_clause: Optional[str] = None
+        frame_clause: Optional[str] = None,
     ) -> str:
         """
         Build window function expression.
@@ -278,15 +279,25 @@ class SQLExpressionEngine:
     def _is_valid_sql_filter(self, expr: str) -> bool:
         """Check if expression is already a valid SQL filter."""
         # Simple heuristic: if it contains SQL operators, assume it's valid
-        sql_operators = ['=', '!=', '<>', '>', '<', '>=', '<=', 'AND', 'OR', 'IN', 'LIKE', 'BETWEEN']
+        sql_operators = [
+            "=",
+            "!=",
+            "<>",
+            ">",
+            "<",
+            ">=",
+            "<=",
+            "AND",
+            "OR",
+            "IN",
+            "LIKE",
+            "BETWEEN",
+        ]
         expr_upper = expr.upper()
         return any(op in expr_upper for op in sql_operators)
 
     def _build_filter_expression(
-        self,
-        filter_expr: str,
-        table_name: str,
-        context: Dict[str, Any]
+        self, filter_expr: str, table_name: str, context: Dict[str, Any]
     ) -> str:
         """Build filter expression from filter string."""
         # Parse and build filter
@@ -294,8 +305,8 @@ class SQLExpressionEngine:
         quoted_table = self._quote_identifier(table_name)
 
         # Handle simple column = value patterns
-        if '=' in filter_expr:
-            parts = filter_expr.split('=')
+        if "=" in filter_expr:
+            parts = filter_expr.split("=")
             if len(parts) == 2:
                 col = parts[0].strip()
                 val = parts[1].strip()
@@ -315,7 +326,7 @@ class SQLExpressionEngine:
         quoted_column = self._quote_identifier(column_name)
 
         # Handle CASE expressions (don't quote them)
-        if column_name.upper().startswith('CASE'):
+        if column_name.upper().startswith("CASE"):
             return f"SUM({column_name})"
 
         return f"SUM({quoted_table}.{quoted_column})"
@@ -347,7 +358,9 @@ class SQLExpressionEngine:
         quoted_column = self._quote_identifier(column_name)
         return f"MAX({quoted_table}.{quoted_column})"
 
-    def _build_count_distinct(self, column_name: str, table_name: str, context: Dict) -> str:
+    def _build_count_distinct(
+        self, column_name: str, table_name: str, context: Dict
+    ) -> str:
         """Build COUNT DISTINCT aggregation."""
         quoted_table = self._quote_identifier(table_name)
         quoted_column = self._quote_identifier(column_name)
@@ -377,26 +390,30 @@ class SQLExpressionEngine:
         # DATABRICKS and STANDARD both support PERCENTILE_CONT
         return f"PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {quoted_table}.{quoted_column})"
 
-    def _build_percentile(self, column_name: str, table_name: str, context: Dict) -> str:
+    def _build_percentile(
+        self, column_name: str, table_name: str, context: Dict
+    ) -> str:
         """Build PERCENTILE aggregation."""
         quoted_table = self._quote_identifier(table_name)
         quoted_column = self._quote_identifier(column_name)
 
         # Get percentile value from context (default to 0.5)
-        percentile = context.get('percentile', 0.5)
+        percentile = context.get("percentile", 0.5)
 
         if self.dialect == SQLDialect.DATABRICKS:
             return f"PERCENTILE({quoted_table}.{quoted_column}, {percentile})"
         else:
             return f"PERCENTILE_CONT({percentile}) WITHIN GROUP (ORDER BY {quoted_table}.{quoted_column})"
 
-    def _build_weighted_avg(self, column_name: str, table_name: str, context: Dict) -> str:
+    def _build_weighted_avg(
+        self, column_name: str, table_name: str, context: Dict
+    ) -> str:
         """Build WEIGHTED_AVG aggregation."""
         quoted_table = self._quote_identifier(table_name)
         quoted_column = self._quote_identifier(column_name)
 
         # Get weight column from context
-        weight_column = context.get('weight_column', 'weight')
+        weight_column = context.get("weight_column", "weight")
         quoted_weight = self._quote_identifier(weight_column)
 
         # Weighted average: SUM(value * weight) / SUM(weight)
@@ -408,27 +425,29 @@ class SQLExpressionEngine:
         quoted_column = self._quote_identifier(column_name)
 
         # Get denominator column from context
-        denominator_column = context.get('denominator_column', 'total')
+        denominator_column = context.get("denominator_column", "total")
         quoted_denominator = self._quote_identifier(denominator_column)
 
         # Ratio with NULL handling
         return f"{quoted_table}.{quoted_column} / NULLIF({quoted_table}.{quoted_denominator}, 0)"
 
-    def _build_running_sum(self, column_name: str, table_name: str, context: Dict) -> str:
+    def _build_running_sum(
+        self, column_name: str, table_name: str, context: Dict
+    ) -> str:
         """Build RUNNING_SUM (cumulative sum) using window function."""
         quoted_table = self._quote_identifier(table_name)
         quoted_column = self._quote_identifier(column_name)
 
         # Get partition and order columns from context
-        partition_by = context.get('partition_by', [])
-        order_by = context.get('order_by', [])
+        partition_by = context.get("partition_by", [])
+        order_by = context.get("order_by", [])
 
         # Build window function
         return self.build_window_function(
             function_name=f"SUM({quoted_table}.{quoted_column})",
             partition_by=partition_by,
             order_by=order_by,
-            frame_clause="ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW"
+            frame_clause="ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW",
         )
 
     def _build_coalesce(self, column_name: str, table_name: str, context: Dict) -> str:
@@ -437,7 +456,7 @@ class SQLExpressionEngine:
         quoted_column = self._quote_identifier(column_name)
 
         # Get default value from context
-        default_value = context.get('default_value', 0)
+        default_value = context.get("default_value", 0)
         formatted_default = self._format_value(default_value)
 
         return f"COALESCE({quoted_table}.{quoted_column}, {formatted_default})"
@@ -446,46 +465,46 @@ class SQLExpressionEngine:
     # Window Functions
     # ========================================================================
 
-    def _build_row_number(self, column_name: str, table_name: str, context: Dict) -> str:
+    def _build_row_number(
+        self, column_name: str, table_name: str, context: Dict
+    ) -> str:
         """Build ROW_NUMBER window function."""
-        partition_by = context.get('partition_by', [])
-        order_by = context.get('order_by', [(column_name, 'ASC')])
+        partition_by = context.get("partition_by", [])
+        order_by = context.get("order_by", [(column_name, "ASC")])
 
         return self.build_window_function(
-            function_name="ROW_NUMBER()",
-            partition_by=partition_by,
-            order_by=order_by
+            function_name="ROW_NUMBER()", partition_by=partition_by, order_by=order_by
         )
 
     def _build_rank(self, column_name: str, table_name: str, context: Dict) -> str:
         """Build RANK window function."""
-        partition_by = context.get('partition_by', [])
-        order_by = context.get('order_by', [(column_name, 'DESC')])
+        partition_by = context.get("partition_by", [])
+        order_by = context.get("order_by", [(column_name, "DESC")])
 
         return self.build_window_function(
-            function_name="RANK()",
-            partition_by=partition_by,
-            order_by=order_by
+            function_name="RANK()", partition_by=partition_by, order_by=order_by
         )
 
-    def _build_dense_rank(self, column_name: str, table_name: str, context: Dict) -> str:
+    def _build_dense_rank(
+        self, column_name: str, table_name: str, context: Dict
+    ) -> str:
         """Build DENSE_RANK window function."""
-        partition_by = context.get('partition_by', [])
-        order_by = context.get('order_by', [(column_name, 'DESC')])
+        partition_by = context.get("partition_by", [])
+        order_by = context.get("order_by", [(column_name, "DESC")])
 
         return self.build_window_function(
-            function_name="DENSE_RANK()",
-            partition_by=partition_by,
-            order_by=order_by
+            function_name="DENSE_RANK()", partition_by=partition_by, order_by=order_by
         )
 
-    def _build_exception_aggregation(self, column_name: str, table_name: str, context: Dict) -> str:
+    def _build_exception_aggregation(
+        self, column_name: str, table_name: str, context: Dict
+    ) -> str:
         """Build EXCEPTION aggregation (aggregation excluding certain values)."""
         quoted_table = self._quote_identifier(table_name)
         quoted_column = self._quote_identifier(column_name)
 
         # Get exception values from context
-        exception_values = context.get('exception_values', [])
+        exception_values = context.get("exception_values", [])
 
         if not exception_values:
             # No exceptions, just do regular aggregation
@@ -495,7 +514,12 @@ class SQLExpressionEngine:
         conditions = []
         for exc_val in exception_values:
             formatted_val = self._format_value(exc_val)
-            conditions.append((f"{quoted_table}.{quoted_column} != {formatted_val}", f"{quoted_table}.{quoted_column}"))
+            conditions.append(
+                (
+                    f"{quoted_table}.{quoted_column} != {formatted_val}",
+                    f"{quoted_table}.{quoted_column}",
+                )
+            )
 
         case_expr = self.build_case_when(conditions, else_value=0)
         return f"SUM({case_expr})"
@@ -505,7 +529,10 @@ class SQLExpressionEngine:
 # Utility Functions
 # ========================================================================
 
-def detect_aggregation_type(formula: str, aggregation_hint: str = None) -> SQLAggregationType:
+
+def detect_aggregation_type(
+    formula: str, aggregation_hint: str = None
+) -> SQLAggregationType:
     """
     Detect SQL aggregation type from formula or hint.
 

@@ -4,6 +4,7 @@ Lakebase activation state tracker.
 Distinguishes between startup (fallback to local DB is safe) and runtime
 (fallback means silent data loss because writes already went to Lakebase).
 """
+
 import logging
 from datetime import datetime, timezone
 from typing import Optional

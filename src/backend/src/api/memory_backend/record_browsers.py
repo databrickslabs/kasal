@@ -124,9 +124,7 @@ async def _browse_lakebase_records(
         instance_name=instance_name, group_id=group_id
     ) as session:
         count_sql = text(f"SELECT COUNT(*) FROM {table_name} WHERE {where_clause}")
-        total = int(
-            (await session.execute(count_sql, params)).scalar() or 0
-        )
+        total = int((await session.execute(count_sql, params)).scalar() or 0)
         sql = text(
             f"SELECT id, content, metadata, created_at, updated_at, agent, score "
             f"FROM {table_name} "
@@ -138,7 +136,11 @@ async def _browse_lakebase_records(
         records: List[Dict[str, Any]] = []
         for row in result.fetchall():
             metadata_val = row[2]
-            metadata = metadata_val if isinstance(metadata_val, dict) else _safe_json(metadata_val)
+            metadata = (
+                metadata_val
+                if isinstance(metadata_val, dict)
+                else _safe_json(metadata_val)
+            )
             records.append(
                 {
                     "id": row[0],
@@ -149,8 +151,16 @@ async def _browse_lakebase_records(
                     "source": metadata.get("source") or row[5] or None,
                     "private": bool(metadata.get("private") or False),
                     "metadata": {
-                        k: v for k, v in metadata.items()
-                        if k not in ("scope", "categories", "importance", "source", "private")
+                        k: v
+                        for k, v in metadata.items()
+                        if k
+                        not in (
+                            "scope",
+                            "categories",
+                            "importance",
+                            "source",
+                            "private",
+                        )
                     },
                     "created_at": str(row[3]) if row[3] else None,
                     "last_accessed": str(row[4]) if row[4] else None,
@@ -212,9 +222,7 @@ def _browse_default_records(
                 # group's store dir (see CrewMemoryService._build_local_storage).
                 db_path = storage_dir / "memory.db"
                 if not db_path.is_file():
-                    logger.info(
-                        "[memory/records] No memory.db in %s", storage_dir
-                    )
+                    logger.info("[memory/records] No memory.db in %s", storage_dir)
                     continue
                 storage = LocalMemoryStorage(db_path)
                 # True store count for this scope, so the client knows whether
@@ -264,6 +272,7 @@ def _row_to_record_dict(
     positions: Dict[str, int],
 ) -> Dict[str, Any]:
     """Map a Databricks similarity-search row to a UI-friendly record dict."""
+
     def at(col: str) -> Any:
         idx = positions.get(col)
         if idx is None or idx >= len(row):
@@ -314,6 +323,7 @@ def _memory_record_to_dict(record: Any) -> Dict[str, Any]:
 
 def _safe_json(value: Any) -> Dict[str, Any]:
     import json as _json
+
     if not value:
         return {}
     if isinstance(value, dict):
@@ -327,6 +337,7 @@ def _safe_json(value: Any) -> Dict[str, Any]:
 
 def _safe_json_list(value: Any) -> List[Any]:
     import json as _json
+
     if not value:
         return []
     if isinstance(value, list):
@@ -460,7 +471,9 @@ def _delete_default_records(
         try:
             from src.services.memory.local_storage_backend import LocalMemoryStorage
         except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Default memory delete failed (local storage missing): %s", exc)
+            logger.warning(
+                "Default memory delete failed (local storage missing): %s", exc
+            )
             return 0
         for storage_dir in storage_dirs:
             try:
@@ -490,5 +503,7 @@ def _delete_default_records(
             deleted += 1
             logger.info("Removed local memory store %s", storage_dir)
         except Exception as exc:
-            logger.warning("Failed to remove local memory store %s: %s", storage_dir, exc)
+            logger.warning(
+                "Failed to remove local memory store %s: %s", storage_dir, exc
+            )
     return deleted

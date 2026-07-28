@@ -4,12 +4,15 @@ Service for managing PowerBI Semantic Model Cache.
 Handles cache retrieval, storage, and validation for semantic model metadata.
 """
 
-from typing import Optional, Dict, Any
 from datetime import date
+from typing import Any, Dict, Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.repositories.powerbi_semantic_model_cache_repository import PowerBISemanticModelCacheRepository
 from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
+from src.repositories.powerbi_semantic_model_cache_repository import (
+    PowerBISemanticModelCacheRepository,
+)
 
 
 class PowerBISemanticModelCacheService:
@@ -67,7 +70,7 @@ class PowerBISemanticModelCacheService:
         dataset_id: str,
         workspace_id: str,
         metadata: Dict[str, Any],
-        report_id: Optional[str] = None
+        report_id: Optional[str] = None,
     ) -> PowerBISemanticModelCache:
         """
         Save or update cached metadata for today.
@@ -87,7 +90,7 @@ class PowerBISemanticModelCacheService:
             group_id=group_id,
             dataset_id=dataset_id,
             workspace_id=workspace_id,
-            report_id=report_id
+            report_id=report_id,
         )
 
         if existing_cache:
@@ -100,7 +103,7 @@ class PowerBISemanticModelCacheService:
                 dataset_id=dataset_id,
                 workspace_id=workspace_id,
                 metadata=metadata,
-                report_id=report_id
+                report_id=report_id,
             )
 
     async def cleanup_old_caches(self, days_to_keep: int = 7) -> int:
@@ -122,7 +125,7 @@ class PowerBISemanticModelCacheService:
         schema: Dict[str, Any],
         sample_data: Dict[str, Any],
         default_filters: Optional[Dict[str, Any]] = None,
-        slicers: Optional[list] = None
+        slicers: Optional[list] = None,
     ) -> Dict[str, Any]:
         """
         Build metadata dictionary for caching.
@@ -142,7 +145,7 @@ class PowerBISemanticModelCacheService:
             "measures": measures,
             "relationships": relationships,
             "schema": schema,
-            "sample_data": sample_data
+            "sample_data": sample_data,
         }
 
         if default_filters:

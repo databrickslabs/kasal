@@ -2,22 +2,26 @@
 Additional coverage tests for repositories/mcp_repository.py
 Covers missing lines: 59-64, 76-84, 89-91, 97-99, 109-122, 130-147, 187-202, 266-270, 283-293, 360, 375-378
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from src.models.mcp_server import MCPServer
+from src.models.mcp_settings import MCPSettings
 from src.repositories.mcp_repository import (
     MCPServerRepository,
     MCPSettingsRepository,
     SyncMCPServerRepository,
 )
-from src.models.mcp_server import MCPServer
-from src.models.mcp_settings import MCPSettings
 
 
 class MockServer:
-    def __init__(self, id=1, name="srv1", enabled=True, global_enabled=True, group_id=None):
+    def __init__(
+        self, id=1, name="srv1", enabled=True, global_enabled=True, group_id=None
+    ):
         self.id = id
         self.name = name
         self.enabled = enabled
@@ -74,6 +78,7 @@ def settings_repo(async_session):
 
 # --- find_global_enabled ---
 
+
 @pytest.mark.asyncio
 async def test_find_global_enabled_returns_results(server_repo, async_session):
     servers = [MockServer(id=1, enabled=True, global_enabled=True)]
@@ -92,6 +97,7 @@ async def test_find_global_enabled_empty(server_repo, async_session):
 
 # --- find_by_names ---
 
+
 @pytest.mark.asyncio
 async def test_find_by_names_empty_list(server_repo, async_session):
     result = await server_repo.find_by_names([])
@@ -108,6 +114,7 @@ async def test_find_by_names_returns_matches(server_repo, async_session):
 
 
 # --- find_by_name_and_group ---
+
 
 @pytest.mark.asyncio
 async def test_find_by_name_and_group_found(server_repo, async_session):
@@ -126,6 +133,7 @@ async def test_find_by_name_and_group_not_found(server_repo, async_session):
 
 # --- find_base_by_name ---
 
+
 @pytest.mark.asyncio
 async def test_find_base_by_name_found(server_repo, async_session):
     srv = MockServer(name="base_srv", group_id=None)
@@ -142,6 +150,7 @@ async def test_find_base_by_name_not_found(server_repo, async_session):
 
 
 # --- list_for_group_scope ---
+
 
 @pytest.mark.asyncio
 async def test_list_for_group_scope_with_group(server_repo, async_session):
@@ -160,6 +169,7 @@ async def test_list_for_group_scope_no_group(server_repo, async_session):
 
 
 # --- find_by_names_group_scope ---
+
 
 @pytest.mark.asyncio
 async def test_find_by_names_group_scope_empty_names(server_repo, async_session):
@@ -186,9 +196,10 @@ async def test_find_by_names_group_scope_no_group(server_repo, async_session):
 
 # --- toggle_global_enabled ---
 
+
 @pytest.mark.asyncio
 async def test_toggle_global_enabled_not_found(server_repo):
-    with patch.object(server_repo, 'get', new_callable=AsyncMock, return_value=None):
+    with patch.object(server_repo, "get", new_callable=AsyncMock, return_value=None):
         result = await server_repo.toggle_global_enabled(999)
     assert result is None
 
@@ -196,7 +207,7 @@ async def test_toggle_global_enabled_not_found(server_repo):
 @pytest.mark.asyncio
 async def test_toggle_global_enabled_success(server_repo, async_session):
     srv = MockServer(global_enabled=True)
-    with patch.object(server_repo, 'get', new_callable=AsyncMock, return_value=srv):
+    with patch.object(server_repo, "get", new_callable=AsyncMock, return_value=srv):
         result = await server_repo.toggle_global_enabled(1)
     assert result is srv
     assert srv.global_enabled is False
@@ -207,7 +218,7 @@ async def test_toggle_global_enabled_success(server_repo, async_session):
 @pytest.mark.asyncio
 async def test_toggle_global_enabled_error(server_repo, async_session):
     srv = MockServer(global_enabled=False)
-    with patch.object(server_repo, 'get', new_callable=AsyncMock, return_value=srv):
+    with patch.object(server_repo, "get", new_callable=AsyncMock, return_value=srv):
         async_session.flush.side_effect = Exception("flush error")
         with patch("logging.error"):
             with pytest.raises(Exception, match="flush error"):
@@ -217,10 +228,13 @@ async def test_toggle_global_enabled_error(server_repo, async_session):
 
 # --- MCPSettings: update_individual_enabled ---
 
+
 @pytest.mark.asyncio
 async def test_update_individual_enabled_true(settings_repo, async_session):
     s = MockSettings(individual_enabled=False)
-    with patch.object(settings_repo, 'get_settings', new_callable=AsyncMock, return_value=s):
+    with patch.object(
+        settings_repo, "get_settings", new_callable=AsyncMock, return_value=s
+    ):
         result = await settings_repo.update_individual_enabled(True)
     assert result is s
     assert s.individual_enabled is True
@@ -231,17 +245,22 @@ async def test_update_individual_enabled_true(settings_repo, async_session):
 @pytest.mark.asyncio
 async def test_update_individual_enabled_false(settings_repo, async_session):
     s = MockSettings(individual_enabled=True)
-    with patch.object(settings_repo, 'get_settings', new_callable=AsyncMock, return_value=s):
+    with patch.object(
+        settings_repo, "get_settings", new_callable=AsyncMock, return_value=s
+    ):
         result = await settings_repo.update_individual_enabled(False)
     assert s.individual_enabled is False
 
 
 # --- MCPSettings: update_settings ---
 
+
 @pytest.mark.asyncio
 async def test_update_settings_both_none(settings_repo, async_session):
     s = MockSettings(global_enabled=False, individual_enabled=True)
-    with patch.object(settings_repo, 'get_settings', new_callable=AsyncMock, return_value=s):
+    with patch.object(
+        settings_repo, "get_settings", new_callable=AsyncMock, return_value=s
+    ):
         result = await settings_repo.update_settings()
     # Nothing changed
     assert result is s
@@ -252,7 +271,9 @@ async def test_update_settings_both_none(settings_repo, async_session):
 @pytest.mark.asyncio
 async def test_update_settings_global_only(settings_repo, async_session):
     s = MockSettings(global_enabled=False)
-    with patch.object(settings_repo, 'get_settings', new_callable=AsyncMock, return_value=s):
+    with patch.object(
+        settings_repo, "get_settings", new_callable=AsyncMock, return_value=s
+    ):
         result = await settings_repo.update_settings(global_enabled=True)
     assert s.global_enabled is True
 
@@ -260,7 +281,9 @@ async def test_update_settings_global_only(settings_repo, async_session):
 @pytest.mark.asyncio
 async def test_update_settings_individual_only(settings_repo, async_session):
     s = MockSettings(individual_enabled=True)
-    with patch.object(settings_repo, 'get_settings', new_callable=AsyncMock, return_value=s):
+    with patch.object(
+        settings_repo, "get_settings", new_callable=AsyncMock, return_value=s
+    ):
         result = await settings_repo.update_settings(individual_enabled=False)
     assert s.individual_enabled is False
 
@@ -268,13 +291,18 @@ async def test_update_settings_individual_only(settings_repo, async_session):
 @pytest.mark.asyncio
 async def test_update_settings_both(settings_repo, async_session):
     s = MockSettings(global_enabled=False, individual_enabled=False)
-    with patch.object(settings_repo, 'get_settings', new_callable=AsyncMock, return_value=s):
-        result = await settings_repo.update_settings(global_enabled=True, individual_enabled=True)
+    with patch.object(
+        settings_repo, "get_settings", new_callable=AsyncMock, return_value=s
+    ):
+        result = await settings_repo.update_settings(
+            global_enabled=True, individual_enabled=True
+        )
     assert s.global_enabled is True
     assert s.individual_enabled is True
 
 
 # --- SyncMCPServerRepository: find_global_enabled and find_by_names ---
+
 
 def test_sync_find_global_enabled():
     db = MagicMock(spec=Session)

@@ -2,12 +2,13 @@
 Coverage tests for services/memory_config_service.py
 Covers missing lines: get_active_config branches
 """
-import pytest
+
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.schemas.memory_backend import MemoryBackendType
+import pytest
 
+from src.schemas.memory_backend import MemoryBackendType
 
 VALID_DATABRICKS_CONFIG = {
     "workspace_url": "https://example.databricks.com",
@@ -46,12 +47,14 @@ def make_backend(
 
 def make_service():
     from src.services.memory.config_service import MemoryConfigService
+
     svc = MemoryConfigService(session=AsyncMock())
     svc.repository = AsyncMock()
     return svc
 
 
 # ---- No group_id, no backends ----
+
 
 @pytest.mark.asyncio
 async def test_no_group_id_no_backends_returns_none():
@@ -63,12 +66,13 @@ async def test_no_group_id_no_backends_returns_none():
 
 # ---- group_id but no active backends ----
 
+
 @pytest.mark.asyncio
 async def test_group_id_inactive_backend_returns_none():
     svc = make_service()
-    svc.repository.get_by_group_id = AsyncMock(return_value=[
-        make_backend(is_active=False)
-    ])
+    svc.repository.get_by_group_id = AsyncMock(
+        return_value=[make_backend(is_active=False)]
+    )
     result = await svc.get_active_config(group_id="g1")
     assert result is None
 
@@ -82,6 +86,7 @@ async def test_group_id_empty_backends_returns_none():
 
 
 # ---- group_id with DATABRICKS backend with databricks_config ----
+
 
 @pytest.mark.asyncio
 async def test_group_id_databricks_with_config():
@@ -99,6 +104,7 @@ async def test_group_id_databricks_with_config():
 
 # ---- group_id with LAKEBASE backend with lakebase_config ----
 
+
 @pytest.mark.asyncio
 async def test_group_id_lakebase_with_config():
     svc = make_service()
@@ -113,6 +119,7 @@ async def test_group_id_lakebase_with_config():
 
 
 # ---- group_id with DEFAULT/other backend (no specific config) ----
+
 
 @pytest.mark.asyncio
 async def test_group_id_default_backend_no_config():
@@ -129,6 +136,7 @@ async def test_group_id_default_backend_no_config():
 
 
 # ---- group_id with DATABRICKS, no workspace_url, auth succeeds ----
+
 
 @pytest.mark.asyncio
 async def test_group_id_databricks_no_workspace_url_auth_succeeds():
@@ -149,12 +157,13 @@ async def test_group_id_databricks_no_workspace_url_auth_succeeds():
     mock_auth.auth_method = "oauth"
 
     # asyncio is a local import inside the function, patch it via builtins
-    with patch('asyncio.run', return_value=mock_auth):
+    with patch("asyncio.run", return_value=mock_auth):
         result = await svc.get_active_config(group_id="g1")
     assert result is not None
 
 
 # ---- group_id with DATABRICKS, no workspace_url, auth fails ----
+
 
 @pytest.mark.asyncio
 async def test_group_id_databricks_no_workspace_url_auth_fails():
@@ -170,12 +179,13 @@ async def test_group_id_databricks_no_workspace_url_auth_fails():
     )
     svc.repository.get_by_group_id = AsyncMock(return_value=[backend])
 
-    with patch('asyncio.run', side_effect=Exception("auth error")):
+    with patch("asyncio.run", side_effect=Exception("auth error")):
         result = await svc.get_active_config(group_id="g1")
     assert result is not None
 
 
 # ---- group_id, prefer DATABRICKS when multiple active ----
+
 
 @pytest.mark.asyncio
 async def test_group_id_prefers_databricks_over_default():
@@ -188,13 +198,16 @@ async def test_group_id_prefers_databricks_over_default():
         backend_type=MemoryBackendType.DATABRICKS,
         databricks_config=VALID_DATABRICKS_CONFIG.copy(),
     )
-    svc.repository.get_by_group_id = AsyncMock(return_value=[default_backend, db_backend])
+    svc.repository.get_by_group_id = AsyncMock(
+        return_value=[default_backend, db_backend]
+    )
     result = await svc.get_active_config(group_id="g1")
     assert result is not None
     assert result.backend_type == MemoryBackendType.DATABRICKS
 
 
 # ---- group_id, prefer LAKEBASE when no DATABRICKS ----
+
 
 @pytest.mark.asyncio
 async def test_group_id_prefers_lakebase_over_default():
@@ -207,13 +220,16 @@ async def test_group_id_prefers_lakebase_over_default():
         backend_type=MemoryBackendType.LAKEBASE,
         lakebase_config=VALID_LAKEBASE_CONFIG.copy(),
     )
-    svc.repository.get_by_group_id = AsyncMock(return_value=[default_backend, lb_backend])
+    svc.repository.get_by_group_id = AsyncMock(
+        return_value=[default_backend, lb_backend]
+    )
     result = await svc.get_active_config(group_id="g1")
     assert result is not None
     assert result.backend_type == MemoryBackendType.LAKEBASE
 
 
 # ---- System-level default (no group_id): active+default DATABRICKS ----
+
 
 @pytest.mark.asyncio
 async def test_no_group_id_default_databricks():
@@ -232,6 +248,7 @@ async def test_no_group_id_default_databricks():
 
 # ---- System-level default: active+default LAKEBASE ----
 
+
 @pytest.mark.asyncio
 async def test_no_group_id_default_lakebase():
     svc = make_service()
@@ -248,6 +265,7 @@ async def test_no_group_id_default_lakebase():
 
 
 # ---- System-level default: active=False or is_default=False ----
+
 
 @pytest.mark.asyncio
 async def test_no_group_id_inactive_default_returns_none():
@@ -269,6 +287,7 @@ async def test_no_group_id_not_default_returns_none():
 
 # ---- System-level default: DATABRICKS, no workspace_url ----
 
+
 @pytest.mark.asyncio
 async def test_no_group_id_databricks_no_workspace_url_auth_succeeds():
     svc = make_service()
@@ -288,7 +307,7 @@ async def test_no_group_id_databricks_no_workspace_url_auth_succeeds():
     mock_auth.workspace_url = "https://system.databricks.com"
     mock_auth.auth_method = "pat"
 
-    with patch('asyncio.run', return_value=mock_auth):
+    with patch("asyncio.run", return_value=mock_auth):
         result = await svc.get_active_config(group_id=None)
     assert result is not None
 
@@ -308,6 +327,6 @@ async def test_no_group_id_databricks_no_workspace_url_auth_fails():
     )
     svc.repository.get_all = AsyncMock(return_value=[backend])
 
-    with patch('asyncio.run', side_effect=Exception("auth error")):
+    with patch("asyncio.run", side_effect=Exception("auth error")):
         result = await svc.get_active_config(group_id=None)
     assert result is not None

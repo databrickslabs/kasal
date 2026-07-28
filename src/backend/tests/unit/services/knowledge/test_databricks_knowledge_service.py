@@ -7,9 +7,10 @@ Tests reflect the current implementation with latest features:
 - Support for user tokens (OBO authentication)
 """
 
+from typing import Any, Dict, List, Optional
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from typing import Optional, Dict, Any, List
 
 from src.services.knowledge.databricks_service import DatabricksKnowledgeService
 

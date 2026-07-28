@@ -5,13 +5,14 @@ Tests the KBI formula parser and dependency resolver used by all converters.
 """
 
 import pytest
-from src.services.converters.common.transformers.formula import (
-    TokenType,
-    FormulaToken,
-    KbiFormulaParser,
-    KBIDependencyResolver,
-)
+
 from src.services.converters.base.models import KPI
+from src.services.converters.common.transformers.formula import (
+    FormulaToken,
+    KBIDependencyResolver,
+    KbiFormulaParser,
+    TokenType,
+)
 
 
 class TestTokenType:
@@ -267,23 +268,23 @@ class TestKBIDependencyResolver:
             KPI(
                 description="Total Sales",
                 technical_name="total_sales",
-                formula="SUM(sales.amount)"
+                formula="SUM(sales.amount)",
             ),
             KPI(
                 description="Total Cost",
                 technical_name="total_cost",
-                formula="SUM(cost.amount)"
+                formula="SUM(cost.amount)",
             ),
             KPI(
                 description="Profit",
                 technical_name="profit",
-                formula="[total_sales] - [total_cost]"
+                formula="[total_sales] - [total_cost]",
             ),
             KPI(
                 description="Profit Margin",
                 technical_name="profit_margin",
-                formula="[profit] / [total_sales]"
-            )
+                formula="[profit] / [total_sales]",
+            ),
         ]
 
     # ========== Build KBI Lookup Tests ==========
@@ -343,7 +344,7 @@ class TestKBIDependencyResolver:
         kpi_with_bad_ref = KPI(
             description="Bad KPI",
             technical_name="bad_kpi",
-            formula="[nonexistent_kbi] + 100"
+            formula="[nonexistent_kbi] + 100",
         )
 
         dependencies = resolver.resolve_formula_kbis(kpi_with_bad_ref)
@@ -355,9 +356,7 @@ class TestKBIDependencyResolver:
         resolver.build_kbi_lookup(sample_kpis)
 
         kpi_no_formula = KPI(
-            description="No Formula",
-            technical_name="no_formula",
-            formula=""
+            description="No Formula", technical_name="no_formula", formula=""
         )
 
         dependencies = resolver.resolve_formula_kbis(kpi_no_formula)
@@ -394,7 +393,9 @@ class TestKBIDependencyResolver:
         assert len(tree["dependencies"]) == 2
 
         # Find profit dependency
-        profit_dep = next(d for d in tree["dependencies"] if d["kbi"].technical_name == "profit")
+        profit_dep = next(
+            d for d in tree["dependencies"] if d["kbi"].technical_name == "profit"
+        )
 
         # Profit should have its own dependencies
         assert len(profit_dep["dependencies"]) == 2
@@ -414,16 +415,8 @@ class TestKBIDependencyResolver:
         """Test handling of circular dependencies"""
         # Create circular dependency: A -> B -> A
         circular_kpis = [
-            KPI(
-                description="KPI A",
-                technical_name="kpi_a",
-                formula="[kpi_b] + 100"
-            ),
-            KPI(
-                description="KPI B",
-                technical_name="kpi_b",
-                formula="[kpi_a] * 2"
-            )
+            KPI(description="KPI A", technical_name="kpi_a", formula="[kpi_b] + 100"),
+            KPI(description="KPI B", technical_name="kpi_b", formula="[kpi_a] * 2"),
         ]
 
         resolver.build_kbi_lookup(circular_kpis)

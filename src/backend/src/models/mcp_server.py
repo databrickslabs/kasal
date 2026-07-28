@@ -1,5 +1,15 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, Float, JSON, DateTime, UniqueConstraint
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 
 from src.db.base import Base
 
@@ -14,7 +24,7 @@ class MCPServer(Base):
 
     __tablename__ = "mcp_servers"
     __table_args__ = (
-        UniqueConstraint('name', 'group_id', name='uq_mcpserver_name_group'),
+        UniqueConstraint("name", "group_id", name="uq_mcpserver_name_group"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -31,7 +41,9 @@ class MCPServer(Base):
     max_retries = Column(Integer, default=3)
     model_mapping_enabled = Column(Boolean, default=False)
     rate_limit = Column(Integer, default=60)  # Requests per minute
-    additional_config = Column(JSON, default=dict)  # Additional configuration parameters
+    additional_config = Column(
+        JSON, default=dict
+    )  # Additional configuration parameters
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

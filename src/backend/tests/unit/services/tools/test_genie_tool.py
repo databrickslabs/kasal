@@ -4,10 +4,13 @@ The former crewai stub machinery (fake crewai.tools module + meta-path
 finder returning MagicMocks for all crewai imports) is gone: kasal_engine
 is lightweight (pydantic only), so the real BaseTool imports directly.
 """
-import pytest
-from unittest.mock import patch, AsyncMock, Mock, MagicMock
-from src.services.tools.genie_tool import GenieTool, GenieInput
+
 import logging
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
+
+from src.services.tools.genie_tool import GenieInput, GenieTool
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +99,7 @@ class TestGenieTool:
             "max_polling_delay": 60,
             "timeout_minutes": 20,
             "exponential_backoff": False,
-            "backoff_after_seconds": 180
+            "backoff_after_seconds": 180,
         }
         tool = GenieTool(tool_config=tool_config)
         assert tool._base_polling_delay == 10
@@ -149,8 +152,10 @@ class TestGenieTool:
         """Test getting workspace URL from databricks_auth."""
         tool = GenieTool(tool_config={"spaceId": "test-space"})
 
-        with patch('src.utils.databricks_auth._databricks_auth') as mock_auth:
-            mock_auth.get_workspace_url = AsyncMock(return_value="https://test.databricks.com")
+        with patch("src.utils.databricks_auth._databricks_auth") as mock_auth:
+            mock_auth.get_workspace_url = AsyncMock(
+                return_value="https://test.databricks.com"
+            )
 
             url = await tool._get_workspace_url()
             assert url == "https://test.databricks.com"
@@ -160,7 +165,7 @@ class TestGenieTool:
         """Test workspace URL retrieval failure."""
         tool = GenieTool(tool_config={"spaceId": "test-space"})
 
-        with patch('src.utils.databricks_auth._databricks_auth') as mock_auth:
+        with patch("src.utils.databricks_auth._databricks_auth") as mock_auth:
             mock_auth.get_workspace_url = AsyncMock(return_value=None)
 
             with pytest.raises(ValueError, match="Could not obtain workspace URL"):
@@ -191,7 +196,9 @@ class TestGenieTool:
         """Test URL construction with space_id placeholder."""
         tool = GenieTool(tool_config={"spaceId": "my-space"})
 
-        url = tool._make_url("https://test.databricks.com", "/api/spaces/{self._space_id}/test")
+        url = tool._make_url(
+            "https://test.databricks.com", "/api/spaces/{self._space_id}/test"
+        )
         assert url == "https://test.databricks.com/api/spaces/my-space/test"
 
     def test_make_url_without_space_id_raises_error(self):
@@ -199,14 +206,16 @@ class TestGenieTool:
         tool = GenieTool()  # No space_id configured
 
         with pytest.raises(ValueError, match="Genie space ID is not configured"):
-            tool._make_url("https://test.databricks.com", "/api/spaces/{self._space_id}/test")
+            tool._make_url(
+                "https://test.databricks.com", "/api/spaces/{self._space_id}/test"
+            )
 
     @pytest.mark.asyncio
     async def test_get_auth_headers_success(self):
         """Test getting auth headers successfully."""
         tool = GenieTool(tool_config={"spaceId": "test-space"})
 
-        with patch('src.utils.databricks_auth.get_auth_context') as mock_get_auth_ctx:
+        with patch("src.utils.databricks_auth.get_auth_context") as mock_get_auth_ctx:
             mock_headers = {"Authorization": "Bearer test-token"}
             mock_auth_ctx = Mock()
             mock_auth_ctx.get_headers.return_value = mock_headers
@@ -221,7 +230,7 @@ class TestGenieTool:
         """Test getting auth headers with user token."""
         tool = GenieTool(tool_config={"spaceId": "test-space"}, user_token="user-token")
 
-        with patch('src.utils.databricks_auth.get_auth_context') as mock_get_auth_ctx:
+        with patch("src.utils.databricks_auth.get_auth_context") as mock_get_auth_ctx:
             mock_headers = {"Authorization": "Bearer obo-token"}
             mock_auth_ctx = Mock()
             mock_auth_ctx.get_headers.return_value = mock_headers
@@ -236,7 +245,7 @@ class TestGenieTool:
         """Test getting auth headers failure."""
         tool = GenieTool(tool_config={"spaceId": "test-space"})
 
-        with patch('src.utils.databricks_auth.get_auth_context') as mock_get_auth_ctx:
+        with patch("src.utils.databricks_auth.get_auth_context") as mock_get_auth_ctx:
             mock_get_auth_ctx.return_value = None  # No auth available
 
             headers = await tool._get_auth_headers()
@@ -258,8 +267,10 @@ class TestGenieTool:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=None)
 
-        with patch('aiohttp.ClientSession', return_value=mock_session):
-            result = await tool._test_token_permissions(headers, "https://test.databricks.com")
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            result = await tool._test_token_permissions(
+                headers, "https://test.databricks.com"
+            )
             assert result is True
 
     @pytest.mark.asyncio
@@ -279,8 +290,10 @@ class TestGenieTool:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=None)
 
-        with patch('aiohttp.ClientSession', return_value=mock_session):
-            result = await tool._test_token_permissions(headers, "https://test.databricks.com")
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            result = await tool._test_token_permissions(
+                headers, "https://test.databricks.com"
+            )
             assert result is False
 
     def test_run_without_space_id(self):
@@ -311,9 +324,7 @@ class TestGenieTool:
         tool = GenieTool(tool_config={"spaceId": "test-space"})
 
         message_status = {
-            "attachments": [
-                {"text": {"content": "This is the response"}}
-            ]
+            "attachments": [{"text": {"content": "This is the response"}}]
         }
 
         response = tool._extract_response(message_status)
@@ -329,7 +340,7 @@ class TestGenieTool:
                 "result": {
                     "data_typed_array": [
                         {"values": [{"str": "Customer1"}, {"str": "1000"}]},
-                        {"values": [{"str": "Customer2"}, {"str": "2000"}]}
+                        {"values": [{"str": "Customer2"}, {"str": "2000"}]},
                     ]
                 }
             }
@@ -384,7 +395,7 @@ class TestGenieTool:
                 "result": {
                     "data_typed_array": [
                         {"values": [{"str": "Row1"}]},
-                        {"values": [{"str": "Row2"}]}
+                        {"values": [{"str": "Row2"}]},
                     ]
                 }
             }

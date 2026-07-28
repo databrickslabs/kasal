@@ -3,19 +3,21 @@ Unit tests for MemoryConfigService.
 
 Tests configuration management and active config retrieval logic.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock
+
 from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
-from src.services.memory.config_service import MemoryConfigService
+import pytest
+
+from src.core.unit_of_work import UnitOfWork
 from src.models.memory_backend import MemoryBackend
 from src.schemas.memory_backend import (
-    MemoryBackendConfig,
     DatabricksMemoryConfig,
-    MemoryBackendType
+    MemoryBackendConfig,
+    MemoryBackendType,
 )
-from src.core.unit_of_work import UnitOfWork
+from src.services.memory.config_service import MemoryConfigService
 
 
 @pytest.fixture
@@ -46,16 +48,17 @@ def databricks_backend():
         backend_type=MemoryBackendType.DATABRICKS,
         databricks_config={
             "endpoint_name": "test-endpoint",
-            "memory_index": "catalog.schema.memory_index",            "short_term_index": "ml.agents.short_term",
+            "memory_index": "catalog.schema.memory_index",
+            "short_term_index": "ml.agents.short_term",
             "long_term_index": "ml.agents.long_term",
             "entity_index": "ml.agents.entity",
             "workspace_url": "https://test.databricks.com",
-            "embedding_dimension": 768
+            "embedding_dimension": 768,
         },
         is_active=True,
         is_default=False,
         created_at=datetime.utcnow() - timedelta(days=2),
-        updated_at=datetime.utcnow() - timedelta(days=1)
+        updated_at=datetime.utcnow() - timedelta(days=1),
     )
 
 
@@ -72,13 +75,13 @@ def default_backend():
         is_active=True,
         is_default=False,
         created_at=datetime.utcnow() - timedelta(days=5),
-        updated_at=datetime.utcnow() - timedelta(days=3)
+        updated_at=datetime.utcnow() - timedelta(days=3),
     )
 
 
 class TestMemoryConfigService:
     """Test cases for MemoryConfigService."""
-    
+
     @pytest.mark.asyncio
     async def test_get_active_config_with_group_id_databricks_preferred(
         self, service, mock_uow, databricks_backend, default_backend
@@ -88,18 +91,18 @@ class TestMemoryConfigService:
         group_id = "test-group-123"
         mock_uow.memory_backend_repository.get_by_group_id.return_value = [
             default_backend,
-            databricks_backend
+            databricks_backend,
         ]
-        
+
         # Act
         result = await service.get_active_config(group_id)
-        
+
         # Assert
         assert result is not None
         assert result.backend_type == MemoryBackendType.DATABRICKS
         assert isinstance(result.databricks_config, DatabricksMemoryConfig)
         assert result.databricks_config.endpoint_name == "test-endpoint"
-    
+
     @pytest.mark.asyncio
     async def test_get_active_config_most_recent_when_no_databricks(
         self, service, mock_uow, default_backend
@@ -116,7 +119,7 @@ class TestMemoryConfigService:
             enable_entity=False,
             enable_relationship_retrieval=False,
             databricks_config=None,
-            custom_config=None
+            custom_config=None,
         )
         newer_backend = MagicMock(
             backend_type=MemoryBackendType.DEFAULT,
@@ -127,21 +130,21 @@ class TestMemoryConfigService:
             enable_entity=True,
             enable_relationship_retrieval=False,
             databricks_config=None,
-            custom_config=None
+            custom_config=None,
         )
-        
+
         mock_uow.memory_backend_repository.get_by_group_id.return_value = [
             older_backend,
-            newer_backend
+            newer_backend,
         ]
-        
+
         # Act
         result = await service.get_active_config(group_id)
-        
+
         # Assert
         assert result is not None
         assert result.backend_type == MemoryBackendType.DEFAULT
-    
+
     @pytest.mark.asyncio
     async def test_get_active_config_only_active_backends(
         self, service, mock_uow, databricks_backend
@@ -159,35 +162,35 @@ class TestMemoryConfigService:
             enable_entity=False,
             enable_relationship_retrieval=False,
             databricks_config=None,
-            custom_config={"test": "value"}
+            custom_config={"test": "value"},
         )
-        
+
         mock_uow.memory_backend_repository.get_by_group_id.return_value = [
             databricks_backend,
-            active_backend
+            active_backend,
         ]
-        
+
         # Act
         result = await service.get_active_config(group_id)
-        
+
         # Assert
         assert result is not None
         assert result.backend_type == MemoryBackendType.DEFAULT
         assert result.custom_config == {"test": "value"}
-    
+
     @pytest.mark.asyncio
     async def test_get_active_config_no_active_backends(self, service, mock_uow):
         """Test that None is returned when no active backends exist."""
         # Arrange
         group_id = "test-group-123"
         mock_uow.memory_backend_repository.get_by_group_id.return_value = []
-        
+
         # Act
         result = await service.get_active_config(group_id)
-        
+
         # Assert
         assert result is None
-    
+
     @pytest.mark.asyncio
     async def test_get_active_config_system_default_fallback(
         self, service, mock_uow, databricks_backend
@@ -196,30 +199,30 @@ class TestMemoryConfigService:
         # Arrange
         databricks_backend.is_default = True
         databricks_backend.is_active = True
-        
+
         mock_uow.memory_backend_repository.get_all.return_value = [databricks_backend]
-        
+
         # Act
         result = await service.get_active_config(group_id=None)
-        
+
         # Assert
         assert result is not None
         assert result.backend_type == MemoryBackendType.DATABRICKS
         assert isinstance(result.databricks_config, DatabricksMemoryConfig)
         mock_uow.memory_backend_repository.get_all.assert_called_once()
-    
+
     @pytest.mark.asyncio
     async def test_get_active_config_no_system_default(self, service, mock_uow):
         """Test that None is returned when no system default exists."""
         # Arrange
         mock_uow.memory_backend_repository.get_all.return_value = []
-        
+
         # Act
         result = await service.get_active_config(group_id=None)
-        
+
         # Assert
         assert result is None
-    
+
     @pytest.mark.asyncio
     async def test_get_active_config_databricks_config_conversion(
         self, service, mock_uow, databricks_backend
@@ -227,18 +230,20 @@ class TestMemoryConfigService:
         """Test proper conversion of databricks_config dict to DatabricksMemoryConfig."""
         # Arrange
         group_id = "test-group-123"
-        mock_uow.memory_backend_repository.get_by_group_id.return_value = [databricks_backend]
-        
+        mock_uow.memory_backend_repository.get_by_group_id.return_value = [
+            databricks_backend
+        ]
+
         # Act
         result = await service.get_active_config(group_id)
-        
+
         # Assert
         assert result.databricks_config is not None
         assert isinstance(result.databricks_config, DatabricksMemoryConfig)
         assert result.databricks_config.endpoint_name == "test-endpoint"
         assert result.databricks_config.workspace_url == "https://test.databricks.com"
         assert result.databricks_config.embedding_dimension == 768
-    
+
     @pytest.mark.asyncio
     async def test_get_active_config_multiple_databricks_most_recent(
         self, service, mock_uow
@@ -251,12 +256,15 @@ class TestMemoryConfigService:
             is_active=True,
             updated_at=datetime.utcnow() - timedelta(days=5),
             name="Older Databricks",
-            databricks_config={"endpoint_name": "old-endpoint", "memory_index": "catalog.schema.memory_index"},
+            databricks_config={
+                "endpoint_name": "old-endpoint",
+                "memory_index": "catalog.schema.memory_index",
+            },
             enable_short_term=True,
             enable_long_term=True,
             enable_entity=True,
             enable_relationship_retrieval=False,
-            custom_config=None
+            custom_config=None,
         )
         newer_databricks = MagicMock(
             backend_type=MemoryBackendType.DATABRICKS,
@@ -265,30 +273,31 @@ class TestMemoryConfigService:
             name="Newer Databricks",
             databricks_config={
                 "endpoint_name": "new-endpoint",
-                "memory_index": "catalog.schema.memory_index",                "short_term_index": "new.index",
+                "memory_index": "catalog.schema.memory_index",
+                "short_term_index": "new.index",
                 "workspace_url": "https://new.databricks.com",
-                "embedding_dimension": 1024
+                "embedding_dimension": 1024,
             },
             enable_short_term=False,
             enable_long_term=True,
             enable_entity=True,
             enable_relationship_retrieval=False,
-            custom_config=None
+            custom_config=None,
         )
-        
+
         mock_uow.memory_backend_repository.get_by_group_id.return_value = [
             older_databricks,
-            newer_databricks
+            newer_databricks,
         ]
-        
+
         # Act
         result = await service.get_active_config(group_id)
-        
+
         # Assert
         assert result is not None
         assert result.backend_type == MemoryBackendType.DATABRICKS
         assert result.databricks_config.endpoint_name == "new-endpoint"
-    
+
     @pytest.mark.asyncio
     async def test_get_active_config_preserves_custom_config(self, service, mock_uow):
         """Test that custom_config is preserved in the result."""
@@ -303,14 +312,16 @@ class TestMemoryConfigService:
             enable_long_term=True,
             enable_entity=True,
             enable_relationship_retrieval=False,
-            custom_config={"key1": "value1", "key2": 123}
+            custom_config={"key1": "value1", "key2": 123},
         )
-        
-        mock_uow.memory_backend_repository.get_by_group_id.return_value = [backend_with_custom]
-        
+
+        mock_uow.memory_backend_repository.get_by_group_id.return_value = [
+            backend_with_custom
+        ]
+
         # Act
         result = await service.get_active_config(group_id)
-        
+
         # Assert
         assert result is not None
         assert result.custom_config == {"key1": "value1", "key2": 123}

@@ -8,30 +8,31 @@ from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
+
 class BaseGuardrail(ABC):
     """
     Abstract base class for guardrails that validate task output.
-    
+
     All guardrails should inherit from this class and implement the validate method.
     """
-    
+
     def __init__(self, config: Dict[str, Any]):
         """
         Initialize the guardrail with configuration.
-        
+
         Args:
             config: Configuration dictionary for the guardrail
         """
         self.config = config
-    
+
     @abstractmethod
     def validate(self, output: str) -> Dict[str, Any]:
         """
         Validate the task output.
-        
+
         Args:
             output: The task output to validate
-            
+
         Returns:
             Dictionary with validation result and feedback:
                 - valid (bool): Whether the output is valid
@@ -52,7 +53,9 @@ def is_task_output(value: Any) -> bool:
     ``str(output)``, so "not a string, not a dict, and carries one of those
     attributes" is the real condition being tested.
     """
-    if value is None or isinstance(value, (str, bytes, dict, list, tuple, int, float, bool)):
+    if value is None or isinstance(
+        value, (str, bytes, dict, list, tuple, int, float, bool)
+    ):
         return False
     # Anything else that reaches a guardrail IS the task's output object. Naming
     # the attributes instead would silently reject a future output type that

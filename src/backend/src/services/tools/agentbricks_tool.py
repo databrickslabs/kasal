@@ -1,13 +1,14 @@
-from src.services.tools.base import BaseTool
-from typing import Optional, Type, Union, Dict, Any, List
-from pydantic import BaseModel, Field, PrivateAttr, field_validator
-import logging
-import aiohttp
 import asyncio
+import logging
 import os
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Type, Union
 
-from src.utils.telemetry import get_user_agent_header, KasalProduct
+import aiohttp
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
+
+from src.services.tools.base import BaseTool
+from src.utils.telemetry import KasalProduct, get_user_agent_header
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -44,7 +45,10 @@ def _extract_responses_output_text(output: List[Any]) -> str:
         parts: List[str] = []
         if isinstance(content, list):
             for part in content:
-                if isinstance(part, dict) and part.get("type") in ("output_text", "text"):
+                if isinstance(part, dict) and part.get("type") in (
+                    "output_text",
+                    "text",
+                ):
                     text = part.get("text")
                     if isinstance(text, str) and text.strip():
                         parts.append(text)
@@ -59,9 +63,10 @@ def _extract_responses_output_text(output: List[Any]) -> str:
 
 class AgentBricksInput(BaseModel):
     """Input schema for AgentBricks."""
+
     question: str = Field(..., description="The question to ask the AgentBricks agent.")
 
-    @field_validator('question', mode='before')
+    @field_validator("question", mode="before")
     @classmethod
     def parse_question(cls, value):
         """
@@ -74,14 +79,14 @@ class AgentBricksInput(BaseModel):
 
         # If it's a dict with a description or text field, use that
         if isinstance(value, dict):
-            if 'description' in value:
-                return value['description']
-            elif 'text' in value:
-                return value['text']
-            elif 'query' in value:
-                return value['query']
-            elif 'question' in value:
-                return value['question']
+            if "description" in value:
+                return value["description"]
+            elif "text" in value:
+                return value["text"]
+            elif "query" in value:
+                return value["query"]
+            elif "question" in value:
+                return value["question"]
             # If we can't find a suitable field, convert the whole dict to string
             return str(value)
 
@@ -103,8 +108,12 @@ class AgentBricksTool(BaseTool):
     _tool_id: int = PrivateAttr(default=None)
     _user_token: str = PrivateAttr(default=None)  # For OBO authentication
     _group_id: str = PrivateAttr(default=None)  # For PAT authentication fallback
-    _return_trace: bool = PrivateAttr(default=False)  # Whether to return execution trace
-    _custom_inputs: Dict[str, Any] = PrivateAttr(default=None)  # Custom inputs for the agent
+    _return_trace: bool = PrivateAttr(
+        default=False
+    )  # Whether to return execution trace
+    _custom_inputs: Dict[str, Any] = PrivateAttr(
+        default=None
+    )  # Custom inputs for the agent
 
     def __init__(
         self,
@@ -113,13 +122,15 @@ class AgentBricksTool(BaseTool):
         token_required: bool = True,
         user_token: str = None,
         group_id: str = None,
-        result_as_answer: bool = False
+        result_as_answer: bool = False,
     ):
         super().__init__(result_as_answer=result_as_answer)
         if tool_config is None:
             tool_config = {}
 
-        logger.info(f"AgentBricksTool.__init__ called with tool_config keys: {list(tool_config.keys()) if tool_config else []}")
+        logger.info(
+            f"AgentBricksTool.__init__ called with tool_config keys: {list(tool_config.keys()) if tool_config else []}"
+        )
 
         # Set tool ID if provided
         if tool_id is not None:
@@ -134,45 +145,58 @@ class AgentBricksTool(BaseTool):
         # This is essential because UserContext doesn't propagate to CrewAI threads
         if group_id:
             self._group_id = group_id
-            logger.info(f"Group ID provided for PAT authentication fallback: {group_id}")
+            logger.info(
+                f"Group ID provided for PAT authentication fallback: {group_id}"
+            )
         else:
-            logger.warning("No group_id provided - PAT authentication may fail if user_token unavailable")
+            logger.warning(
+                "No group_id provided - PAT authentication may fail if user_token unavailable"
+            )
 
         # Extract endpoint_name from tool_config (ONLY config, never environment)
         if tool_config:
-            if 'endpointName' in tool_config:
+            if "endpointName" in tool_config:
                 # Handle if endpointName is a list
-                if isinstance(tool_config['endpointName'], list) and tool_config['endpointName']:
-                    self._endpoint_name = tool_config['endpointName'][0]
-                    logger.info(f"Using endpointName from config (list): {self._endpoint_name}")
+                if (
+                    isinstance(tool_config["endpointName"], list)
+                    and tool_config["endpointName"]
+                ):
+                    self._endpoint_name = tool_config["endpointName"][0]
+                    logger.info(
+                        f"Using endpointName from config (list): {self._endpoint_name}"
+                    )
                 else:
-                    self._endpoint_name = tool_config['endpointName']
-                    logger.info(f"Using endpointName from config: {self._endpoint_name}")
-            elif 'endpoint' in tool_config:
-                self._endpoint_name = tool_config['endpoint']
+                    self._endpoint_name = tool_config["endpointName"]
+                    logger.info(
+                        f"Using endpointName from config: {self._endpoint_name}"
+                    )
+            elif "endpoint" in tool_config:
+                self._endpoint_name = tool_config["endpoint"]
                 logger.info(f"Using endpoint from config: {self._endpoint_name}")
-            elif 'endpoint_name' in tool_config:
-                self._endpoint_name = tool_config['endpoint_name']
+            elif "endpoint_name" in tool_config:
+                self._endpoint_name = tool_config["endpoint_name"]
                 logger.info(f"Using endpoint_name from config: {self._endpoint_name}")
 
             # Extract timeout if provided
-            if 'timeout' in tool_config:
-                self._timeout = tool_config['timeout']
+            if "timeout" in tool_config:
+                self._timeout = tool_config["timeout"]
                 logger.info(f"Using timeout from config: {self._timeout}s")
 
             # Extract return_trace flag if provided
-            if 'return_trace' in tool_config:
-                self._return_trace = tool_config['return_trace']
+            if "return_trace" in tool_config:
+                self._return_trace = tool_config["return_trace"]
                 logger.info(f"Return trace enabled: {self._return_trace}")
 
             # Extract custom inputs if provided
-            if 'custom_inputs' in tool_config:
-                self._custom_inputs = tool_config['custom_inputs']
+            if "custom_inputs" in tool_config:
+                self._custom_inputs = tool_config["custom_inputs"]
                 logger.info(f"Custom inputs provided: {self._custom_inputs}")
 
         # Validate endpoint_name is configured
         if not self._endpoint_name:
-            logger.warning("AgentBricks endpoint name not configured in tool_config. Tool will fail when used.")
+            logger.warning(
+                "AgentBricks endpoint name not configured in tool_config. Tool will fail when used."
+            )
 
         # Log configuration
         logger.info("AgentBricksTool Configuration:")
@@ -180,7 +204,9 @@ class AgentBricksTool(BaseTool):
         logger.info(f"Endpoint Name: {self._endpoint_name}")
         logger.info(f"Timeout: {self._timeout}s")
         logger.info(f"Has user token: {bool(self._user_token)}")
-        logger.info("Host and authentication will be obtained from databricks_auth module at runtime")
+        logger.info(
+            "Host and authentication will be obtained from databricks_auth module at runtime"
+        )
 
     def set_user_token(self, user_token: str):
         """Set user access token for OBO authentication."""
@@ -196,7 +222,9 @@ class AgentBricksTool(BaseTool):
             workspace_url = await _databricks_auth.get_workspace_url()
 
             if not workspace_url:
-                raise ValueError("Could not obtain workspace URL from databricks_auth module")
+                raise ValueError(
+                    "Could not obtain workspace URL from databricks_auth module"
+                )
 
             return workspace_url
 
@@ -207,11 +235,11 @@ class AgentBricksTool(BaseTool):
     def _make_url(self, workspace_url: str, path: str) -> str:
         """Create a full URL from workspace URL and path."""
         # Ensure workspace_url doesn't have trailing slash
-        workspace_url = workspace_url.rstrip('/')
+        workspace_url = workspace_url.rstrip("/")
 
         # Ensure path starts with a slash
-        if not path.startswith('/'):
-            path = '/' + path
+        if not path.startswith("/"):
+            path = "/" + path
 
         return f"{workspace_url}{path}"
 
@@ -219,7 +247,7 @@ class AgentBricksTool(BaseTool):
         """Get authentication headers using unified authentication."""
         try:
             from src.utils.databricks_auth import get_auth_context
-            from src.utils.user_context import UserContext, GroupContext
+            from src.utils.user_context import GroupContext, UserContext
 
             # CRITICAL: Set UserContext with group_id before calling get_auth_context()
             # This is necessary because Python's contextvars don't propagate to CrewAI threads
@@ -230,12 +258,16 @@ class AgentBricksTool(BaseTool):
                     group_context = GroupContext(
                         group_ids=[self._group_id],
                         group_email=f"{self._group_id}@tool_thread",
-                        access_token=self._user_token
+                        access_token=self._user_token,
                     )
                     UserContext.set_group_context(group_context)
-                    logger.info(f"[AgentBricksTool] Set UserContext with group_id={self._group_id} for PAT authentication")
+                    logger.info(
+                        f"[AgentBricksTool] Set UserContext with group_id={self._group_id} for PAT authentication"
+                    )
                 except Exception as ctx_error:
-                    logger.warning(f"[AgentBricksTool] Could not set UserContext: {ctx_error}")
+                    logger.warning(
+                        f"[AgentBricksTool] Could not set UserContext: {ctx_error}"
+                    )
 
             # Get unified auth context (handles OBO → PAT with group_id → SPN)
             auth = await get_auth_context(user_token=self._user_token)
@@ -279,7 +311,7 @@ class AgentBricksTool(BaseTool):
 
             if not headers:
                 raise Exception("No authentication headers available")
-            
+
             # Add User-Agent for Databricks telemetry
             headers.update(get_user_agent_header(KasalProduct.AGENTBRICKS))
 
@@ -289,19 +321,14 @@ class AgentBricksTool(BaseTool):
             # endpoint; the AI Gateway only exposes OpenAI-compatible
             # /chat/completions and /embeddings (no /responses route), so these
             # invocations stay on /serving-endpoints/<endpoint>/invocations.
-            url = self._make_url(workspace_url, f"/serving-endpoints/{endpoint_name}/invocations")
+            url = self._make_url(
+                workspace_url, f"/serving-endpoints/{endpoint_name}/invocations"
+            )
             logger.info(f"Querying AgentBricks endpoint at URL: {url}")
 
             # Build request payload in AgentBricks format
             # AgentBricks uses 'input' field instead of 'messages'
-            payload = {
-                "input": [
-                    {
-                        "role": "user",
-                        "content": question
-                    }
-                ]
-            }
+            payload = {"input": [{"role": "user", "content": question}]}
 
             # Add custom inputs if provided
             if self._custom_inputs:
@@ -315,7 +342,7 @@ class AgentBricksTool(BaseTool):
                     url,
                     json=payload,
                     headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=self._timeout)
+                    timeout=aiohttp.ClientTimeout(total=self._timeout),
                 ) as response:
                     if response.status != 200:
                         error_text = await response.text()
@@ -385,7 +412,9 @@ class AgentBricksTool(BaseTool):
                     "AgentBricks returned an unrecognized response shape: %s",
                     type(result).__name__,
                 )
-                response_text = "The Agent Bricks endpoint returned an unrecognized response."
+                response_text = (
+                    "The Agent Bricks endpoint returned an unrecognized response."
+                )
 
             logger.info(f"AgentBricks query completed successfully")
             return response_text
@@ -445,7 +474,7 @@ To find available AgentBricks endpoints, use the AgentBricks API endpoints list.
 """
 
         # Handle empty inputs or 'None' as an input
-        if not question or question.lower() == 'none':
+        if not question or question.lower() == "none":
             return """To use the AgentBricksTool, please provide a specific question.
 For example:
 - "What are the current sales trends?"

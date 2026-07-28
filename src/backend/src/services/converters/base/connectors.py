@@ -3,17 +3,18 @@ Base Inbound Connector
 Abstract base class for all inbound connectors that extract measures from source systems
 """
 
+import logging
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from enum import Enum
-import logging
+from typing import Any, Dict, List, Optional
 
 from .models import KPI, KPIDefinition
 
 
 class ConnectorType(str, Enum):
     """Supported inbound connector types"""
+
     POWERBI = "powerbi"
     TABLEAU = "tableau"
     LOOKER = "looker"
@@ -24,6 +25,7 @@ class ConnectorType(str, Enum):
 @dataclass
 class InboundConnectorMetadata:
     """Metadata about an inbound connector"""
+
     connector_type: ConnectorType
     source_id: str  # Dataset ID, Workbook ID, etc.
     source_name: Optional[str] = None
@@ -113,7 +115,7 @@ class BaseInboundConnector(ABC):
         self,
         definition_name: str,
         definition_description: Optional[str] = None,
-        **extract_kwargs
+        **extract_kwargs,
     ) -> KPIDefinition:
         """
         Extract measures and wrap in KPIDefinition.
@@ -139,12 +141,12 @@ class BaseInboundConnector(ABC):
         # Create KPIDefinition
         definition = KPIDefinition(
             description=definition_description or definition_name,
-            technical_name=definition_name.lower().replace(' ', '_'),
+            technical_name=definition_name.lower().replace(" ", "_"),
             kpis=kpis,
             default_variables={},
             query_filters=[],
             structures={},
-            filters=None  # FIXED: filters expects Optional[Dict], not list
+            filters=None,  # FIXED: filters expects Optional[Dict], not list
         )
 
         self.logger.info(

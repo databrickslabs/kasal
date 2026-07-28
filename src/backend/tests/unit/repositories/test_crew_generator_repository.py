@@ -1,11 +1,12 @@
 """Unit tests for CrewGeneratorRepository."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.repositories.crew_generator_repository import CrewGeneratorRepository
+import pytest
+
 from src.core.exceptions import KasalError
+from src.repositories.crew_generator_repository import CrewGeneratorRepository
 
 
 @pytest.fixture
@@ -81,7 +82,9 @@ class TestUpdate:
     @pytest.mark.asyncio
     async def test_updates_task_context(self, repo, mock_session):
         task = MagicMock(context=[])
-        with patch("src.repositories.crew_generator_repository.TaskRepository") as MockTaskRepo:
+        with patch(
+            "src.repositories.crew_generator_repository.TaskRepository"
+        ) as MockTaskRepo:
             mock_task_repo = MockTaskRepo.return_value
             mock_task_repo.get = AsyncMock(return_value=task)
 
@@ -92,7 +95,9 @@ class TestUpdate:
 
     @pytest.mark.asyncio
     async def test_returns_none_when_task_not_found(self, repo, mock_session):
-        with patch("src.repositories.crew_generator_repository.TaskRepository") as MockTaskRepo:
+        with patch(
+            "src.repositories.crew_generator_repository.TaskRepository"
+        ) as MockTaskRepo:
             mock_task_repo = MockTaskRepo.return_value
             mock_task_repo.get = AsyncMock(return_value=None)
 
@@ -111,35 +116,41 @@ class TestCreateCrewEntities:
 
     @pytest.mark.asyncio
     async def test_creates_agents_and_tasks(self, repo, mock_session):
-        agent_data = [{
-            "name": "Researcher",
-            "role": "Research",
-            "goal": "Find info",
-            "backstory": "Expert",
-        }]
-        task_data = [{
-            "name": "Search Task",
-            "description": "Search the web",
-            "expected_output": "Report",
-            "agent": "Researcher",
-        }]
+        agent_data = [
+            {
+                "name": "Researcher",
+                "role": "Research",
+                "goal": "Find info",
+                "backstory": "Expert",
+            }
+        ]
+        task_data = [
+            {
+                "name": "Search Task",
+                "description": "Search the web",
+                "expected_output": "Report",
+                "agent": "Researcher",
+            }
+        ]
 
         # Mock flush/refresh to set attributes on entity
         async def mock_flush():
             pass
 
         async def mock_refresh(entity):
-            if not hasattr(entity, 'id') or entity.id is None:
+            if not hasattr(entity, "id") or entity.id is None:
                 entity.id = str(uuid.uuid4())
-            if not hasattr(entity, 'created_at'):
+            if not hasattr(entity, "created_at"):
                 entity.created_at = None
-            if not hasattr(entity, 'updated_at'):
+            if not hasattr(entity, "updated_at"):
                 entity.updated_at = None
 
         mock_session.flush = AsyncMock(side_effect=mock_flush)
         mock_session.refresh = AsyncMock(side_effect=mock_refresh)
 
-        result = await repo.create_crew_entities({"agents": agent_data, "tasks": task_data})
+        result = await repo.create_crew_entities(
+            {"agents": agent_data, "tasks": task_data}
+        )
 
         assert "agents" in result
         assert "tasks" in result
@@ -150,19 +161,28 @@ class TestCreateCrewEntities:
     @pytest.mark.asyncio
     async def test_creates_entities_without_group_context(self, repo, mock_session):
         async def mock_refresh(entity):
-            if not hasattr(entity, 'id') or entity.id is None:
+            if not hasattr(entity, "id") or entity.id is None:
                 entity.id = str(uuid.uuid4())
-            if not hasattr(entity, 'created_at'):
+            if not hasattr(entity, "created_at"):
                 entity.created_at = None
-            if not hasattr(entity, 'updated_at'):
+            if not hasattr(entity, "updated_at"):
                 entity.updated_at = None
 
         mock_session.refresh = AsyncMock(side_effect=mock_refresh)
 
-        result = await repo.create_crew_entities({
-            "agents": [{"name": "A", "role": "R", "goal": "G", "backstory": "B"}],
-            "tasks": [{"name": "T", "description": "D", "expected_output": "E", "agent": "A"}],
-        })
+        result = await repo.create_crew_entities(
+            {
+                "agents": [{"name": "A", "role": "R", "goal": "G", "backstory": "B"}],
+                "tasks": [
+                    {
+                        "name": "T",
+                        "description": "D",
+                        "expected_output": "E",
+                        "agent": "A",
+                    }
+                ],
+            }
+        )
 
         assert len(result["agents"]) == 1
 
@@ -175,10 +195,12 @@ class TestCreateAgents:
         group_ctx.primary_group_id = "g-1"
         group_ctx.group_email = "a@b.com"
 
-        agents_data = [{"name": "Agent1", "role": "Role", "goal": "Goal", "backstory": "Back"}]
+        agents_data = [
+            {"name": "Agent1", "role": "Role", "goal": "Goal", "backstory": "Back"}
+        ]
 
         async def mock_refresh(entity):
-            if not hasattr(entity, 'id') or entity.id is None:
+            if not hasattr(entity, "id") or entity.id is None:
                 entity.id = str(uuid.uuid4())
 
         mock_session.refresh = AsyncMock(side_effect=mock_refresh)
@@ -190,10 +212,18 @@ class TestCreateAgents:
 
     @pytest.mark.asyncio
     async def test_forces_allow_code_execution_false(self, repo, mock_session):
-        agents_data = [{"name": "Agent1", "role": "R", "goal": "G", "backstory": "B", "allow_code_execution": True}]
+        agents_data = [
+            {
+                "name": "Agent1",
+                "role": "R",
+                "goal": "G",
+                "backstory": "B",
+                "allow_code_execution": True,
+            }
+        ]
 
         async def mock_refresh(entity):
-            if not hasattr(entity, 'id') or entity.id is None:
+            if not hasattr(entity, "id") or entity.id is None:
                 entity.id = str(uuid.uuid4())
 
         mock_session.refresh = AsyncMock(side_effect=mock_refresh)
@@ -208,10 +238,17 @@ class TestCreateTasks:
     @pytest.mark.asyncio
     async def test_assigns_agent_by_name(self, repo, mock_session):
         agent_map = {"Agent1": "agent-uuid-1"}
-        tasks_data = [{"name": "Task1", "description": "D", "expected_output": "E", "agent": "Agent1"}]
+        tasks_data = [
+            {
+                "name": "Task1",
+                "description": "D",
+                "expected_output": "E",
+                "agent": "Agent1",
+            }
+        ]
 
         async def mock_refresh(entity):
-            if not hasattr(entity, 'id') or entity.id is None:
+            if not hasattr(entity, "id") or entity.id is None:
                 entity.id = str(uuid.uuid4())
 
         mock_session.refresh = AsyncMock(side_effect=mock_refresh)
@@ -227,7 +264,7 @@ class TestCreateTasks:
         tasks_data = [{"name": "Task1", "description": "D", "expected_output": "E"}]
 
         async def mock_refresh(entity):
-            if not hasattr(entity, 'id') or entity.id is None:
+            if not hasattr(entity, "id") or entity.id is None:
                 entity.id = str(uuid.uuid4())
 
         mock_session.refresh = AsyncMock(side_effect=mock_refresh)
@@ -239,10 +276,17 @@ class TestCreateTasks:
     @pytest.mark.asyncio
     async def test_case_insensitive_agent_match(self, repo, mock_session):
         agent_map = {"Researcher Agent": "agent-uuid-1"}
-        tasks_data = [{"name": "T", "description": "D", "expected_output": "E", "agent": "researcher agent"}]
+        tasks_data = [
+            {
+                "name": "T",
+                "description": "D",
+                "expected_output": "E",
+                "agent": "researcher agent",
+            }
+        ]
 
         async def mock_refresh(entity):
-            if not hasattr(entity, 'id') or entity.id is None:
+            if not hasattr(entity, "id") or entity.id is None:
                 entity.id = str(uuid.uuid4())
 
         mock_session.refresh = AsyncMock(side_effect=mock_refresh)
@@ -312,11 +356,11 @@ class TestCreateSingleAgent:
         }
 
         async def mock_refresh(entity):
-            if not hasattr(entity, 'id') or entity.id is None:
+            if not hasattr(entity, "id") or entity.id is None:
                 entity.id = str(uuid.uuid4())
-            if not hasattr(entity, 'created_at'):
+            if not hasattr(entity, "created_at"):
                 entity.created_at = None
-            if not hasattr(entity, 'updated_at'):
+            if not hasattr(entity, "updated_at"):
                 entity.updated_at = None
 
         mock_session.refresh = AsyncMock(side_effect=mock_refresh)
@@ -360,11 +404,11 @@ class TestCreateSingleAgent:
         }
 
         async def mock_refresh(entity):
-            if not hasattr(entity, 'id') or entity.id is None:
+            if not hasattr(entity, "id") or entity.id is None:
                 entity.id = str(uuid.uuid4())
-            if not hasattr(entity, 'created_at'):
+            if not hasattr(entity, "created_at"):
                 entity.created_at = None
-            if not hasattr(entity, 'updated_at'):
+            if not hasattr(entity, "updated_at"):
                 entity.updated_at = None
 
         mock_session.refresh = AsyncMock(side_effect=mock_refresh)
@@ -387,11 +431,11 @@ class TestCreateSingleAgent:
         }
 
         async def mock_refresh(entity):
-            if not hasattr(entity, 'id') or entity.id is None:
+            if not hasattr(entity, "id") or entity.id is None:
                 entity.id = str(uuid.uuid4())
-            if not hasattr(entity, 'created_at'):
+            if not hasattr(entity, "created_at"):
                 entity.created_at = None
-            if not hasattr(entity, 'updated_at'):
+            if not hasattr(entity, "updated_at"):
                 entity.updated_at = None
 
         mock_session.refresh = AsyncMock(side_effect=mock_refresh)
@@ -404,7 +448,9 @@ class TestCreateSingleAgent:
         assert result["allow_code_execution"] is False
 
     @pytest.mark.asyncio
-    async def test_create_single_agent_error_raises_kasal_error(self, repo, mock_session):
+    async def test_create_single_agent_error_raises_kasal_error(
+        self, repo, mock_session
+    ):
         mock_session.flush.side_effect = Exception("DB connection lost")
 
         agent_data = {
@@ -430,15 +476,15 @@ class TestCreateSingleTask:
         }
 
         async def mock_refresh(entity):
-            if not hasattr(entity, 'id') or entity.id is None:
+            if not hasattr(entity, "id") or entity.id is None:
                 entity.id = str(uuid.uuid4())
-            if not hasattr(entity, 'created_at'):
+            if not hasattr(entity, "created_at"):
                 entity.created_at = None
-            if not hasattr(entity, 'updated_at'):
+            if not hasattr(entity, "updated_at"):
                 entity.updated_at = None
-            if not hasattr(entity, 'context'):
+            if not hasattr(entity, "context"):
                 entity.context = None
-            if not hasattr(entity, 'tool_configs'):
+            if not hasattr(entity, "tool_configs"):
                 entity.tool_configs = None
 
         mock_session.refresh = AsyncMock(side_effect=mock_refresh)
@@ -471,15 +517,15 @@ class TestCreateSingleTask:
         }
 
         async def mock_refresh(entity):
-            if not hasattr(entity, 'id') or entity.id is None:
+            if not hasattr(entity, "id") or entity.id is None:
                 entity.id = str(uuid.uuid4())
-            if not hasattr(entity, 'created_at'):
+            if not hasattr(entity, "created_at"):
                 entity.created_at = None
-            if not hasattr(entity, 'updated_at'):
+            if not hasattr(entity, "updated_at"):
                 entity.updated_at = None
-            if not hasattr(entity, 'context'):
+            if not hasattr(entity, "context"):
                 entity.context = None
-            if not hasattr(entity, 'tool_configs'):
+            if not hasattr(entity, "tool_configs"):
                 entity.tool_configs = None
 
         mock_session.refresh = AsyncMock(side_effect=mock_refresh)
@@ -500,15 +546,15 @@ class TestCreateSingleTask:
         }
 
         async def mock_refresh(entity):
-            if not hasattr(entity, 'id') or entity.id is None:
+            if not hasattr(entity, "id") or entity.id is None:
                 entity.id = str(uuid.uuid4())
-            if not hasattr(entity, 'created_at'):
+            if not hasattr(entity, "created_at"):
                 entity.created_at = None
-            if not hasattr(entity, 'updated_at'):
+            if not hasattr(entity, "updated_at"):
                 entity.updated_at = None
-            if not hasattr(entity, 'context'):
+            if not hasattr(entity, "context"):
                 entity.context = None
-            if not hasattr(entity, 'tool_configs'):
+            if not hasattr(entity, "tool_configs"):
                 entity.tool_configs = None
 
         mock_session.refresh = AsyncMock(side_effect=mock_refresh)
@@ -520,7 +566,9 @@ class TestCreateSingleTask:
         assert added_entity.tool_configs == {"search": {"max_results": 10}}
 
     @pytest.mark.asyncio
-    async def test_create_single_task_error_raises_kasal_error(self, repo, mock_session):
+    async def test_create_single_task_error_raises_kasal_error(
+        self, repo, mock_session
+    ):
         mock_session.flush.side_effect = Exception("DB write failed")
 
         task_data = {
@@ -540,7 +588,9 @@ class TestUpdateTaskDependencies:
         task = MagicMock()
         task.context = []
 
-        with patch("src.repositories.crew_generator_repository.TaskRepository") as MockTaskRepo:
+        with patch(
+            "src.repositories.crew_generator_repository.TaskRepository"
+        ) as MockTaskRepo:
             mock_task_repo = MockTaskRepo.return_value
             mock_task_repo.get = AsyncMock(return_value=task)
 
@@ -552,7 +602,9 @@ class TestUpdateTaskDependencies:
 
     @pytest.mark.asyncio
     async def test_update_task_dependencies_task_not_found(self, repo, mock_session):
-        with patch("src.repositories.crew_generator_repository.TaskRepository") as MockTaskRepo:
+        with patch(
+            "src.repositories.crew_generator_repository.TaskRepository"
+        ) as MockTaskRepo:
             mock_task_repo = MockTaskRepo.return_value
             mock_task_repo.get = AsyncMock(return_value=None)
 
@@ -564,8 +616,12 @@ class TestUpdateTaskDependencies:
             mock_session.flush.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_update_task_dependencies_error_raises_kasal_error(self, repo, mock_session):
-        with patch("src.repositories.crew_generator_repository.TaskRepository") as MockTaskRepo:
+    async def test_update_task_dependencies_error_raises_kasal_error(
+        self, repo, mock_session
+    ):
+        with patch(
+            "src.repositories.crew_generator_repository.TaskRepository"
+        ) as MockTaskRepo:
             mock_task_repo = MockTaskRepo.return_value
             mock_task_repo.get = AsyncMock(side_effect=Exception("DB error"))
 

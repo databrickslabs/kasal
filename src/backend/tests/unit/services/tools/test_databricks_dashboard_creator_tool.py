@@ -1,14 +1,14 @@
 """Unit tests for DatabricksDashboardCreatorTool (Tool 95)."""
+
 import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from src.services.tools.databricks_dashboard_creator_tool import (
-    DatabricksDashboardCreatorTool,
     DatabricksDashboardCreatorSchema,
+    DatabricksDashboardCreatorTool,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared test data
@@ -47,55 +47,59 @@ SAMPLE_VISUAL_MAPPINGS = [
     },
 ]
 
-SAMPLE_TOOL94_OUTPUT = json.dumps({
-    "visual_mappings": SAMPLE_VISUAL_MAPPINGS,
-    "dashboard_title": "My PBI Dashboard",
-    "catalog": "main",
-    "schema_name": "metrics",
-    "summary": {
-        "total_visuals": 3,
-        "mapped": 3,
-        "unmapped": 0,
-    },
-})
+SAMPLE_TOOL94_OUTPUT = json.dumps(
+    {
+        "visual_mappings": SAMPLE_VISUAL_MAPPINGS,
+        "dashboard_title": "My PBI Dashboard",
+        "catalog": "main",
+        "schema_name": "metrics",
+        "summary": {
+            "total_visuals": 3,
+            "mapped": 3,
+            "unmapped": 0,
+        },
+    }
+)
 
-SAMPLE_TOOL94_OUTPUT_TWO_VIEWS = json.dumps({
-    "visual_mappings": [
-        {
-            "visual_id": "v001",
-            "page_name": "Page1",
-            "visual_type": "barChart",
-            "chart_title": "Chart A",
-            "ucmv_view": "main.metrics.view_a",
-            "dimensions": ["dim1"],
-            "measures": ["m1"],
-            "sql": "SELECT dim1, MEASURE(m1) FROM main.metrics.view_a GROUP BY dim1",
-        },
-        {
-            "visual_id": "v002",
-            "page_name": "Page1",
-            "visual_type": "tableEx",
-            "chart_title": "Table B",
-            "ucmv_view": "main.metrics.view_b",
-            "dimensions": ["dim2"],
-            "measures": ["m2"],
-            "sql": "SELECT dim2, MEASURE(m2) FROM main.metrics.view_b GROUP BY dim2",
-        },
-        {
-            "visual_id": "v003",
-            "page_name": "Page1",
-            "visual_type": "lineChart",
-            "chart_title": "Line C",
-            "ucmv_view": "main.metrics.view_a",  # same view as v001
-            "dimensions": ["dim3"],
-            "measures": ["m3"],
-            "sql": "SELECT dim3, MEASURE(m3) FROM main.metrics.view_a GROUP BY dim3",
-        },
-    ],
-    "dashboard_title": "Two Views Dashboard",
-    "catalog": "main",
-    "schema_name": "metrics",
-})
+SAMPLE_TOOL94_OUTPUT_TWO_VIEWS = json.dumps(
+    {
+        "visual_mappings": [
+            {
+                "visual_id": "v001",
+                "page_name": "Page1",
+                "visual_type": "barChart",
+                "chart_title": "Chart A",
+                "ucmv_view": "main.metrics.view_a",
+                "dimensions": ["dim1"],
+                "measures": ["m1"],
+                "sql": "SELECT dim1, MEASURE(m1) FROM main.metrics.view_a GROUP BY dim1",
+            },
+            {
+                "visual_id": "v002",
+                "page_name": "Page1",
+                "visual_type": "tableEx",
+                "chart_title": "Table B",
+                "ucmv_view": "main.metrics.view_b",
+                "dimensions": ["dim2"],
+                "measures": ["m2"],
+                "sql": "SELECT dim2, MEASURE(m2) FROM main.metrics.view_b GROUP BY dim2",
+            },
+            {
+                "visual_id": "v003",
+                "page_name": "Page1",
+                "visual_type": "lineChart",
+                "chart_title": "Line C",
+                "ucmv_view": "main.metrics.view_a",  # same view as v001
+                "dimensions": ["dim3"],
+                "measures": ["m3"],
+                "sql": "SELECT dim3, MEASURE(m3) FROM main.metrics.view_a GROUP BY dim3",
+            },
+        ],
+        "dashboard_title": "Two Views Dashboard",
+        "catalog": "main",
+        "schema_name": "metrics",
+    }
+)
 
 
 def _mock_auth(workspace_url="https://test.azuredatabricks.net"):
@@ -135,14 +139,17 @@ def _run_tool(tool, auth=None, mock_requests=None, **kwargs):
     if mock_requests is None:
         mock_requests = _make_requests_mock()
 
-    with patch.object(tool, "_authenticate", return_value=auth), \
-         patch.dict("sys.modules", {"requests": mock_requests}):
+    with (
+        patch.object(tool, "_authenticate", return_value=auth),
+        patch.dict("sys.modules", {"requests": mock_requests}),
+    ):
         return tool._run(**kwargs)
 
 
 # ---------------------------------------------------------------------------
 # Schema tests
 # ---------------------------------------------------------------------------
+
 
 class TestDatabricksDashboardCreatorSchema:
     def test_all_fields_optional(self):
@@ -171,6 +178,7 @@ class TestDatabricksDashboardCreatorSchema:
 # Tool initialization
 # ---------------------------------------------------------------------------
 
+
 class TestToolInit:
     def test_tool_name(self):
         tool = DatabricksDashboardCreatorTool()
@@ -178,7 +186,10 @@ class TestToolInit:
 
     def test_description_present(self):
         tool = DatabricksDashboardCreatorTool()
-        assert "dashboard" in tool.description.lower() or "lakeview" in tool.description.lower()
+        assert (
+            "dashboard" in tool.description.lower()
+            or "lakeview" in tool.description.lower()
+        )
 
     def test_visual_mappings_json_in_default_config(self):
         tool = DatabricksDashboardCreatorTool()
@@ -199,6 +210,7 @@ class TestToolInit:
 # Error cases
 # ---------------------------------------------------------------------------
 
+
 class TestErrorCases:
     def test_no_visual_mappings_returns_error(self):
         """Empty/None visual_mappings anywhere (injection or DB) → error."""
@@ -216,8 +228,14 @@ class TestErrorCases:
     def test_no_visual_mappings_falls_back_to_db(self):
         """No injected visual_mappings_json but a prior mapper run in the DB → uses it."""
         tool = DatabricksDashboardCreatorTool()
-        db_output = json.dumps({"visual_mappings": SAMPLE_VISUAL_MAPPINGS,
-                                "dashboard_title": "T", "catalog": "c", "schema_name": "s"})
+        db_output = json.dumps(
+            {
+                "visual_mappings": SAMPLE_VISUAL_MAPPINGS,
+                "dashboard_title": "T",
+                "catalog": "c",
+                "schema_name": "s",
+            }
+        )
         with patch.object(
             DatabricksDashboardCreatorTool,
             "_fetch_latest_mapper_output_from_db",
@@ -231,15 +249,17 @@ class TestErrorCases:
 
     def test_no_mapped_visuals_with_sql_returns_error(self):
         """visual_mappings with no ucmv_view/sql → error."""
-        unmapped = json.dumps([
-            {
-                "visual_id": "v1",
-                "page_name": "Page1",
-                "visual_type": "barChart",
-                "ucmv_view": None,
-                "sql": None,
-            }
-        ])
+        unmapped = json.dumps(
+            [
+                {
+                    "visual_id": "v1",
+                    "page_name": "Page1",
+                    "visual_type": "barChart",
+                    "ucmv_view": None,
+                    "sql": None,
+                }
+            ]
+        )
         tool = DatabricksDashboardCreatorTool()
         auth = _mock_auth()
         with patch.object(tool, "_authenticate", return_value=auth):
@@ -262,11 +282,14 @@ class TestErrorCases:
 # Visual mappings parsing
 # ---------------------------------------------------------------------------
 
+
 class TestParseVisualMappings:
     def test_parses_visual_mappings_from_dict_output(self):
         """Input has {'visual_mappings': [...]} wrapper → extracted."""
         tool = DatabricksDashboardCreatorTool()
-        mappings, title, catalog, schema = tool._parse_visual_mappings(SAMPLE_TOOL94_OUTPUT)
+        mappings, title, catalog, schema = tool._parse_visual_mappings(
+            SAMPLE_TOOL94_OUTPUT
+        )
         assert len(mappings) == 3
         assert title == "My PBI Dashboard"
         assert catalog == "main"
@@ -296,6 +319,7 @@ class TestParseVisualMappings:
 # ---------------------------------------------------------------------------
 # Widget type mapping
 # ---------------------------------------------------------------------------
+
 
 class TestWidgetTypeMapping:
     def test_widget_type_bar_chart(self):
@@ -352,6 +376,7 @@ class TestWidgetTypeMapping:
 # Lakeview JSON building
 # ---------------------------------------------------------------------------
 
+
 class TestLakeviewJsonBuilding:
     def test_lakeview_json_has_datasets(self):
         """_build_lakeview_json() → serialized JSON has 'datasets' key."""
@@ -406,6 +431,7 @@ class TestLakeviewJsonBuilding:
 # Dashboard creation via API
 # ---------------------------------------------------------------------------
 
+
 class TestDashboardCreation:
     def test_dashboard_created_via_api(self):
         """mock requests → dashboard_id returned in output."""
@@ -413,16 +439,23 @@ class TestDashboardCreation:
         auth = _mock_auth()
         mock_req = _make_requests_mock(dashboard_id="dash-abc-123")
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.services.tools.databricks_dashboard_creator_tool._requests", mock_req, create=True):
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch(
+                "src.services.tools.databricks_dashboard_creator_tool._requests",
+                mock_req,
+                create=True,
+            ),
+        ):
             # Patch _api_request directly to avoid import complexity
             with patch.object(
-                tool, "_api_request",
+                tool,
+                "_api_request",
                 side_effect=[
-                    (200, {"dashboards": []}),           # list existing
+                    (200, {"dashboards": []}),  # list existing
                     (201, {"dashboard_id": "dash-abc-123"}),  # create
-                    (200, {}),                            # publish
-                ]
+                    (200, {}),  # publish
+                ],
             ):
                 result = tool._run(
                     visual_mappings_json=SAMPLE_TOOL94_OUTPUT,
@@ -438,15 +471,18 @@ class TestDashboardCreation:
         tool = DatabricksDashboardCreatorTool()
         auth = _mock_auth()
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch.object(
-                 tool, "_api_request",
-                 side_effect=[
-                     (200, {"dashboards": []}),
-                     (201, {"dashboard_id": "dash-xyz"}),
-                     (200, {}),
-                 ]
-             ):
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch.object(
+                tool,
+                "_api_request",
+                side_effect=[
+                    (200, {"dashboards": []}),
+                    (201, {"dashboard_id": "dash-xyz"}),
+                    (200, {}),
+                ],
+            ),
+        ):
             result = tool._run(
                 visual_mappings_json=SAMPLE_TOOL94_OUTPUT,
                 warehouse_id="wh-123",
@@ -460,17 +496,22 @@ class TestDashboardCreation:
         """If dashboard with same name exists, PUT is used (updated status)."""
         tool = DatabricksDashboardCreatorTool()
         auth = _mock_auth()
-        existing = [{"display_name": "My PBI Dashboard", "dashboard_id": "existing-001"}]
+        existing = [
+            {"display_name": "My PBI Dashboard", "dashboard_id": "existing-001"}
+        ]
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch.object(
-                 tool, "_api_request",
-                 side_effect=[
-                     (200, {"dashboards": existing}),
-                     (200, {"dashboard_id": "existing-001"}),
-                     (200, {}),
-                 ]
-             ):
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch.object(
+                tool,
+                "_api_request",
+                side_effect=[
+                    (200, {"dashboards": existing}),
+                    (200, {"dashboard_id": "existing-001"}),
+                    (200, {}),
+                ],
+            ),
+        ):
             result = tool._run(
                 visual_mappings_json=SAMPLE_TOOL94_OUTPUT,
                 warehouse_id="wh-123",
@@ -484,14 +525,17 @@ class TestDashboardCreation:
         tool = DatabricksDashboardCreatorTool()
         auth = _mock_auth()
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch.object(
-                 tool, "_api_request",
-                 side_effect=[
-                     (200, {"dashboards": []}),
-                     (500, {"message": "Internal Server Error"}),
-                 ]
-             ):
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch.object(
+                tool,
+                "_api_request",
+                side_effect=[
+                    (200, {"dashboards": []}),
+                    (500, {"message": "Internal Server Error"}),
+                ],
+            ),
+        ):
             result = tool._run(
                 visual_mappings_json=SAMPLE_TOOL94_OUTPUT,
                 warehouse_id="wh-123",
@@ -520,21 +564,24 @@ class TestDashboardCreation:
         tool = DatabricksDashboardCreatorTool()
         auth = _mock_auth()
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch.object(
-                 tool, "_api_request",
-                 side_effect=[
-                     (200, {"dashboards": []}),
-                     (201, {"dashboard_id": "dash-001"}),
-                     (200, {}),
-                 ]
-             ), \
-             patch.object(tool, "_publish_dashboard", return_value=True) as mock_pub:
-                result = tool._run(
-                    visual_mappings_json=SAMPLE_TOOL94_OUTPUT,
-                    warehouse_id="wh-123",
-                    publish_dashboard=True,
-                )
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch.object(
+                tool,
+                "_api_request",
+                side_effect=[
+                    (200, {"dashboards": []}),
+                    (201, {"dashboard_id": "dash-001"}),
+                    (200, {}),
+                ],
+            ),
+            patch.object(tool, "_publish_dashboard", return_value=True) as mock_pub,
+        ):
+            result = tool._run(
+                visual_mappings_json=SAMPLE_TOOL94_OUTPUT,
+                warehouse_id="wh-123",
+                publish_dashboard=True,
+            )
 
         mock_pub.assert_called_once()
 
@@ -543,20 +590,23 @@ class TestDashboardCreation:
         tool = DatabricksDashboardCreatorTool()
         auth = _mock_auth()
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch.object(
-                 tool, "_api_request",
-                 side_effect=[
-                     (200, {"dashboards": []}),
-                     (201, {"dashboard_id": "dash-001"}),
-                 ]
-             ), \
-             patch.object(tool, "_publish_dashboard", return_value=True) as mock_pub:
-                result = tool._run(
-                    visual_mappings_json=SAMPLE_TOOL94_OUTPUT,
-                    warehouse_id="wh-123",
-                    publish_dashboard=False,
-                )
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch.object(
+                tool,
+                "_api_request",
+                side_effect=[
+                    (200, {"dashboards": []}),
+                    (201, {"dashboard_id": "dash-001"}),
+                ],
+            ),
+            patch.object(tool, "_publish_dashboard", return_value=True) as mock_pub,
+        ):
+            result = tool._run(
+                visual_mappings_json=SAMPLE_TOOL94_OUTPUT,
+                warehouse_id="wh-123",
+                publish_dashboard=False,
+            )
 
         mock_pub.assert_not_called()
 
@@ -565,21 +615,25 @@ class TestDashboardCreation:
 # Output structure
 # ---------------------------------------------------------------------------
 
+
 class TestOutputStructure:
     def test_output_has_required_keys(self):
         """Successful output has dashboard_id, dashboard_url, widget_count, etc."""
         tool = DatabricksDashboardCreatorTool()
         auth = _mock_auth()
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch.object(
-                 tool, "_api_request",
-                 side_effect=[
-                     (200, {"dashboards": []}),
-                     (201, {"dashboard_id": "dash-123"}),
-                     (200, {}),
-                 ]
-             ):
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch.object(
+                tool,
+                "_api_request",
+                side_effect=[
+                    (200, {"dashboards": []}),
+                    (201, {"dashboard_id": "dash-123"}),
+                    (200, {}),
+                ],
+            ),
+        ):
             result = tool._run(
                 visual_mappings_json=SAMPLE_TOOL94_OUTPUT,
                 warehouse_id="wh-123",
@@ -598,15 +652,18 @@ class TestOutputStructure:
         tool = DatabricksDashboardCreatorTool()
         auth = _mock_auth()
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch.object(
-                 tool, "_api_request",
-                 side_effect=[
-                     (200, {"dashboards": []}),
-                     (201, {"dashboard_id": "dash-123"}),
-                     (200, {}),
-                 ]
-             ):
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch.object(
+                tool,
+                "_api_request",
+                side_effect=[
+                    (200, {"dashboards": []}),
+                    (201, {"dashboard_id": "dash-123"}),
+                    (200, {}),
+                ],
+            ),
+        ):
             result = tool._run(
                 visual_mappings_json=SAMPLE_TOOL94_OUTPUT,
                 warehouse_id="wh-123",
@@ -620,6 +677,7 @@ class TestOutputStructure:
 # ---------------------------------------------------------------------------
 # Safe name helper
 # ---------------------------------------------------------------------------
+
 
 class TestSafeName:
     def test_safe_name_alphanumeric_ok(self):

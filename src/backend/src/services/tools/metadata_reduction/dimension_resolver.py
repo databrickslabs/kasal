@@ -35,10 +35,10 @@ except ImportError:
 class DimensionBinding:
     """Explicit binding between a user question keyword and a model column."""
 
-    user_term: str          # Token from user question, e.g. "Business Unit"
-    resolved_table: str     # e.g. "dim_Country"
-    resolved_column: str    # e.g. "Business Unit"
-    confidence: float       # 0.0 – 1.0
+    user_term: str  # Token from user question, e.g. "Business Unit"
+    resolved_table: str  # e.g. "dim_Country"
+    resolved_column: str  # e.g. "Business Unit"
+    confidence: float  # 0.0 – 1.0
     sample_values: List[str] = field(default_factory=list)  # Up to 5 sample values
 
     def to_dict(self) -> Dict[str, Any]:

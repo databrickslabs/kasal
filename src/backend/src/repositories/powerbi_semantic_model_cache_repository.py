@@ -5,8 +5,9 @@ Handles database operations for semantic model metadata caching.
 """
 
 from datetime import date, timedelta
-from typing import Optional, Dict, Any
-from sqlalchemy import select, and_, or_
+from typing import Any, Dict, Optional
+
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
@@ -98,7 +99,7 @@ class PowerBISemanticModelCacheRepository:
         dataset_id: str,
         workspace_id: str,
         metadata: Dict[str, Any],
-        report_id: Optional[str] = None
+        report_id: Optional[str] = None,
     ) -> PowerBISemanticModelCache:
         """
         Create new cache entry for today.
@@ -119,7 +120,7 @@ class PowerBISemanticModelCacheRepository:
             workspace_id=workspace_id,
             report_id=report_id,
             cached_date=date.today(),
-            cache_data=metadata
+            cache_data=metadata,
         )
 
         self.session.add(cache)
@@ -129,9 +130,7 @@ class PowerBISemanticModelCacheRepository:
         return cache
 
     async def update_cache(
-        self,
-        cache: PowerBISemanticModelCache,
-        metadata: Dict[str, Any]
+        self, cache: PowerBISemanticModelCache, metadata: Dict[str, Any]
     ) -> PowerBISemanticModelCache:
         """
         Update existing cache entry with new metadata.

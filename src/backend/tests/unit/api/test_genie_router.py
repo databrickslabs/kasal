@@ -6,14 +6,15 @@ execute_genie_query, and send_genie_message by calling handler functions
 directly with mocked GenieService objects.
 """
 
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class GroupCtx:
     """Minimal GroupContext stand-in."""
@@ -28,12 +29,9 @@ def _make_request():
 
 
 def _make_spaces_response(count=2):
-    from src.schemas.genie import GenieSpacesResponse, GenieSpace
+    from src.schemas.genie import GenieSpace, GenieSpacesResponse
 
-    spaces = [
-        GenieSpace(id=f"sp-{i}", name=f"Space {i}")
-        for i in range(count)
-    ]
+    spaces = [GenieSpace(id=f"sp-{i}", name=f"Space {i}") for i in range(count)]
     return GenieSpacesResponse(spaces=spaces, page_size=50, has_more=False)
 
 
@@ -43,7 +41,9 @@ def _patch_service(mock_instance):
 
 
 def _patch_token(token=None):
-    return patch("src.api.genie_router.extract_user_token_from_request", return_value=token)
+    return patch(
+        "src.api.genie_router.extract_user_token_from_request", return_value=token
+    )
 
 
 def _patch_user_context():
@@ -53,6 +53,7 @@ def _patch_user_context():
 # ---------------------------------------------------------------------------
 # Tests – get_genie_spaces
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_genie_spaces_success():
@@ -118,6 +119,7 @@ async def test_get_genie_spaces_page_size_capped_at_200():
 # Tests – search_genie_spaces
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_search_genie_spaces_success():
     """search_genie_spaces forwards request to service and returns result."""
@@ -162,6 +164,7 @@ async def test_search_genie_spaces_no_group_context():
 # ---------------------------------------------------------------------------
 # Tests – get_genie_space_details
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_genie_space_details_success():
@@ -209,11 +212,16 @@ async def test_get_genie_space_details_not_found():
 # Tests – execute_genie_query
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_execute_genie_query_success():
     """execute_genie_query calls service and returns response."""
     from src.api.genie_router import execute_genie_query
-    from src.schemas.genie import GenieExecutionRequest, GenieExecutionResponse, GenieQueryStatus
+    from src.schemas.genie import (
+        GenieExecutionRequest,
+        GenieExecutionResponse,
+        GenieQueryStatus,
+    )
 
     mock_svc = AsyncMock()
     mock_svc.execute_query = AsyncMock(
@@ -246,7 +254,11 @@ async def test_execute_genie_query_success():
 async def test_execute_genie_query_uses_provided_timeout():
     """execute_genie_query uses custom timeout when provided."""
     from src.api.genie_router import execute_genie_query
-    from src.schemas.genie import GenieExecutionRequest, GenieExecutionResponse, GenieQueryStatus
+    from src.schemas.genie import (
+        GenieExecutionRequest,
+        GenieExecutionResponse,
+        GenieQueryStatus,
+    )
 
     mock_svc = AsyncMock()
     mock_svc.execute_query = AsyncMock(
@@ -274,11 +286,16 @@ async def test_execute_genie_query_uses_provided_timeout():
 # Tests – send_genie_message
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_send_genie_message_success():
     """send_genie_message returns response when service succeeds."""
     from src.api.genie_router import send_genie_message
-    from src.schemas.genie import GenieSendMessageRequest, GenieSendMessageResponse, GenieMessageStatus
+    from src.schemas.genie import (
+        GenieMessageStatus,
+        GenieSendMessageRequest,
+        GenieSendMessageResponse,
+    )
 
     mock_svc = AsyncMock()
     mock_svc.send_message = AsyncMock(
@@ -305,8 +322,8 @@ async def test_send_genie_message_success():
 async def test_send_genie_message_raises_when_no_response():
     """send_genie_message raises KasalError when service returns None."""
     from src.api.genie_router import send_genie_message
-    from src.schemas.genie import GenieSendMessageRequest
     from src.core.exceptions import KasalError
+    from src.schemas.genie import GenieSendMessageRequest
 
     mock_svc = AsyncMock()
     mock_svc.send_message = AsyncMock(return_value=None)

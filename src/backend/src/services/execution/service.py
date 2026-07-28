@@ -1,7 +1,7 @@
 """Execution service for managing AI agent workflow executions.
 
 This module provides the core service layer for managing execution operations
-in the AI agent system. It handles flow execution, status tracking, and 
+in the AI agent system. It handles flow execution, status tracking, and
 coordination between different execution engines.
 
 Key Features:
@@ -24,60 +24,66 @@ Example:
     ... )
 """
 
+import asyncio
+import concurrent.futures
+import copy
+import json
 import logging
+import os
 import sys
 import traceback
-import json
-import os
 import uuid
-import concurrent.futures
-import asyncio
-from typing import Dict, Any, Optional, List, Union
-from datetime import datetime, UTC
-from src.core.exceptions import KasalError
+from datetime import UTC, datetime
+from typing import Any, Dict, List, Optional, Union
+
 from sqlalchemy.orm import Session
 
+from src.core.exceptions import KasalError
 from src.core.logger import LoggerManager
-from src.schemas.execution import ExecutionStatus, CrewConfig, ExecutionNameGenerationRequest, ExecutionCreateResponse
-from src.utils.asyncio_utils import run_in_thread_with_loop, create_and_run_loop
+from src.schemas.execution import (
+    CrewConfig,
+    ExecutionCreateResponse,
+    ExecutionNameGenerationRequest,
+    ExecutionStatus,
+)
 from src.services.execution.kasal_service import KasalExecutionService
-from src.services.execution.status import ExecutionStatusService
 from src.services.execution.naming import ExecutionNameService
-from src.utils.user_context import GroupContext
+from src.services.execution.status import ExecutionStatusService
+from src.utils.asyncio_utils import create_and_run_loop, run_in_thread_with_loop
 from src.utils.sensitive_data_utils import mask_sensitive_fields
-import copy
-
+from src.utils.user_context import GroupContext
 
 # Configure logging
 logger = logging.getLogger(__name__)
 crew_logger = LoggerManager.get_instance().crew
 exec_logger = LoggerManager.get_instance().crew
 
+
 class ExecutionService:
     """High-level service for orchestrating AI agent workflow executions.
-    
+
     This service provides the main interface for executing flows, managing
     execution lifecycles, and coordinating between different execution engines.
     It maintains a thread pool for concurrent operations and tracks active
     executions across the system.
-    
+
     Attributes:
         executions: Class-level dictionary tracking all active executions
         _thread_pool: Thread pool executor for concurrent operations (10 workers)
         execution_name_service: Service for generating descriptive execution names
         kasal_execution_service: Service for CrewAI-specific execution logic
-    
+
     Note:
         The service uses class-level attributes for shared state across instances,
         enabling centralized execution tracking in a multi-threaded environment.
     """
-    
+
     # Initialize the executions dictionary as a class attribute
     executions = {}
-    
+
     # Initialize the thread pool executor
     _thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
-    
+
     def __init__(self, session=None):
         """Initialize the ExecutionService with required dependencies.
 
@@ -122,35 +128,46 @@ class ExecutionService:
         masked_inputs = copy.deepcopy(inputs)
 
         # Mask tool_configs in agents_yaml
-        if 'agents_yaml' in masked_inputs and isinstance(masked_inputs['agents_yaml'], dict):
-            for agent_key, agent_config in masked_inputs['agents_yaml'].items():
-                if isinstance(agent_config, dict) and 'tool_configs' in agent_config:
-                    agent_config['tool_configs'] = mask_sensitive_fields(agent_config['tool_configs'])
+        if "agents_yaml" in masked_inputs and isinstance(
+            masked_inputs["agents_yaml"], dict
+        ):
+            for agent_key, agent_config in masked_inputs["agents_yaml"].items():
+                if isinstance(agent_config, dict) and "tool_configs" in agent_config:
+                    agent_config["tool_configs"] = mask_sensitive_fields(
+                        agent_config["tool_configs"]
+                    )
 
         # Mask tool_configs in tasks_yaml
-        if 'tasks_yaml' in masked_inputs and isinstance(masked_inputs['tasks_yaml'], dict):
-            for task_key, task_config in masked_inputs['tasks_yaml'].items():
-                if isinstance(task_config, dict) and 'tool_configs' in task_config:
-                    task_config['tool_configs'] = mask_sensitive_fields(task_config['tool_configs'])
+        if "tasks_yaml" in masked_inputs and isinstance(
+            masked_inputs["tasks_yaml"], dict
+        ):
+            for task_key, task_config in masked_inputs["tasks_yaml"].items():
+                if isinstance(task_config, dict) and "tool_configs" in task_config:
+                    task_config["tool_configs"] = mask_sensitive_fields(
+                        task_config["tool_configs"]
+                    )
 
         # Mask sensitive fields in the nested 'inputs' dictionary (user-provided values)
         # This catches fields like client_secret, password, token, api_key, etc.
-        if 'inputs' in masked_inputs and isinstance(masked_inputs['inputs'], dict):
-            masked_inputs['inputs'] = mask_sensitive_fields(masked_inputs['inputs'])
+        if "inputs" in masked_inputs and isinstance(masked_inputs["inputs"], dict):
+            masked_inputs["inputs"] = mask_sensitive_fields(masked_inputs["inputs"])
 
         return masked_inputs
 
-    async def execute_flow(self, flow_id: Optional[uuid.UUID] = None, 
-                           nodes: Optional[List[Dict[str, Any]]] = None, 
-                           edges: Optional[List[Dict[str, Any]]] = None,
-                           job_id: Optional[str] = None,
-                           config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def execute_flow(
+        self,
+        flow_id: Optional[uuid.UUID] = None,
+        nodes: Optional[List[Dict[str, Any]]] = None,
+        edges: Optional[List[Dict[str, Any]]] = None,
+        job_id: Optional[str] = None,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """Execute a flow asynchronously with job tracking.
-        
+
         Orchestrates the execution of either a saved flow (by ID) or a dynamic
         flow (by nodes/edges). Generates a job ID if not provided and delegates
         to the CrewAI execution service for actual processing.
-        
+
         Args:
             flow_id: Optional UUID of a saved flow to execute. If provided,
                 the flow definition will be loaded from storage.
@@ -162,18 +179,18 @@ class ExecutionService:
                 Auto-generated if not provided.
             config: Optional configuration dictionary with execution parameters
                 such as timeout, retry settings, or environment variables.
-            
+
         Returns:
             Dictionary containing execution result with keys:
                 - job_id: The execution job identifier
                 - status: Current execution status
                 - result: Execution output (when completed)
                 - error: Error details (if failed)
-        
+
         Raises:
             HTTPException: Re-raised from underlying services for HTTP errors
             HTTPException(500): For unexpected errors during execution
-        
+
         Example:
             >>> result = await service.execute_flow(
             ...     flow_id=uuid.UUID("123e4567-e89b-12d3-a456-426614174000"),
@@ -198,7 +215,7 @@ class ExecutionService:
                 nodes=nodes,
                 edges=edges,
                 job_id=job_id,
-                config=execution_config
+                config=execution_config,
             )
             logger.info(f"Flow execution started successfully: {result}")
             return result
@@ -208,17 +225,15 @@ class ExecutionService:
         except Exception as e:
             error_msg = f"Unexpected error in execute_flow: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            raise KasalError(
-                detail=error_msg
-            )
-    
+            raise KasalError(detail=error_msg)
+
     async def get_execution(self, execution_id: int) -> Dict[str, Any]:
         """
         Get details of a specific execution
-        
+
         Args:
             execution_id: ID of the execution to retrieve
-            
+
         Returns:
             Dictionary with execution details
         """
@@ -226,64 +241,62 @@ class ExecutionService:
             return await self.kasal_execution_service.get_flow_execution(execution_id)
         except Exception as e:
             logger.error(f"Error getting execution: {str(e)}", exc_info=True)
-            raise KasalError(
-                detail=f"Error getting execution: {str(e)}"
-            )
-    
+            raise KasalError(detail=f"Error getting execution: {str(e)}")
+
     async def get_executions_by_flow(self, flow_id: uuid.UUID) -> Dict[str, Any]:
         """
         Get all executions for a specific flow
-        
+
         Args:
             flow_id: ID of the flow to get executions for
-            
+
         Returns:
             Dictionary with execution details
         """
         try:
-            return await self.kasal_execution_service.get_flow_executions_by_flow(str(flow_id))
+            return await self.kasal_execution_service.get_flow_executions_by_flow(
+                str(flow_id)
+            )
         except Exception as e:
             logger.error(f"Error getting executions: {str(e)}", exc_info=True)
-            raise KasalError(
-                detail=f"Error getting executions: {str(e)}"
-            )
+            raise KasalError(detail=f"Error getting executions: {str(e)}")
 
     # Methods from ExecutionRunnerService
     @staticmethod
     def create_execution_id() -> str:
         """
         Generate a unique execution ID.
-        
+
         Returns:
             A unique execution ID
         """
         return str(uuid.uuid4())
-        
+
     @staticmethod
     def get_execution(execution_id: str) -> Optional[Dict[str, Any]]:
         """
         Get execution data from in-memory storage.
-        
+
         Args:
             execution_id: ID of the execution to retrieve
-            
+
         Returns:
             Execution data dictionary or None if not found
         """
         return ExecutionService.executions.get(execution_id)
-        
+
     @staticmethod
     def add_execution_to_memory(
-        execution_id: str, 
-        status: str, 
+        execution_id: str,
+        status: str,
         run_name: str,
         created_at: datetime = None,
         group_id: Optional[int] = None,
-        group_email: Optional[str] = None
+        group_email: Optional[str] = None,
     ) -> None:
         """
         Add an execution to in-memory storage.
-        
+
         Args:
             execution_id: ID of the execution
             status: Status of the execution
@@ -299,11 +312,13 @@ class ExecutionService:
             "run_name": run_name,
             "output": "",
             "group_id": group_id,
-            "group_email": group_email
+            "group_email": group_email,
         }
 
     @staticmethod
-    def _derive_placeholder_run_name(agents_yaml: Dict[str, Any], tasks_yaml: Dict[str, Any]) -> str:
+    def _derive_placeholder_run_name(
+        agents_yaml: Dict[str, Any], tasks_yaml: Dict[str, Any]
+    ) -> str:
         """Instant, deterministic run name used until the LLM rename lands.
 
         Prefers the first task's name/description, then the first agent role,
@@ -341,9 +356,7 @@ class ExecutionService:
         try:
             name_service = ExecutionNameService.create(None)
             request = ExecutionNameGenerationRequest(
-                agents_yaml=agents_yaml,
-                tasks_yaml=tasks_yaml,
-                model=model
+                agents_yaml=agents_yaml, tasks_yaml=tasks_yaml, model=model
             )
             response = await name_service.generate_execution_name(request)
             new_name = (response.name or "").strip()
@@ -351,6 +364,7 @@ class ExecutionService:
                 return
 
             from src.services.execution.status import ExecutionStatusService
+
             await ExecutionStatusService.update_run_name(execution_id, new_name)
 
             # Keep the in-memory fallback (used when the DB row is missing)
@@ -375,29 +389,35 @@ class ExecutionService:
         n = len(cls.executions)
         cls.executions.clear()
         if n:
-            logger.info(f"[ExecutionService] Cleared {n} in-memory execution(s) after DB swap")
+            logger.info(
+                f"[ExecutionService] Cleared {n} in-memory execution(s) after DB swap"
+            )
         return n
 
     @staticmethod
     def sanitize_for_database(data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Ensure all data is properly serializable for database storage.
-        
+
         Args:
             data: Dictionary containing execution data
-            
+
         Returns:
             Sanitized data safe for database storage
         """
         # Create a deep copy to avoid modifying the original
         result = {}
-        
+
         for key, value in data.items():
             if isinstance(value, dict):
                 result[key] = ExecutionService.sanitize_for_database(value)
             elif isinstance(value, list):
                 result[key] = [
-                    ExecutionService.sanitize_for_database(item) if isinstance(item, dict) else item
+                    (
+                        ExecutionService.sanitize_for_database(item)
+                        if isinstance(item, dict)
+                        else item
+                    )
                     for item in value
                 ]
             elif isinstance(value, uuid.UUID):
@@ -411,25 +431,25 @@ class ExecutionService:
                 except (TypeError, OverflowError):
                     # Convert to string if not serializable
                     result[key] = str(value)
-                    
+
         return result
-    
+
     @staticmethod
     async def run_crew_execution(
         execution_id: str,
         config: CrewConfig,
         execution_type: str = "crew",
         group_context: GroupContext = None,
-        session = None
+        session=None,
     ) -> Dict[str, Any]:
         """
         Run a crew execution with the provided configuration.
-        
+
         Args:
             execution_id: Unique identifier for the execution
             config: Configuration for the execution
             execution_type: Type of execution (crew, flow)
-            
+
         Returns:
             Dictionary with execution result
         """
@@ -440,127 +460,194 @@ class ExecutionService:
         else:
             exec_logger = LoggerManager.get_instance().crew
 
-        exec_logger.info(f"[run_crew_execution] Starting {execution_type} execution for execution_id: {execution_id}")
-        
+        exec_logger.info(
+            f"[run_crew_execution] Starting {execution_type} execution for execution_id: {execution_id}"
+        )
+
         try:
             # Execution is already created with RUNNING status, no need to update to PREPARING
-            exec_logger.info(f"[run_crew_execution] Execution {execution_id} already has RUNNING status from creation")
-            
+            exec_logger.info(
+                f"[run_crew_execution] Execution {execution_id} already has RUNNING status from creation"
+            )
+
             # Create an instance of KasalExecutionService
             crew_execution_service = KasalExecutionService()
-            
+
             # Process different execution types
             if execution_type.lower() == "flow":
-                exec_logger.info(f"[run_crew_execution] This is a FLOW execution - delegating to KasalExecutionService")
-                
+                exec_logger.info(
+                    f"[run_crew_execution] This is a FLOW execution - delegating to KasalExecutionService"
+                )
+
                 # Convert config to dictionary
                 execution_config = {}
-                if hasattr(config, 'model_dump'):
+                if hasattr(config, "model_dump"):
                     try:
                         execution_config = config.model_dump()
                     except Exception as dump_error:
-                        exec_logger.warning(f"[run_crew_execution] Error calling model_dump() on config: {dump_error}")
+                        exec_logger.warning(
+                            f"[run_crew_execution] Error calling model_dump() on config: {dump_error}"
+                        )
                         # Create minimal config manually if model_dump() fails
                         # Include checkpoint resume parameters
-                        for attr in ['nodes', 'edges', 'flow_config', 'model', 'inputs',
-                                     'resume_from_flow_uuid', 'resume_from_execution_id', 'resume_from_crew_sequence']:
+                        for attr in [
+                            "nodes",
+                            "edges",
+                            "flow_config",
+                            "model",
+                            "inputs",
+                            "resume_from_flow_uuid",
+                            "resume_from_execution_id",
+                            "resume_from_crew_sequence",
+                        ]:
                             if hasattr(config, attr):
                                 execution_config[attr] = getattr(config, attr)
                 else:
                     # Create config dictionary manually
                     # Include checkpoint resume parameters
-                    for attr in ['nodes', 'edges', 'flow_config', 'model', 'inputs',
-                                 'resume_from_flow_uuid', 'resume_from_execution_id', 'resume_from_crew_sequence']:
+                    for attr in [
+                        "nodes",
+                        "edges",
+                        "flow_config",
+                        "model",
+                        "inputs",
+                        "resume_from_flow_uuid",
+                        "resume_from_execution_id",
+                        "resume_from_crew_sequence",
+                    ]:
                         if hasattr(config, attr):
                             execution_config[attr] = getattr(config, attr)
-                
+
                 # Extract flow_id from config
                 flow_id = None
-                if hasattr(config, 'flow_id') and config.flow_id:
+                if hasattr(config, "flow_id") and config.flow_id:
                     flow_id = config.flow_id
-                    exec_logger.info(f"[run_crew_execution] Found flow_id in direct attribute: {flow_id}")
-                elif hasattr(config, 'inputs') and config.inputs and isinstance(config.inputs, dict) and 'flow_id' in config.inputs:
-                    flow_id = config.inputs['flow_id']
-                    exec_logger.info(f"[run_crew_execution] Found flow_id in inputs dict: {flow_id}")
-                
+                    exec_logger.info(
+                        f"[run_crew_execution] Found flow_id in direct attribute: {flow_id}"
+                    )
+                elif (
+                    hasattr(config, "inputs")
+                    and config.inputs
+                    and isinstance(config.inputs, dict)
+                    and "flow_id" in config.inputs
+                ):
+                    flow_id = config.inputs["flow_id"]
+                    exec_logger.info(
+                        f"[run_crew_execution] Found flow_id in inputs dict: {flow_id}"
+                    )
+
                 # Sanitize the config for database
-                sanitized_config = ExecutionService.sanitize_for_database(execution_config)
-                
+                sanitized_config = ExecutionService.sanitize_for_database(
+                    execution_config
+                )
+
                 # Delegate flow execution to KasalExecutionService
                 result = await crew_execution_service.run_flow_execution(
                     flow_id=str(flow_id) if flow_id else None,
-                    nodes=sanitized_config.get('nodes'),
-                    edges=sanitized_config.get('edges'),
+                    nodes=sanitized_config.get("nodes"),
+                    edges=sanitized_config.get("edges"),
                     job_id=execution_id,
                     config=sanitized_config,
-                    group_context=group_context
+                    group_context=group_context,
                 )
-                exec_logger.info(f"[run_crew_execution] Flow execution initiated: {result}")
+                exec_logger.info(
+                    f"[run_crew_execution] Flow execution initiated: {result}"
+                )
                 return result
-                
+
             # For crew executions, use the proper method from KasalExecutionService
             elif execution_type.lower() == "crew":
-                exec_logger.debug(f"[run_crew_execution] This is a CREW execution - delegating to KasalExecutionService")
-                
+                exec_logger.debug(
+                    f"[run_crew_execution] This is a CREW execution - delegating to KasalExecutionService"
+                )
+
                 # NOTE: Databricks authentication is now handled via get_auth_context() in databricks_auth.py
                 # No need to set up environment variables here - each component uses unified auth
 
-                exec_logger.debug(f"[run_crew_execution] Calling crew_execution_service.run_crew_execution for job_id: {execution_id}")
+                exec_logger.debug(
+                    f"[run_crew_execution] Calling crew_execution_service.run_crew_execution for job_id: {execution_id}"
+                )
                 # This call should handle PREPARING/RUNNING updates internally
                 result = await crew_execution_service.run_crew_execution(
                     execution_id=execution_id,
                     config=config,
                     group_context=group_context,
-                    session=session
+                    session=session,
                 )
-                exec_logger.info(f"[run_crew_execution] Successfully initiated crew execution via KasalExecutionService for job_id: {execution_id}. Result: {result}")
-                return result # Return result from run_crew_execution
+                exec_logger.info(
+                    f"[run_crew_execution] Successfully initiated crew execution via KasalExecutionService for job_id: {execution_id}. Result: {result}"
+                )
+                return result  # Return result from run_crew_execution
 
             # Light "chat" mode: run a SINGLE agent via Agent.kickoff_async (no crew,
             # no tasks/process). Reuses the same RUNNING row + status/SSE plumbing.
             elif execution_type.lower() == "agent":
-                exec_logger.info(f"[run_crew_execution] This is a LIGHT AGENT execution - delegating to KasalExecutionService for job_id: {execution_id}")
+                exec_logger.info(
+                    f"[run_crew_execution] This is a LIGHT AGENT execution - delegating to KasalExecutionService for job_id: {execution_id}"
+                )
                 result = await crew_execution_service.run_light_agent_execution(
                     execution_id=execution_id,
                     config=config,
                     group_context=group_context,
-                    session=session
+                    session=session,
                 )
-                exec_logger.info(f"[run_crew_execution] Light agent execution finished for job_id: {execution_id}. Result: {result}")
+                exec_logger.info(
+                    f"[run_crew_execution] Light agent execution finished for job_id: {execution_id}. Result: {result}"
+                )
                 return result
             else:
                 # For other execution types, use the standard thread pool approach
-                exec_logger.debug(f"[run_crew_execution] Using thread pool execution for {execution_type} job_id {execution_id}")
+                exec_logger.debug(
+                    f"[run_crew_execution] Using thread pool execution for {execution_type} job_id {execution_id}"
+                )
                 future = ExecutionService._thread_pool.submit(
                     run_in_thread_with_loop,
                     ExecutionService._execute_crew,
-                    execution_id, config, execution_type
+                    execution_id,
+                    config,
+                    execution_type,
                 )
-                
+
                 # Return immediate response with execution details
                 return {
                     "execution_id": execution_id,
                     "status": ExecutionStatus.RUNNING.value,
-                    "message": f"{execution_type.capitalize()} execution started (logging may be incomplete)"
+                    "message": f"{execution_type.capitalize()} execution started (logging may be incomplete)",
                 }
-            
+
         except Exception as e:
-            exec_logger.error(f"[run_crew_execution] Error during initiation of {execution_type} execution {execution_id}: {str(e)}", exc_info=True)
+            exec_logger.error(
+                f"[run_crew_execution] Error during initiation of {execution_type} execution {execution_id}: {str(e)}",
+                exc_info=True,
+            )
             # Attempt to update status to FAILED using ExecutionStatusService
             try:
-                exec_logger.error(f"[run_crew_execution] Attempting to update status to FAILED for execution_id: {execution_id} due to error.")
+                exec_logger.error(
+                    f"[run_crew_execution] Attempting to update status to FAILED for execution_id: {execution_id} due to error."
+                )
                 await ExecutionStatusService.update_status(
                     job_id=execution_id,
                     status="failed",
-                    message=f"Failed during initiation: {str(e)}"
+                    message=f"Failed during initiation: {str(e)}",
                 )
-                exec_logger.info(f"[run_crew_execution] Successfully updated status to FAILED for execution_id: {execution_id}.")
+                exec_logger.info(
+                    f"[run_crew_execution] Successfully updated status to FAILED for execution_id: {execution_id}."
+                )
             except Exception as update_err:
-                exec_logger.critical(f"[run_crew_execution] CRITICAL: Failed to update status to FAILED for execution_id: {execution_id} after initiation error: {update_err}", exc_info=True)
-            
-            raise # Re-raise the original exception
-    
-    async def list_executions(self, group_ids: List[str] = None, user_email: str = None, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+                exec_logger.critical(
+                    f"[run_crew_execution] CRITICAL: Failed to update status to FAILED for execution_id: {execution_id} after initiation error: {update_err}",
+                    exc_info=True,
+                )
+
+            raise  # Re-raise the original exception
+
+    async def list_executions(
+        self,
+        group_ids: List[str] = None,
+        user_email: str = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
         """
         List executions from both database and in-memory storage with group and user filtering.
 
@@ -577,37 +664,54 @@ class ExecutionService:
             # Get executions from database using ExecutionRepository
             from src.repositories.execution_repository import ExecutionRepository
 
-            logger.debug(f"[list_executions] Starting database query - group_ids: {group_ids}, user_email: {user_email}")
+            logger.debug(
+                f"[list_executions] Starting database query - group_ids: {group_ids}, user_email: {user_email}"
+            )
 
             if self.session:
-                logger.debug(f"[list_executions] Using injected database session: {self.session}")
+                logger.debug(
+                    f"[list_executions] Using injected database session: {self.session}"
+                )
                 repo = ExecutionRepository(self.session)
                 logger.debug(f"[list_executions] Created repository: {repo}")
 
                 # Get executions with group and user filtering using the correct repository method
-                logger.debug(f"[list_executions] Calling repo.get_execution_history with group_ids={group_ids}")
+                logger.debug(
+                    f"[list_executions] Calling repo.get_execution_history with group_ids={group_ids}"
+                )
                 db_executions_list, total_count = await repo.get_execution_history(
                     limit=limit,
                     offset=offset,
                     group_ids=group_ids,
-                    user_email=user_email
+                    user_email=user_email,
                 )
-                logger.debug(f"[list_executions] Repository returned {len(db_executions_list)} items, total_count={total_count}")
-                
-                logger.debug(f"[list_executions] Database returned {len(db_executions_list)} executions for group_ids: {group_ids}")
+                logger.debug(
+                    f"[list_executions] Repository returned {len(db_executions_list)} items, total_count={total_count}"
+                )
+
+                logger.debug(
+                    f"[list_executions] Database returned {len(db_executions_list)} executions for group_ids: {group_ids}"
+                )
 
                 # Debug what we got
                 if db_executions_list:
-                    logger.debug(f"[list_executions] First execution: job_id={db_executions_list[0].job_id}, group_id={db_executions_list[0].group_id}, run_name={db_executions_list[0].run_name}")
+                    logger.debug(
+                        f"[list_executions] First execution: job_id={db_executions_list[0].job_id}, group_id={db_executions_list[0].group_id}, run_name={db_executions_list[0].run_name}"
+                    )
                 else:
-                    logger.warning(f"[list_executions] No executions found for group_ids: {group_ids}")
-                
+                    logger.warning(
+                        f"[list_executions] No executions found for group_ids: {group_ids}"
+                    )
+
                 # Convert to list of dicts, including inputs with agents_yaml and tasks_yaml
                 import json
+
                 db_executions = []
                 for e in db_executions_list:
                     # Mask sensitive data in inputs before returning to API
-                    masked_inputs = self._mask_inputs_sensitive_data(e.inputs) if e.inputs else None
+                    masked_inputs = (
+                        self._mask_inputs_sensitive_data(e.inputs) if e.inputs else None
+                    )
 
                     exec_dict = {
                         "execution_id": e.job_id,
@@ -621,16 +725,36 @@ class ExecutionService:
                         "group_id": e.group_id,  # CRITICAL: Include group_id for frontend security filtering
                         "inputs": masked_inputs,  # Include the masked inputs field (sensitive data redacted)
                         # Flow scheduling support - include execution_type and flow_id
-                        "execution_type": getattr(e, 'execution_type', None) or (masked_inputs.get('execution_type') if masked_inputs else None) or 'crew',
-                        "flow_id": str(e.flow_id) if getattr(e, 'flow_id', None) else (masked_inputs.get('flow_id') if masked_inputs else None)
+                        "execution_type": getattr(e, "execution_type", None)
+                        or (
+                            masked_inputs.get("execution_type")
+                            if masked_inputs
+                            else None
+                        )
+                        or "crew",
+                        "flow_id": (
+                            str(e.flow_id)
+                            if getattr(e, "flow_id", None)
+                            else (
+                                masked_inputs.get("flow_id") if masked_inputs else None
+                            )
+                        ),
                     }
 
                     # Also extract agents_yaml and tasks_yaml from masked inputs for direct access
                     if masked_inputs and isinstance(masked_inputs, dict):
-                        if 'agents_yaml' in masked_inputs:
-                            exec_dict['agents_yaml'] = json.dumps(masked_inputs['agents_yaml']) if isinstance(masked_inputs['agents_yaml'], dict) else masked_inputs.get('agents_yaml', '')
-                        if 'tasks_yaml' in masked_inputs:
-                            exec_dict['tasks_yaml'] = json.dumps(masked_inputs['tasks_yaml']) if isinstance(masked_inputs['tasks_yaml'], dict) else masked_inputs.get('tasks_yaml', '')
+                        if "agents_yaml" in masked_inputs:
+                            exec_dict["agents_yaml"] = (
+                                json.dumps(masked_inputs["agents_yaml"])
+                                if isinstance(masked_inputs["agents_yaml"], dict)
+                                else masked_inputs.get("agents_yaml", "")
+                            )
+                        if "tasks_yaml" in masked_inputs:
+                            exec_dict["tasks_yaml"] = (
+                                json.dumps(masked_inputs["tasks_yaml"])
+                                if isinstance(masked_inputs["tasks_yaml"], dict)
+                                else masked_inputs.get("tasks_yaml", "")
+                            )
 
                     db_executions.append(exec_dict)
             else:
@@ -641,9 +765,11 @@ class ExecutionService:
             memory_executions = {}
             for execution_id, execution_data in ExecutionService.executions.items():
                 # Check if this execution is already in the list from the database
-                if not any(e.get("execution_id") == execution_id for e in db_executions):
+                if not any(
+                    e.get("execution_id") == execution_id for e in db_executions
+                ):
                     memory_executions[execution_id] = execution_data
-            
+
             # Combine results
             results = db_executions.copy()
             for execution_id, data in memory_executions.items():
@@ -651,51 +777,57 @@ class ExecutionService:
                 if "execution_id" not in execution_data:
                     execution_data["execution_id"] = execution_id
                 results.append(execution_data)
-            
-            logger.debug(f"Returning {len(results)} total executions ({len(db_executions)} from DB, {len(memory_executions)} from memory)")
+
+            logger.debug(
+                f"Returning {len(results)} total executions ({len(db_executions)} from DB, {len(memory_executions)} from memory)"
+            )
             return results
-                
+
         except Exception as e:
-            logger.error(f"Database connection failed while listing executions: {str(e)}")
+            logger.error(
+                f"Database connection failed while listing executions: {str(e)}"
+            )
             logger.error(f"Error type: {type(e).__name__}")
             import traceback
+
             logger.error(f"Full traceback: {traceback.format_exc()}")
 
             # CRITICAL: Re-raise the exception so we can see what's happening
             raise
-            
+
             # Check database configuration
             from src.config.settings import settings
+
             logger.error(f"Database URI: {settings.DATABASE_URI}")
             logger.error(f"Database type: {settings.DATABASE_TYPE}")
-            
+
             # If database access fails, just return in-memory executions
             memory_only_results = [
-                {**data, "execution_id": execution_id} 
+                {**data, "execution_id": execution_id}
                 for execution_id, data in ExecutionService.executions.items()
             ]
-            logger.info(f"Falling back to {len(memory_only_results)} in-memory executions")
+            logger.info(
+                f"Falling back to {len(memory_only_results)} in-memory executions"
+            )
             return memory_only_results
-    
+
     @staticmethod
     def _execute_crew(
-        execution_id: str,
-        config: CrewConfig,
-        execution_type: str
+        execution_id: str, config: CrewConfig, execution_type: str
     ) -> None:
         """
         Execute a crew or flow with proper database updates.
-        
+
         Args:
             execution_id: String ID for the execution
             config: Configuration for the execution
             execution_type: Type of execution (crew or flow)
         """
         exec_logger.info(f"Executing {execution_type} with ID {execution_id}")
-        
+
         result = None
         success = False
-        
+
         try:
             # NOTE: Databricks authentication is now handled via get_auth_context() in databricks_auth.py
             # No need to set up environment variables here - each component uses unified auth
@@ -707,16 +839,23 @@ class ExecutionService:
                 result = {"status": "completed", "message": "Flow execution completed"}
             else:
                 # Generic execution handling
-                result = {"status": "completed", "message": f"{execution_type} execution completed"}
-                
+                result = {
+                    "status": "completed",
+                    "message": f"{execution_type} execution completed",
+                }
+
             # Mark as successful
             success = True
-            exec_logger.info(f"{execution_type.capitalize()} execution {execution_id} completed successfully")
-            
+            exec_logger.info(
+                f"{execution_type.capitalize()} execution {execution_id} completed successfully"
+            )
+
         except Exception as e:
-            exec_logger.error(f"Error during {execution_type} execution {execution_id}: {str(e)}")
+            exec_logger.error(
+                f"Error during {execution_type} execution {execution_id}: {str(e)}"
+            )
             result = {"status": "failed", "error": str(e)}
-            
+
         finally:
             # Update execution status in database using a new session
             # We need a new session since this runs in a different thread
@@ -724,23 +863,27 @@ class ExecutionService:
                 # Use create_and_run_loop to properly manage the event loop
                 create_and_run_loop(
                     ExecutionService._update_execution_status(
-                        execution_id, 
-                        ExecutionStatus.COMPLETED.value if success else ExecutionStatus.FAILED.value,
-                        result
+                        execution_id,
+                        (
+                            ExecutionStatus.COMPLETED.value
+                            if success
+                            else ExecutionStatus.FAILED.value
+                        ),
+                        result,
                     )
                 )
             except Exception as update_error:
-                exec_logger.error(f"Error updating execution status: {str(update_error)}")
-    
+                exec_logger.error(
+                    f"Error updating execution status: {str(update_error)}"
+                )
+
     @staticmethod
     async def _update_execution_status(
-        execution_id: str,
-        status: str,
-        result: Optional[Dict[str, Any]] = None
+        execution_id: str, status: str, result: Optional[Dict[str, Any]] = None
     ) -> None:
         """
         Update execution status in the database.
-        
+
         Args:
             execution_id: String ID of the execution
             status: New status for the execution
@@ -749,24 +892,26 @@ class ExecutionService:
         try:
             # Use ExecutionStatusService to update status
             from src.services.execution.status import ExecutionStatusService
-            
+
             # Sanitize result for database storage if needed
             update_data = {"status": status}
             if result:
                 update_data["result"] = ExecutionService.sanitize_for_database(result)
-            
+
             # Update execution status using the service
-            # No need to use create_and_run_loop here since execute_db_operation_with_fresh_engine 
+            # No need to use create_and_run_loop here since execute_db_operation_with_fresh_engine
             # already handles event loop isolation
             success = await ExecutionStatusService.update_status(
                 job_id=execution_id,
                 status=status,
                 message=f"Status updated to {status}",
-                result=result
+                result=result,
             )
-            
+
             if not success:
-                exec_logger.error(f"Failed to update execution {execution_id} status to {status}")
+                exec_logger.error(
+                    f"Failed to update execution {execution_id} status to {status}"
+                )
             else:
                 exec_logger.info(f"Updated execution {execution_id} status to {status}")
                 # Clean up in-memory entry once terminal status is persisted to DB
@@ -779,25 +924,31 @@ class ExecutionService:
                 }
                 if status in terminal_statuses:
                     ExecutionService.executions.pop(execution_id, None)
-                    exec_logger.debug(f"Cleaned up in-memory execution entry for {execution_id}")
+                    exec_logger.debug(
+                        f"Cleaned up in-memory execution entry for {execution_id}"
+                    )
 
         except Exception as e:
             exec_logger.error(f"Error updating execution status: {str(e)}")
-    
-    async def get_execution_status(self, execution_id: str, group_ids: List[str] = None) -> Dict[str, Any]:
+
+    async def get_execution_status(
+        self, execution_id: str, group_ids: List[str] = None
+    ) -> Dict[str, Any]:
         """
         Get the current status of an execution from the database with group filtering.
-        
+
         Args:
             execution_id: String ID of the execution
             group_ids: List of group IDs for filtering
-            
+
         Returns:
             Dictionary with execution status information or None if not found
         """
         try:
             # Use ExecutionHistoryRepository to get execution with group filtering
-            from src.repositories.execution_history_repository import ExecutionHistoryRepository
+            from src.repositories.execution_history_repository import (
+                ExecutionHistoryRepository,
+            )
 
             # Create repository with session if available
             if self.session:
@@ -811,7 +962,9 @@ class ExecutionService:
                 )
             else:
                 # Log error if no session available
-                exec_logger.error(f"No database session available for getting execution status")
+                exec_logger.error(
+                    f"No database session available for getting execution status"
+                )
                 return None
 
             if not execution:
@@ -850,7 +1003,13 @@ class ExecutionService:
             # statuses answer straight from the slim probe with result=None —
             # the same value they returned before, without dragging a completed
             # prior payload through the driver on every 2s poll.
-            in_flight = {"PENDING", "PREPARING", "RUNNING", "WAITING_FOR_APPROVAL", "STOPPING"}
+            in_flight = {
+                "PENDING",
+                "PREPARING",
+                "RUNNING",
+                "WAITING_FOR_APPROVAL",
+                "STOPPING",
+            }
             result_value = None
             if (execution.status or "").upper() not in in_flight:
                 full_row = await repository.get_execution_by_job_id(
@@ -873,12 +1032,14 @@ class ExecutionService:
                 # MLflow integration fields
                 "mlflow_trace_id": execution.mlflow_trace_id,
                 "mlflow_experiment_name": execution.mlflow_experiment_name,
-                "mlflow_evaluation_run_id": execution.mlflow_evaluation_run_id
+                "mlflow_evaluation_run_id": execution.mlflow_evaluation_run_id,
             }
         except Exception as e:
-            exec_logger.error(f"Error getting execution status for {execution_id}: {str(e)}")
+            exec_logger.error(
+                f"Error getting execution status for {execution_id}: {str(e)}"
+            )
             return None
-    
+
     async def get_execution_status_detail(
         self, execution_id: str, group_ids: List[str] = None
     ) -> Optional[Dict[str, Any]]:
@@ -898,7 +1059,9 @@ class ExecutionService:
             )
 
             if not self.session:
-                exec_logger.error("No database session available for getting execution status detail")
+                exec_logger.error(
+                    "No database session available for getting execution status detail"
+                )
                 return None
 
             repository = ExecutionHistoryRepository(self.session)
@@ -940,23 +1103,27 @@ class ExecutionService:
     async def create_execution(
         self,
         config: CrewConfig,
-        background_tasks = None,
-        group_context: GroupContext = None
+        background_tasks=None,
+        group_context: GroupContext = None,
     ) -> Dict[str, Any]:
         """
         Create a new execution and start it in the background.
-        
+
         Args:
             config: Configuration for the execution
             background_tasks: Optional FastAPI background tasks object
             group_context: Group context for multi-tenant execution
-            
+
         Returns:
             Dictionary with execution details
         """
         # Use consistent logger instance defined at the module level
         # Choose logger based on execution type
-        execution_type = config.execution_type if hasattr(config, 'execution_type') and config.execution_type else "crew"
+        execution_type = (
+            config.execution_type
+            if hasattr(config, "execution_type") and config.execution_type
+            else "crew"
+        )
         if execution_type.lower() == "flow":
             logger = LoggerManager.get_instance().flow
             # Also update exec_logger for backward compatibility with existing code
@@ -965,145 +1132,223 @@ class ExecutionService:
             logger = crew_logger
             exec_logger = crew_logger
 
-        logger.debug("[ExecutionService.create_execution] Received request to create execution.")
+        logger.debug(
+            "[ExecutionService.create_execution] Received request to create execution."
+        )
 
         try:
             # Generate a new execution ID
             execution_id = ExecutionService.create_execution_id()
-            logger.debug(f"[ExecutionService.create_execution] Generated execution_id: {execution_id}")
+            logger.debug(
+                f"[ExecutionService.create_execution] Generated execution_id: {execution_id}"
+            )
 
             # Generate a descriptive run name
             # Determine model safely
-            model = config.model if config.model else "default-model" # Provide a default if model can be None
+            model = (
+                config.model if config.model else "default-model"
+            )  # Provide a default if model can be None
             # Ensure agents_yaml and tasks_yaml are dictionaries
-            agents_yaml = config.agents_yaml if isinstance(config.agents_yaml, dict) else {}
-            tasks_yaml = config.tasks_yaml if isinstance(config.tasks_yaml, dict) else {}
+            agents_yaml = (
+                config.agents_yaml if isinstance(config.agents_yaml, dict) else {}
+            )
+            tasks_yaml = (
+                config.tasks_yaml if isinstance(config.tasks_yaml, dict) else {}
+            )
 
             # For flow executions, extract agents and tasks from flow nodes if agents_yaml/tasks_yaml are empty
             # This is needed because flows store agent/task data in nodes, not in agents_yaml/tasks_yaml
             if execution_type == "flow" and not agents_yaml and not tasks_yaml:
-                logger.info("[ExecutionService.create_execution] Flow execution detected with empty agents_yaml/tasks_yaml - extracting from nodes")
-                agents_yaml, tasks_yaml = self._extract_agents_tasks_from_flow_config(config)
-                logger.info(f"[ExecutionService.create_execution] Extracted {len(agents_yaml)} agents and {len(tasks_yaml)} tasks from flow config for name generation")
+                logger.info(
+                    "[ExecutionService.create_execution] Flow execution detected with empty agents_yaml/tasks_yaml - extracting from nodes"
+                )
+                agents_yaml, tasks_yaml = self._extract_agents_tasks_from_flow_config(
+                    config
+                )
+                logger.info(
+                    f"[ExecutionService.create_execution] Extracted {len(agents_yaml)} agents and {len(tasks_yaml)} tasks from flow config for name generation"
+                )
 
             # Log the agents_yaml to see if knowledge_sources are present
-            logger.info(f"[ExecutionService.create_execution] Received agents_yaml with {len(agents_yaml)} agents")
+            logger.info(
+                f"[ExecutionService.create_execution] Received agents_yaml with {len(agents_yaml)} agents"
+            )
             for agent_id, agent_config in agents_yaml.items():
-                logger.info(f"[ExecutionService.create_execution] Agent {agent_id} keys: {list(agent_config.keys())}")
+                logger.info(
+                    f"[ExecutionService.create_execution] Agent {agent_id} keys: {list(agent_config.keys())}"
+                )
                 if "knowledge_sources" in agent_config:
                     knowledge_sources = agent_config.get("knowledge_sources", [])
-                    logger.info(f"[ExecutionService.create_execution] Agent {agent_id} has {len(knowledge_sources)} knowledge_sources")
+                    logger.info(
+                        f"[ExecutionService.create_execution] Agent {agent_id} has {len(knowledge_sources)} knowledge_sources"
+                    )
                     for idx, source in enumerate(knowledge_sources):
-                        logger.info(f"[ExecutionService.create_execution] Agent {agent_id} knowledge_source[{idx}]: {source}")
+                        logger.info(
+                            f"[ExecutionService.create_execution] Agent {agent_id} knowledge_source[{idx}]: {source}"
+                        )
                 else:
-                    logger.debug(f"[ExecutionService.create_execution] Agent {agent_id} has NO knowledge_sources field")
+                    logger.debug(
+                        f"[ExecutionService.create_execution] Agent {agent_id} has NO knowledge_sources field"
+                    )
 
             # Ensure GroupContext is available in UserContext for authentication
             # This is critical for both OBO (user_token) and PAT (group_id) authentication
             if group_context:
                 from src.utils.user_context import UserContext
+
                 UserContext.set_group_context(group_context)
-                logger.info(f"[ExecutionService.create_execution] Set GroupContext for execution name generation: primary_group_id={group_context.primary_group_id}, has_access_token={bool(group_context.access_token)}")
+                logger.info(
+                    f"[ExecutionService.create_execution] Set GroupContext for execution name generation: primary_group_id={group_context.primary_group_id}, has_access_token={bool(group_context.access_token)}"
+                )
 
                 # Also set user_token if available for OBO authentication
-                if hasattr(group_context, 'access_token') and group_context.access_token:
+                if (
+                    hasattr(group_context, "access_token")
+                    and group_context.access_token
+                ):
                     UserContext.set_user_token(group_context.access_token)
-                    logger.info("[ExecutionService.create_execution] Set user_token for OBO authentication")
+                    logger.info(
+                        "[ExecutionService.create_execution] Set user_token for OBO authentication"
+                    )
 
             # Start with an instant deterministic placeholder name. The LLM
             # naming call (a full model roundtrip — seconds on reasoning models)
             # used to be awaited here, delaying time-to-first-answer of EVERY
             # run; it now happens off the critical path (see the rename task
             # scheduled after the DB record exists) and simply renames the run.
-            run_name = ExecutionService._derive_placeholder_run_name(agents_yaml, tasks_yaml)
-            logger.debug(f"[ExecutionService.create_execution] Placeholder run_name: {run_name} for execution_id: {execution_id}")
+            run_name = ExecutionService._derive_placeholder_run_name(
+                agents_yaml, tasks_yaml
+            )
+            logger.debug(
+                f"[ExecutionService.create_execution] Placeholder run_name: {run_name} for execution_id: {execution_id}"
+            )
 
             # Add run_name to config inputs for crew consistency
             if not config.inputs:
                 config.inputs = {}
             config.inputs["run_name"] = run_name
-            logger.info(f"[ExecutionService.create_execution] Added run_name to config.inputs for consistent crew_id generation")
+            logger.info(
+                f"[ExecutionService.create_execution] Added run_name to config.inputs for consistent crew_id generation"
+            )
 
             # Extract execution type and flow_id
             # Note: execution_type is already captured above for logger selection
             flow_id = None
 
             if execution_type == "flow":
-                logger.info(f"[ExecutionService.create_execution] Creating flow execution for execution_id: {execution_id}")
-                
+                logger.info(
+                    f"[ExecutionService.create_execution] Creating flow execution for execution_id: {execution_id}"
+                )
+
                 # Check if flow_id is directly available in config
-                if hasattr(config, 'flow_id') and config.flow_id:
+                if hasattr(config, "flow_id") and config.flow_id:
                     flow_id = config.flow_id
-                    logger.info(f"[ExecutionService.create_execution] Using flow_id from config: {flow_id}")
+                    logger.info(
+                        f"[ExecutionService.create_execution] Using flow_id from config: {flow_id}"
+                    )
                 # Also try to get flow_id from inputs
                 elif config.inputs and "flow_id" in config.inputs:
                     flow_id = config.inputs.get("flow_id")
-                    logger.info(f"[ExecutionService.create_execution] Using flow_id from inputs: {flow_id}")
-                
+                    logger.info(
+                        f"[ExecutionService.create_execution] Using flow_id from inputs: {flow_id}"
+                    )
+
                 # If no flow_id is provided, check if nodes/edges are provided for ad-hoc execution
                 # This allows "test before save" workflow from the canvas
                 if not flow_id:
                     # Check if nodes and edges are provided in config for ad-hoc execution
-                    has_nodes = hasattr(config, 'nodes') and config.nodes is not None and len(config.nodes) > 0
-                    has_edges = hasattr(config, 'edges') and config.edges is not None
+                    has_nodes = (
+                        hasattr(config, "nodes")
+                        and config.nodes is not None
+                        and len(config.nodes) > 0
+                    )
+                    has_edges = hasattr(config, "edges") and config.edges is not None
 
                     if has_nodes:
                         # Ad-hoc flow execution with nodes from canvas (no database save required)
                         # Edges may be empty for single-crew flows - that's valid
                         edge_count = len(config.edges) if config.edges else 0
-                        exec_logger.info(f"[ExecutionService.create_execution] No flow_id provided, but nodes ({len(config.nodes)}) and edges ({edge_count}) present - allowing ad-hoc flow execution")
+                        exec_logger.info(
+                            f"[ExecutionService.create_execution] No flow_id provided, but nodes ({len(config.nodes)}) and edges ({edge_count}) present - allowing ad-hoc flow execution"
+                        )
                     else:
                         # No flow_id and no nodes/edges, try to find the most recent flow from database
-                        exec_logger.info(f"[ExecutionService.create_execution] No flow_id or nodes/edges provided for execution_id: {execution_id}, trying to find most recent flow from database")
+                        exec_logger.info(
+                            f"[ExecutionService.create_execution] No flow_id or nodes/edges provided for execution_id: {execution_id}, trying to find most recent flow from database"
+                        )
                         try:
                             # Use async query for the most recent flow from the database
                             from src.db.session import request_scoped_session
                             from src.repositories.flow_repository import FlowRepository
 
                             async with request_scoped_session() as db:
-                                most_recent_flow = await FlowRepository(db).get_most_recent()
+                                most_recent_flow = await FlowRepository(
+                                    db
+                                ).get_most_recent()
 
                                 if most_recent_flow:
                                     flow_id = most_recent_flow.id
-                                    exec_logger.info(f"[ExecutionService.create_execution] Found most recent flow with ID {flow_id} for execution_id: {execution_id}")
+                                    exec_logger.info(
+                                        f"[ExecutionService.create_execution] Found most recent flow with ID {flow_id} for execution_id: {execution_id}"
+                                    )
                                 else:
-                                    exec_logger.error(f"[ExecutionService.create_execution] No flows found in database for execution_id: {execution_id}")
-                                    raise ValueError("No flow found in the database. Please create a flow first, or provide nodes and edges for ad-hoc execution.")
+                                    exec_logger.error(
+                                        f"[ExecutionService.create_execution] No flows found in database for execution_id: {execution_id}"
+                                    )
+                                    raise ValueError(
+                                        "No flow found in the database. Please create a flow first, or provide nodes and edges for ad-hoc execution."
+                                    )
                         except Exception as e:
-                            exec_logger.error(f"[ExecutionService.create_execution] Error finding most recent flow: {str(e)}")
-                            raise ValueError(f"Error finding most recent flow: {str(e)}")
+                            exec_logger.error(
+                                f"[ExecutionService.create_execution] Error finding most recent flow: {str(e)}"
+                            )
+                            raise ValueError(
+                                f"Error finding most recent flow: {str(e)}"
+                            )
 
             # Create database entry
             inputs = {
                 "agents_yaml": config.agents_yaml,
                 "tasks_yaml": config.tasks_yaml,
                 "inputs": config.inputs,
-                "reasoning": config.reasoning if hasattr(config, 'reasoning') else False,
+                "reasoning": (
+                    config.reasoning if hasattr(config, "reasoning") else False
+                ),
                 "model": config.model,
                 "execution_type": execution_type,
-                "schema_detection_enabled": config.schema_detection_enabled
+                "schema_detection_enabled": config.schema_detection_enabled,
             }
 
             # For flow executions, make sure to include nodes and edges in the inputs
             if execution_type == "flow":
                 # Make sure we have nodes and edges for flow execution
-                if hasattr(config, 'nodes') and config.nodes:
+                if hasattr(config, "nodes") and config.nodes:
                     inputs["nodes"] = config.nodes
-                    logger.info(f"[ExecutionService.create_execution] Added {len(config.nodes)} nodes to flow execution")
+                    logger.info(
+                        f"[ExecutionService.create_execution] Added {len(config.nodes)} nodes to flow execution"
+                    )
                 elif not flow_id:
                     # Only warn about missing nodes if we don't have a flow_id
-                    logger.warning(f"[ExecutionService.create_execution] No nodes provided for flow execution {execution_id} and no flow_id present, this will cause an error")
+                    logger.warning(
+                        f"[ExecutionService.create_execution] No nodes provided for flow execution {execution_id} and no flow_id present, this will cause an error"
+                    )
                 else:
-                    logger.info(f"[ExecutionService.create_execution] No nodes provided for flow execution {execution_id}, but flow_id {flow_id} is present. Nodes will be loaded from the database.")
+                    logger.info(
+                        f"[ExecutionService.create_execution] No nodes provided for flow execution {execution_id}, but flow_id {flow_id} is present. Nodes will be loaded from the database."
+                    )
 
-                if hasattr(config, 'edges') and config.edges:
+                if hasattr(config, "edges") and config.edges:
                     inputs["edges"] = config.edges
-                    logger.info(f"[ExecutionService.create_execution] Added {len(config.edges)} edges to flow execution")
+                    logger.info(
+                        f"[ExecutionService.create_execution] Added {len(config.edges)} edges to flow execution"
+                    )
 
                 # Add flow configuration if available
-                if hasattr(config, 'flow_config') and config.flow_config:
+                if hasattr(config, "flow_config") and config.flow_config:
                     inputs["flow_config"] = config.flow_config
-                    logger.info(f"[ExecutionService.create_execution] Added flow_config to flow execution")
+                    logger.info(
+                        f"[ExecutionService.create_execution] Added flow_config to flow execution"
+                    )
 
             # Add flow_id to inputs if it exists
             if flow_id:
@@ -1112,12 +1357,16 @@ class ExecutionService:
                 if not config.inputs:
                     config.inputs = {}
                 config.inputs["flow_id"] = str(flow_id)
-                logger.info(f"[ExecutionService.create_execution] Added flow_id {flow_id} to config.inputs")
+                logger.info(
+                    f"[ExecutionService.create_execution] Added flow_id {flow_id} to config.inputs"
+                )
 
             # SECURITY: Mask sensitive fields (client_secret, password, token, etc.) BEFORE storing to database
             # This ensures secrets are never persisted in plaintext
             masked_inputs = self._mask_inputs_sensitive_data(inputs)
-            logger.info(f"[ExecutionService.create_execution] Masked sensitive fields in inputs before database storage")
+            logger.info(
+                f"[ExecutionService.create_execution] Masked sensitive fields in inputs before database storage"
+            )
 
             # Sanitize inputs to ensure all values are JSON serializable
             sanitized_inputs = ExecutionService.sanitize_for_database(masked_inputs)
@@ -1125,35 +1374,49 @@ class ExecutionService:
             # Create execution data with RUNNING status for immediate visibility
             execution_data = {
                 "job_id": execution_id,
-                "status": ExecutionStatus.RUNNING.value, # Start with RUNNING status for immediate visibility
+                "status": ExecutionStatus.RUNNING.value,  # Start with RUNNING status for immediate visibility
                 "inputs": sanitized_inputs,
                 # ExecutionHistory.planning stays as a historical-record column but is
                 # no longer populated from the request — Kasal has no planner, so the
                 # column default (False) applies to every new row.
                 "run_name": run_name,
                 "created_at": datetime.now(),  # Remove timezone to match database column type
-                "execution_type": execution_type.lower() if execution_type else "crew"  # Track execution type
+                "execution_type": (
+                    execution_type.lower() if execution_type else "crew"
+                ),  # Track execution type
             }
 
             # Add flow_id for flow executions (flow_id is already a UUID object)
             if execution_type == "flow" and flow_id:
                 import uuid as uuid_module
+
                 # Ensure flow_id is a UUID object for the database
                 if isinstance(flow_id, str):
                     flow_id = uuid_module.UUID(flow_id)
                 execution_data["flow_id"] = flow_id
-                logger.info(f"[ExecutionService.create_execution] Setting flow_id {flow_id} in execution_data for flow execution")
+                logger.info(
+                    f"[ExecutionService.create_execution] Setting flow_id {flow_id} in execution_data for flow execution"
+                )
 
-            logger.debug(f"[ExecutionService.create_execution] Attempting to create DB record for execution_id: {execution_id} with status RUNNING, execution_type: {execution_type}")
+            logger.debug(
+                f"[ExecutionService.create_execution] Attempting to create DB record for execution_id: {execution_id} with status RUNNING, execution_type: {execution_type}"
+            )
 
             # Use ExecutionStatusService to create the execution
             from src.services.execution.status import ExecutionStatusService
-            success = await ExecutionStatusService.create_execution(execution_data, group_context=group_context)
+
+            success = await ExecutionStatusService.create_execution(
+                execution_data, group_context=group_context
+            )
 
             if not success:
-                raise ValueError(f"Failed to create execution record for {execution_id}")
+                raise ValueError(
+                    f"Failed to create execution record for {execution_id}"
+                )
 
-            logger.info(f"[ExecutionService.create_execution] Successfully created DB record for execution_id: {execution_id} with status RUNNING")
+            logger.info(
+                f"[ExecutionService.create_execution] Successfully created DB record for execution_id: {execution_id} with status RUNNING"
+            )
 
             # Add to in-memory storage with RUNNING status. Carry the group so a
             # status lookup that falls back to this entry (see get_execution_status)
@@ -1166,93 +1429,141 @@ class ExecutionService:
                 group_id=group_context.primary_group_id if group_context else None,
                 group_email=group_context.group_email if group_context else None,
             )
-            logger.debug(f"[ExecutionService.create_execution] Added execution_id: {execution_id} to in-memory store with status RUNNING")
+            logger.debug(
+                f"[ExecutionService.create_execution] Added execution_id: {execution_id} to in-memory store with status RUNNING"
+            )
 
             # Fire-and-forget the LLM rename now that the record exists. The
             # created asyncio task inherits this request's contextvars, so the
             # group context / OBO token set above still applies inside it.
-            asyncio.create_task(ExecutionService._generate_run_name_async(
-                execution_id=execution_id,
-                agents_yaml=agents_yaml,
-                tasks_yaml=tasks_yaml,
-                model=model,
-            ))
+            asyncio.create_task(
+                ExecutionService._generate_run_name_async(
+                    execution_id=execution_id,
+                    agents_yaml=agents_yaml,
+                    tasks_yaml=tasks_yaml,
+                    model=model,
+                )
+            )
 
             # Start execution in background
-            logger.info(f"[ExecutionService.create_execution] Preparing to launch background task for execution_id: {execution_id}...")
+            logger.info(
+                f"[ExecutionService.create_execution] Preparing to launch background task for execution_id: {execution_id}..."
+            )
 
             if background_tasks:
+
                 async def run_execution_task():
                     # Use context-aware logger based on execution type
-                    task_logger = LoggerManager.get_instance().flow if execution_type.lower() == "flow" else LoggerManager.get_instance().crew
-                    task_logger.info(f"[run_execution_task] Background task started for execution_id: {execution_id}")
+                    task_logger = (
+                        LoggerManager.get_instance().flow
+                        if execution_type.lower() == "flow"
+                        else LoggerManager.get_instance().crew
+                    )
+                    task_logger.info(
+                        f"[run_execution_task] Background task started for execution_id: {execution_id}"
+                    )
                     try:
-                        task_logger.debug(f"[run_execution_task] Calling ExecutionService.run_crew_execution for execution_id: {execution_id}")
+                        task_logger.debug(
+                            f"[run_execution_task] Calling ExecutionService.run_crew_execution for execution_id: {execution_id}"
+                        )
                         await ExecutionService.run_crew_execution(
                             execution_id=execution_id,
                             config=config,
                             execution_type=execution_type,
                             group_context=group_context,
-                            session=self.session
+                            session=self.session,
                         )
-                        task_logger.info(f"[run_execution_task] ExecutionService.run_crew_execution completed for execution_id: {execution_id}")
+                        task_logger.info(
+                            f"[run_execution_task] ExecutionService.run_crew_execution completed for execution_id: {execution_id}"
+                        )
                     except Exception as task_error:
                         # This catches errors that escape run_crew_execution (e.g., if it re-raises)
-                        task_logger.error(f"[run_execution_task] Error escaped from ExecutionService.run_crew_execution for execution_id: {execution_id}: {str(task_error)}", exc_info=True)
+                        task_logger.error(
+                            f"[run_execution_task] Error escaped from ExecutionService.run_crew_execution for execution_id: {execution_id}: {str(task_error)}",
+                            exc_info=True,
+                        )
                         # Fallback: Attempt to update status if the status update in run_crew_execution failed
-                        task_logger.error(f"[run_execution_task] Fallback: Attempting to update status to FAILED for execution_id: {execution_id} due to escaped task error.")
+                        task_logger.error(
+                            f"[run_execution_task] Fallback: Attempting to update status to FAILED for execution_id: {execution_id} due to escaped task error."
+                        )
                         try:
                             await ExecutionStatusService.update_status(
                                 job_id=execution_id,
                                 status="failed",
-                                message=f"Execution failed due to error: {str(task_error)}"
+                                message=f"Execution failed due to error: {str(task_error)}",
                             )
-                            task_logger.info(f"[run_execution_task] Fallback: Successfully committed FAILED status for {execution_id} due to escaped task error.")
+                            task_logger.info(
+                                f"[run_execution_task] Fallback: Successfully committed FAILED status for {execution_id} due to escaped task error."
+                            )
                         except Exception as status_ex:
-                            task_logger.error(f"[run_execution_task] Fallback: Failed to update status for {execution_id}: {status_ex}")
-                    task_logger.info(f"[run_execution_task] Background task finished for execution_id: {execution_id}")
+                            task_logger.error(
+                                f"[run_execution_task] Fallback: Failed to update status for {execution_id}: {status_ex}"
+                            )
+                    task_logger.info(
+                        f"[run_execution_task] Background task finished for execution_id: {execution_id}"
+                    )
 
                 background_tasks.add_task(run_execution_task)
-                logger.info(f"[ExecutionService.create_execution] Added run_execution_task to FastAPI BackgroundTasks for execution_id: {execution_id}")
+                logger.info(
+                    f"[ExecutionService.create_execution] Added run_execution_task to FastAPI BackgroundTasks for execution_id: {execution_id}"
+                )
             else:
                 # Fallback using asyncio.create_task
-                logger.warning(f"[ExecutionService.create_execution] FastAPI BackgroundTasks not available for {execution_id}, using asyncio.create_task.")
-                task = asyncio.create_task(ExecutionService._run_in_background(
-                    execution_id=execution_id,
-                    config=config,
-                    execution_type=execution_type,
-                    group_context=group_context,
-                    session=self.session
-                ))
+                logger.warning(
+                    f"[ExecutionService.create_execution] FastAPI BackgroundTasks not available for {execution_id}, using asyncio.create_task."
+                )
+                task = asyncio.create_task(
+                    ExecutionService._run_in_background(
+                        execution_id=execution_id,
+                        config=config,
+                        execution_type=execution_type,
+                        group_context=group_context,
+                        session=self.session,
+                    )
+                )
                 # Store the task reference so we can cancel it later
                 if execution_id in ExecutionService.executions:
                     ExecutionService.executions[execution_id]["task"] = task
-                    logger.debug(f"[ExecutionService.create_execution] Stored asyncio task reference for {execution_id}")
-                logger.info(f"[ExecutionService.create_execution] Launched _run_in_background task via asyncio for execution_id: {execution_id}")
+                    logger.debug(
+                        f"[ExecutionService.create_execution] Stored asyncio task reference for {execution_id}"
+                    )
+                logger.info(
+                    f"[ExecutionService.create_execution] Launched _run_in_background task via asyncio for execution_id: {execution_id}"
+                )
 
-            logger.info(f"[ExecutionService.create_execution] Execution {execution_id} launch initiated. Returning initial response.")
+            logger.info(
+                f"[ExecutionService.create_execution] Execution {execution_id} launch initiated. Returning initial response."
+            )
 
             # Return execution details immediately after DB creation and task launch
             from src.schemas.execution import ExecutionCreateResponse
-            return ExecutionCreateResponse( # Use Pydantic model for response
+
+            return ExecutionCreateResponse(  # Use Pydantic model for response
                 execution_id=execution_id,
-                status=ExecutionStatus.RUNNING.value, # Return RUNNING status for immediate visibility
-                run_name=run_name
-            ).model_dump() # Return as dict
+                status=ExecutionStatus.RUNNING.value,  # Return RUNNING status for immediate visibility
+                run_name=run_name,
+            ).model_dump()  # Return as dict
 
         except Exception as e:
-            logger.error(f"[ExecutionService.create_execution] Error during initial creation for execution: {str(e)}", exc_info=True)
-            # Re-raise as KasalError for the API boundary
-            raise KasalError(
-                detail=f"Failed to create execution: {str(e)}"
+            logger.error(
+                f"[ExecutionService.create_execution] Error during initial creation for execution: {str(e)}",
+                exc_info=True,
             )
-    
+            # Re-raise as KasalError for the API boundary
+            raise KasalError(detail=f"Failed to create execution: {str(e)}")
+
     @staticmethod
-    async def _run_in_background(execution_id: str, config: CrewConfig, execution_type: str = "crew", group_context: GroupContext = None, session = None):
+    async def _run_in_background(
+        execution_id: str,
+        config: CrewConfig,
+        execution_type: str = "crew",
+        group_context: GroupContext = None,
+        session=None,
+    ):
         """
         Run an execution in the background using a new database session.
         This is used when FastAPI's background_tasks is not available.
-        
+
         Args:
             execution_id: ID of the execution
             config: Configuration for the execution
@@ -1260,23 +1571,34 @@ class ExecutionService:
         """
         # Use a separate logger instance potentially if needed, or reuse exec_logger
         task_logger = LoggerManager.get_instance().crew
-        task_logger.info(f"[_run_in_background] Asyncio background task started for execution_id: {execution_id}")
+        task_logger.info(
+            f"[_run_in_background] Asyncio background task started for execution_id: {execution_id}"
+        )
         try:
-            task_logger.debug(f"[_run_in_background] Calling ExecutionService.run_crew_execution for execution_id: {execution_id}")
+            task_logger.debug(
+                f"[_run_in_background] Calling ExecutionService.run_crew_execution for execution_id: {execution_id}"
+            )
             await ExecutionService.run_crew_execution(
                 execution_id=execution_id,
                 config=config,
                 execution_type=execution_type,
                 group_context=group_context,
-                session=session
+                session=session,
             )
-            task_logger.info(f"[_run_in_background] ExecutionService.run_crew_execution completed for execution_id: {execution_id}")
+            task_logger.info(
+                f"[_run_in_background] ExecutionService.run_crew_execution completed for execution_id: {execution_id}"
+            )
         except Exception as e:
-            task_logger.error(f"[_run_in_background] Error during ExecutionService.run_crew_execution for execution_id: {execution_id}: {str(e)}", exc_info=True)
+            task_logger.error(
+                f"[_run_in_background] Error during ExecutionService.run_crew_execution for execution_id: {execution_id}: {str(e)}",
+                exc_info=True,
+            )
             # Note: No explicit FAILED status update here, assuming run_crew_execution handles its internal errors
             # and updates status before raising, or the session rollback handles cleanup.
-        task_logger.info(f"[_run_in_background] Asyncio background task finished for execution_id: {execution_id}")
-    
+        task_logger.info(
+            f"[_run_in_background] Asyncio background task finished for execution_id: {execution_id}"
+        )
+
     # Terminal states a crashed/killed crew run can land in; only these are
     # resumable (a kill -9 of the subprocess surfaces as STOPPED).
     RESUMABLE_STATUSES = {"FAILED", "STOPPED", "CANCELLED"}
@@ -1305,7 +1627,9 @@ class ExecutionService:
             ValueError: If the execution is missing, not a crew execution, or
                 not in a resumable (terminal-failed) state
         """
-        from src.repositories.execution_history_repository import ExecutionHistoryRepository
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
         from src.services.execution.checkpoint import build_resume_checkpoint
 
         if not self.session:
@@ -1313,7 +1637,9 @@ class ExecutionService:
 
         group_ids = group_context.group_ids if group_context else None
         repo = ExecutionHistoryRepository(self.session)
-        execution = await repo.get_execution_by_job_id(execution_id, group_ids=group_ids)
+        execution = await repo.get_execution_by_job_id(
+            execution_id, group_ids=group_ids
+        )
         if not execution:
             raise ValueError(f"Execution {execution_id} not found")
 
@@ -1351,7 +1677,9 @@ class ExecutionService:
             reasoning=bool(stored_inputs.get("reasoning", False)),
             model=stored_inputs.get("model"),
             execution_type="crew",
-            schema_detection_enabled=stored_inputs.get("schema_detection_enabled", True),
+            schema_detection_enabled=stored_inputs.get(
+                "schema_detection_enabled", True
+            ),
             resume_checkpoint=checkpoint,
         )
 
@@ -1387,13 +1715,15 @@ class ExecutionService:
             group_email=group_context.group_email if group_context else None,
         )
 
-        task = asyncio.create_task(ExecutionService._run_in_background(
-            execution_id=execution_id,
-            config=config,
-            execution_type="crew",
-            group_context=group_context,
-            session=self.session,
-        ))
+        task = asyncio.create_task(
+            ExecutionService._run_in_background(
+                execution_id=execution_id,
+                config=config,
+                execution_type="crew",
+                group_context=group_context,
+                session=self.session,
+            )
+        )
         if execution_id in ExecutionService.executions:
             ExecutionService.executions[execution_id]["task"] = task
 
@@ -1407,10 +1737,10 @@ class ExecutionService:
     async def _check_for_running_jobs(self, group_context: GroupContext = None) -> None:
         """
         Check for running jobs to enforce single job execution constraint.
-        
+
         Args:
             group_context: Group context for filtering (ensures users can only see their own group's jobs)
-            
+
         Raises:
             ValueError: If there are any running jobs
         """
@@ -1418,26 +1748,26 @@ class ExecutionService:
             # Get active statuses that should block new executions
             active_statuses = [
                 ExecutionStatus.PENDING.value,
-                ExecutionStatus.PREPARING.value, 
-                ExecutionStatus.RUNNING.value
+                ExecutionStatus.PREPARING.value,
+                ExecutionStatus.RUNNING.value,
             ]
-            
+
             # Use ExecutionRepository to check for active executions
             from src.db.session import request_scoped_session
             from src.repositories.execution_repository import ExecutionRepository
-            
+
             async with request_scoped_session() as db:
                 repo = ExecutionRepository(db)
-                
+
                 # Get executions with group filtering
                 group_ids = group_context.group_ids if group_context else None
                 active_executions, _ = await repo.get_execution_history(
                     limit=1,  # We only need to know if any exist
                     offset=0,
                     group_ids=group_ids,
-                    status_filter=active_statuses  # Filter for active statuses
+                    status_filter=active_statuses,  # Filter for active statuses
                 )
-                
+
                 if active_executions:
                     active_execution = active_executions[0]
                     error_msg = (
@@ -1446,18 +1776,24 @@ class ExecutionService:
                         f"Please wait for it to complete. "
                         f"Note: In future releases, we plan to add support for concurrent job execution."
                     )
-                    crew_logger.warning(f"[ExecutionService._check_for_running_jobs] {error_msg}")
+                    crew_logger.warning(
+                        f"[ExecutionService._check_for_running_jobs] {error_msg}"
+                    )
                     raise ValueError(error_msg)
-                    
+
         except ValueError:
             # Re-raise ValueError (our constraint violation)
             raise
         except Exception as e:
             # Log other errors but don't block execution creation
-            crew_logger.error(f"[ExecutionService._check_for_running_jobs] Error checking for running jobs: {str(e)}")
+            crew_logger.error(
+                f"[ExecutionService._check_for_running_jobs] Error checking for running jobs: {str(e)}"
+            )
             # We don't raise here to avoid blocking execution if the check fails for technical reasons
-    
-    async def generate_execution_name(self, request: ExecutionNameGenerationRequest) -> Dict[str, str]:
+
+    async def generate_execution_name(
+        self, request: ExecutionNameGenerationRequest
+    ) -> Dict[str, str]:
         """
         Generate a descriptive name for an execution based on agents and tasks configuration.
 
@@ -1489,144 +1825,182 @@ class ExecutionService:
 
         try:
             # Get nodes and flow_config from the config
-            nodes = config.nodes if hasattr(config, 'nodes') and config.nodes else []
-            flow_config = config.flow_config if hasattr(config, 'flow_config') and config.flow_config else {}
+            nodes = config.nodes if hasattr(config, "nodes") and config.nodes else []
+            flow_config = (
+                config.flow_config
+                if hasattr(config, "flow_config") and config.flow_config
+                else {}
+            )
 
-            logger.info(f"[_extract_agents_tasks_from_flow_config] Processing {len(nodes)} nodes")
+            logger.info(
+                f"[_extract_agents_tasks_from_flow_config] Processing {len(nodes)} nodes"
+            )
 
             # Extract from nodes (direct node data)
             for node in nodes:
-                node_type = node.get('type', '').lower()
-                node_data = node.get('data', {})
-                node_id = node.get('id', '')
+                node_type = node.get("type", "").lower()
+                node_data = node.get("data", {})
+                node_id = node.get("id", "")
 
-                if node_type == 'crewnode':
+                if node_type == "crewnode":
                     # Extract crew information which contains agents and tasks
-                    crew_name = node_data.get('label', node_data.get('name', 'Crew'))
-                    all_agents = node_data.get('allAgents', node_data.get('agents', []))
-                    all_tasks = node_data.get('allTasks', node_data.get('tasks', []))
+                    crew_name = node_data.get("label", node_data.get("name", "Crew"))
+                    all_agents = node_data.get("allAgents", node_data.get("agents", []))
+                    all_tasks = node_data.get("allTasks", node_data.get("tasks", []))
 
-                    logger.info(f"[_extract_agents_tasks_from_flow_config] Found crewNode with {len(all_agents)} agents and {len(all_tasks)} tasks")
+                    logger.info(
+                        f"[_extract_agents_tasks_from_flow_config] Found crewNode with {len(all_agents)} agents and {len(all_tasks)} tasks"
+                    )
 
                     # Extract agents
                     for agent in all_agents:
-                        agent_id = agent.get('id', f"agent_{len(agents_yaml)}")
+                        agent_id = agent.get("id", f"agent_{len(agents_yaml)}")
                         agents_yaml[agent_id] = {
-                            'role': agent.get('role', agent.get('name', 'Agent')),
-                            'goal': agent.get('goal', ''),
-                            'backstory': agent.get('backstory', '')
+                            "role": agent.get("role", agent.get("name", "Agent")),
+                            "goal": agent.get("goal", ""),
+                            "backstory": agent.get("backstory", ""),
                         }
 
                     # Extract tasks
                     for task in all_tasks:
-                        task_id = task.get('id', f"task_{len(tasks_yaml)}")
+                        task_id = task.get("id", f"task_{len(tasks_yaml)}")
                         tasks_yaml[task_id] = {
-                            'name': task.get('name', task.get('description', 'Task')[:50]),
-                            'description': task.get('description', ''),
-                            'expected_output': task.get('expected_output', task.get('expectedOutput', ''))
+                            "name": task.get(
+                                "name", task.get("description", "Task")[:50]
+                            ),
+                            "description": task.get("description", ""),
+                            "expected_output": task.get(
+                                "expected_output", task.get("expectedOutput", "")
+                            ),
                         }
 
-                elif node_type == 'agentnode':
+                elif node_type == "agentnode":
                     # Extract single agent
-                    agent_id = node_data.get('agentId', node_id)
+                    agent_id = node_data.get("agentId", node_id)
                     agents_yaml[agent_id] = {
-                        'role': node_data.get('role', node_data.get('label', 'Agent')),
-                        'goal': node_data.get('goal', ''),
-                        'backstory': node_data.get('backstory', '')
+                        "role": node_data.get("role", node_data.get("label", "Agent")),
+                        "goal": node_data.get("goal", ""),
+                        "backstory": node_data.get("backstory", ""),
                     }
 
-                elif node_type == 'tasknode':
+                elif node_type == "tasknode":
                     # Extract single task
-                    task_id = node_data.get('taskId', node_id)
+                    task_id = node_data.get("taskId", node_id)
                     tasks_yaml[task_id] = {
-                        'name': node_data.get('name', node_data.get('label', 'Task')),
-                        'description': node_data.get('description', ''),
-                        'expected_output': node_data.get('expected_output', node_data.get('expectedOutput', ''))
+                        "name": node_data.get("name", node_data.get("label", "Task")),
+                        "description": node_data.get("description", ""),
+                        "expected_output": node_data.get(
+                            "expected_output", node_data.get("expectedOutput", "")
+                        ),
                     }
 
             # Also extract from flow_config's startingPoints and listeners
-            starting_points = flow_config.get('startingPoints', [])
-            listeners = flow_config.get('listeners', [])
+            starting_points = flow_config.get("startingPoints", [])
+            listeners = flow_config.get("listeners", [])
 
-            logger.info(f"[_extract_agents_tasks_from_flow_config] Processing {len(starting_points)} starting points and {len(listeners)} listeners")
+            logger.info(
+                f"[_extract_agents_tasks_from_flow_config] Processing {len(starting_points)} starting points and {len(listeners)} listeners"
+            )
 
             # Process starting points
             for sp in starting_points:
-                node_type = sp.get('nodeType', '')
-                node_data = sp.get('nodeData', {})
+                node_type = sp.get("nodeType", "")
+                node_data = sp.get("nodeData", {})
 
-                if node_type == 'crewNode':
+                if node_type == "crewNode":
                     # Extract from crew node
-                    all_agents = node_data.get('allAgents', node_data.get('agents', []))
-                    all_tasks = node_data.get('allTasks', node_data.get('tasks', []))
+                    all_agents = node_data.get("allAgents", node_data.get("agents", []))
+                    all_tasks = node_data.get("allTasks", node_data.get("tasks", []))
 
                     for agent in all_agents:
-                        agent_id = agent.get('id', f"agent_sp_{len(agents_yaml)}")
+                        agent_id = agent.get("id", f"agent_sp_{len(agents_yaml)}")
                         if agent_id not in agents_yaml:
                             agents_yaml[agent_id] = {
-                                'role': agent.get('role', agent.get('name', 'Agent')),
-                                'goal': agent.get('goal', ''),
-                                'backstory': agent.get('backstory', '')
+                                "role": agent.get("role", agent.get("name", "Agent")),
+                                "goal": agent.get("goal", ""),
+                                "backstory": agent.get("backstory", ""),
                             }
 
                     for task in all_tasks:
-                        task_id = task.get('id', f"task_sp_{len(tasks_yaml)}")
+                        task_id = task.get("id", f"task_sp_{len(tasks_yaml)}")
                         if task_id not in tasks_yaml:
                             tasks_yaml[task_id] = {
-                                'name': task.get('name', task.get('description', 'Task')[:50] if task.get('description') else 'Task'),
-                                'description': task.get('description', ''),
-                                'expected_output': task.get('expected_output', task.get('expectedOutput', ''))
+                                "name": task.get(
+                                    "name",
+                                    (
+                                        task.get("description", "Task")[:50]
+                                        if task.get("description")
+                                        else "Task"
+                                    ),
+                                ),
+                                "description": task.get("description", ""),
+                                "expected_output": task.get(
+                                    "expected_output", task.get("expectedOutput", "")
+                                ),
                             }
 
                 # Also extract crew info if present at top level of starting point
-                crew_name = sp.get('crewName', '')
+                crew_name = sp.get("crewName", "")
                 if crew_name and crew_name not in agents_yaml:
                     agents_yaml[f"crew_{crew_name}"] = {
-                        'role': crew_name,
-                        'goal': f"Execute {crew_name} workflow",
-                        'backstory': ''
+                        "role": crew_name,
+                        "goal": f"Execute {crew_name} workflow",
+                        "backstory": "",
                     }
 
             # Process listeners (same structure as starting points)
             for listener in listeners:
-                node_type = listener.get('nodeType', '')
-                node_data = listener.get('nodeData', {})
+                node_type = listener.get("nodeType", "")
+                node_data = listener.get("nodeData", {})
 
-                if node_type == 'crewNode':
-                    all_agents = node_data.get('allAgents', node_data.get('agents', []))
-                    all_tasks = node_data.get('allTasks', node_data.get('tasks', []))
+                if node_type == "crewNode":
+                    all_agents = node_data.get("allAgents", node_data.get("agents", []))
+                    all_tasks = node_data.get("allTasks", node_data.get("tasks", []))
 
                     for agent in all_agents:
-                        agent_id = agent.get('id', f"agent_listener_{len(agents_yaml)}")
+                        agent_id = agent.get("id", f"agent_listener_{len(agents_yaml)}")
                         if agent_id not in agents_yaml:
                             agents_yaml[agent_id] = {
-                                'role': agent.get('role', agent.get('name', 'Agent')),
-                                'goal': agent.get('goal', ''),
-                                'backstory': agent.get('backstory', '')
+                                "role": agent.get("role", agent.get("name", "Agent")),
+                                "goal": agent.get("goal", ""),
+                                "backstory": agent.get("backstory", ""),
                             }
 
                     for task in all_tasks:
-                        task_id = task.get('id', f"task_listener_{len(tasks_yaml)}")
+                        task_id = task.get("id", f"task_listener_{len(tasks_yaml)}")
                         if task_id not in tasks_yaml:
                             tasks_yaml[task_id] = {
-                                'name': task.get('name', task.get('description', 'Task')[:50] if task.get('description') else 'Task'),
-                                'description': task.get('description', ''),
-                                'expected_output': task.get('expected_output', task.get('expectedOutput', ''))
+                                "name": task.get(
+                                    "name",
+                                    (
+                                        task.get("description", "Task")[:50]
+                                        if task.get("description")
+                                        else "Task"
+                                    ),
+                                ),
+                                "description": task.get("description", ""),
+                                "expected_output": task.get(
+                                    "expected_output", task.get("expectedOutput", "")
+                                ),
                             }
 
                 # Also extract crew info if present at top level
-                crew_name = listener.get('crewName', '')
+                crew_name = listener.get("crewName", "")
                 if crew_name and f"crew_{crew_name}" not in agents_yaml:
                     agents_yaml[f"crew_{crew_name}"] = {
-                        'role': crew_name,
-                        'goal': f"Execute {crew_name} workflow",
-                        'backstory': ''
+                        "role": crew_name,
+                        "goal": f"Execute {crew_name} workflow",
+                        "backstory": "",
                     }
 
-            logger.info(f"[_extract_agents_tasks_from_flow_config] Final extraction: {len(agents_yaml)} agents, {len(tasks_yaml)} tasks")
+            logger.info(
+                f"[_extract_agents_tasks_from_flow_config] Final extraction: {len(agents_yaml)} agents, {len(tasks_yaml)} tasks"
+            )
 
         except Exception as e:
-            logger.error(f"[_extract_agents_tasks_from_flow_config] Error extracting agents/tasks from flow config: {str(e)}")
+            logger.error(
+                f"[_extract_agents_tasks_from_flow_config] Error extracting agents/tasks from flow config: {str(e)}"
+            )
             logger.error(traceback.format_exc())
             # Return empty dicts on error - the fallback name generation will handle it
 
@@ -1639,11 +2013,11 @@ class ExecutionService:
         reason: Optional[str] = None,
         requested_by: Optional[str] = None,
         preserve_partial_results: bool = True,
-        db: Optional[Any] = None
+        db: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         Stop a running execution.
-        
+
         Args:
             execution_id: ID of the execution to stop
             stop_type: Type of stop (graceful or force)
@@ -1651,17 +2025,22 @@ class ExecutionService:
             requested_by: User who requested the stop
             preserve_partial_results: Whether to save partial results
             db: Database session
-            
+
         Returns:
             Dict with stop status and partial results if available
         """
-        from src.models.execution_status import ExecutionStatus
-        from src.schemas.execution import StopExecutionResponse
-        from src.repositories.execution_history_repository import ExecutionHistoryRepository
         from datetime import datetime
 
+        from src.models.execution_status import ExecutionStatus
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
+        from src.schemas.execution import StopExecutionResponse
+
         crew_logger.info(f"[STOP] ========== STOP EXECUTION CALLED ==========")
-        crew_logger.info(f"[STOP] execution_id: {execution_id}, stop_type: {stop_type}, reason: {reason}")
+        crew_logger.info(
+            f"[STOP] execution_id: {execution_id}, stop_type: {stop_type}, reason: {reason}"
+        )
 
         try:
             # Update execution status to STOPPING
@@ -1678,127 +2057,190 @@ class ExecutionService:
                 partial_results = None
                 if preserve_partial_results and execution:
                     partial_results = execution.result
-            
+
             # Check if execution is in our active executions dictionary
             if execution_id in self.executions:
                 execution_info = self.executions[execution_id]
-                
+
                 # For force stop, cancel the asyncio task if it exists
                 if stop_type == "force" and "task" in execution_info:
                     task = execution_info["task"]
                     if not task.done():
                         task.cancel()
-                        crew_logger.info(f"Force cancelled task for execution {execution_id}")
-                
+                        crew_logger.info(
+                            f"Force cancelled task for execution {execution_id}"
+                        )
+
                 # For graceful stop, set a flag that the execution should check
                 if stop_type == "graceful":
                     execution_info["stop_requested"] = True
-                    crew_logger.info(f"Graceful stop requested for execution {execution_id}")
-            
+                    crew_logger.info(
+                        f"Graceful stop requested for execution {execution_id}"
+                    )
+
             # Try to stop using ProcessFlowExecutor first (for flow-based executions)
-            crew_logger.info(f"[STOP] Attempting to stop execution {execution_id} via ProcessFlowExecutor")
+            crew_logger.info(
+                f"[STOP] Attempting to stop execution {execution_id} via ProcessFlowExecutor"
+            )
             flow_terminated = False
             try:
-                from src.services.flow_builder.process_executor import process_flow_executor
+                from src.services.flow_builder.process_executor import (
+                    process_flow_executor,
+                )
 
                 # Try to terminate the flow process
-                flow_terminated = await process_flow_executor.terminate_execution(execution_id, graceful=(stop_type == "graceful"))
+                flow_terminated = await process_flow_executor.terminate_execution(
+                    execution_id, graceful=(stop_type == "graceful")
+                )
                 if flow_terminated:
-                    crew_logger.info(f"[STOP] Successfully terminated flow process for execution {execution_id}")
+                    crew_logger.info(
+                        f"[STOP] Successfully terminated flow process for execution {execution_id}"
+                    )
                 else:
-                    crew_logger.info(f"[STOP] Execution {execution_id} not found in ProcessFlowExecutor tracking - trying psutil fallback")
+                    crew_logger.info(
+                        f"[STOP] Execution {execution_id} not found in ProcessFlowExecutor tracking - trying psutil fallback"
+                    )
                     # Fallback: Use psutil to find and kill processes by execution_id
                     try:
                         import psutil
+
                         current_process = psutil.Process()
                         children = current_process.children(recursive=True)
                         killed_count = 0
                         for child in children:
                             try:
                                 # Check if this process is related to our execution
-                                cmdline = ' '.join(child.cmdline())
-                                if execution_id in cmdline or execution_id[:8] in cmdline:
-                                    crew_logger.info(f"[STOP] Found process {child.pid} matching execution {execution_id}, terminating...")
+                                cmdline = " ".join(child.cmdline())
+                                if (
+                                    execution_id in cmdline
+                                    or execution_id[:8] in cmdline
+                                ):
+                                    crew_logger.info(
+                                        f"[STOP] Found process {child.pid} matching execution {execution_id}, terminating..."
+                                    )
                                     child.terminate()
                                     killed_count += 1
                             except (psutil.NoSuchProcess, psutil.AccessDenied):
                                 pass
                         if killed_count > 0:
-                            crew_logger.info(f"[STOP] Terminated {killed_count} processes via psutil fallback")
+                            crew_logger.info(
+                                f"[STOP] Terminated {killed_count} processes via psutil fallback"
+                            )
                             flow_terminated = True
                         else:
-                            crew_logger.info(f"[STOP] No matching processes found via psutil for {execution_id}")
+                            crew_logger.info(
+                                f"[STOP] No matching processes found via psutil for {execution_id}"
+                            )
                     except Exception as psutil_error:
-                        crew_logger.warning(f"[STOP] psutil fallback failed: {psutil_error}")
+                        crew_logger.warning(
+                            f"[STOP] psutil fallback failed: {psutil_error}"
+                        )
 
             except Exception as flow_error:
-                crew_logger.info(f"[STOP] Could not stop via ProcessFlowExecutor: {flow_error}")
+                crew_logger.info(
+                    f"[STOP] Could not stop via ProcessFlowExecutor: {flow_error}"
+                )
 
             # Try to stop using ProcessCrewExecutor (for crew-based executions)
-            crew_logger.info(f"[STOP] Attempting to stop execution {execution_id} via ProcessCrewExecutor")
+            crew_logger.info(
+                f"[STOP] Attempting to stop execution {execution_id} via ProcessCrewExecutor"
+            )
             process_terminated = False
             try:
-                from src.services.agent_builder.process_executor import process_crew_executor
+                from src.services.agent_builder.process_executor import (
+                    process_crew_executor,
+                )
 
                 # Try to terminate the process
-                process_terminated = await process_crew_executor.terminate_execution(execution_id)
+                process_terminated = await process_crew_executor.terminate_execution(
+                    execution_id
+                )
                 if process_terminated:
-                    crew_logger.info(f"[STOP] Successfully terminated crew process for execution {execution_id}")
+                    crew_logger.info(
+                        f"[STOP] Successfully terminated crew process for execution {execution_id}"
+                    )
                 else:
-                    crew_logger.info(f"[STOP] Execution {execution_id} not found in ProcessCrewExecutor (may be thread-based)")
+                    crew_logger.info(
+                        f"[STOP] Execution {execution_id} not found in ProcessCrewExecutor (may be thread-based)"
+                    )
 
             except Exception as process_error:
-                crew_logger.info(f"[STOP] Could not stop via ProcessCrewExecutor: {process_error}")
-            
+                crew_logger.info(
+                    f"[STOP] Could not stop via ProcessCrewExecutor: {process_error}"
+                )
+
             # If not process-based (neither flow nor crew), try the thread-based crew_executor
             if not flow_terminated and not process_terminated:
                 try:
                     from src.services.execution.thread_executor import crew_executor
-                    
+
                     # Request cooperative stop through the executor
                     stop_requested = crew_executor.request_stop(execution_id)
                     if stop_requested:
-                        crew_logger.info(f"Stop requested for execution {execution_id} via CrewExecutor")
-                        
+                        crew_logger.info(
+                            f"Stop requested for execution {execution_id} via CrewExecutor"
+                        )
+
                         # For force stop, also cancel the asyncio task if it exists
-                        if stop_type == "force" and execution_id in self.executions and "task" in self.executions[execution_id]:
+                        if (
+                            stop_type == "force"
+                            and execution_id in self.executions
+                            and "task" in self.executions[execution_id]
+                        ):
                             task = self.executions[execution_id]["task"]
                             if not task.done():
                                 task.cancel()
-                                crew_logger.info(f"Force cancelled asyncio task for execution {execution_id}")
-                                
+                                crew_logger.info(
+                                    f"Force cancelled asyncio task for execution {execution_id}"
+                                )
+
                                 # Wait briefly for cancellation
                                 try:
-                                    await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+                                    await asyncio.wait_for(
+                                        asyncio.shield(task), timeout=2.0
+                                    )
                                 except (asyncio.CancelledError, asyncio.TimeoutError):
-                                    crew_logger.info(f"Task cancellation completed for {execution_id}")
+                                    crew_logger.info(
+                                        f"Task cancellation completed for {execution_id}"
+                                    )
                     else:
-                        crew_logger.warning(f"Execution {execution_id} not found in CrewExecutor")
-                        
+                        crew_logger.warning(
+                            f"Execution {execution_id} not found in CrewExecutor"
+                        )
+
                 except Exception as executor_error:
-                    crew_logger.warning(f"Could not stop via CrewExecutor: {executor_error}")
-            
+                    crew_logger.warning(
+                        f"Could not stop via CrewExecutor: {executor_error}"
+                    )
+
             # Also try to cancel via KasalEngineService
             try:
                 from src.services.execution.engine_service import KasalEngineService
+
                 crew_service = KasalEngineService()
                 cancelled = await crew_service.cancel_execution(execution_id)
                 if cancelled:
-                    crew_logger.info(f"Successfully cancelled execution {execution_id} via KasalEngineService")
+                    crew_logger.info(
+                        f"Successfully cancelled execution {execution_id} via KasalEngineService"
+                    )
             except Exception as cancel_error:
-                crew_logger.warning(f"Could not cancel via KasalEngineService: {cancel_error}")
-            
+                crew_logger.warning(
+                    f"Could not cancel via KasalEngineService: {cancel_error}"
+                )
+
             # Remove from active executions to stop tracking it
             if execution_id in self.executions:
                 del self.executions[execution_id]
-                crew_logger.info(f"Removed {execution_id} from active executions tracking")
-            
+                crew_logger.info(
+                    f"Removed {execution_id} from active executions tracking"
+                )
+
             # Log that we've attempted to stop the execution threads
             crew_logger.info(
                 f"Execution {execution_id} stop initiated. ThreadManager attempted to stop related threads. "
                 "Note: CrewAI does not natively support cancellation, but threads have been targeted for termination."
             )
-            
+
             # Final update to mark as STOPPED
             if db:
                 await ExecutionHistoryRepository(db).mark_stopped(
@@ -1806,17 +2248,17 @@ class ExecutionService:
                     partial_results if preserve_partial_results else None,
                 )
                 await db.commit()
-            
+
             return {
                 "execution_id": execution_id,
                 "status": ExecutionStatus.STOPPED.value,
                 "message": f"Execution {stop_type} stopped successfully",
-                "partial_results": partial_results
+                "partial_results": partial_results,
             }
-            
+
         except Exception as e:
             crew_logger.error(f"Error stopping execution {execution_id}: {str(e)}")
-            
+
             # Try to update status to indicate stop failed
             if db:
                 try:
@@ -1826,8 +2268,9 @@ class ExecutionService:
                     await db.commit()
                 except:
                     pass
-            
+
             raise Exception(f"Failed to stop execution: {str(e)}")
+
 
 # Flush the in-memory execution registry whenever the active database is swapped
 # (Lakebase activate/deactivate). Entries are keyed to the previous DB, so a
@@ -1836,6 +2279,9 @@ class ExecutionService:
 # imports ExecutionService before any runtime swap, so the hook is in place.
 try:  # pragma: no cover - import-time wiring
     from src.db.session import async_session_factory as _async_session_factory
+
     _async_session_factory.register_on_swap(ExecutionService.clear_in_memory_cache)
 except Exception as _reg_err:  # noqa: BLE001
-    logger.warning(f"[ExecutionService] Could not register DB-swap cache hook: {_reg_err}")
+    logger.warning(
+        f"[ExecutionService] Could not register DB-swap cache hook: {_reg_err}"
+    )

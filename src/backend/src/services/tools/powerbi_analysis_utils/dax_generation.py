@@ -9,29 +9,25 @@ movement: every method still reads ``self`` exactly as it did in the single
 import asyncio
 import base64
 import contextvars
-import logging
 import json
+import logging
 import re
-from typing import Any, Optional, Type, Dict, List
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from typing import Any, Dict, List, Optional, Type
+
+import httpx
+from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
-from pydantic import BaseModel, Field, PrivateAttr
-import httpx
-
 from src.services.tools.tool_session_provider import ToolSessionProvider
-
 
 logger = logging.getLogger(__name__)
 
 
 class PowerBIDaxGenerationMixin:
     async def _generate_dax_with_llm(
-        self,
-        user_question: str,
-        model_context: Dict[str, Any],
-        config: Dict[str, Any]
+        self, user_question: str, model_context: Dict[str, Any], config: Dict[str, Any]
     ) -> Optional[str]:
         """
         Generate DAX query using LLM with enriched context (Microsoft Copilot-style).
@@ -47,10 +43,18 @@ class PowerBIDaxGenerationMixin:
         # DEBUG: Log config values at the start of DAX generation
         logger.info("=" * 80)
         logger.info("[DAX GENERATION CONFIG DEBUG] Config values received:")
-        logger.info(f"[DAX GENERATION CONFIG DEBUG]   business_mappings: {type(config.get('business_mappings')).__name__} = {str(config.get('business_mappings', {}))[:200]}")
-        logger.info(f"[DAX GENERATION CONFIG DEBUG]   field_synonyms: {type(config.get('field_synonyms')).__name__} = {str(config.get('field_synonyms', {}))[:200]}")
-        logger.info(f"[DAX GENERATION CONFIG DEBUG]   active_filters: {type(config.get('active_filters')).__name__} = {str(config.get('active_filters', {}))[:200]}")
-        logger.info(f"[DAX GENERATION CONFIG DEBUG]   conversation_history: {type(config.get('conversation_history')).__name__} = {str(config.get('conversation_history', []))[:200]}")
+        logger.info(
+            f"[DAX GENERATION CONFIG DEBUG]   business_mappings: {type(config.get('business_mappings')).__name__} = {str(config.get('business_mappings', {}))[:200]}"
+        )
+        logger.info(
+            f"[DAX GENERATION CONFIG DEBUG]   field_synonyms: {type(config.get('field_synonyms')).__name__} = {str(config.get('field_synonyms', {}))[:200]}"
+        )
+        logger.info(
+            f"[DAX GENERATION CONFIG DEBUG]   active_filters: {type(config.get('active_filters')).__name__} = {str(config.get('active_filters', {}))[:200]}"
+        )
+        logger.info(
+            f"[DAX GENERATION CONFIG DEBUG]   conversation_history: {type(config.get('conversation_history')).__name__} = {str(config.get('conversation_history', []))[:200]}"
+        )
         logger.info("=" * 80)
 
         llm_workspace_url = config.get("llm_workspace_url")
@@ -64,17 +68,27 @@ class PowerBIDaxGenerationMixin:
         # Check if we have measures to work with
         measures = model_context.get("measures", [])
         if not measures:
-            logger.warning("[DAX Generation] No measures available - cannot generate meaningful query")
+            logger.warning(
+                "[DAX Generation] No measures available - cannot generate meaningful query"
+            )
             return None
 
         # Build ENRICHED context (Microsoft Copilot-style)
         enriched_context = self._build_enriched_semantic_context(model_context, config)
 
         # Log context size for debugging
-        logger.info(f"[DAX Generation] Enriched context size: {len(enriched_context)} characters")
-        logger.info(f"[DAX Generation] Active filters: {config.get('active_filters', {})}")
-        logger.info(f"[DAX Generation] Business mappings: {len(config.get('business_mappings', {}))} terms")
-        logger.info(f"[DAX Generation] Field synonyms: {len(config.get('field_synonyms', {}))} fields")
+        logger.info(
+            f"[DAX Generation] Enriched context size: {len(enriched_context)} characters"
+        )
+        logger.info(
+            f"[DAX Generation] Active filters: {config.get('active_filters', {})}"
+        )
+        logger.info(
+            f"[DAX Generation] Business mappings: {len(config.get('business_mappings', {}))} terms"
+        )
+        logger.info(
+            f"[DAX Generation] Field synonyms: {len(config.get('field_synonyms', {}))} fields"
+        )
 
         # Build the enhanced prompt
         prompt = f"""{enriched_context}
@@ -274,12 +288,12 @@ CALCULATETABLE(...)
             event_context="DAX Generation - Prompt",
             prompt=prompt,
             model=llm_model,
-            operation="generate_dax"
+            operation="generate_dax",
         )
 
         # Call LLM via LLMManager
         from src.services.llm.manager import LLMManager
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
 
         try:
             content = await LLMManager.completion(
@@ -302,7 +316,7 @@ CALCULATETABLE(...)
                 prompt=prompt,
                 response=content,
                 model=llm_model,
-                operation="generate_dax"
+                operation="generate_dax",
             )
 
             # Clean up: extract just the DAX query
@@ -314,10 +328,12 @@ CALCULATETABLE(...)
             logger.info("=" * 80)
 
             # Validate that generated DAX uses only available measures
-            available_measure_names = [m["name"] for m in model_context.get("measures", [])]
+            available_measure_names = [
+                m["name"] for m in model_context.get("measures", [])
+            ]
 
             # Check for hallucinated measures - extract all [measure] references
-            dax_pattern = r'\[([^\]]+)\]'
+            dax_pattern = r"\[([^\]]+)\]"
             all_references = re.findall(dax_pattern, dax)
 
             # Filter to get only measure references (not table[column] references)
@@ -331,15 +347,24 @@ CALCULATETABLE(...)
             potential_measures = []
             for ref in all_references:
                 # Check if this is part of a table[column] pattern
-                is_table_column = any(f"{table['name']}[{ref}]" in dax for table in model_context.get("tables", []))
+                is_table_column = any(
+                    f"{table['name']}[{ref}]" in dax
+                    for table in model_context.get("tables", [])
+                )
                 if not is_table_column:
                     potential_measures.append(ref)
 
             # Check for measures not in available list
-            hallucinated = [m for m in potential_measures if m not in available_measure_names]
+            hallucinated = [
+                m for m in potential_measures if m not in available_measure_names
+            ]
             if hallucinated:
-                logger.warning(f"[DAX Generation] LLM may have used non-existent measures: {hallucinated}")
-                logger.warning(f"[DAX Generation] Available measures are: {available_measure_names[:10]}")
+                logger.warning(
+                    f"[DAX Generation] LLM may have used non-existent measures: {hallucinated}"
+                )
+                logger.warning(
+                    f"[DAX Generation] Available measures are: {available_measure_names[:10]}"
+                )
 
             # Auto-wrap with report-level filters if present
             dax = self._auto_wrap_with_report_filters(dax, config)
@@ -357,7 +382,7 @@ CALCULATETABLE(...)
         prompt: str,
         model: str,
         operation: str,
-        response: Optional[str] = None
+        response: Optional[str] = None,
     ) -> None:
         """
         Emit a trace event for LLM operations that appears in the UI technical trace.
@@ -374,23 +399,32 @@ CALCULATETABLE(...)
         """
         try:
             # Check if trace_context was injected (happens during crew preparation)
-            trace_ctx = getattr(self, 'trace_context', None)
+            trace_ctx = getattr(self, "trace_context", None)
 
             # Use logger.info instead of debug to ensure visibility
-            logger.info(f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - trace_context present: {trace_ctx is not None}")
+            logger.info(
+                f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - trace_context present: {trace_ctx is not None}"
+            )
 
             if not trace_ctx:
-                logger.info("[PowerBIAnalysisTool] No trace_context available, skipping llm_call trace emission")
+                logger.info(
+                    "[PowerBIAnalysisTool] No trace_context available, skipping llm_call trace emission"
+                )
                 return
 
-            logger.info(f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - job_id: {trace_ctx.get('job_id')}")
+            logger.info(
+                f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - job_id: {trace_ctx.get('job_id')}"
+            )
 
-            if not trace_ctx.get('job_id'):
-                logger.info("[PowerBIAnalysisTool] trace_context missing job_id, skipping llm_call trace emission")
+            if not trace_ctx.get("job_id"):
+                logger.info(
+                    "[PowerBIAnalysisTool] trace_context missing job_id, skipping llm_call trace emission"
+                )
                 return
 
             # Get the trace queue
             from src.services.trace.queue import get_trace_queue
+
             queue = get_trace_queue()
 
             # Build trace data with prompt and response (limit size to avoid issues)
@@ -398,45 +432,57 @@ CALCULATETABLE(...)
             max_display_length = 3000
 
             trace_output = {
-                'operation': operation,
-                'model': model,
-                'prompt_length': len(prompt),
-                'prompt': prompt[:max_display_length] + ('...[truncated]' if len(prompt) > max_display_length else ''),
-                'prompt_preview': prompt[:200] if len(prompt) > 200 else prompt
+                "operation": operation,
+                "model": model,
+                "prompt_length": len(prompt),
+                "prompt": prompt[:max_display_length]
+                + ("...[truncated]" if len(prompt) > max_display_length else ""),
+                "prompt_preview": prompt[:200] if len(prompt) > 200 else prompt,
             }
 
             if response:
-                trace_output['response_length'] = len(response)
-                trace_output['response'] = response[:max_display_length] + ('...[truncated]' if len(response) > max_display_length else '')
-                trace_output['response_preview'] = response[:200] if len(response) > 200 else response
+                trace_output["response_length"] = len(response)
+                trace_output["response"] = response[:max_display_length] + (
+                    "...[truncated]" if len(response) > max_display_length else ""
+                )
+                trace_output["response_preview"] = (
+                    response[:200] if len(response) > 200 else response
+                )
 
             # Emit the trace event
             # Note: Frontend expects agent_role and model in extra_data for llm_call events
             trace_event = {
-                'job_id': trace_ctx.get('job_id'),
-                'event_type': 'llm_call',
-                'event_source': 'PowerBI Analysis Tool',
-                'event_context': event_context,
-                'output': trace_output,
-                'extra_data': {
-                    'agent_role': 'PowerBI Analysis Tool',  # Frontend uses this for display
-                    'model': model  # Frontend uses this for display
+                "job_id": trace_ctx.get("job_id"),
+                "event_type": "llm_call",
+                "event_source": "PowerBI Analysis Tool",
+                "event_context": event_context,
+                "output": trace_output,
+                "extra_data": {
+                    "agent_role": "PowerBI Analysis Tool",  # Frontend uses this for display
+                    "model": model,  # Frontend uses this for display
                 },
-                'trace_metadata': {
-                    'tool_name': 'PowerBIAnalysisTool',
-                    'operation': operation,
-                    'model': model
+                "trace_metadata": {
+                    "tool_name": "PowerBIAnalysisTool",
+                    "operation": operation,
+                    "model": model,
                 },
-                'group_context': trace_ctx.get('group_context')
+                "group_context": trace_ctx.get("group_context"),
             }
 
-            logger.info(f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - About to emit trace event: {event_context}")
+            logger.info(
+                f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - About to emit trace event: {event_context}"
+            )
             queue.put_nowait(trace_event)
-            logger.info(f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - Successfully emitted llm_call trace event: {event_context}")
+            logger.info(
+                f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - Successfully emitted llm_call trace event: {event_context}"
+            )
 
         except Exception as e:
             # Don't fail the tool execution if trace emission fails
-            logger.error(f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - Failed to emit llm_call trace: {e}", exc_info=True)
+            logger.error(
+                f"[PowerBIAnalysisTool] TRACE EMISSION DEBUG - Failed to emit llm_call trace: {e}",
+                exc_info=True,
+            )
 
     def _extract_dax_from_llm_response(self, content: str) -> str:
         """
@@ -448,11 +494,13 @@ CALCULATETABLE(...)
         - Markdown formatting in the response
         """
         # Remove markdown code blocks
-        content = re.sub(r'```dax\s*', '', content)
-        content = re.sub(r'```\s*', '', content)
+        content = re.sub(r"```dax\s*", "", content)
+        content = re.sub(r"```\s*", "", content)
 
         # Find EVALUATE statement
-        evaluate_match = re.search(r'(EVALUATE[\s\S]+?)(?:\n\n|$)', content, re.IGNORECASE)
+        evaluate_match = re.search(
+            r"(EVALUATE[\s\S]+?)(?:\n\n|$)", content, re.IGNORECASE
+        )
         if evaluate_match:
             dax_query = evaluate_match.group(1).strip()
         else:
@@ -466,17 +514,17 @@ CALCULATETABLE(...)
         # Everything after the last ) that closes a CALCULATETABLE/SUMMARIZECOLUMNS is extra text
 
         # Remove lines starting with markdown formatting (**, ##, -, etc.) after the query
-        lines = dax_query.split('\n')
+        lines = dax_query.split("\n")
         clean_lines = []
         found_closing = False
         paren_depth = 0
 
         for line in lines:
             # Track parenthesis depth
-            paren_depth += line.count('(') - line.count(')')
+            paren_depth += line.count("(") - line.count(")")
 
             # If we're at depth 0 after this line, we've closed all parens
-            if paren_depth == 0 and ('EVALUATE' in clean_lines or clean_lines):
+            if paren_depth == 0 and ("EVALUATE" in clean_lines or clean_lines):
                 clean_lines.append(line)
                 found_closing = True
                 # Stop after the first complete query (depth returns to 0)
@@ -485,17 +533,21 @@ CALCULATETABLE(...)
             # Keep building the query
             clean_lines.append(line)
 
-        dax_query = '\n'.join(clean_lines).strip()
+        dax_query = "\n".join(clean_lines).strip()
 
         # Final cleanup: Remove any trailing markdown or text after the last )
         # Find the last ) and cut everything after it
-        last_paren = dax_query.rfind(')')
+        last_paren = dax_query.rfind(")")
         if last_paren != -1:
             # Check if there's any non-whitespace after the last )
-            after_paren = dax_query[last_paren + 1:].strip()
-            if after_paren and (after_paren.startswith('**') or after_paren.startswith('#') or after_paren.startswith('-')):
+            after_paren = dax_query[last_paren + 1 :].strip()
+            if after_paren and (
+                after_paren.startswith("**")
+                or after_paren.startswith("#")
+                or after_paren.startswith("-")
+            ):
                 # There's markdown text after the query - remove it
-                dax_query = dax_query[:last_paren + 1]
+                dax_query = dax_query[: last_paren + 1]
 
         return dax_query.strip()
 
@@ -504,7 +556,7 @@ CALCULATETABLE(...)
         user_question: str,
         model_context: Dict[str, Any],
         config: Dict[str, Any],
-        previous_attempts: List[Dict[str, Any]]
+        previous_attempts: List[Dict[str, Any]],
     ) -> Optional[str]:
         """
         Generate DAX with self-correction based on previous failed attempts.
@@ -518,13 +570,19 @@ CALCULATETABLE(...)
             return None
 
         # Build context about previous attempts
-        attempts_text = "\n\n".join([
-            f"### Attempt {att['attempt']}\n"
-            f"**DAX Query:**\n```dax\n{att['dax']}\n```\n"
-            f"**Result:** {'✅ SUCCESS' if att['success'] else '❌ FAILED'}\n"
-            f"**Error:** {att['error']}" if not att['success'] else ""
-            for att in previous_attempts
-        ])
+        attempts_text = "\n\n".join(
+            [
+                (
+                    f"### Attempt {att['attempt']}\n"
+                    f"**DAX Query:**\n```dax\n{att['dax']}\n```\n"
+                    f"**Result:** {'✅ SUCCESS' if att['success'] else '❌ FAILED'}\n"
+                    f"**Error:** {att['error']}"
+                    if not att["success"]
+                    else ""
+                )
+                for att in previous_attempts
+            ]
+        )
 
         # Build enriched context (same as initial generation)
         enriched_context = self._build_enriched_semantic_context(model_context, config)
@@ -608,13 +666,15 @@ Your previous attempt(s) to generate a DAX query failed. Analyze the errors and 
 
         # Log the self-correction prompt
         logger.info("=" * 80)
-        logger.info(f"[DAX Self-Correction] Attempt {len(previous_attempts) + 1} Prompt:")
+        logger.info(
+            f"[DAX Self-Correction] Attempt {len(previous_attempts) + 1} Prompt:"
+        )
         logger.info(prompt)
         logger.info("=" * 80)
 
         # Call LLM via LLMManager
         from src.services.llm.manager import LLMManager
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
 
         try:
             content = await LLMManager.completion(
@@ -635,22 +695,31 @@ Your previous attempt(s) to generate a DAX query failed. Analyze the errors and 
             dax = self._extract_dax_from_llm_response(content)
 
             # Validate against available measures
-            available_measure_names = [m["name"] for m in model_context.get("measures", [])]
+            available_measure_names = [
+                m["name"] for m in model_context.get("measures", [])
+            ]
 
             # Check for hallucinated measures - extract all [measure] references
-            dax_pattern = r'\[([^\]]+)\]'
+            dax_pattern = r"\[([^\]]+)\]"
             all_references = re.findall(dax_pattern, dax)
 
             # Find references that look like measures (not part of table[column])
             potential_measures = []
             for ref in all_references:
-                is_table_column = any(f"{table['name']}[{ref}]" in dax for table in model_context.get("tables", []))
+                is_table_column = any(
+                    f"{table['name']}[{ref}]" in dax
+                    for table in model_context.get("tables", [])
+                )
                 if not is_table_column:
                     potential_measures.append(ref)
 
-            hallucinated = [m for m in potential_measures if m not in available_measure_names]
+            hallucinated = [
+                m for m in potential_measures if m not in available_measure_names
+            ]
             if hallucinated:
-                logger.warning(f"[DAX Self-Correction] LLM may have used non-existent measures: {hallucinated}")
+                logger.warning(
+                    f"[DAX Self-Correction] LLM may have used non-existent measures: {hallucinated}"
+                )
 
             logger.info(f"[DAX Self-Correction] Extracted DAX: {dax[:100]}...")
             return dax
@@ -659,7 +728,9 @@ Your previous attempt(s) to generate a DAX query failed. Analyze the errors and 
             logger.error(f"LLM self-correction error: {e}")
             return None
 
-    def _generate_simple_dax(self, user_question: str, model_context: Dict[str, Any]) -> Optional[str]:
+    def _generate_simple_dax(
+        self, user_question: str, model_context: Dict[str, Any]
+    ) -> Optional[str]:
         """Generate a simple DAX query without LLM."""
         measures = model_context.get("measures", [])
         if not measures:
@@ -685,21 +756,17 @@ SUMMARIZECOLUMNS(
 )"""
 
     async def _execute_dax_query(
-        self,
-        workspace_id: str,
-        dataset_id: str,
-        access_token: str,
-        dax_query: str
+        self, workspace_id: str, dataset_id: str, access_token: str, dax_query: str
     ) -> Dict[str, Any]:
         """Execute DAX query via Power BI Execute Queries API."""
         url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
         payload = {
             "queries": [{"query": dax_query}],
-            "serializerSettings": {"includeNulls": True}
+            "serializerSettings": {"includeNulls": True},
         }
 
         result = {
@@ -707,7 +774,7 @@ SUMMARIZECOLUMNS(
             "data": [],
             "row_count": 0,
             "columns": [],
-            "error": None
+            "error": None,
         }
 
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -736,14 +803,16 @@ SUMMARIZECOLUMNS(
                 return result
 
             except httpx.HTTPStatusError as e:
-                error_text = e.response.text if hasattr(e.response, 'text') else str(e)
+                error_text = e.response.text if hasattr(e.response, "text") else str(e)
                 result["error"] = f"HTTP {e.response.status_code}: {error_text}"
                 return result
             except Exception as e:
                 result["error"] = str(e)
                 return result
 
-    def _extract_measures_from_dax(self, dax_query: str, available_measures: List[str]) -> List[str]:
+    def _extract_measures_from_dax(
+        self, dax_query: str, available_measures: List[str]
+    ) -> List[str]:
         """Extract measure names used in a DAX query."""
         used_measures = []
         for measure in available_measures:

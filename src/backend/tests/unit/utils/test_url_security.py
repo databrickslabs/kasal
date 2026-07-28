@@ -1,13 +1,14 @@
 """
 Unit tests for src.utils.url_security (P1 SSRF / token-exfiltration fixes).
 """
+
 import pytest
 
 from src.utils.url_security import (
-    is_trusted_databricks_host,
-    check_url_structure,
-    assert_safe_outbound_url,
     UnsafeUrlError,
+    assert_safe_outbound_url,
+    check_url_structure,
+    is_trusted_databricks_host,
 )
 
 
@@ -54,15 +55,15 @@ class TestCheckUrlStructure:
     @pytest.mark.parametrize(
         "url",
         [
-            "http://hooks.example.com/x",          # not https
-            "ftp://example.com",                    # bad scheme
-            "https://169.254.169.254/",             # metadata
-            "https://localhost/x",                  # loopback name
-            "https://10.0.0.5/x",                   # RFC1918
-            "https://127.0.0.1/x",                  # loopback
-            "https://[::1]/x",                      # ipv6 loopback
-            "https://foo.internal/x",               # internal tld
-            "https:///nohost",                      # no host
+            "http://hooks.example.com/x",  # not https
+            "ftp://example.com",  # bad scheme
+            "https://169.254.169.254/",  # metadata
+            "https://localhost/x",  # loopback name
+            "https://10.0.0.5/x",  # RFC1918
+            "https://127.0.0.1/x",  # loopback
+            "https://[::1]/x",  # ipv6 loopback
+            "https://foo.internal/x",  # internal tld
+            "https:///nohost",  # no host
         ],
     )
     def test_rejects(self, url):
@@ -74,7 +75,10 @@ class TestAssertSafeOutboundUrl:
     @pytest.mark.asyncio
     async def test_public_https_ok(self):
         # example.com resolves to public addresses
-        assert await assert_safe_outbound_url("https://example.com") == "https://example.com"
+        assert (
+            await assert_safe_outbound_url("https://example.com")
+            == "https://example.com"
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

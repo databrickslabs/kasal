@@ -615,7 +615,9 @@ class TestDeletion:
 
         async with factory() as session:
             service = WorkflowRecipeService(session)
-            recipe_id = (await WorkflowRecipeRepository(session).list_by_group(["g1"]))[0].id
+            recipe_id = (await WorkflowRecipeRepository(session).list_by_group(["g1"]))[
+                0
+            ].id
             assert await service.delete(recipe_id, ["g1"]) is True
 
         async with factory() as session:
@@ -629,12 +631,18 @@ class TestDeletion:
             await session.commit()
 
         async with factory() as session:
-            recipe_id = (await WorkflowRecipeRepository(session).list_by_group(["g1"]))[0].id
+            recipe_id = (await WorkflowRecipeRepository(session).list_by_group(["g1"]))[
+                0
+            ].id
             # Reported as "not found" rather than deleted — the caller 404s.
-            assert await WorkflowRecipeService(session).delete(recipe_id, ["g2"]) is False
+            assert (
+                await WorkflowRecipeService(session).delete(recipe_id, ["g2"]) is False
+            )
 
         async with factory() as session:
-            assert len(await WorkflowRecipeRepository(session).list_by_group(["g1"])) == 1
+            assert (
+                len(await WorkflowRecipeRepository(session).list_by_group(["g1"])) == 1
+            )
 
     @pytest.mark.asyncio
     async def test_delete_for_groups_clears_only_those_workspaces(self):
@@ -671,7 +679,9 @@ class TestDeletion:
         assert counts == {"recipe_count": 0, "trial_count": 0}
 
         async with factory() as session:
-            assert len(await WorkflowRecipeRepository(session).list_by_group(["g1"])) == 1
+            assert (
+                len(await WorkflowRecipeRepository(session).list_by_group(["g1"])) == 1
+            )
 
     @pytest.mark.asyncio
     async def test_omitting_groups_clears_every_workspace(self):

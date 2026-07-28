@@ -9,17 +9,18 @@ All database and service dependencies are mocked at their import location
 inside src.services.execution.cleanup.
 """
 
-import pytest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
-from src.services.execution.cleanup import ExecutionCleanupService
+import pytest
+
 from src.models.execution_status import ExecutionStatus
-
+from src.services.execution.cleanup import ExecutionCleanupService
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_job(job_id: str, status: str) -> SimpleNamespace:
     """Create a lightweight mock execution record."""
@@ -360,9 +361,7 @@ class TestCleanupStaleJobsOnStartup:
                 "src.services.execution.cleanup.ExecutionStatusService.update_status",
                 update_status_mock,
             ),
-            patch(
-                "src.services.execution.cleanup.logger"
-            ) as mock_logger,
+            patch("src.services.execution.cleanup.logger") as mock_logger,
         ):
             result = await ExecutionCleanupService.cleanup_stale_jobs_on_startup()
 
@@ -388,9 +387,7 @@ class TestCleanupStaleJobsOnStartup:
                 "src.services.execution.cleanup.ExecutionRepository",
                 return_value=repo_instance,
             ),
-            patch(
-                "src.services.execution.cleanup.logger"
-            ) as mock_logger,
+            patch("src.services.execution.cleanup.logger") as mock_logger,
         ):
             result = await ExecutionCleanupService.cleanup_stale_jobs_on_startup()
 
@@ -421,15 +418,15 @@ class TestCleanupStaleJobsOnStartup:
                 "src.services.execution.cleanup.ExecutionStatusService.update_status",
                 update_status_mock,
             ),
-            patch(
-                "src.services.execution.cleanup.logger"
-            ) as mock_logger,
+            patch("src.services.execution.cleanup.logger") as mock_logger,
         ):
             result = await ExecutionCleanupService.cleanup_stale_jobs_on_startup()
 
         assert result == 0
         error_messages = [str(c) for c in mock_logger.error.call_args_list]
-        assert any("Failed to clean up stale job: fail-job" in msg for msg in error_messages)
+        assert any(
+            "Failed to clean up stale job: fail-job" in msg for msg in error_messages
+        )
 
     @pytest.mark.asyncio
     async def test_logging_on_exception(self):
@@ -450,9 +447,7 @@ class TestCleanupStaleJobsOnStartup:
                 "src.services.execution.cleanup.ExecutionRepository",
                 return_value=repo_instance,
             ),
-            patch(
-                "src.services.execution.cleanup.logger"
-            ) as mock_logger,
+            patch("src.services.execution.cleanup.logger") as mock_logger,
         ):
             result = await ExecutionCleanupService.cleanup_stale_jobs_on_startup()
 
@@ -671,9 +666,7 @@ class TestGetStaleJobs:
                 "src.services.execution.cleanup.ExecutionRepository",
                 return_value=repo_instance,
             ),
-            patch(
-                "src.services.execution.cleanup.logger"
-            ) as mock_logger,
+            patch("src.services.execution.cleanup.logger") as mock_logger,
         ):
             result = await ExecutionCleanupService.get_stale_jobs()
 

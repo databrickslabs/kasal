@@ -8,9 +8,10 @@ query-embedding step, the scoping forwarded to the embedding service, the
 result mapping, and graceful failure handling.
 """
 
-import pytest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.knowledge.search_service import KnowledgeSearchService
 
@@ -19,21 +20,33 @@ def _make_service(group_id="grp-1"):
     return KnowledgeSearchService(session=MagicMock(), group_id=group_id)
 
 
-def _row(content="chunk text", title="Doc", source="orig.md",
-         file_path="/Volumes/c/s/v/grp-1/exec/file.txt", group_id="grp-1",
-         doc_metadata=None):
+def _row(
+    content="chunk text",
+    title="Doc",
+    source="orig.md",
+    file_path="/Volumes/c/s/v/grp-1/exec/file.txt",
+    group_id="grp-1",
+    doc_metadata=None,
+):
     return SimpleNamespace(
         content=content,
         title=title,
         source=source,
         file_path=file_path,
         group_id=group_id,
-        doc_metadata=doc_metadata if doc_metadata is not None else {"chunk_index": 2, "score": 0.87},
+        doc_metadata=(
+            doc_metadata
+            if doc_metadata is not None
+            else {"chunk_index": 2, "score": 0.87}
+        ),
     )
 
 
 def _patch_embedding(value):
-    return patch("src.services.llm.manager.LLMManager.get_embedding", AsyncMock(return_value=value))
+    return patch(
+        "src.services.llm.manager.LLMManager.get_embedding",
+        AsyncMock(return_value=value),
+    )
 
 
 def _patch_doc_service(search_mock, group_paths=None):
@@ -97,7 +110,12 @@ class TestKnowledgeSearchService:
         # the DB ranks only within that file's chunks (see the scoping comment
         # in knowledge_search_service.search).
         stored = "/Volumes/c/s/v/grp-7/exec/b.txt"
-        with _patch_embedding([0.2] * 1024), _patch_doc_service(search_mock, group_paths=[stored, "/Volumes/x/other.pdf"]):
+        with (
+            _patch_embedding([0.2] * 1024),
+            _patch_doc_service(
+                search_mock, group_paths=[stored, "/Volumes/x/other.pdf"]
+            ),
+        ):
             await svc.search("q", file_paths=["/Volumes/a/b.txt"], limit=8)
 
         search_mock.assert_awaited_once()
@@ -113,7 +131,10 @@ class TestKnowledgeSearchService:
         svc = _make_service(group_id="grp-7")
         search_mock = AsyncMock(return_value=[])
 
-        with _patch_embedding([0.2] * 1024), _patch_doc_service(search_mock, group_paths=["/Volumes/x/other.pdf"]):
+        with (
+            _patch_embedding([0.2] * 1024),
+            _patch_doc_service(search_mock, group_paths=["/Volumes/x/other.pdf"]),
+        ):
             results = await svc.search("q", file_paths=["/Volumes/a/missing.txt"])
 
         assert results == []
@@ -147,8 +168,10 @@ class TestKnowledgeSearchService:
     async def test_search_returns_empty_on_embedding_exception(self):
         """Embedding generation raising is swallowed -> empty results."""
         svc = _make_service()
-        with patch("src.services.llm.manager.LLMManager.get_embedding",
-                   AsyncMock(side_effect=RuntimeError("boom"))):
+        with patch(
+            "src.services.llm.manager.LLMManager.get_embedding",
+            AsyncMock(side_effect=RuntimeError("boom")),
+        ):
             results = await svc.search("q")
         assert results == []
 

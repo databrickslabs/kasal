@@ -7,10 +7,10 @@ using fuzzy string matching. Borrows patterns from the IDOR_2.0 reference implem
 Dependencies: rapidfuzz (optional, falls back to difflib)
 """
 
+import logging
 import re
 import unicodedata
-import logging
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from .question_preprocessor import QuestionIntent
@@ -30,20 +30,82 @@ except ImportError:
     logger.warning("rapidfuzz not installed — falling back to difflib (slower)")
 
     def _fuzzy_score(query: str, candidate: str, threshold: int = 70) -> float:  # type: ignore[misc]
-        ratio = difflib.SequenceMatcher(None, query.lower(), candidate.lower()).ratio() * 100
+        ratio = (
+            difflib.SequenceMatcher(None, query.lower(), candidate.lower()).ratio()
+            * 100
+        )
         return ratio if ratio >= threshold else 0.0
 
 
 # Common stopwords to filter from user questions
-_STOPWORDS = frozenset({
-    "a", "an", "and", "are", "as", "at", "be", "by", "do", "for", "from",
-    "get", "has", "have", "how", "i", "if", "in", "is", "it", "its", "me",
-    "much", "my", "no", "not", "of", "on", "or", "our", "per", "show",
-    "tell", "the", "to", "us", "was", "we", "what", "when", "where",
-    "which", "who", "why", "will", "with", "would", "yes",
-    "can", "could", "does", "each", "many", "should", "than", "that",
-    "their", "them", "then", "there", "these", "this", "those", "very",
-})
+_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "do",
+        "for",
+        "from",
+        "get",
+        "has",
+        "have",
+        "how",
+        "i",
+        "if",
+        "in",
+        "is",
+        "it",
+        "its",
+        "me",
+        "much",
+        "my",
+        "no",
+        "not",
+        "of",
+        "on",
+        "or",
+        "our",
+        "per",
+        "show",
+        "tell",
+        "the",
+        "to",
+        "us",
+        "was",
+        "we",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "why",
+        "will",
+        "with",
+        "would",
+        "yes",
+        "can",
+        "could",
+        "does",
+        "each",
+        "many",
+        "should",
+        "than",
+        "that",
+        "their",
+        "them",
+        "then",
+        "there",
+        "these",
+        "this",
+        "those",
+        "very",
+    }
+)
 
 # Warehouse prefixes stripped during normalization
 _TABLE_PREFIXES = re.compile(
@@ -125,7 +187,9 @@ class FuzzyScorer:
                 sd_table = key.split("[")[0] if "[" in key else key
                 if sd_table != table_name:
                     continue
-                values = entry.get("sample_values", []) if isinstance(entry, dict) else []
+                values = (
+                    entry.get("sample_values", []) if isinstance(entry, dict) else []
+                )
                 for val in values:
                     if isinstance(val, str) and val:
                         candidates.append(val.lower())
@@ -295,7 +359,17 @@ class FuzzyScorer:
         filter_cols = filter_columns or set()
 
         # Date/time column heuristic
-        _date_keywords = {"date", "year", "month", "quarter", "week", "day", "time", "period", "calendar"}
+        _date_keywords = {
+            "date",
+            "year",
+            "month",
+            "quarter",
+            "week",
+            "day",
+            "time",
+            "period",
+            "calendar",
+        }
 
         kept = []
         for col in columns:
@@ -321,7 +395,8 @@ class FuzzyScorer:
 
             # Score-based inclusion
             score = self.score_column(
-                col, question_tokens,
+                col,
+                question_tokens,
                 sample_data=sample_data,
                 table_name=table_name,
             )
@@ -389,11 +464,13 @@ class FuzzyScorer:
                     # Exact column name match for a named dimension → guaranteed in
                     score = max(score, self.synonym_threshold + 5)
 
-            results.append({
-                "table": table,
-                "score": score,
-                "likely_relevant": score >= self.boost_min,
-            })
+            results.append(
+                {
+                    "table": table,
+                    "score": score,
+                    "likely_relevant": score >= self.boost_min,
+                }
+            )
         results.sort(key=lambda x: x["score"], reverse=True)
         return results
 
@@ -426,9 +503,11 @@ class FuzzyScorer:
                 if m_name in intent_measure_names:
                     score = max(score, self.boost_min + 15)
 
-            results.append({
-                "measure": measure,
-                "score": score,
-            })
+            results.append(
+                {
+                    "measure": measure,
+                    "score": score,
+                }
+            )
         results.sort(key=lambda x: x["score"], reverse=True)
         return results

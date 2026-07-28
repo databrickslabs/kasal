@@ -5,6 +5,7 @@ Covers ``CrewGenerationService.synthesize_crew_from_conversation`` and its
 crew from the WHOLE chat conversation (gather info → build dashboard → …),
 weighted so every user step survives a long/bloated conversation.
 """
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -53,7 +54,9 @@ class TestBuildConversationTranscript:
     @pytest.mark.asyncio
     async def test_returns_empty_without_group(self):
         svc = _build_service()
-        out = await svc._build_conversation_transcript("s1", _gc(group_ids=(), primary=None))
+        out = await svc._build_conversation_transcript(
+            "s1", _gc(group_ids=(), primary=None)
+        )
         assert out == ""
 
     @pytest.mark.asyncio
@@ -115,7 +118,10 @@ class TestSynthesizeCrewFromConversation:
     async def test_raises_when_no_conversation(self):
         svc = _build_service()
         with patch.object(
-            svc, "_build_conversation_transcript", new_callable=AsyncMock, return_value=""
+            svc,
+            "_build_conversation_transcript",
+            new_callable=AsyncMock,
+            return_value="",
         ):
             with pytest.raises(BadRequestError):
                 await svc.synthesize_crew_from_conversation("s1", _gc())
@@ -127,15 +133,21 @@ class TestSynthesizeCrewFromConversation:
         created = {"agents": [{"id": "a1"}], "tasks": [{"id": "t1"}, {"id": "t2"}]}
         with (
             patch.object(
-                svc, "_build_conversation_transcript",
-                new_callable=AsyncMock, return_value=transcript,
+                svc,
+                "_build_conversation_transcript",
+                new_callable=AsyncMock,
+                return_value=transcript,
             ),
             patch.object(
-                svc, "create_crew_complete",
-                new_callable=AsyncMock, return_value=created,
+                svc,
+                "create_crew_complete",
+                new_callable=AsyncMock,
+                return_value=created,
             ) as ccc,
         ):
-            result = await svc.synthesize_crew_from_conversation("s1", _gc(), model="m1")
+            result = await svc.synthesize_crew_from_conversation(
+                "s1", _gc(), model="m1"
+            )
 
         assert result is created
         ccc.assert_awaited_once()

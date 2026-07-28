@@ -4,29 +4,31 @@ Service for crew execution operations.
 This module provides business logic for executing CrewAI operations including
 running execution jobs, managing execution lifecycle, and handling results.
 """
+
 import asyncio
 import traceback
-from datetime import datetime, UTC
-from typing import Dict, Any, Optional, List
-from concurrent.futures import ThreadPoolExecutor
-from sqlalchemy.ext.asyncio import AsyncSession
-from enum import Enum
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
+from src.db.session import request_scoped_session
 from src.models.execution_status import ExecutionStatus
-from src.schemas.execution import CrewConfig
 from src.repositories.execution_repository import ExecutionRepository
+from src.schemas.execution import CrewConfig
+from src.services.catalog.agents import AgentService
+from src.services.catalog.tasks import TaskService
+
 # Sync flow repository removed - use async FlowRepository instead
 from src.services.execution.engine_factory import EngineFactory
 from src.services.execution.engine_service import KasalEngineService
 from src.services.execution.status import ExecutionStatusService
 from src.services.flow_builder.kasal_flow_service import KasalFlowService
 from src.utils.user_context import GroupContext
-from src.db.session import request_scoped_session
-from src.services.catalog.agents import AgentService
-from src.services.catalog.tasks import TaskService
-
 
 # Initialize logger
 crew_logger = LoggerManager.get_instance().crew
@@ -40,6 +42,7 @@ executions = {}
 
 class JobStatus(Enum):
     """Status of a job."""
+
     PENDING = "PENDING"
     PREPARING = "PREPARING"
     RUNNING = "RUNNING"
@@ -50,57 +53,63 @@ class JobStatus(Enum):
 
 class KasalExecutionService:
     """Service for managing CrewAI executions."""
-    
+
     def __init__(self):
         """
         Initialize the service.
         """
         pass
-    
+
     async def prepare_and_run_crew(
         self,
         execution_id: str,
         config: CrewConfig,
         group_context: GroupContext = None,
-        session = None
+        session=None,
     ) -> Dict[str, Any]:
         """
         Prepare and run a crew execution.
-        
+
         Args:
             execution_id: ID of the execution
             config: Configuration for the crew
             group_context: Group context for logging isolation
-            
+
         Returns:
             Dictionary with execution results
         """
         try:
             # Execution is already created with RUNNING status, just log the progress
-            crew_logger.info(f"Starting crew execution {execution_id} (already has RUNNING status)")
-            
+            crew_logger.info(
+                f"Starting crew execution {execution_id} (already has RUNNING status)"
+            )
+
             # Log the configuration inputs
             if config.inputs:
                 crew_logger.info(f"Config inputs keys: {list(config.inputs.keys())}")
                 # Memory backend config is now fetched from database, not passed from frontend
-            
+
             # Prepare the engine
             engine = await self._prepare_engine(config)
-            
+
             # Wait for engine initialization to complete if it's still running
-            if hasattr(engine, '_init_task') and not engine._init_task.done():
+            if hasattr(engine, "_init_task") and not engine._init_task.done():
                 await engine._init_task
-            
+
             # No need to update status to RUNNING since it's already set during creation
-            crew_logger.info(f"Engine prepared for execution {execution_id}, starting actual execution")
-            
+            crew_logger.info(
+                f"Engine prepared for execution {execution_id}, starting actual execution"
+            )
+
             # Convert CrewConfig to the dictionary format expected by the engine
             # Log what we have in the config
             crew_logger.info(f"Config has agents: {config.agents is not None}")
-            crew_logger.info(f"Config has agents_yaml: {config.agents_yaml is not None}")
+            crew_logger.info(
+                f"Config has agents_yaml: {config.agents_yaml is not None}"
+            )
             crew_logger.info(f"Config has tasks: {config.tasks is not None}")
             crew_logger.info(f"Config has tasks_yaml: {config.tasks_yaml is not None}")
-            
+
             # Convert agents from dict to list format and enhance with database data
             agents_list = []
             # First check for agents_yaml (YAML-based config)
@@ -109,22 +118,32 @@ class KasalExecutionService:
                 try:
                     async with request_scoped_session() as session:
                         agent_service = AgentService(session)
-                        
+
                         for agent_id, agent_config in config.agents_yaml.items():
                             # Log what we're working with
-                            crew_logger.info(f"Processing agent from YAML - key: {agent_id}")
-                            crew_logger.info(f"Agent config keys: {list(agent_config.keys()) if isinstance(agent_config, dict) else 'not a dict'}")
-                            
+                            crew_logger.info(
+                                f"Processing agent from YAML - key: {agent_id}"
+                            )
+                            crew_logger.info(
+                                f"Agent config keys: {list(agent_config.keys()) if isinstance(agent_config, dict) else 'not a dict'}"
+                            )
+
                             # Add the ID to the config if not present
-                            if 'id' not in agent_config:
-                                agent_config['id'] = agent_id
-                            
+                            if "id" not in agent_config:
+                                agent_config["id"] = agent_id
+
                             # Log if knowledge_sources are present
-                            if 'knowledge_sources' in agent_config:
-                                crew_logger.info(f"Agent {agent_id} has {len(agent_config.get('knowledge_sources', []))} knowledge_sources from YAML")
-                                for idx, source in enumerate(agent_config.get('knowledge_sources', [])):
-                                    crew_logger.info(f"  Knowledge source {idx}: {source}")
-                            
+                            if "knowledge_sources" in agent_config:
+                                crew_logger.info(
+                                    f"Agent {agent_id} has {len(agent_config.get('knowledge_sources', []))} knowledge_sources from YAML"
+                                )
+                                for idx, source in enumerate(
+                                    agent_config.get("knowledge_sources", [])
+                                ):
+                                    crew_logger.info(
+                                        f"  Knowledge source {idx}: {source}"
+                                    )
+
                             # Try to fetch the agent from database to get tool_configs.
                             # ID FIRST: the YAML key embeds the DB UUID
                             # (agent_<uuid>), so the id lookup virtually always
@@ -133,58 +152,93 @@ class KasalExecutionService:
                             # no 'name' key, so the role sentence was used),
                             # doubling DB round trips for every agent.
                             db_agent = None
-                            db_agent_id = agent_config.get('id', agent_config.get('db_id', agent_id))
+                            db_agent_id = agent_config.get(
+                                "id", agent_config.get("db_id", agent_id)
+                            )
                             # Strip the 'agent_' prefix if it exists (common in YAML keys)
-                            if db_agent_id.startswith('agent_'):
+                            if db_agent_id.startswith("agent_"):
                                 db_agent_id = db_agent_id[6:]  # Remove 'agent_' prefix
                             # Also strip 'agent-' prefix if it still exists
-                            if db_agent_id.startswith('agent-'):
+                            if db_agent_id.startswith("agent-"):
                                 db_agent_id = db_agent_id[6:]  # Remove 'agent-' prefix
-                            crew_logger.info(f"Attempting to fetch agent by ID: {db_agent_id}")
+                            crew_logger.info(
+                                f"Attempting to fetch agent by ID: {db_agent_id}"
+                            )
                             try:
                                 db_agent = await agent_service.get(db_agent_id)
                             except Exception as e:
-                                crew_logger.debug(f"Could not fetch agent by ID {db_agent_id}: {e}")
+                                crew_logger.debug(
+                                    f"Could not fetch agent by ID {db_agent_id}: {e}"
+                                )
 
                             # Fall back to name/role lookup only when the id missed
                             if not db_agent:
-                                agent_name = agent_config.get('name', agent_config.get('role', ''))
+                                agent_name = agent_config.get(
+                                    "name", agent_config.get("role", "")
+                                )
                                 if agent_name:
-                                    crew_logger.info(f"Attempting to fetch agent by name: {agent_name}")
+                                    crew_logger.info(
+                                        f"Attempting to fetch agent by name: {agent_name}"
+                                    )
                                     try:
-                                        db_agent = await agent_service.find_by_name(agent_name)
+                                        db_agent = await agent_service.find_by_name(
+                                            agent_name
+                                        )
                                     except Exception as e:
-                                        crew_logger.debug(f"Could not fetch agent by name {agent_name}: {e}")
-                            
+                                        crew_logger.debug(
+                                            f"Could not fetch agent by name {agent_name}: {e}"
+                                        )
+
                             try:
                                 if db_agent:
                                     # Log what we found
-                                    crew_logger.info(f"Found agent {agent_id} in database")
-                                    crew_logger.info(f"Agent has tool_configs attribute: {hasattr(db_agent, 'tool_configs')}")
-                                    if hasattr(db_agent, 'tool_configs'):
-                                        crew_logger.info(f"Agent tool_configs value from DB: {db_agent.tool_configs}")
+                                    crew_logger.info(
+                                        f"Found agent {agent_id} in database"
+                                    )
+                                    crew_logger.info(
+                                        f"Agent has tool_configs attribute: {hasattr(db_agent, 'tool_configs')}"
+                                    )
+                                    if hasattr(db_agent, "tool_configs"):
+                                        crew_logger.info(
+                                            f"Agent tool_configs value from DB: {db_agent.tool_configs}"
+                                        )
                                         # Prefer YAML tool_configs if present and non-empty, otherwise use database
-                                        if 'tool_configs' not in agent_config or not agent_config.get('tool_configs'):
-                                            agent_config['tool_configs'] = db_agent.tool_configs or {}
-                                            crew_logger.info(f"Using tool_configs from database for agent {agent_id}: {agent_config['tool_configs']}")
+                                        if (
+                                            "tool_configs" not in agent_config
+                                            or not agent_config.get("tool_configs")
+                                        ):
+                                            agent_config["tool_configs"] = (
+                                                db_agent.tool_configs or {}
+                                            )
+                                            crew_logger.info(
+                                                f"Using tool_configs from database for agent {agent_id}: {agent_config['tool_configs']}"
+                                            )
                                         else:
-                                            crew_logger.info(f"Keeping tool_configs from YAML for agent {agent_id}: {agent_config['tool_configs']}")
+                                            crew_logger.info(
+                                                f"Keeping tool_configs from YAML for agent {agent_id}: {agent_config['tool_configs']}"
+                                            )
                                     else:
-                                        crew_logger.warning(f"Agent {agent_id} does not have tool_configs attribute")
-                                        if 'tool_configs' not in agent_config:
-                                            agent_config['tool_configs'] = {}
+                                        crew_logger.warning(
+                                            f"Agent {agent_id} does not have tool_configs attribute"
+                                        )
+                                        if "tool_configs" not in agent_config:
+                                            agent_config["tool_configs"] = {}
                                 else:
-                                    crew_logger.warning(f"Agent {agent_id} not found in database")
+                                    crew_logger.warning(
+                                        f"Agent {agent_id} not found in database"
+                                    )
                             except Exception as e:
-                                crew_logger.debug(f"Could not fetch agent {agent_id} from database: {e}")
-                            
+                                crew_logger.debug(
+                                    f"Could not fetch agent {agent_id} from database: {e}"
+                                )
+
                             agents_list.append(agent_config)
                 except Exception as e:
                     crew_logger.error(f"Error fetching agent data from database: {e}")
                     # Continue with just YAML data if database fetch fails
                     for agent_id, agent_config in config.agents_yaml.items():
-                        if 'id' not in agent_config:
-                            agent_config['id'] = agent_id
+                        if "id" not in agent_config:
+                            agent_config["id"] = agent_id
                         agents_list.append(agent_config)
             # If not YAML, check for agents array (node-based config)
             elif config.agents and isinstance(config.agents, list):
@@ -192,7 +246,7 @@ class KasalExecutionService:
                 agents_list = config.agents
             else:
                 crew_logger.warning("No agents found in config")
-            
+
             # Convert tasks from dict to list format and enhance with database data
             tasks_list = []
             if config.tasks_yaml and isinstance(config.tasks_yaml, dict):
@@ -200,16 +254,20 @@ class KasalExecutionService:
                 try:
                     async with request_scoped_session() as session:
                         task_service = TaskService(session)
-                        
+
                         for task_id, task_config in config.tasks_yaml.items():
                             # Log what we're working with
-                            crew_logger.info(f"Processing task from YAML - key: {task_id}")
-                            crew_logger.info(f"Task config keys: {list(task_config.keys()) if isinstance(task_config, dict) else 'not a dict'}")
-                            
+                            crew_logger.info(
+                                f"Processing task from YAML - key: {task_id}"
+                            )
+                            crew_logger.info(
+                                f"Task config keys: {list(task_config.keys()) if isinstance(task_config, dict) else 'not a dict'}"
+                            )
+
                             # Add the ID to the config if not present
-                            if 'id' not in task_config:
-                                task_config['id'] = task_id
-                            
+                            if "id" not in task_config:
+                                task_config["id"] = task_id
+
                             # Try to fetch the task from database to get tool_configs.
                             # ID FIRST: the YAML key embeds the DB UUID
                             # (task_<uuid>), so the id lookup virtually always
@@ -217,63 +275,98 @@ class KasalExecutionService:
                             # (exact-equality match against the multi-sentence
                             # description) and doubled DB round trips per task.
                             db_task = None
-                            db_task_id = task_config.get('id', task_config.get('db_id', task_id))
+                            db_task_id = task_config.get(
+                                "id", task_config.get("db_id", task_id)
+                            )
                             # Strip the 'task_' prefix if it exists (common in YAML keys)
-                            if db_task_id.startswith('task_'):
+                            if db_task_id.startswith("task_"):
                                 db_task_id = db_task_id[5:]  # Remove 'task_' prefix
                             # Also strip 'task-' prefix if it still exists
-                            if db_task_id.startswith('task-'):
+                            if db_task_id.startswith("task-"):
                                 db_task_id = db_task_id[5:]  # Remove 'task-' prefix
-                            crew_logger.info(f"Attempting to fetch task by ID: {db_task_id}")
+                            crew_logger.info(
+                                f"Attempting to fetch task by ID: {db_task_id}"
+                            )
                             try:
                                 db_task = await task_service.get(db_task_id)
                             except Exception as e:
-                                crew_logger.debug(f"Could not fetch task by ID {db_task_id}: {e}")
+                                crew_logger.debug(
+                                    f"Could not fetch task by ID {db_task_id}: {e}"
+                                )
 
                             # Fall back to name lookup only when the id missed
                             if not db_task:
-                                task_name = task_config.get('name', task_config.get('description', ''))
+                                task_name = task_config.get(
+                                    "name", task_config.get("description", "")
+                                )
                                 if task_name:
-                                    crew_logger.info(f"Attempting to fetch task by name: {task_name}")
+                                    crew_logger.info(
+                                        f"Attempting to fetch task by name: {task_name}"
+                                    )
                                     try:
-                                        db_task = await task_service.find_by_name(task_name)
+                                        db_task = await task_service.find_by_name(
+                                            task_name
+                                        )
                                     except Exception as e:
-                                        crew_logger.debug(f"Could not fetch task by name {task_name}: {e}")
-                            
+                                        crew_logger.debug(
+                                            f"Could not fetch task by name {task_name}: {e}"
+                                        )
+
                             try:
                                 if db_task:
                                     # Log what we found
-                                    crew_logger.info(f"Found task {task_id} in database")
-                                    crew_logger.info(f"Task has tool_configs attribute: {hasattr(db_task, 'tool_configs')}")
-                                    if hasattr(db_task, 'tool_configs'):
-                                        crew_logger.info(f"Task tool_configs value from DB: {db_task.tool_configs}")
+                                    crew_logger.info(
+                                        f"Found task {task_id} in database"
+                                    )
+                                    crew_logger.info(
+                                        f"Task has tool_configs attribute: {hasattr(db_task, 'tool_configs')}"
+                                    )
+                                    if hasattr(db_task, "tool_configs"):
+                                        crew_logger.info(
+                                            f"Task tool_configs value from DB: {db_task.tool_configs}"
+                                        )
                                         # Prefer YAML tool_configs if present and non-empty, otherwise use database
-                                        if 'tool_configs' not in task_config or not task_config.get('tool_configs'):
-                                            task_config['tool_configs'] = db_task.tool_configs or {}
-                                            crew_logger.info(f"Using tool_configs from database for task {task_id}: {task_config['tool_configs']}")
+                                        if (
+                                            "tool_configs" not in task_config
+                                            or not task_config.get("tool_configs")
+                                        ):
+                                            task_config["tool_configs"] = (
+                                                db_task.tool_configs or {}
+                                            )
+                                            crew_logger.info(
+                                                f"Using tool_configs from database for task {task_id}: {task_config['tool_configs']}"
+                                            )
                                         else:
-                                            crew_logger.info(f"Keeping tool_configs from YAML for task {task_id}: {task_config['tool_configs']}")
+                                            crew_logger.info(
+                                                f"Keeping tool_configs from YAML for task {task_id}: {task_config['tool_configs']}"
+                                            )
                                     else:
-                                        crew_logger.warning(f"Task {task_id} does not have tool_configs attribute")
-                                        if 'tool_configs' not in task_config:
-                                            task_config['tool_configs'] = {}
+                                        crew_logger.warning(
+                                            f"Task {task_id} does not have tool_configs attribute"
+                                        )
+                                        if "tool_configs" not in task_config:
+                                            task_config["tool_configs"] = {}
 
                                     # llm_guardrail is NOT injected from the database here.
                                     # The frontend controls whether llm_guardrail is active via
                                     # the user's toggle. If enabled, it's sent in tasks_yaml.
                                     # The DB stores it as a suggestion for the UI only.
                                 else:
-                                    crew_logger.warning(f"Task {task_id} not found in database")
+                                    crew_logger.warning(
+                                        f"Task {task_id} not found in database"
+                                    )
                             except Exception as e:
-                                crew_logger.debug(f"Could not fetch task {task_id} from database: {e}")
-                            
+                                crew_logger.debug(
+                                    f"Could not fetch task {task_id} from database: {e}"
+                                )
+
                             tasks_list.append(task_config)
                 except Exception as e:
                     crew_logger.error(f"Error fetching task data from database: {e}")
                     # Continue with just YAML data if database fetch fails
                     for task_id, task_config in config.tasks_yaml.items():
-                        if 'id' not in task_config:
-                            task_config['id'] = task_id
+                        if "id" not in task_config:
+                            task_config["id"] = task_id
                         tasks_list.append(task_config)
             # If not YAML, check for tasks array (node-based config)
             elif config.tasks and isinstance(config.tasks, list):
@@ -281,15 +374,19 @@ class KasalExecutionService:
                 tasks_list = config.tasks
             else:
                 crew_logger.warning("No tasks found in config")
-            
+
             # Get run_name from the execution record if available
             run_name = None
             if execution_id in executions:
                 run_name = executions[execution_id].get("run_name")
-                crew_logger.info(f"Found execution {execution_id} in memory with run_name: {run_name}")
+                crew_logger.info(
+                    f"Found execution {execution_id} in memory with run_name: {run_name}"
+                )
             else:
-                crew_logger.warning(f"Execution {execution_id} not found in memory, executions keys: {list(executions.keys())}")
-            
+                crew_logger.warning(
+                    f"Execution {execution_id} not found in memory, executions keys: {list(executions.keys())}"
+                )
+
             # Include run_name in inputs so it's accessible throughout the execution
             inputs_with_run_name = config.inputs or {}
             if run_name:
@@ -300,7 +397,9 @@ class KasalExecutionService:
             manager_llm = inputs_with_run_name.get("manager_llm")
 
             # Log the process type being used
-            crew_logger.info(f"Execution {execution_id} using process type: {process_type}")
+            crew_logger.info(
+                f"Execution {execution_id} using process type: {process_type}"
+            )
 
             # Build crew configuration with process type
             # IMPORTANT: Use static "Default Crew" when run_name is None to ensure consistent crew_id
@@ -312,34 +411,44 @@ class KasalExecutionService:
                 # NOTE: `planning` / `planning_llm` are deliberately NOT forwarded. The
                 # CrewAI-style prose planner was removed; the engine has no planner, so
                 # those request/DB fields are legacy compatibility only and are ignored.
-                "reasoning": config.reasoning if hasattr(config, 'reasoning') else False
+                "reasoning": (
+                    config.reasoning if hasattr(config, "reasoning") else False
+                ),
             }
 
             # Add manager_llm if hierarchical process
             if process_type == "hierarchical" and manager_llm:
                 crew_config_dict["manager_llm"] = manager_llm
-                crew_logger.info(f"Configuring hierarchical process with manager_llm: {manager_llm}")
+                crew_logger.info(
+                    f"Configuring hierarchical process with manager_llm: {manager_llm}"
+                )
 
             # Add reasoning_llm if specified
             if inputs_with_run_name.get("reasoning_llm"):
-                crew_config_dict["reasoning_llm"] = inputs_with_run_name["reasoning_llm"]
+                crew_config_dict["reasoning_llm"] = inputs_with_run_name[
+                    "reasoning_llm"
+                ]
 
             # Reasoning budget from the sidebar Reasoning section
             # ({"reasoning_effort": "low"|"medium"|"high"}). Carried to each agent in
             # CrewPreparation and applied to the agent's own LLM as the model's native
             # reasoning budget by the shared agent builder.
             if inputs_with_run_name.get("reasoning_config"):
-                crew_config_dict["reasoning_config"] = inputs_with_run_name["reasoning_config"]
+                crew_config_dict["reasoning_config"] = inputs_with_run_name[
+                    "reasoning_config"
+                ]
 
             execution_config = {
                 "agents": agents_list,
                 "tasks": tasks_list,
                 "inputs": inputs_with_run_name,
-                "reasoning": config.reasoning if hasattr(config, 'reasoning') else False,
+                "reasoning": (
+                    config.reasoning if hasattr(config, "reasoning") else False
+                ),
                 "model": config.model,
                 "run_name": run_name,
                 "execution_id": execution_id,
-                "crew": crew_config_dict
+                "crew": crew_config_dict,
             }
 
             # Memory scoping (chat): carry the chat session id + the recall-scope
@@ -365,23 +474,32 @@ class KasalExecutionService:
                 )
 
             # Add group_id to config if group_context is provided
-            if group_context and group_context.group_ids and len(group_context.group_ids) > 0:
+            if (
+                group_context
+                and group_context.group_ids
+                and len(group_context.group_ids) > 0
+            ):
                 execution_config["group_id"] = group_context.group_ids[0]
-            
+
             # Run the crew via the engine - this starts the execution but doesn't wait for it to complete
             # The engine will update the status to COMPLETED or FAILED when done
-            result = await engine.run_execution(execution_id, execution_config, group_context, session)
+            result = await engine.run_execution(
+                execution_id, execution_config, group_context, session
+            )
 
             # Return the execution ID - do NOT update status to COMPLETED here
             # as the execution is running asynchronously and will be updated by the engine
-            return {"execution_id": execution_id, "status": ExecutionStatus.RUNNING.value}
+            return {
+                "execution_id": execution_id,
+                "status": ExecutionStatus.RUNNING.value,
+            }
 
         except Exception as e:
             # Update status to FAILED
             await ExecutionStatusService.update_status(
                 job_id=execution_id,
                 status=ExecutionStatus.FAILED.value,
-                message=f"Crew execution failed: {str(e)}"
+                message=f"Crew execution failed: {str(e)}",
             )
             raise
 
@@ -390,7 +508,7 @@ class KasalExecutionService:
         execution_id: str,
         config: CrewConfig,
         group_context: GroupContext = None,
-        session = None
+        session=None,
     ) -> Dict[str, Any]:
         """Thin service-layer delegate for the "chat" (light) single-agent path.
 
@@ -416,12 +534,18 @@ class KasalExecutionService:
         # Lakebase; keeps the engine/services/repositories free of DB-infra concerns.
         try:
             from src.db.session import async_session_factory
+
             if not async_session_factory.is_lakebase:
                 from src.db.database_router import activate_lakebase_in_subprocess
+
                 activated = await activate_lakebase_in_subprocess()
-                crew_logger.info(f"[light_agent] Lakebase activation ensured before run: {activated}")
+                crew_logger.info(
+                    f"[light_agent] Lakebase activation ensured before run: {activated}"
+                )
         except Exception as lb_err:  # noqa: BLE001
-            crew_logger.warning(f"[light_agent] Lakebase activation check failed (non-fatal): {lb_err}")
+            crew_logger.warning(
+                f"[light_agent] Lakebase activation check failed (non-fatal): {lb_err}"
+            )
 
         engine = await self._prepare_engine(config)
         return await engine.run_light_agent_execution(
@@ -434,89 +558,92 @@ class KasalExecutionService:
     async def _prepare_engine(self, config: CrewConfig) -> Any:
         """
         Prepare the engine for execution.
-        
+
         Args:
             config: Configuration for the engine
-            
+
         Returns:
             Initialized engine
         """
         # Get engine from factory
         engine = await EngineFactory.get_engine(
-            engine_type="kasal",
-            initialize=True,
-            model=config.model
+            engine_type="kasal", initialize=True, model=config.model
         )
-        
+
         if not engine:
             raise ValueError("Failed to initialize CrewAI engine")
-            
+
         return engine
-    
-    async def run_crew_execution(self, execution_id: str, config: CrewConfig, group_context: GroupContext = None, session = None) -> Dict[str, Any]:
+
+    async def run_crew_execution(
+        self,
+        execution_id: str,
+        config: CrewConfig,
+        group_context: GroupContext = None,
+        session=None,
+    ) -> Dict[str, Any]:
         """
         Run a crew execution with the provided configuration.
-        
+
         Args:
             execution_id: Unique ID for the execution
             config: Configuration for the execution
             group_context: Group context for logging isolation
-            
+
         Returns:
             Dictionary with execution results
         """
         crew_logger.info(f"Running crew execution {execution_id}")
-        
+
         # Create an asyncio task for executing the crew
-        task = asyncio.create_task(self.prepare_and_run_crew(
-            execution_id=execution_id,
-            config=config,
-            group_context=group_context,
-            session=session
-        ))
-        
+        task = asyncio.create_task(
+            self.prepare_and_run_crew(
+                execution_id=execution_id,
+                config=config,
+                group_context=group_context,
+                session=session,
+            )
+        )
+
         # Store task reference to prevent garbage collection
         _active_tasks.add(task)
         # Remove from active tasks when done
         task.add_done_callback(lambda t: _active_tasks.remove(t))
-        
+
         # Store the task in memory for potential cancellation
         executions[execution_id] = {
             "task": task,
             "status": ExecutionStatus.PENDING.value,
-            "created_at": datetime.now()
+            "created_at": datetime.now(),
         }
-        
+
         # Return immediate response
         return {
             "execution_id": execution_id,
             "status": ExecutionStatus.RUNNING.value,
-            "message": "CrewAI execution started successfully"
+            "message": "CrewAI execution started successfully",
         }
-    
+
     @staticmethod
     def get_execution(execution_id: str) -> Optional[Dict[str, Any]]:
         """
         Get execution from in-memory storage.
-        
+
         Args:
             execution_id: ID of the execution
-            
+
         Returns:
             Execution dictionary or None if not found
         """
         return executions.get(execution_id)
-    
+
     @staticmethod
     def add_execution_to_memory(
-        execution_id: str, 
-        status: str, 
-        run_name: str,
-        created_at: datetime = None
+        execution_id: str, status: str, run_name: str, created_at: datetime = None
     ) -> None:
         """
         Add execution to in-memory storage.
-        
+
         Args:
             execution_id: ID of the execution
             status: Status of the execution
@@ -527,19 +654,19 @@ class KasalExecutionService:
             "execution_id": execution_id,
             "status": status,
             "run_name": run_name,
-            "created_at": created_at or datetime.now()
+            "created_at": created_at or datetime.now(),
         }
-    
+
     async def update_execution_status(
         self,
         execution_id: str,
         status: ExecutionStatus,
         message: str,
-        result: Any = None
+        result: Any = None,
     ) -> None:
         """
         Update execution status in memory and database.
-        
+
         Args:
             execution_id: ID of the execution
             status: New execution status
@@ -552,13 +679,10 @@ class KasalExecutionService:
             executions[execution_id]["message"] = message
             if result:
                 executions[execution_id]["result"] = result
-        
+
         # Update database through ExecutionStatusService
         await ExecutionStatusService.update_status(
-            job_id=execution_id,
-            status=status.value,
-            message=message,
-            result=result
+            job_id=execution_id, status=status.value, message=message, result=result
         )
 
         # Clean up in-memory entry once terminal status is persisted to DB
@@ -572,75 +696,75 @@ class KasalExecutionService:
         }
         if status in terminal_statuses:
             executions.pop(execution_id, None)
-            crew_logger.debug(f"Cleaned up in-memory execution entry for {execution_id}")
-    
+            crew_logger.debug(
+                f"Cleaned up in-memory execution entry for {execution_id}"
+            )
+
     async def cancel_execution(self, execution_id: str) -> bool:
         """
         Cancel a running execution.
-        
+
         Args:
             execution_id: ID of the execution to cancel
-            
+
         Returns:
             Boolean indicating success
         """
         crew_logger.info(f"Cancelling execution {execution_id}")
-        
+
         # Check if execution exists in memory
         if execution_id not in executions:
             crew_logger.warning(f"Execution {execution_id} not found in memory")
             return False
-            
+
         # Get engine from factory
-        engine = await EngineFactory.get_engine(
-            engine_type="kasal",
-            initialize=False
-        )
-        
+        engine = await EngineFactory.get_engine(engine_type="kasal", initialize=False)
+
         if not engine:
-            crew_logger.error(f"Failed to get engine for cancelling execution {execution_id}")
+            crew_logger.error(
+                f"Failed to get engine for cancelling execution {execution_id}"
+            )
             return False
-            
+
         # Cancel execution through engine
         return await engine.cancel_execution(execution_id)
-    
+
     async def get_execution_status(self, execution_id: str) -> Dict[str, Any]:
         """
         Get the status of an execution.
-        
+
         Args:
             execution_id: ID of the execution
-            
+
         Returns:
             Dictionary with execution status details
         """
         crew_logger.info(f"Getting status for execution {execution_id}")
-        
+
         # Check memory first
         if execution_id in executions:
             memory_status = executions[execution_id]["status"]
-            
+
             # If terminal status, just return from memory
             if memory_status in [
                 ExecutionStatus.COMPLETED.value,
                 ExecutionStatus.FAILED.value,
-                ExecutionStatus.CANCELLED.value
+                ExecutionStatus.CANCELLED.value,
             ]:
                 return executions[execution_id]
-                
+
         # Get engine from factory
-        engine = await EngineFactory.get_engine(
-            engine_type="kasal",
-            initialize=False
-        )
-        
+        engine = await EngineFactory.get_engine(engine_type="kasal", initialize=False)
+
         if not engine:
-            crew_logger.error(f"Failed to get engine for execution status {execution_id}")
+            crew_logger.error(
+                f"Failed to get engine for execution status {execution_id}"
+            )
             return None
-            
+
         # Get status from engine
         return await engine.get_execution_status(execution_id)
-    
+
     async def run_flow_execution(
         self,
         flow_id: Optional[str] = None,
@@ -648,12 +772,12 @@ class KasalExecutionService:
         edges: Optional[List[Dict[str, Any]]] = None,
         job_id: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
-        group_context: GroupContext = None
+        group_context: GroupContext = None,
     ) -> Dict[str, Any]:
         """
         Run a flow execution with the provided configuration.
         This method handles all flow data loading and execution preparation.
-        
+
         Args:
             flow_id: Optional ID of flow to execute
             nodes: Optional list of nodes for a dynamic flow
@@ -668,20 +792,24 @@ class KasalExecutionService:
         # Use flow logger from LoggerManager for flow execution
         flow_logger = LoggerManager.get_instance().flow
 
-        flow_logger.info(f"Running flow execution with flow_id={flow_id}, job_id={job_id}")
+        flow_logger.info(
+            f"Running flow execution with flow_id={flow_id}, job_id={job_id}"
+        )
 
         # If no job_id is provided, generate a random UUID
         if not job_id:
             job_id = str(uuid.uuid4())
             flow_logger.info(f"Generated random job_id: {job_id}")
-        
+
         try:
             # Initialize configuration
             execution_config = config or {}
-            
+
             # If flow_id is provided but no nodes/edges, load flow data from repository
             if flow_id and (not nodes or not isinstance(nodes, list)):
-                flow_logger.info(f"No nodes provided but flow_id exists: {flow_id}. Loading flow data from repository")
+                flow_logger.info(
+                    f"No nodes provided but flow_id exists: {flow_id}. Loading flow data from repository"
+                )
                 try:
                     # Get repository instance through async factory function with session
                     from src.db.session import request_scoped_session
@@ -693,56 +821,70 @@ class KasalExecutionService:
                         # Find flow by ID using async method
                         flow = await flow_repository.get(flow_id)
                         if not flow:
-                            crew_logger.error(f"Flow with ID {flow_id} not found in repository")
+                            crew_logger.error(
+                                f"Flow with ID {flow_id} not found in repository"
+                            )
                             return {
                                 "success": False,
                                 "error": f"Flow with ID {flow_id} not found",
-                                "job_id": job_id
+                                "job_id": job_id,
                             }
 
                         # Add flow data to execution config
                         if flow.nodes:
-                            execution_config['nodes'] = flow.nodes
-                            crew_logger.info(f"Loaded {len(flow.nodes)} nodes from repository for flow {flow_id}")
+                            execution_config["nodes"] = flow.nodes
+                            crew_logger.info(
+                                f"Loaded {len(flow.nodes)} nodes from repository for flow {flow_id}"
+                            )
                         if flow.edges:
-                            execution_config['edges'] = flow.edges
-                            crew_logger.info(f"Loaded {len(flow.edges)} edges from repository for flow {flow_id}")
+                            execution_config["edges"] = flow.edges
+                            crew_logger.info(
+                                f"Loaded {len(flow.edges)} edges from repository for flow {flow_id}"
+                            )
                         if flow.flow_config:
-                            execution_config['flow_config'] = flow.flow_config
-                            crew_logger.info(f"Loaded flow_config from repository for flow {flow_id}")
+                            execution_config["flow_config"] = flow.flow_config
+                            crew_logger.info(
+                                f"Loaded flow_config from repository for flow {flow_id}"
+                            )
                 except Exception as e:
-                    crew_logger.error(f"Error loading flow data from repository: {str(e)}", exc_info=True)
+                    crew_logger.error(
+                        f"Error loading flow data from repository: {str(e)}",
+                        exc_info=True,
+                    )
                     return {
                         "success": False,
                         "error": f"Error loading flow data: {str(e)}",
-                        "job_id": job_id
+                        "job_id": job_id,
                     }
-            
+
             # If nodes are provided directly, add them to the config
             if nodes:
                 flow_logger.info(f"Adding {len(nodes)} nodes to execution config")
-                execution_config['nodes'] = nodes
-                execution_config['edges'] = edges or []
+                execution_config["nodes"] = nodes
+                execution_config["edges"] = edges or []
             elif not flow_id:
                 # Neither flow_id nor nodes provided - can't proceed
                 flow_logger.error("No flow_id or nodes provided, cannot execute flow")
                 return {
                     "success": False,
                     "error": "Either flow_id or nodes must be provided for flow execution",
-                    "job_id": job_id
+                    "job_id": job_id,
                 }
-            
+
             # Make sure flow_id is in the config
             if flow_id:
-                execution_config['flow_id'] = flow_id
-            
+                execution_config["flow_id"] = flow_id
+
             # Add group context to config if provided
             if group_context:
-                execution_config['group_context'] = group_context
-                execution_config['group_id'] = group_context.primary_group_id  # For background task API key loading
+                execution_config["group_context"] = group_context
+                execution_config["group_id"] = (
+                    group_context.primary_group_id
+                )  # For background task API key loading
 
             # Create a database session for flow execution
             from src.db.session import request_scoped_session
+
             async with request_scoped_session() as session:
                 # Create a flow service instance with session
                 flow_service = KasalFlowService(session)
@@ -750,8 +892,11 @@ class KasalExecutionService:
                 # Set group context in UserContext for API key loading
                 if group_context:
                     from src.utils.user_context import UserContext
+
                     UserContext.set_group_context(group_context)
-                    flow_logger.info(f"Set group context for flow execution: group_id={group_context.primary_group_id}")
+                    flow_logger.info(
+                        f"Set group context for flow execution: group_id={group_context.primary_group_id}"
+                    )
 
                 # Run the flow
                 try:
@@ -763,15 +908,27 @@ class KasalExecutionService:
 
                     # Call the flow service to run the flow with process isolation
                     # Extract checkpoint resume parameters from config
-                    resume_from_flow_uuid = execution_config.get('resume_from_flow_uuid')
-                    resume_from_execution_id = execution_config.get('resume_from_execution_id')
-                    resume_from_crew_sequence = execution_config.get('resume_from_crew_sequence')
+                    resume_from_flow_uuid = execution_config.get(
+                        "resume_from_flow_uuid"
+                    )
+                    resume_from_execution_id = execution_config.get(
+                        "resume_from_execution_id"
+                    )
+                    resume_from_crew_sequence = execution_config.get(
+                        "resume_from_crew_sequence"
+                    )
                     if resume_from_flow_uuid:
-                        flow_logger.info(f"Starting flow execution for job_id: {job_id} (RESUMING from checkpoint {resume_from_flow_uuid})")
+                        flow_logger.info(
+                            f"Starting flow execution for job_id: {job_id} (RESUMING from checkpoint {resume_from_flow_uuid})"
+                        )
                         if resume_from_crew_sequence is not None:
-                            flow_logger.info(f"Resume from crew sequence: {resume_from_crew_sequence} (will skip crews up to this sequence)")
+                            flow_logger.info(
+                                f"Resume from crew sequence: {resume_from_crew_sequence} (will skip crews up to this sequence)"
+                            )
                     else:
-                        flow_logger.info(f"Starting flow execution for job_id: {job_id}")
+                        flow_logger.info(
+                            f"Starting flow execution for job_id: {job_id}"
+                        )
                     result = await flow_service.run_flow(
                         flow_id=flow_id,
                         job_id=job_id,
@@ -780,46 +937,44 @@ class KasalExecutionService:
                         user_token=user_token,
                         resume_from_flow_uuid=resume_from_flow_uuid,
                         resume_from_execution_id=resume_from_execution_id,
-                        resume_from_crew_sequence=resume_from_crew_sequence
+                        resume_from_crew_sequence=resume_from_crew_sequence,
                     )
 
-                    flow_logger.info(f"Flow execution started successfully (process isolated): {result}")
+                    flow_logger.info(
+                        f"Flow execution started successfully (process isolated): {result}"
+                    )
                     return result
                 except Exception as e:
-                    flow_logger.error(f"Error running flow execution: {e}", exc_info=True)
+                    flow_logger.error(
+                        f"Error running flow execution: {e}", exc_info=True
+                    )
                     # Update status to FAILED - reuse the existing session
                     await ExecutionStatusService.update_status(
                         job_id=job_id,
                         status=ExecutionStatus.FAILED.value,
                         message=f"Flow execution failed: {str(e)}",
-                        session=session
+                        session=session,
                     )
-                    return {
-                        "success": False,
-                        "error": str(e),
-                        "job_id": job_id
-                    }
+                    return {"success": False, "error": str(e), "job_id": job_id}
         except Exception as e:
             flow_logger = LoggerManager.get_instance().flow
-            flow_logger.error(f"Unexpected error in run_flow_execution: {e}", exc_info=True)
+            flow_logger.error(
+                f"Unexpected error in run_flow_execution: {e}", exc_info=True
+            )
             await ExecutionStatusService.update_status(
                 job_id=job_id,
                 status=ExecutionStatus.FAILED.value,
-                message=f"Unexpected error in flow execution: {str(e)}"
+                message=f"Unexpected error in flow execution: {str(e)}",
             )
-            return {
-                "success": False,
-                "error": str(e),
-                "job_id": job_id
-            }
-    
+            return {"success": False, "error": str(e), "job_id": job_id}
+
     async def get_flow_execution(self, execution_id: int) -> Dict[str, Any]:
         """
         Get details of a specific flow execution.
-        
+
         Args:
             execution_id: ID of the flow execution to retrieve
-            
+
         Returns:
             Dictionary with execution details
         """
@@ -827,6 +982,7 @@ class KasalExecutionService:
 
         # Create a database session for flow execution retrieval
         from src.db.session import request_scoped_session
+
         async with request_scoped_session() as session:
             # Create a flow service instance with session
             flow_service = KasalFlowService(session)
@@ -837,14 +993,14 @@ class KasalExecutionService:
             except Exception as e:
                 crew_logger.error(f"Error getting flow execution: {e}", exc_info=True)
                 raise
-    
+
     async def get_flow_executions_by_flow(self, flow_id: str) -> Dict[str, Any]:
         """
         Get all executions for a specific flow.
-        
+
         Args:
             flow_id: ID of the flow to get executions for
-            
+
         Returns:
             Dictionary with list of executions
         """
@@ -852,6 +1008,7 @@ class KasalExecutionService:
 
         # Create a database session for flow executions retrieval
         from src.db.session import request_scoped_session
+
         async with request_scoped_session() as session:
             # Create a flow service instance with session
             flow_service = KasalFlowService(session)
@@ -862,4 +1019,3 @@ class KasalExecutionService:
             except Exception as e:
                 crew_logger.error(f"Error getting flow executions: {e}", exc_info=True)
                 raise
-    

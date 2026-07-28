@@ -4,10 +4,12 @@ Embedding Queue Service for batching documentation embedding operations.
 This service queues embedding operations and processes them in batches
 to reduce database lock contention in SQLite.
 """
+
 import asyncio
 import logging
-from typing import List, Dict, Any, Optional
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
@@ -65,16 +67,18 @@ class EmbeddingQueueService:
     ):
         """Add an embedding to the queue for batch processing."""
         async with self.lock:
-            self.queue.append({
-                "source": source,
-                "title": title,
-                "content": content,
-                "embedding": embedding,
-                "doc_metadata": doc_metadata or {},
-                "group_id": group_id,
-                "file_path": file_path,
-                "created_at": datetime.utcnow()
-            })
+            self.queue.append(
+                {
+                    "source": source,
+                    "title": title,
+                    "content": content,
+                    "embedding": embedding,
+                    "doc_metadata": doc_metadata or {},
+                    "group_id": group_id,
+                    "file_path": file_path,
+                    "created_at": datetime.utcnow(),
+                }
+            )
 
             # If queue is full, process immediately
             if len(self.queue) >= self.batch_size:
@@ -95,8 +99,8 @@ class EmbeddingQueueService:
             if not self.queue:
                 return
 
-            batch = self.queue[:self.batch_size]
-            self.queue = self.queue[self.batch_size:]
+            batch = self.queue[: self.batch_size]
+            self.queue = self.queue[self.batch_size :]
 
             if batch:
                 await self._batch_insert(batch)
@@ -138,11 +142,15 @@ class EmbeddingQueueService:
                     return
             except Exception as e:
                 if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt  # Exponential backoff
-                    logger.warning(f"Retry {attempt + 1}/{max_retries} after {wait_time}s: {e}")
+                    wait_time = 2**attempt  # Exponential backoff
+                    logger.warning(
+                        f"Retry {attempt + 1}/{max_retries} after {wait_time}s: {e}"
+                    )
                     await asyncio.sleep(wait_time)
                 else:
-                    logger.error(f"Failed to insert embedding after {max_retries} attempts: {e}")
+                    logger.error(
+                        f"Failed to insert embedding after {max_retries} attempts: {e}"
+                    )
 
 
 # Global singleton instance

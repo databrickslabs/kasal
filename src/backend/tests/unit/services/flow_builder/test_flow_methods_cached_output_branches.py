@@ -10,15 +10,17 @@ Focus areas:
   crew-level reasoning were removed; legacy crew rows carrying them are inert)
 - FlowMethodFactory.create_listener_method: no-results path, state injection
 """
-import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
-import uuid
 
+import asyncio
+import uuid
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+
+import pytest
 
 # ============================================================================
 # extract_final_answer - uncovered branches
 # ============================================================================
+
 
 class TestExtractFinalAnswerExtended:
     """Additional tests for extract_final_answer covering missed branches."""
@@ -27,7 +29,7 @@ class TestExtractFinalAnswerExtended:
         """Test first_result is a dict with 'content' key (not wrapped in list)."""
         from src.services.flow_builder.modules.flow_methods import extract_final_answer
 
-        results = [{'content': 'Final Answer: The dict answer'}]
+        results = [{"content": "Final Answer: The dict answer"}]
         result = extract_final_answer(results)
         assert result == "The dict answer"
 
@@ -35,7 +37,7 @@ class TestExtractFinalAnswerExtended:
         """Test dict content without Final Answer marker returns full content."""
         from src.services.flow_builder.modules.flow_methods import extract_final_answer
 
-        results = [{'content': 'Plain content no marker here'}]
+        results = [{"content": "Plain content no marker here"}]
         result = extract_final_answer(results)
         assert result == "Plain content no marker here"
 
@@ -79,18 +81,18 @@ class TestExtractFinalAnswerExtended:
         """Test list containing non-dict items falls back to str concatenation."""
         from src.services.flow_builder.modules.flow_methods import extract_final_answer
 
-        results = [['string1', 'string2']]
+        results = [["string1", "string2"]]
         result = extract_final_answer(results)
-        assert 'string1' in result
-        assert 'string2' in result
+        assert "string1" in result
+        assert "string2" in result
 
     def test_nested_list_item_with_final_answer_no_colon(self):
         """Test nested list item with 'Final Answer' without colon."""
         from src.services.flow_builder.modules.flow_methods import extract_final_answer
 
-        results = [[{'content': 'Thinking...\nFinal Answer\nThe actual answer'}]]
+        results = [[{"content": "Thinking...\nFinal Answer\nThe actual answer"}]]
         result = extract_final_answer(results)
-        assert 'actual answer' in result
+        assert "actual answer" in result
 
     def test_string_result_with_final_answer_no_colon(self):
         """Test string with 'Final Answer' marker but no colon."""
@@ -126,13 +128,16 @@ class TestExtractFinalAnswerExtended:
 # get_model_context_limits - found config with values
 # ============================================================================
 
+
 class TestGetModelContextLimitsExtended:
     """Additional tests covering model config with actual values."""
 
     @pytest.mark.asyncio
     async def test_returns_config_values_when_found(self):
         """Test actual context window and max_output values are returned."""
-        from src.services.flow_builder.modules.flow_methods import get_model_context_limits
+        from src.services.flow_builder.modules.flow_methods import (
+            get_model_context_limits,
+        )
 
         mock_agent = MagicMock()
         mock_agent.llm = "gpt-4"
@@ -144,24 +149,32 @@ class TestGetModelContextLimitsExtended:
         mock_model_config.context_window = 32000
         mock_model_config.max_output_tokens = 8000
 
-        with patch('src.db.session.request_scoped_session') as mock_session, \
-             patch('src.services.settings.models.ModelConfigService') as mock_svc_cls:
+        with (
+            patch("src.db.session.request_scoped_session") as mock_session,
+            patch("src.services.settings.models.ModelConfigService") as mock_svc_cls,
+        ):
             mock_session_instance = AsyncMock()
-            mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_session_instance)
+            mock_session.return_value.__aenter__ = AsyncMock(
+                return_value=mock_session_instance
+            )
             mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
             mock_svc = MagicMock()
             mock_svc.find_by_key = AsyncMock(return_value=mock_model_config)
             mock_svc_cls.return_value = mock_svc
 
-            context_window, max_output = await get_model_context_limits(mock_agent, mock_group_context)
+            context_window, max_output = await get_model_context_limits(
+                mock_agent, mock_group_context
+            )
             assert context_window == 32000
             assert max_output == 8000
 
     @pytest.mark.asyncio
     async def test_returns_defaults_when_config_values_are_zero(self):
         """Test default returned when config has falsy context_window."""
-        from src.services.flow_builder.modules.flow_methods import get_model_context_limits
+        from src.services.flow_builder.modules.flow_methods import (
+            get_model_context_limits,
+        )
 
         mock_agent = MagicMock()
         mock_agent.llm = "unknown-model"
@@ -173,8 +186,10 @@ class TestGetModelContextLimitsExtended:
         mock_model_config.context_window = 0  # Falsy
         mock_model_config.max_output_tokens = None  # Falsy
 
-        with patch('src.db.session.request_scoped_session') as mock_session, \
-             patch('src.services.settings.models.ModelConfigService') as mock_svc_cls:
+        with (
+            patch("src.db.session.request_scoped_session") as mock_session,
+            patch("src.services.settings.models.ModelConfigService") as mock_svc_cls,
+        ):
             mock_session.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -182,7 +197,9 @@ class TestGetModelContextLimitsExtended:
             mock_svc.find_by_key = AsyncMock(return_value=mock_model_config)
             mock_svc_cls.return_value = mock_svc
 
-            context_window, max_output = await get_model_context_limits(mock_agent, mock_group_context)
+            context_window, max_output = await get_model_context_limits(
+                mock_agent, mock_group_context
+            )
             # Falls back to defaults when values are falsy
             assert context_window == 128000
             assert max_output == 16000
@@ -190,14 +207,18 @@ class TestGetModelContextLimitsExtended:
     @pytest.mark.asyncio
     async def test_llm_with_unknown_type_returns_defaults(self):
         """Test LLM object without model attr returns defaults."""
-        from src.services.flow_builder.modules.flow_methods import get_model_context_limits
+        from src.services.flow_builder.modules.flow_methods import (
+            get_model_context_limits,
+        )
 
         mock_agent = MagicMock()
         mock_llm = MagicMock(spec=[])  # No attributes
         del mock_llm.__str__  # not a string
+
         # Create a plain object with no 'model' attr
         class UnknownLLM:
             pass
+
         mock_agent.llm = UnknownLLM()
 
         context_window, max_output = await get_model_context_limits(mock_agent, None)
@@ -209,6 +230,7 @@ class TestGetModelContextLimitsExtended:
 # create_skipped_crew_method - get_cached_output branches
 # ============================================================================
 
+
 class TestGetCachedOutputBranches:
     """Tests for the get_cached_output helper inside create_skipped_crew_method."""
 
@@ -218,8 +240,8 @@ class TestGetCachedOutputBranches:
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
-            method_name='starting_point_0',
-            crew_name='Crew A',
+            method_name="starting_point_0",
+            crew_name="Crew A",
             crew_sequence=1,
             is_starting_point=True,
             checkpoint_output=None,
@@ -227,11 +249,11 @@ class TestGetCachedOutputBranches:
 
         mock_flow = MagicMock()
         mock_flow.state = {}
-        mock_flow._method_outputs = {'starting_point_0': 'from_persist'}
+        mock_flow._method_outputs = {"starting_point_0": "from_persist"}
 
-        inner_func = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+        inner_func = method.__wrapped__ if hasattr(method, "__wrapped__") else method
         result = await inner_func(mock_flow)
-        assert result == 'from_persist'
+        assert result == "from_persist"
 
     @pytest.mark.asyncio
     async def test_skipped_starting_no_checkpoint_uses_state_method_key(self):
@@ -239,20 +261,20 @@ class TestGetCachedOutputBranches:
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
-            method_name='starting_point_0',
-            crew_name='Crew A',
+            method_name="starting_point_0",
+            crew_name="Crew A",
             crew_sequence=1,
             is_starting_point=True,
             checkpoint_output=None,
         )
 
         mock_flow = MagicMock()
-        mock_flow.state = {'starting_point_0': 'from_state_method'}
+        mock_flow.state = {"starting_point_0": "from_state_method"}
         mock_flow._method_outputs = {}
 
-        inner_func = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+        inner_func = method.__wrapped__ if hasattr(method, "__wrapped__") else method
         result = await inner_func(mock_flow)
-        assert result == 'from_state_method'
+        assert result == "from_state_method"
 
     @pytest.mark.asyncio
     async def test_skipped_starting_no_checkpoint_uses_state_crew_key(self):
@@ -260,20 +282,20 @@ class TestGetCachedOutputBranches:
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
-            method_name='starting_point_0',
-            crew_name='Crew Alpha',
+            method_name="starting_point_0",
+            crew_name="Crew Alpha",
             crew_sequence=1,
             is_starting_point=True,
             checkpoint_output=None,
         )
 
         mock_flow = MagicMock()
-        mock_flow.state = {'Crew Alpha': 'from_state_crew'}
+        mock_flow.state = {"Crew Alpha": "from_state_crew"}
         mock_flow._method_outputs = {}
 
-        inner_func = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+        inner_func = method.__wrapped__ if hasattr(method, "__wrapped__") else method
         result = await inner_func(mock_flow)
-        assert result == 'from_state_crew'
+        assert result == "from_state_crew"
 
     @pytest.mark.asyncio
     async def test_skipped_starting_no_checkpoint_uses_seq_key(self):
@@ -281,20 +303,20 @@ class TestGetCachedOutputBranches:
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
-            method_name='starting_point_0',
-            crew_name='Crew B',
+            method_name="starting_point_0",
+            crew_name="Crew B",
             crew_sequence=3,
             is_starting_point=True,
             checkpoint_output=None,
         )
 
         mock_flow = MagicMock()
-        mock_flow.state = {'crew_3_output': 'from_seq_key'}
+        mock_flow.state = {"crew_3_output": "from_seq_key"}
         mock_flow._method_outputs = {}
 
-        inner_func = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+        inner_func = method.__wrapped__ if hasattr(method, "__wrapped__") else method
         result = await inner_func(mock_flow)
-        assert result == 'from_seq_key'
+        assert result == "from_seq_key"
 
     @pytest.mark.asyncio
     async def test_skipped_starting_no_checkpoint_uses_output_key(self):
@@ -302,20 +324,20 @@ class TestGetCachedOutputBranches:
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
-            method_name='my_method',
-            crew_name='Crew C',
+            method_name="my_method",
+            crew_name="Crew C",
             crew_sequence=2,
             is_starting_point=True,
             checkpoint_output=None,
         )
 
         mock_flow = MagicMock()
-        mock_flow.state = {'my_method_output': 'from_output_key'}
+        mock_flow.state = {"my_method_output": "from_output_key"}
         mock_flow._method_outputs = {}
 
-        inner_func = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+        inner_func = method.__wrapped__ if hasattr(method, "__wrapped__") else method
         result = await inner_func(mock_flow)
-        assert result == 'from_output_key'
+        assert result == "from_output_key"
 
     @pytest.mark.asyncio
     async def test_skipped_starting_no_checkpoint_uses_previous_output_key(self):
@@ -323,20 +345,20 @@ class TestGetCachedOutputBranches:
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
-            method_name='starting_point_0',
-            crew_name='Crew D',
+            method_name="starting_point_0",
+            crew_name="Crew D",
             crew_sequence=1,
             is_starting_point=True,
             checkpoint_output=None,
         )
 
         mock_flow = MagicMock()
-        mock_flow.state = {'previous_output': 'from_prev_key'}
+        mock_flow.state = {"previous_output": "from_prev_key"}
         mock_flow._method_outputs = {}
 
-        inner_func = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+        inner_func = method.__wrapped__ if hasattr(method, "__wrapped__") else method
         result = await inner_func(mock_flow)
-        assert result == 'from_prev_key'
+        assert result == "from_prev_key"
 
     @pytest.mark.asyncio
     async def test_skipped_starting_no_checkpoint_returns_placeholder(self):
@@ -344,8 +366,8 @@ class TestGetCachedOutputBranches:
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
-            method_name='starting_point_0',
-            crew_name='Crew E',
+            method_name="starting_point_0",
+            crew_name="Crew E",
             crew_sequence=1,
             is_starting_point=True,
             checkpoint_output=None,
@@ -355,10 +377,10 @@ class TestGetCachedOutputBranches:
         mock_flow.state = {}
         mock_flow._method_outputs = {}
 
-        inner_func = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+        inner_func = method.__wrapped__ if hasattr(method, "__wrapped__") else method
         result = await inner_func(mock_flow)
         assert isinstance(result, dict)
-        assert result.get('status') == 'skipped'
+        assert result.get("status") == "skipped"
 
     @pytest.mark.asyncio
     async def test_skipped_listener_uses_previous_output_fallback(self):
@@ -366,12 +388,12 @@ class TestGetCachedOutputBranches:
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
-            method_name='listener_0',
-            crew_name='Listener Crew',
+            method_name="listener_0",
+            crew_name="Listener Crew",
             crew_sequence=2,
             is_starting_point=False,
-            method_condition='starting_point_0',
-            condition_type='NONE',
+            method_condition="starting_point_0",
+            condition_type="NONE",
             checkpoint_output=None,
         )
 
@@ -379,9 +401,9 @@ class TestGetCachedOutputBranches:
         mock_flow.state = {}
         mock_flow._method_outputs = {}
 
-        inner_func = method.__wrapped__ if hasattr(method, '__wrapped__') else method
-        result = await inner_func(mock_flow, 'prev_fallback_data')
-        assert result == 'prev_fallback_data'
+        inner_func = method.__wrapped__ if hasattr(method, "__wrapped__") else method
+        result = await inner_func(mock_flow, "prev_fallback_data")
+        assert result == "prev_fallback_data"
 
     @pytest.mark.asyncio
     async def test_skipped_starting_stores_in_state(self):
@@ -389,22 +411,22 @@ class TestGetCachedOutputBranches:
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
-            method_name='starting_point_0',
-            crew_name='Crew F',
+            method_name="starting_point_0",
+            crew_name="Crew F",
             crew_sequence=1,
             is_starting_point=True,
-            checkpoint_output='Checkpoint data',
+            checkpoint_output="Checkpoint data",
         )
 
         mock_flow = MagicMock()
         mock_flow.state = {}
 
-        inner_func = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+        inner_func = method.__wrapped__ if hasattr(method, "__wrapped__") else method
         await inner_func(mock_flow)
 
         # State should be updated
-        assert mock_flow.state.get('starting_point_0') == 'Checkpoint data'
-        assert mock_flow.state.get('Crew F') == 'Checkpoint data'
+        assert mock_flow.state.get("starting_point_0") == "Checkpoint data"
+        assert mock_flow.state.get("Crew F") == "Checkpoint data"
 
     @pytest.mark.asyncio
     async def test_skipped_listener_stores_in_state(self):
@@ -412,23 +434,23 @@ class TestGetCachedOutputBranches:
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
-            method_name='listener_1',
-            crew_name='Listener Crew G',
+            method_name="listener_1",
+            crew_name="Listener Crew G",
             crew_sequence=2,
             is_starting_point=False,
-            method_condition='starting_point_0',
-            condition_type='NONE',
-            checkpoint_output='Listener checkpoint data',
+            method_condition="starting_point_0",
+            condition_type="NONE",
+            checkpoint_output="Listener checkpoint data",
         )
 
         mock_flow = MagicMock()
         mock_flow.state = {}
 
-        inner_func = method.__wrapped__ if hasattr(method, '__wrapped__') else method
-        await inner_func(mock_flow, 'prev_output')
+        inner_func = method.__wrapped__ if hasattr(method, "__wrapped__") else method
+        await inner_func(mock_flow, "prev_output")
 
-        assert mock_flow.state.get('listener_1') == 'Listener checkpoint data'
-        assert mock_flow.state.get('previous_output') == 'Listener checkpoint data'
+        assert mock_flow.state.get("listener_1") == "Listener checkpoint data"
+        assert mock_flow.state.get("previous_output") == "Listener checkpoint data"
 
     @pytest.mark.asyncio
     async def test_skipped_listener_no_checkpoint_no_prev_returns_placeholder(self):
@@ -436,12 +458,12 @@ class TestGetCachedOutputBranches:
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
-            method_name='listener_0',
-            crew_name='Listener H',
+            method_name="listener_0",
+            crew_name="Listener H",
             crew_sequence=2,
             is_starting_point=False,
-            method_condition='starting_point_0',
-            condition_type='NONE',
+            method_condition="starting_point_0",
+            condition_type="NONE",
             checkpoint_output=None,
         )
 
@@ -449,29 +471,30 @@ class TestGetCachedOutputBranches:
         mock_flow.state = {}
         mock_flow._method_outputs = {}
 
-        inner_func = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+        inner_func = method.__wrapped__ if hasattr(method, "__wrapped__") else method
         result = await inner_func(mock_flow)
         assert isinstance(result, dict)
-        assert result.get('status') == 'skipped'
+        assert result.get("status") == "skipped"
 
     def test_state_object_based_lookup(self):
         """get_cached_output: object-like state (has attribute named like method)."""
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_skipped_crew_method(
-            method_name='starting_point_0',
-            crew_name='Crew ObjState',
+            method_name="starting_point_0",
+            crew_name="Crew ObjState",
             crew_sequence=1,
             is_starting_point=True,
             checkpoint_output=None,
         )
         # Just verify it's callable and has the right name
-        assert method.__name__ == 'starting_point_0'
+        assert method.__name__ == "starting_point_0"
 
 
 # ============================================================================
 # FlowMethodFactory.create_hitl_gate_method - method structure
 # ============================================================================
+
 
 class TestCreateHitlGateMethod:
     """Tests for HITL gate method creation."""
@@ -481,12 +504,12 @@ class TestCreateHitlGateMethod:
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_hitl_gate_method(
-            method_name='hitl_gate_0',
-            gate_node_id='gate-node-1',
-            gate_config={'message': 'Please approve', 'timeout_seconds': 3600},
-            previous_method_name='starting_point_0',
+            method_name="hitl_gate_0",
+            gate_node_id="gate-node-1",
+            gate_config={"message": "Please approve", "timeout_seconds": 3600},
+            previous_method_name="starting_point_0",
             crew_sequence=1,
-            callbacks={'job_id': 'test-job-123', 'flow_id': 'flow-456'},
+            callbacks={"job_id": "test-job-123", "flow_id": "flow-456"},
             group_context=None,
         )
         assert callable(method)
@@ -496,23 +519,23 @@ class TestCreateHitlGateMethod:
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_hitl_gate_method(
-            method_name='hitl_gate_check',
-            gate_node_id='gate-1',
+            method_name="hitl_gate_check",
+            gate_node_id="gate-1",
             gate_config={},
-            previous_method_name='starting_point_0',
+            previous_method_name="starting_point_0",
             crew_sequence=1,
         )
-        assert method.__name__ == 'hitl_gate_check'
+        assert method.__name__ == "hitl_gate_check"
 
     def test_creates_without_callbacks(self):
         """create_hitl_gate_method works without callbacks."""
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         method = FlowMethodFactory.create_hitl_gate_method(
-            method_name='hitl_gate_0',
-            gate_node_id='gate-1',
-            gate_config={'message': 'Approve?'},
-            previous_method_name='starting_point_0',
+            method_name="hitl_gate_0",
+            gate_node_id="gate-1",
+            gate_config={"message": "Approve?"},
+            previous_method_name="starting_point_0",
             crew_sequence=1,
         )
         assert callable(method)
@@ -522,6 +545,7 @@ class TestCreateHitlGateMethod:
 # create_starting_point_crew_method - memory branches (+ legacy planning/reasoning
 # crew-data shapes, which are now inert and must simply not break the factory)
 # ============================================================================
+
 
 class TestStartingPointMethodBranches:
     """Test branches inside the starting_point crew execution."""
@@ -539,7 +563,14 @@ class TestStartingPointMethodBranches:
         task.agent = agent
         return task
 
-    def _make_crew_data(self, memory=None, process='sequential', verbose=True, planning=False, reasoning=False):
+    def _make_crew_data(
+        self,
+        memory=None,
+        process="sequential",
+        verbose=True,
+        planning=False,
+        reasoning=False,
+    ):
         crew_data = MagicMock()
         crew_data.memory = memory
         crew_data.process = process
@@ -552,14 +583,14 @@ class TestStartingPointMethodBranches:
         """create_starting_point_crew_method with hierarchical process."""
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
-        crew_data = self._make_crew_data(process='hierarchical')
+        crew_data = self._make_crew_data(process="hierarchical")
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
         method = FlowMethodFactory.create_starting_point_crew_method(
-            method_name='starting_point_0',
+            method_name="starting_point_0",
             task_list=[self._make_task()],
-            crew_name='Hierarchical Crew',
-            callbacks={'job_id': 'j1'},
+            crew_name="Hierarchical Crew",
+            callbacks={"job_id": "j1"},
             group_context=None,
             create_execution_callbacks=mock_create_callbacks,
             crew_data=crew_data,
@@ -579,10 +610,10 @@ class TestStartingPointMethodBranches:
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
         method = FlowMethodFactory.create_starting_point_crew_method(
-            method_name='starting_point_0',
+            method_name="starting_point_0",
             task_list=[task],
-            crew_name='No Memory Crew',
-            callbacks={'job_id': 'j1'},
+            crew_name="No Memory Crew",
+            callbacks={"job_id": "j1"},
             group_context=None,
             create_execution_callbacks=mock_create_callbacks,
             crew_data=None,
@@ -603,10 +634,10 @@ class TestStartingPointMethodBranches:
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
         method = FlowMethodFactory.create_starting_point_crew_method(
-            method_name='starting_point_0',
+            method_name="starting_point_0",
             task_list=[self._make_task()],
-            crew_name='Legacy Planning Crew',
-            callbacks={'job_id': 'j1'},
+            crew_name="Legacy Planning Crew",
+            callbacks={"job_id": "j1"},
             group_context=None,
             create_execution_callbacks=mock_create_callbacks,
             crew_data=crew_data,
@@ -621,10 +652,10 @@ class TestStartingPointMethodBranches:
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
         method = FlowMethodFactory.create_starting_point_crew_method(
-            method_name='starting_point_0',
+            method_name="starting_point_0",
             task_list=[self._make_task()],
-            crew_name='Reasoning Crew',
-            callbacks={'job_id': 'j1'},
+            crew_name="Reasoning Crew",
+            callbacks={"job_id": "j1"},
             group_context=None,
             create_execution_callbacks=mock_create_callbacks,
             crew_data=crew_data,
@@ -640,10 +671,10 @@ class TestStartingPointMethodBranches:
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
         method = FlowMethodFactory.create_starting_point_crew_method(
-            method_name='starting_point_0',
+            method_name="starting_point_0",
             task_list=[self._make_task()],
-            crew_name='No Memory Crew',
-            callbacks={'job_id': 'j1'},
+            crew_name="No Memory Crew",
+            callbacks={"job_id": "j1"},
             group_context=None,
             create_execution_callbacks=mock_create_callbacks,
             crew_data=crew_data,
@@ -652,20 +683,22 @@ class TestStartingPointMethodBranches:
         mock_flow = MagicMock()
         mock_flow.state = {}
 
-        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_cls:
+        with patch(
+            "src.services.flow_builder.modules.flow_methods.Crew"
+        ) as mock_crew_cls:
             mock_crew = MagicMock()
             mock_crew.kickoff_async = AsyncMock(return_value=MagicMock(raw="result"))
             mock_crew_cls.return_value = mock_crew
 
-            with patch('asyncio.wait_for', new_callable=AsyncMock) as mock_wait:
+            with patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait:
                 mock_wait.return_value = MagicMock(raw="result")
-                inner = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+                inner = method.__wrapped__ if hasattr(method, "__wrapped__") else method
                 result = await inner(mock_flow)
 
             # Crew was created
             mock_crew_cls.assert_called_once()
             call_kwargs = mock_crew_cls.call_args[1]
-            assert call_kwargs.get('memory') is False
+            assert call_kwargs.get("memory") is False
 
     @pytest.mark.asyncio
     async def test_starting_method_no_callbacks_job_id(self):
@@ -675,9 +708,9 @@ class TestStartingPointMethodBranches:
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
         method = FlowMethodFactory.create_starting_point_crew_method(
-            method_name='starting_point_0',
+            method_name="starting_point_0",
             task_list=[self._make_task()],
-            crew_name='No Callback Crew',
+            crew_name="No Callback Crew",
             callbacks={},  # No job_id
             group_context=None,
             create_execution_callbacks=mock_create_callbacks,
@@ -686,13 +719,17 @@ class TestStartingPointMethodBranches:
         mock_flow = MagicMock()
         mock_flow.state = {}
 
-        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_cls, \
-             patch('asyncio.wait_for', new_callable=AsyncMock) as mock_wait:
+        with (
+            patch(
+                "src.services.flow_builder.modules.flow_methods.Crew"
+            ) as mock_crew_cls,
+            patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
+        ):
             mock_crew = MagicMock()
             mock_crew_cls.return_value = mock_crew
             mock_wait.return_value = MagicMock(raw="done")
 
-            inner = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+            inner = method.__wrapped__ if hasattr(method, "__wrapped__") else method
             await inner(mock_flow)
 
             # Callbacks should not be set (no job_id)
@@ -702,6 +739,7 @@ class TestStartingPointMethodBranches:
 # ============================================================================
 # create_listener_method - no-results path, large context, state injection
 # ============================================================================
+
 
 class TestListenerMethodBranches:
     """Test branches inside the listener method execution."""
@@ -725,27 +763,33 @@ class TestListenerMethodBranches:
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
         method = FlowMethodFactory.create_listener_method(
-            method_name='listener_0',
+            method_name="listener_0",
             listener_tasks=[self._make_task()],
-            method_condition='starting_point_0',
-            condition_type='NONE',
-            callbacks={'job_id': 'j1'},
+            method_condition="starting_point_0",
+            condition_type="NONE",
+            callbacks={"job_id": "j1"},
             group_context=None,
             create_execution_callbacks=mock_create_callbacks,
-            crew_name='Listener Crew',
+            crew_name="Listener Crew",
         )
 
         mock_flow = MagicMock()
         mock_flow.state = {}
 
-        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_cls, \
-             patch('src.services.flow_builder.modules.flow_methods.Task') as mock_task_cls, \
-             patch('asyncio.wait_for', new_callable=AsyncMock) as mock_wait:
+        with (
+            patch(
+                "src.services.flow_builder.modules.flow_methods.Crew"
+            ) as mock_crew_cls,
+            patch(
+                "src.services.flow_builder.modules.flow_methods.Task"
+            ) as mock_task_cls,
+            patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
+        ):
             mock_crew_cls.return_value = MagicMock()
             mock_task_cls.return_value = MagicMock()
             mock_wait.return_value = MagicMock(raw="listener result")
 
-            inner = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+            inner = method.__wrapped__ if hasattr(method, "__wrapped__") else method
             result = await inner(mock_flow)  # No results arg
 
         assert result is not None
@@ -758,14 +802,14 @@ class TestListenerMethodBranches:
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
         method = FlowMethodFactory.create_listener_method(
-            method_name='listener_0',
+            method_name="listener_0",
             listener_tasks=[self._make_task()],
-            method_condition='starting_point_0',
-            condition_type='NONE',
-            callbacks={'job_id': 'j1'},
+            method_condition="starting_point_0",
+            condition_type="NONE",
+            callbacks={"job_id": "j1"},
             group_context=None,
             create_execution_callbacks=mock_create_callbacks,
-            crew_name='Listener Crew',
+            crew_name="Listener Crew",
         )
 
         mock_flow = MagicMock()
@@ -773,14 +817,20 @@ class TestListenerMethodBranches:
 
         large_output = "A" * 5000  # > 2000 chars
 
-        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_cls, \
-             patch('src.services.flow_builder.modules.flow_methods.Task') as mock_task_cls, \
-             patch('asyncio.wait_for', new_callable=AsyncMock) as mock_wait:
+        with (
+            patch(
+                "src.services.flow_builder.modules.flow_methods.Crew"
+            ) as mock_crew_cls,
+            patch(
+                "src.services.flow_builder.modules.flow_methods.Task"
+            ) as mock_task_cls,
+            patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
+        ):
             mock_crew_cls.return_value = MagicMock()
             mock_task_cls.return_value = MagicMock()
             mock_wait.return_value = MagicMock(raw="listener result from large input")
 
-            inner = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+            inner = method.__wrapped__ if hasattr(method, "__wrapped__") else method
             result = await inner(mock_flow, large_output)
 
         assert result is not None
@@ -788,8 +838,9 @@ class TestListenerMethodBranches:
     @pytest.mark.asyncio
     async def test_listener_with_json_previous_output(self):
         """JSON previous output triggers tool _default_config injection."""
-        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
         import json
+
+        from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         agent = MagicMock()
         agent.role = "Listener Agent"
@@ -797,7 +848,7 @@ class TestListenerMethodBranches:
         agent._kasal_memory_disabled = False
 
         mock_tool = MagicMock()
-        mock_tool._default_config = {'config_json': ''}
+        mock_tool._default_config = {"config_json": ""}
         agent.tools = [mock_tool]
 
         task = MagicMock()
@@ -808,33 +859,41 @@ class TestListenerMethodBranches:
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
         method = FlowMethodFactory.create_listener_method(
-            method_name='listener_0',
+            method_name="listener_0",
             listener_tasks=[task],
-            method_condition='starting_point_0',
-            condition_type='NONE',
-            callbacks={'job_id': 'j1'},
+            method_condition="starting_point_0",
+            condition_type="NONE",
+            callbacks={"job_id": "j1"},
             group_context=None,
             create_execution_callbacks=mock_create_callbacks,
-            crew_name='Listener Crew',
+            crew_name="Listener Crew",
         )
 
         mock_flow = MagicMock()
         mock_flow.state = {}
 
-        pipeline_output = json.dumps({
-            'join_key_map': {'key': 'val'},
-            'enrichment_joins': [],
-            'filter_sets': {},
-        })
+        pipeline_output = json.dumps(
+            {
+                "join_key_map": {"key": "val"},
+                "enrichment_joins": [],
+                "filter_sets": {},
+            }
+        )
 
-        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_cls, \
-             patch('src.services.flow_builder.modules.flow_methods.Task') as mock_task_cls, \
-             patch('asyncio.wait_for', new_callable=AsyncMock) as mock_wait:
+        with (
+            patch(
+                "src.services.flow_builder.modules.flow_methods.Crew"
+            ) as mock_crew_cls,
+            patch(
+                "src.services.flow_builder.modules.flow_methods.Task"
+            ) as mock_task_cls,
+            patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
+        ):
             mock_crew_cls.return_value = MagicMock()
             mock_task_cls.return_value = MagicMock()
             mock_wait.return_value = MagicMock(raw="processed result")
 
-            inner = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+            inner = method.__wrapped__ if hasattr(method, "__wrapped__") else method
             result = await inner(mock_flow, pipeline_output)
 
         assert result is not None
@@ -856,7 +915,7 @@ class TestListenerMethodBranches:
 
         crew_data = MagicMock()
         crew_data.memory = None
-        crew_data.process = 'sequential'
+        crew_data.process = "sequential"
         crew_data.verbose = True
         crew_data.planning = False
         crew_data.reasoning = False
@@ -864,47 +923,60 @@ class TestListenerMethodBranches:
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
         method = FlowMethodFactory.create_listener_method(
-            method_name='listener_0',
+            method_name="listener_0",
             listener_tasks=[task],
-            method_condition='starting_point_0',
-            condition_type='NONE',
-            callbacks={'job_id': 'j1'},
+            method_condition="starting_point_0",
+            condition_type="NONE",
+            callbacks={"job_id": "j1"},
             group_context=None,
             create_execution_callbacks=mock_create_callbacks,
-            crew_name='Listener Crew',
+            crew_name="Listener Crew",
             crew_data=crew_data,
         )
 
         mock_flow = MagicMock()
         mock_flow.state = {}
 
-        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_cls, \
-             patch('src.services.flow_builder.modules.flow_methods.Task') as mock_task_cls, \
-             patch('asyncio.wait_for', new_callable=AsyncMock) as mock_wait:
+        with (
+            patch(
+                "src.services.flow_builder.modules.flow_methods.Crew"
+            ) as mock_crew_cls,
+            patch(
+                "src.services.flow_builder.modules.flow_methods.Task"
+            ) as mock_task_cls,
+            patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
+        ):
             mock_crew_cls.return_value = MagicMock()
             mock_task_cls.return_value = MagicMock()
             mock_wait.return_value = MagicMock(raw="result")
 
-            inner = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+            inner = method.__wrapped__ if hasattr(method, "__wrapped__") else method
             await inner(mock_flow, "prev output")
 
             call_kwargs = mock_crew_cls.call_args[1]
-            assert call_kwargs.get('memory') is False
+            assert call_kwargs.get("memory") is False
 
     @pytest.mark.asyncio
     async def test_listener_timeout(self):
         """Listener method handles asyncio.TimeoutError correctly."""
         import asyncio
+
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
 
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
         method = FlowMethodFactory.create_listener_method(
-            method_name='listener_0',
-            listener_tasks=[MagicMock(description='t', expected_output='o', agent=MagicMock(role='r', tools=[]))],
-            method_condition='starting_point_0',
-            condition_type='NONE',
-            callbacks={'job_id': 'j1'},
+            method_name="listener_0",
+            listener_tasks=[
+                MagicMock(
+                    description="t",
+                    expected_output="o",
+                    agent=MagicMock(role="r", tools=[]),
+                )
+            ],
+            method_condition="starting_point_0",
+            condition_type="NONE",
+            callbacks={"job_id": "j1"},
             group_context=None,
             create_execution_callbacks=mock_create_callbacks,
         )
@@ -912,14 +984,20 @@ class TestListenerMethodBranches:
         mock_flow = MagicMock()
         mock_flow.state = {}
 
-        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_cls, \
-             patch('src.services.flow_builder.modules.flow_methods.Task') as mock_task_cls, \
-             patch('asyncio.wait_for', new_callable=AsyncMock) as mock_wait:
+        with (
+            patch(
+                "src.services.flow_builder.modules.flow_methods.Crew"
+            ) as mock_crew_cls,
+            patch(
+                "src.services.flow_builder.modules.flow_methods.Task"
+            ) as mock_task_cls,
+            patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
+        ):
             mock_crew_cls.return_value = MagicMock()
             mock_task_cls.return_value = MagicMock()
             mock_wait.side_effect = asyncio.TimeoutError()
 
-            inner = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+            inner = method.__wrapped__ if hasattr(method, "__wrapped__") else method
             with pytest.raises(TimeoutError):
                 await inner(mock_flow, "prev output")
 
@@ -931,81 +1009,104 @@ class TestListenerMethodBranches:
         mock_create_callbacks = MagicMock(return_value=(MagicMock(), MagicMock()))
 
         method = FlowMethodFactory.create_listener_method(
-            method_name='listener_1',
-            listener_tasks=[MagicMock(description='t', expected_output='o', agent=MagicMock(role='r', tools=[]))],
-            method_condition='starting_point_0',
-            condition_type='NONE',
-            callbacks={'job_id': 'j1'},
+            method_name="listener_1",
+            listener_tasks=[
+                MagicMock(
+                    description="t",
+                    expected_output="o",
+                    agent=MagicMock(role="r", tools=[]),
+                )
+            ],
+            method_condition="starting_point_0",
+            condition_type="NONE",
+            callbacks={"job_id": "j1"},
             group_context=None,
             create_execution_callbacks=mock_create_callbacks,
-            crew_name='Stored Result Crew',
+            crew_name="Stored Result Crew",
         )
 
         mock_flow = MagicMock()
         mock_flow.state = {}
 
-        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_cls, \
-             patch('src.services.flow_builder.modules.flow_methods.Task') as mock_task_cls, \
-             patch('asyncio.wait_for', new_callable=AsyncMock) as mock_wait:
+        with (
+            patch(
+                "src.services.flow_builder.modules.flow_methods.Crew"
+            ) as mock_crew_cls,
+            patch(
+                "src.services.flow_builder.modules.flow_methods.Task"
+            ) as mock_task_cls,
+            patch("asyncio.wait_for", new_callable=AsyncMock) as mock_wait,
+        ):
             mock_crew_cls.return_value = MagicMock()
             mock_task_cls.return_value = MagicMock()
             mock_wait.return_value = MagicMock(raw="stored_result")
 
-            inner = method.__wrapped__ if hasattr(method, '__wrapped__') else method
+            inner = method.__wrapped__ if hasattr(method, "__wrapped__") else method
             await inner(mock_flow, "prev output")
 
-        assert mock_flow.state.get('listener_1') == "stored_result"
+        assert mock_flow.state.get("listener_1") == "stored_result"
 
 
 # ============================================================================
 # Method naming sanity checks
 # ============================================================================
 
+
 class TestMethodNaming:
     """Ensure method __name__ is always set correctly."""
 
     def test_starting_point_method_name(self):
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
+
         method = FlowMethodFactory.create_starting_point_crew_method(
-            method_name='my_custom_start',
-            task_list=[MagicMock(description='t', agent=MagicMock(role='r', tools=[]))],
-            crew_name='Test',
+            method_name="my_custom_start",
+            task_list=[MagicMock(description="t", agent=MagicMock(role="r", tools=[]))],
+            crew_name="Test",
             callbacks=None,
             group_context=None,
-            create_execution_callbacks=MagicMock(return_value=(MagicMock(), MagicMock())),
+            create_execution_callbacks=MagicMock(
+                return_value=(MagicMock(), MagicMock())
+            ),
         )
-        assert method.__name__ == 'my_custom_start'
+        assert method.__name__ == "my_custom_start"
 
     def test_listener_method_name(self):
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
+
         method = FlowMethodFactory.create_listener_method(
-            method_name='my_listener',
-            listener_tasks=[MagicMock(description='t', agent=MagicMock(role='r', tools=[]))],
-            method_condition='some_start',
-            condition_type='NONE',
+            method_name="my_listener",
+            listener_tasks=[
+                MagicMock(description="t", agent=MagicMock(role="r", tools=[]))
+            ],
+            method_condition="some_start",
+            condition_type="NONE",
             callbacks=None,
             group_context=None,
-            create_execution_callbacks=MagicMock(return_value=(MagicMock(), MagicMock())),
+            create_execution_callbacks=MagicMock(
+                return_value=(MagicMock(), MagicMock())
+            ),
         )
-        assert method.__name__ == 'my_listener'
+        assert method.__name__ == "my_listener"
 
     def test_skipped_starting_method_name(self):
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
+
         method = FlowMethodFactory.create_skipped_crew_method(
-            method_name='skipped_start',
-            crew_name='Crew',
+            method_name="skipped_start",
+            crew_name="Crew",
             crew_sequence=1,
             is_starting_point=True,
         )
-        assert method.__name__ == 'skipped_start'
+        assert method.__name__ == "skipped_start"
 
     def test_skipped_listener_method_name(self):
         from src.services.flow_builder.modules.flow_methods import FlowMethodFactory
+
         method = FlowMethodFactory.create_skipped_crew_method(
-            method_name='skipped_listener',
-            crew_name='Crew',
+            method_name="skipped_listener",
+            crew_name="Crew",
             crew_sequence=2,
             is_starting_point=False,
-            method_condition='start',
+            method_condition="start",
         )
-        assert method.__name__ == 'skipped_listener'
+        assert method.__name__ == "skipped_listener"

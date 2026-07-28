@@ -1,4 +1,5 @@
 """Tests for src.utils.memory_paths — deterministic local memory store paths."""
+
 import os
 from unittest.mock import patch
 
@@ -30,14 +31,18 @@ class TestLocalMemoryRoot:
 
     def test_expands_user_in_override(self, tmp_path):
         # Path.expanduser() reads $HOME (not Path.home()), so set HOME directly.
-        with patch.dict(os.environ, {"KASAL_MEMORY_DIR": "~/kasal_mem_x", "HOME": str(tmp_path)}):
+        with patch.dict(
+            os.environ, {"KASAL_MEMORY_DIR": "~/kasal_mem_x", "HOME": str(tmp_path)}
+        ):
             root = local_memory_root()
         assert root == tmp_path / "kasal_mem_x"
 
     def test_defaults_under_home_when_unset(self, tmp_path):
         env = {k: v for k, v in os.environ.items() if k != "KASAL_MEMORY_DIR"}
-        with patch.dict(os.environ, env, clear=True), \
-             patch("src.utils.memory_paths.Path.home", return_value=tmp_path):
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("src.utils.memory_paths.Path.home", return_value=tmp_path),
+        ):
             root = local_memory_root()
         assert root == tmp_path / ".kasal" / "memory"
         assert root.is_dir()

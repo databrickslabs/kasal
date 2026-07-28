@@ -7,22 +7,22 @@ Targets uncovered lines:
  794-804, 807-808, 832-881, 914, 922, 959-969, 988, 999-1093
 """
 
-import pytest
 import uuid
-from unittest.mock import MagicMock, AsyncMock, patch, Mock, call
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
-from sqlalchemy.ext.asyncio import AsyncSession
+import pytest
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.services.flow_builder.flow_runner_service import FlowRunnerService
 from src.schemas.flow_execution import FlowExecutionStatus
 from src.services.flow_builder.exceptions import FlowPausedForApprovalException
-
+from src.services.flow_builder.flow_runner_service import FlowRunnerService
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_service(db=None):
     """Return a FlowRunnerService with all heavy deps patched out."""
@@ -30,9 +30,15 @@ def _make_service(db=None):
     with patch("src.services.flow_builder.flow_runner_service.FlowExecutionService"):
         with patch("src.services.flow_builder.flow_runner_service.FlowRepository"):
             with patch("src.services.flow_builder.flow_runner_service.TaskRepository"):
-                with patch("src.services.flow_builder.flow_runner_service.AgentRepository"):
-                    with patch("src.services.flow_builder.flow_runner_service.ToolRepository"):
-                        with patch("src.services.flow_builder.flow_runner_service.CrewRepository"):
+                with patch(
+                    "src.services.flow_builder.flow_runner_service.AgentRepository"
+                ):
+                    with patch(
+                        "src.services.flow_builder.flow_runner_service.ToolRepository"
+                    ):
+                        with patch(
+                            "src.services.flow_builder.flow_runner_service.CrewRepository"
+                        ):
                             return FlowRunnerService(db)
 
 
@@ -48,19 +54,28 @@ def _make_execution(exec_id=1, flow_id=None):
 # _emit_error_span
 # ---------------------------------------------------------------------------
 
+
 class TestEmitErrorSpan:
     """Tests for _emit_error_span helper (lines 78-120)."""
 
     @pytest.mark.asyncio
     async def test_emit_error_span_success(self):
         svc = _make_service()
-        with patch("src.services.otel_tracing.otel_config.create_kasal_tracer_provider") as mock_prov, \
-             patch("src.services.otel_tracing.db_exporter.KasalDBSpanExporter"), \
-             patch("opentelemetry.sdk.trace.export.SimpleSpanProcessor"):
+        with (
+            patch(
+                "src.services.otel_tracing.otel_config.create_kasal_tracer_provider"
+            ) as mock_prov,
+            patch("src.services.otel_tracing.db_exporter.KasalDBSpanExporter"),
+            patch("opentelemetry.sdk.trace.export.SimpleSpanProcessor"),
+        ):
             mock_tracer = MagicMock()
             mock_span = MagicMock()
-            mock_tracer.start_as_current_span.return_value.__enter__ = lambda s: mock_span
-            mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(return_value=False)
+            mock_tracer.start_as_current_span.return_value.__enter__ = (
+                lambda s: mock_span
+            )
+            mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+                return_value=False
+            )
             provider_instance = MagicMock()
             provider_instance.get_tracer.return_value = mock_tracer
             mock_prov.return_value = provider_instance
@@ -70,17 +85,26 @@ class TestEmitErrorSpan:
     @pytest.mark.asyncio
     async def test_emit_error_span_with_group_email(self):
         svc = _make_service()
-        with patch("src.services.otel_tracing.otel_config.create_kasal_tracer_provider") as mock_prov, \
-             patch("src.services.otel_tracing.db_exporter.KasalDBSpanExporter"), \
-             patch("opentelemetry.sdk.trace.export.SimpleSpanProcessor"):
+        with (
+            patch(
+                "src.services.otel_tracing.otel_config.create_kasal_tracer_provider"
+            ) as mock_prov,
+            patch("src.services.otel_tracing.db_exporter.KasalDBSpanExporter"),
+            patch("opentelemetry.sdk.trace.export.SimpleSpanProcessor"),
+        ):
             provider_instance = MagicMock()
             mock_prov.return_value = provider_instance
-            await svc._emit_error_span("job-2", "err", group_id="g1", group_email="u@example.com")
+            await svc._emit_error_span(
+                "job-2", "err", group_id="g1", group_email="u@example.com"
+            )
 
     @pytest.mark.asyncio
     async def test_emit_error_span_exception_swallowed(self):
         svc = _make_service()
-        with patch("src.services.otel_tracing.otel_config.create_kasal_tracer_provider", side_effect=RuntimeError("oops")):
+        with patch(
+            "src.services.otel_tracing.otel_config.create_kasal_tracer_provider",
+            side_effect=RuntimeError("oops"),
+        ):
             # Should not raise - exception is caught internally
             await svc._emit_error_span("job-3", "error msg")
 
@@ -88,6 +112,7 @@ class TestEmitErrorSpan:
 # ---------------------------------------------------------------------------
 # create_flow_execution
 # ---------------------------------------------------------------------------
+
 
 class TestCreateFlowExecution:
     """Tests for create_flow_execution (lines ~135-183)."""
@@ -99,9 +124,7 @@ class TestCreateFlowExecution:
         svc.flow_execution_service.create_execution = AsyncMock(return_value=mock_ex)
 
         result = await svc.create_flow_execution(
-            flow_id=str(uuid.uuid4()),
-            job_id="job-x",
-            config={"group_id": "g1"}
+            flow_id=str(uuid.uuid4()), job_id="job-x", config={"group_id": "g1"}
         )
         assert result["success"] is True
         assert result["execution_id"] == 99
@@ -109,7 +132,9 @@ class TestCreateFlowExecution:
     @pytest.mark.asyncio
     async def test_create_flow_execution_value_error(self):
         svc = _make_service()
-        svc.flow_execution_service.create_execution = AsyncMock(side_effect=ValueError("bad uuid"))
+        svc.flow_execution_service.create_execution = AsyncMock(
+            side_effect=ValueError("bad uuid")
+        )
 
         result = await svc.create_flow_execution(flow_id="not-a-uuid", job_id="job-y")
         assert result["success"] is False
@@ -118,9 +143,13 @@ class TestCreateFlowExecution:
     @pytest.mark.asyncio
     async def test_create_flow_execution_generic_error(self):
         svc = _make_service()
-        svc.flow_execution_service.create_execution = AsyncMock(side_effect=RuntimeError("db down"))
+        svc.flow_execution_service.create_execution = AsyncMock(
+            side_effect=RuntimeError("db down")
+        )
 
-        result = await svc.create_flow_execution(flow_id=str(uuid.uuid4()), job_id="job-z")
+        result = await svc.create_flow_execution(
+            flow_id=str(uuid.uuid4()), job_id="job-z"
+        )
         assert result["success"] is False
 
 
@@ -128,12 +157,15 @@ class TestCreateFlowExecution:
 # run_flow – top-level routing
 # ---------------------------------------------------------------------------
 
+
 class TestRunFlow:
     """Tests for run_flow covering uncovered branches."""
 
     def _service_with_mocks(self):
         svc = _make_service()
-        svc.flow_execution_service.create_execution = AsyncMock(return_value=_make_execution(1))
+        svc.flow_execution_service.create_execution = AsyncMock(
+            return_value=_make_execution(1)
+        )
         svc.flow_execution_service.update_execution_status = AsyncMock()
         return svc
 
@@ -155,7 +187,7 @@ class TestRunFlow:
             await svc.run_flow(
                 flow_id=None,
                 job_id="job-2",
-                config={"flow_id": str(fid), "group_id": "g"}
+                config={"flow_id": str(fid), "group_id": "g"},
             )
         # 404 because the flow wasn't found
         assert exc_info.value.status_code == 404
@@ -169,7 +201,7 @@ class TestRunFlow:
             await svc.run_flow(
                 flow_id=None,
                 job_id="job-3",
-                config={"flow_id": "bad-uuid", "group_id": "g"}
+                config={"flow_id": "bad-uuid", "group_id": "g"},
             )
         assert exc_info.value.status_code == 400
 
@@ -200,7 +232,7 @@ class TestRunFlow:
             await svc.run_flow(
                 flow_id=fid,
                 job_id="job-5",
-                config={"group_context": group_ctx, "group_id": "group-A"}
+                config={"group_context": group_ctx, "group_id": "group-A"},
             )
         assert exc_info.value.status_code == 403
 
@@ -219,7 +251,9 @@ class TestRunFlow:
         svc = self._service_with_mocks()
         svc.db.commit = AsyncMock()
 
-        with patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository") as MockRepo:
+        with patch(
+            "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+        ) as MockRepo:
             repo_instance = MagicMock()
             # resume_from_execution_id is resolved by job_id first, then int PK fallback.
             repo_instance.get_execution_by_job_id = AsyncMock(return_value=None)
@@ -235,7 +269,7 @@ class TestRunFlow:
                         "nodes": [{"id": "n1"}],
                         "edges": [],
                         "resume_from_execution_id": 115,
-                    }
+                    },
                 )
             assert exc_info.value.status_code == 404
 
@@ -245,7 +279,9 @@ class TestRunFlow:
         svc = self._service_with_mocks()
         svc.db.commit = AsyncMock()
 
-        with patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository") as MockRepo:
+        with patch(
+            "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+        ) as MockRepo:
             repo_instance = MagicMock()
             existing = MagicMock()
             existing.id = 42
@@ -254,7 +290,9 @@ class TestRunFlow:
             MockRepo.return_value = repo_instance
 
             job_uuid = "e089f9fd-d6ea-4565-96ee-f039d5925992"
-            svc._run_dynamic_flow = AsyncMock(return_value={"success": True, "result": "ok"})
+            svc._run_dynamic_flow = AsyncMock(
+                return_value={"success": True, "result": "ok"}
+            )
 
             result = await svc.run_flow(
                 flow_id=None,
@@ -282,11 +320,13 @@ class TestRunFlow:
             "gate_node_id": "gate-node",
         }
 
-        with patch.object(svc, "_run_dynamic_flow", new=AsyncMock(return_value=hitl_result)):
+        with patch.object(
+            svc, "_run_dynamic_flow", new=AsyncMock(return_value=hitl_result)
+        ):
             result = await svc.run_flow(
                 flow_id=None,
                 job_id="job-8",
-                config={"nodes": [{"id": "n1"}], "edges": []}
+                config={"nodes": [{"id": "n1"}], "edges": []},
             )
         assert result["hitl_paused"] is True
         assert result["approval_id"] == "approval-1"
@@ -295,13 +335,19 @@ class TestRunFlow:
     async def test_run_flow_success_with_flow_uuid(self):
         """Successful run with flow_uuid included in return dict."""
         svc = self._service_with_mocks()
-        flow_result = {"success": True, "result": {"data": "ok"}, "flow_uuid": "uuid-xyz"}
+        flow_result = {
+            "success": True,
+            "result": {"data": "ok"},
+            "flow_uuid": "uuid-xyz",
+        }
 
-        with patch.object(svc, "_run_dynamic_flow", new=AsyncMock(return_value=flow_result)):
+        with patch.object(
+            svc, "_run_dynamic_flow", new=AsyncMock(return_value=flow_result)
+        ):
             result = await svc.run_flow(
                 flow_id=None,
                 job_id="job-9",
-                config={"nodes": [{"id": "n1"}], "edges": []}
+                config={"nodes": [{"id": "n1"}], "edges": []},
             )
         assert result["status"] == FlowExecutionStatus.COMPLETED
         assert result["flow_uuid"] == "uuid-xyz"
@@ -312,11 +358,13 @@ class TestRunFlow:
         svc = self._service_with_mocks()
         flow_result = {"success": False, "error": "Something broke"}
 
-        with patch.object(svc, "_run_dynamic_flow", new=AsyncMock(return_value=flow_result)):
+        with patch.object(
+            svc, "_run_dynamic_flow", new=AsyncMock(return_value=flow_result)
+        ):
             result = await svc.run_flow(
                 flow_id=None,
                 job_id="job-10",
-                config={"nodes": [{"id": "n1"}], "edges": []}
+                config={"nodes": [{"id": "n1"}], "edges": []},
             )
         assert result["status"] == FlowExecutionStatus.FAILED
         assert "Something broke" in result["error"]
@@ -329,7 +377,7 @@ class TestRunFlow:
             result = await svc.run_flow(
                 flow_id=None,
                 job_id="job-11",
-                config={"nodes": [{"id": "n1"}], "edges": []}
+                config={"nodes": [{"id": "n1"}], "edges": []},
             )
         assert result["status"] == FlowExecutionStatus.FAILED
 
@@ -339,24 +387,28 @@ class TestRunFlow:
         svc = self._service_with_mocks()
         flow_result = {"success": True, "result": "done"}
 
-        with patch.object(svc, "_run_flow_execution", new=AsyncMock(return_value=flow_result)):
+        with patch.object(
+            svc, "_run_flow_execution", new=AsyncMock(return_value=flow_result)
+        ):
             fid = uuid.uuid4()
             result = await svc.run_flow(
                 flow_id=fid,
                 job_id="job-12",
-                config={"nodes": [{"id": "n1"}], "edges": []}
+                config={"nodes": [{"id": "n1"}], "edges": []},
             )
         assert result["status"] == FlowExecutionStatus.COMPLETED
 
     @pytest.mark.asyncio
     async def test_run_flow_unexpected_exception_raises_http500(self):
         svc = self._service_with_mocks()
-        svc.flow_execution_service.create_execution = AsyncMock(side_effect=RuntimeError("boom"))
+        svc.flow_execution_service.create_execution = AsyncMock(
+            side_effect=RuntimeError("boom")
+        )
         with pytest.raises(HTTPException) as exc_info:
             await svc.run_flow(
                 flow_id=None,
                 job_id="job-13",
-                config={"nodes": [{"id": "n1"}], "edges": []}
+                config={"nodes": [{"id": "n1"}], "edges": []},
             )
         assert exc_info.value.status_code == 500
 
@@ -364,6 +416,7 @@ class TestRunFlow:
 # ---------------------------------------------------------------------------
 # _get_required_providers
 # ---------------------------------------------------------------------------
+
 
 class TestGetRequiredProviders:
     """Tests for _get_required_providers (lines 662-728)."""
@@ -381,9 +434,7 @@ class TestGetRequiredProviders:
             instance = MagicMock()
             instance.get_model_config = AsyncMock(return_value={"provider": "openai"})
             MockSvc.return_value = instance
-            result = await svc._get_required_providers(
-                MagicMock(), {"model": "gpt-4"}
-            )
+            result = await svc._get_required_providers(MagicMock(), {"model": "gpt-4"})
         assert "OPENAI" in result
 
     @pytest.mark.asyncio
@@ -391,7 +442,9 @@ class TestGetRequiredProviders:
         svc = _make_service()
         with patch("src.services.settings.models.ModelConfigService") as MockSvc:
             instance = MagicMock()
-            instance.get_model_config = AsyncMock(return_value={"provider": "anthropic"})
+            instance.get_model_config = AsyncMock(
+                return_value={"provider": "anthropic"}
+            )
             MockSvc.return_value = instance
             config = {
                 "crew": {
@@ -409,7 +462,9 @@ class TestGetRequiredProviders:
         svc = _make_service()
         with patch("src.services.settings.models.ModelConfigService") as MockSvc:
             instance = MagicMock()
-            instance.get_model_config = AsyncMock(return_value={"provider": "perplexity"})
+            instance.get_model_config = AsyncMock(
+                return_value={"provider": "perplexity"}
+            )
             MockSvc.return_value = instance
             config = {
                 # planning_llm is deliberately absent (planner removed).
@@ -426,7 +481,9 @@ class TestGetRequiredProviders:
             instance = MagicMock()
             instance.get_model_config = AsyncMock(return_value=None)
             MockSvc.return_value = instance
-            result = await svc._get_required_providers(MagicMock(), {"model": "unknown-model"})
+            result = await svc._get_required_providers(
+                MagicMock(), {"model": "unknown-model"}
+            )
         assert result == []
 
     @pytest.mark.asyncio
@@ -436,7 +493,9 @@ class TestGetRequiredProviders:
             instance = MagicMock()
             instance.get_model_config = AsyncMock(return_value={})
             MockSvc.return_value = instance
-            result = await svc._get_required_providers(MagicMock(), {"model": "some-model"})
+            result = await svc._get_required_providers(
+                MagicMock(), {"model": "some-model"}
+            )
         assert result == []
 
     @pytest.mark.asyncio
@@ -447,7 +506,9 @@ class TestGetRequiredProviders:
             instance.get_model_config = AsyncMock(side_effect=Exception("service down"))
             MockSvc.return_value = instance
             # Should not raise, just warn
-            result = await svc._get_required_providers(MagicMock(), {"model": "some-model"})
+            result = await svc._get_required_providers(
+                MagicMock(), {"model": "some-model"}
+            )
         assert isinstance(result, list)
 
     @pytest.mark.asyncio
@@ -465,6 +526,7 @@ class TestGetRequiredProviders:
 # ---------------------------------------------------------------------------
 # get_flow_execution
 # ---------------------------------------------------------------------------
+
 
 class TestGetFlowExecution:
     """Tests for get_flow_execution (lines 1095-1152)."""
@@ -499,7 +561,9 @@ class TestGetFlowExecution:
     @pytest.mark.asyncio
     async def test_execution_service_raises(self):
         svc = _make_service()
-        svc.flow_execution_service.get_execution = AsyncMock(side_effect=RuntimeError("db err"))
+        svc.flow_execution_service.get_execution = AsyncMock(
+            side_effect=RuntimeError("db err")
+        )
         result = await svc.get_flow_execution(1)
         assert result["success"] is False
 
@@ -539,6 +603,7 @@ class TestGetFlowExecution:
 # get_flow_executions_by_flow
 # ---------------------------------------------------------------------------
 
+
 class TestGetFlowExecutionsByFlow:
     """Tests for get_flow_executions_by_flow (lines 1154-1187)."""
 
@@ -561,7 +626,9 @@ class TestGetFlowExecutionsByFlow:
     @pytest.mark.asyncio
     async def test_service_raises(self):
         svc = _make_service()
-        svc.flow_execution_service.get_executions_by_flow = AsyncMock(side_effect=RuntimeError("err"))
+        svc.flow_execution_service.get_executions_by_flow = AsyncMock(
+            side_effect=RuntimeError("err")
+        )
         result = await svc.get_flow_executions_by_flow(uuid.uuid4())
         assert result["success"] is False
 
@@ -569,6 +636,7 @@ class TestGetFlowExecutionsByFlow:
 # ---------------------------------------------------------------------------
 # _run_dynamic_flow – internal helper
 # ---------------------------------------------------------------------------
+
 
 def _make_safe_session_patch(mock_session=None):
     """Create a proper async context manager for patching _safe_session staticmethod."""
@@ -605,22 +673,43 @@ class TestRunDynamicFlow:
     @pytest.mark.asyncio
     async def test_dynamic_flow_success(self):
         svc = _make_service()
-        kickoff_result = {"success": True, "result": {"text": "done"}, "flow_uuid": "u1"}
+        kickoff_result = {
+            "success": True,
+            "result": {"text": "done"},
+            "flow_uuid": "u1",
+        }
 
         mock_session = MagicMock(spec=AsyncSession)
 
-        with patch.object(FlowRunnerService, "_safe_session", new=_make_safe_session_patch(mock_session)), \
-             patch("src.services.flow_builder.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF, \
-             patch("src.services.flow_builder.flow_runner_service.FlowRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.TaskRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.AgentRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ToolRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.CrewRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)):
+        with (
+            patch.object(
+                FlowRunnerService,
+                "_safe_session",
+                new=_make_safe_session_patch(mock_session),
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+            ) as MockFlowSvc,
+            patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
+            patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
+            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
+            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
+            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
+            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as MockApiSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                new=_make_smart_session_patch(mock_session),
+            ),
+        ):
 
             flow_svc_instance = MagicMock()
             flow_svc_instance.update_execution_status = AsyncMock()
@@ -634,7 +723,9 @@ class TestRunDynamicFlow:
 
             MockApiSvc.get_provider_api_key = AsyncMock(return_value=None)
 
-            with patch("src.services.execution.history.ExecutionHistoryService") as MockHist:
+            with patch(
+                "src.services.execution.history.ExecutionHistoryService"
+            ) as MockHist:
                 hist_instance = MagicMock()
                 hist_instance.set_checkpoint_active = AsyncMock()
                 MockHist.return_value = hist_instance
@@ -646,7 +737,7 @@ class TestRunDynamicFlow:
                         "nodes": [{"id": "n1"}],
                         "edges": [],
                         "flow_config": {"startingPoints": []},
-                    }
+                    },
                 )
 
             assert result.get("success") is True
@@ -657,19 +748,36 @@ class TestRunDynamicFlow:
         kickoff_result = {"success": False, "error": "crew failed"}
         mock_session = MagicMock(spec=AsyncSession)
 
-        with patch.object(FlowRunnerService, "_safe_session", new=_make_safe_session_patch(mock_session)), \
-             patch("src.services.flow_builder.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF, \
-             patch("src.services.flow_builder.flow_runner_service.FlowRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.TaskRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.AgentRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ToolRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.CrewRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)), \
-             patch.object(svc, "_emit_error_span", new=AsyncMock()):
+        with (
+            patch.object(
+                FlowRunnerService,
+                "_safe_session",
+                new=_make_safe_session_patch(mock_session),
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+            ) as MockFlowSvc,
+            patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
+            patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
+            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
+            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
+            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
+            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as MockApiSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                new=_make_smart_session_patch(mock_session),
+            ),
+            patch.object(svc, "_emit_error_span", new=AsyncMock()),
+        ):
 
             flow_svc_instance = MagicMock()
             flow_svc_instance.update_execution_status = AsyncMock()
@@ -685,7 +793,7 @@ class TestRunDynamicFlow:
             result = await svc._run_dynamic_flow(
                 execution_id=1,
                 job_id="job-fail",
-                config={"nodes": [{"id": "n1"}], "edges": [], "flow_config": {}}
+                config={"nodes": [{"id": "n1"}], "edges": [], "flow_config": {}},
             )
             assert result.get("success") is False
 
@@ -694,18 +802,35 @@ class TestRunDynamicFlow:
         svc = _make_service()
         mock_session = MagicMock(spec=AsyncSession)
 
-        with patch.object(FlowRunnerService, "_safe_session", new=_make_safe_session_patch(mock_session)), \
-             patch("src.services.flow_builder.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF, \
-             patch("src.services.flow_builder.flow_runner_service.FlowRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.TaskRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.AgentRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ToolRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.CrewRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)):
+        with (
+            patch.object(
+                FlowRunnerService,
+                "_safe_session",
+                new=_make_safe_session_patch(mock_session),
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+            ) as MockFlowSvc,
+            patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
+            patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
+            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
+            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
+            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
+            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as MockApiSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                new=_make_smart_session_patch(mock_session),
+            ),
+        ):
 
             pause_exc = FlowPausedForApprovalException(
                 approval_id="appr-1",
@@ -713,7 +838,7 @@ class TestRunDynamicFlow:
                 message="Please approve",
                 execution_id="job-hitl",
                 crew_sequence=0,
-                flow_uuid="fv-1"
+                flow_uuid="fv-1",
             )
 
             bf_instance = MagicMock()
@@ -727,7 +852,9 @@ class TestRunDynamicFlow:
 
             MockApiSvc.get_provider_api_key = AsyncMock(return_value=None)
 
-            with patch("src.services.execution.history.ExecutionHistoryService") as MockHist:
+            with patch(
+                "src.services.execution.history.ExecutionHistoryService"
+            ) as MockHist:
                 hist_instance = MagicMock()
                 hist_instance.set_checkpoint_active = AsyncMock()
                 MockHist.return_value = hist_instance
@@ -735,7 +862,7 @@ class TestRunDynamicFlow:
                 result = await svc._run_dynamic_flow(
                     execution_id=1,
                     job_id="job-hitl",
-                    config={"nodes": [{"id": "n1"}], "edges": [], "flow_config": {}}
+                    config={"nodes": [{"id": "n1"}], "edges": [], "flow_config": {}},
                 )
 
             assert result.get("hitl_paused") is True
@@ -746,19 +873,36 @@ class TestRunDynamicFlow:
         svc = _make_service()
         mock_session = MagicMock(spec=AsyncSession)
 
-        with patch.object(FlowRunnerService, "_safe_session", new=_make_safe_session_patch(mock_session)), \
-             patch("src.services.flow_builder.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF, \
-             patch("src.services.flow_builder.flow_runner_service.FlowRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.TaskRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.AgentRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ToolRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.CrewRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)), \
-             patch.object(svc, "_emit_error_span", new=AsyncMock()):
+        with (
+            patch.object(
+                FlowRunnerService,
+                "_safe_session",
+                new=_make_safe_session_patch(mock_session),
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+            ) as MockFlowSvc,
+            patch("src.services.flow_builder.backend_flow.BackendFlow") as MockBF,
+            patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
+            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
+            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
+            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
+            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as MockApiSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                new=_make_smart_session_patch(mock_session),
+            ),
+            patch.object(svc, "_emit_error_span", new=AsyncMock()),
+        ):
 
             bf_instance = MagicMock()
             bf_instance.kickoff = AsyncMock(side_effect=RuntimeError("crew exploded"))
@@ -774,7 +918,7 @@ class TestRunDynamicFlow:
             result = await svc._run_dynamic_flow(
                 execution_id=1,
                 job_id="job-explode",
-                config={"nodes": [{"id": "n1"}], "edges": [], "flow_config": {}}
+                config={"nodes": [{"id": "n1"}], "edges": [], "flow_config": {}},
             )
             assert result.get("success") is False
             assert "crew exploded" in result.get("error", "")
@@ -783,6 +927,7 @@ class TestRunDynamicFlow:
 # ---------------------------------------------------------------------------
 # _run_flow_execution – result type conversion branches
 # ---------------------------------------------------------------------------
+
 
 class TestRunFlowExecutionResultConversion:
     """Exercises the non-dict result conversion branches in _run_flow_execution."""
@@ -802,8 +947,14 @@ class TestRunFlowExecutionResultConversion:
             yield mock_session
 
         patches = {
-            "safe_session": ("src.services.flow_builder.flow_runner_service.FlowRunnerService._safe_session", _safe_ctx()),
-            "smart_db": ("src.services.flow_builder.flow_runner_service._smart_db_session", _smart_ctx()),
+            "safe_session": (
+                "src.services.flow_builder.flow_runner_service.FlowRunnerService._safe_session",
+                _safe_ctx(),
+            ),
+            "smart_db": (
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                _smart_ctx(),
+            ),
         }
         return patches, mock_session, kickoff_result
 
@@ -812,25 +963,34 @@ class TestRunFlowExecutionResultConversion:
         svc = _make_service()
         mock_session = MagicMock(spec=AsyncSession)
 
-        with patch.object(FlowRunnerService, "_safe_session", new=_make_safe_session_patch(mock_session)), \
-             patch("src.services.flow_builder.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.services.flow_builder.flow_runner_service.FlowRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.TaskRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.AgentRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ToolRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.CrewRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"):
+        with (
+            patch.object(
+                FlowRunnerService,
+                "_safe_session",
+                new=_make_safe_session_patch(mock_session),
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+            ) as MockFlowSvc,
+            patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
+            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
+            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
+            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
+            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
+            ),
+        ):
 
             flow_svc_instance = MagicMock()
             flow_svc_instance.update_execution_status = AsyncMock()
             MockFlowSvc.return_value = flow_svc_instance
 
             result = await svc._run_flow_execution(
-                execution_id=1,
-                flow_id="not-a-uuid",
-                job_id="job-bad-id",
-                config={}
+                execution_id=1, flow_id="not-a-uuid", job_id="job-bad-id", config={}
             )
             assert result["success"] is False
             assert "Invalid UUID" in result["error"]
@@ -839,24 +999,47 @@ class TestRunFlowExecutionResultConversion:
     async def test_run_flow_execution_string_result_conversion(self):
         """Result is a plain string, should be wrapped in dict with 'content' key."""
         svc = _make_service()
-        kickoff_result = {"success": True, "result": "plain string output", "flow_uuid": None}
+        kickoff_result = {
+            "success": True,
+            "result": "plain string output",
+            "flow_uuid": None,
+        }
         mock_session = MagicMock(spec=AsyncSession)
 
-        with patch.object(FlowRunnerService, "_safe_session", new=_make_safe_session_patch(mock_session)), \
-             patch("src.services.flow_builder.flow_runner_service.FlowExecutionService") as MockFlowSvc, \
-             patch("src.services.flow_builder.flow_runner_service.BackendFlow") as MockBF, \
-             patch("src.services.flow_builder.backend_flow.BackendFlow", MockBF), \
-             patch("src.services.flow_builder.flow_runner_service.FlowRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.TaskRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.AgentRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ToolRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.CrewRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
-             patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
-             patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)), \
-             patch.object(svc, "_emit_error_span", new=AsyncMock()), \
-             patch("src.services.settings.models.ModelConfigService") as MockModelSvc:
+        with (
+            patch.object(
+                FlowRunnerService,
+                "_safe_session",
+                new=_make_safe_session_patch(mock_session),
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+            ) as MockFlowSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service.BackendFlow"
+            ) as MockBF,
+            patch("src.services.flow_builder.backend_flow.BackendFlow", MockBF),
+            patch("src.services.flow_builder.flow_runner_service.FlowRepository"),
+            patch("src.services.flow_builder.flow_runner_service.TaskRepository"),
+            patch("src.services.flow_builder.flow_runner_service.AgentRepository"),
+            patch("src.services.flow_builder.flow_runner_service.ToolRepository"),
+            patch("src.services.flow_builder.flow_runner_service.CrewRepository"),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionHistoryRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as MockApiSvc,
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                new=_make_smart_session_patch(mock_session),
+            ),
+            patch.object(svc, "_emit_error_span", new=AsyncMock()),
+            patch("src.services.settings.models.ModelConfigService") as MockModelSvc,
+        ):
 
             flow_svc_instance = MagicMock()
             flow_svc_instance.update_execution_status = AsyncMock()
@@ -878,6 +1061,6 @@ class TestRunFlowExecutionResultConversion:
                 execution_id=1,
                 flow_id=fid,
                 job_id="job-str-res",
-                config={"nodes": [{"id": "n1"}]}
+                config={"nodes": [{"id": "n1"}]},
             )
             assert result.get("success") is True

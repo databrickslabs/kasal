@@ -8,7 +8,8 @@ validating models, and retrieving default settings.
 import logging
 import os
 import re
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -76,7 +77,11 @@ def model_supports_reasoning_effort(model_name: Optional[str]) -> bool:
     # its model, which is not guaranteed to be a str.
     if not model_name or not isinstance(model_name, str):
         return False
-    if os.getenv("KASAL_REASONING_EFFORT_DISABLED", "").strip().lower() in ("1", "true", "yes"):
+    if os.getenv("KASAL_REASONING_EFFORT_DISABLED", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
         return False
 
     m = model_name.lower()
@@ -125,14 +130,14 @@ def model_rejects_temperature(model_name: Optional[str]) -> bool:
 def get_model_config(model_key: str, db: Optional[Session] = None) -> Dict[str, Any]:
     """
     Get model configuration based on model key.
-    
+
     Only returns configurations from the database.
     Returns None if model not found in database.
-    
+
     Args:
         model_key: The model key (e.g., 'gpt-4', 'claude-3-opus')
         db: Optional database session
-        
+
     Returns:
         Dictionary with model configuration or None if not found
     """
@@ -140,13 +145,13 @@ def get_model_config(model_key: str, db: Optional[Session] = None) -> Dict[str, 
     if db:
         try:
             from src.models.model_config import ModelConfig
-            
+
             # Query the database for the model configuration
             result = db.execute(
                 select(ModelConfig).filter(ModelConfig.key == model_key)
             )
             model_config = result.scalars().first()
-            
+
             if model_config:
                 logger.info(f"Found model config for {model_key} in database")
                 return {
@@ -157,24 +162,25 @@ def get_model_config(model_key: str, db: Optional[Session] = None) -> Dict[str, 
                     "context_window": model_config.context_window,
                     "max_output_tokens": model_config.max_output_tokens,
                     "extended_thinking": model_config.extended_thinking,
-                    "enabled": model_config.enabled
+                    "enabled": model_config.enabled,
                 }
             logger.warning(f"Model {model_key} not found in database")
             return None
         except Exception as e:
             logger.warning(f"Error retrieving model config from database: {str(e)}")
             return None
-    
+
     logger.warning(f"No database session provided to get_model_config for {model_key}")
     return None
+
 
 def get_max_rpm_for_model(model_key: str) -> int:
     """
     Get the maximum requests per minute (RPM) for a given model.
-    
+
     Args:
         model_key: The model key (e.g., 'gpt-4', 'claude-3-opus')
-        
+
     Returns:
         Integer representing the maximum RPM
     """
@@ -189,12 +195,10 @@ def get_max_rpm_for_model(model_key: str) -> int:
         "gpt-5.6-terra": 100,
         "gpt-5.6-luna": 100,
         "o3-mini": 100,
-
         # Anthropic models
         "claude-opus-5": 5,  # More conservative for Opus
         "claude-sonnet-5": 10,
         "claude-haiku-4-5": 20,  # Small/fast tier
-
         # Ollama models are hosted locally, but still use conservative defaults
         "qwen2.5:32b": 5,
         "llama2": 10,
@@ -208,25 +212,22 @@ def get_max_rpm_for_model(model_key: str) -> int:
         "gemma2:27b": 5,  # Large model, conservative limit
         "deepseek-r1:32b": 5,  # Large model, conservative limit
         "milkey/QwQ-32B-0305:q4_K_M": 5,  # Large model, conservative limit
-        
         # DeepSeek models
         "deepseek-v4-flash": 5,
         "deepseek-v4-pro": 3,  # More conservative for the thinking-by-default model
-        
         # Databricks models
         "databricks-meta-llama-3-3-70b-instruct": 5,
         "databricks-meta-llama-3-1-405b-instruct": 3,  # Larger model, more conservative
-
         # Google models
         "gemini-3.6-flash": 10,  # Standard rate limit for Gemini Flash
         "gemini-3.5-flash": 10,
         "gemini-3.5-flash-lite": 20,  # Lite tier tolerates more requests
     }
-    
+
     # Return the RPM limit if it exists, otherwise return a default
     if model_key in rpm_limits:
         return rpm_limits[model_key]
-        
+
     # Try to determine a sensible default based on model provider
     if "gpt-5" in model_key or "gpt5" in model_key:
         return 100
@@ -246,7 +247,9 @@ def get_max_rpm_for_model(model_key: str) -> int:
         return 5
     elif "gemini" in model_key:
         return 10  # Default for Gemini models
-    
+
     # Most conservative default for unknown models
-    logger.warning(f"Using conservative default RPM limit for unknown model {model_key}")
-    return 3 
+    logger.warning(
+        f"Using conservative default RPM limit for unknown model {model_key}"
+    )
+    return 3

@@ -22,26 +22,27 @@ import pytest
 
 from src.core.exceptions import BadRequestError
 from src.schemas.prompt_optimization import PromptOptimizationRequest
+from src.services.prompt_optimization import run_state as run_state_mod
+from src.services.prompt_optimization import runs as runs_mod
 from src.services.prompt_optimization import service as svc_module
+
 # Shared helpers the service was split across now live in these modules, and the
 # callers reach them through the module object — so patching HERE is what
 # intercepts every caller. Patching them on ``svc_module`` would rebind only that
 # module's own name and silently let the real implementation run.
 from src.services.prompt_optimization.gepa import reflection as gepa_reflection
-from src.services.prompt_optimization import run_state as run_state_mod
-from src.services.prompt_optimization import runs as runs_mod
 from src.services.prompt_optimization.service import (
     PromptOptimizationService,
     _checklist_grade,
     _distill_requirements,
+    _extract_user_from_log,
     _grade_judge_verdict,
+    _intent_format_score,
+    _json_keys_score,
     _judge_sample_count,
     _median_sample,
     _parse_requirement_lines,
     _resolve_judge_model,
-    _extract_user_from_log,
-    _intent_format_score,
-    _json_keys_score,
 )
 from src.utils.user_context import GroupContext
 
@@ -618,7 +619,8 @@ class TestRegistryResolution:
             return_value=SimpleNamespace(catalog="main", db_schema="kasal")
         )
         with patch(
-            "src.services.databricks.workspace.service.DatabricksService", return_value=fake_db
+            "src.services.databricks.workspace.service.DatabricksService",
+            return_value=fake_db,
         ):
             uri, name = await svc._resolve_registry("detect_intent", _group())
         assert uri == "databricks-uc"
@@ -633,7 +635,8 @@ class TestRegistryResolution:
         fake_db = MagicMock()
         fake_db.get_databricks_config = AsyncMock(return_value=None)
         with patch(
-            "src.services.databricks.workspace.service.DatabricksService", return_value=fake_db
+            "src.services.databricks.workspace.service.DatabricksService",
+            return_value=fake_db,
         ):
             with pytest.raises(ValueError, match="catalog and schema"):
                 await svc._resolve_registry("detect_intent", _group())
@@ -690,8 +693,12 @@ class TestVisibilityAndApply:
         svc = PromptOptimizationService(MagicMock())
         repo, _ = _attach_run_repo(svc)
         await repo.create(
-            {"id": "r1", "target_name": "detect_intent", "status": "running",
-             "group_id": "grp1"}
+            {
+                "id": "r1",
+                "target_name": "detect_intent",
+                "status": "running",
+                "group_id": "grp1",
+            }
         )
         with pytest.raises(ValueError, match="no completed proposal"):
             await svc.apply_run("r1", _group("grp1"))
@@ -701,8 +708,13 @@ class TestVisibilityAndApply:
         svc = PromptOptimizationService(MagicMock())
         repo, _ = _attach_run_repo(svc)
         await repo.create(
-            {"id": "r2", "target_name": "detect_intent", "status": "completed",
-             "optimized_template": "X", "group_id": "grp1"}
+            {
+                "id": "r2",
+                "target_name": "detect_intent",
+                "status": "completed",
+                "optimized_template": "X",
+                "group_id": "grp1",
+            }
         )
         with pytest.raises(ValueError, match="not found"):
             await svc.apply_run("r2", _group("other"))
@@ -1069,8 +1081,7 @@ class TestRunRegistryBehaviors:
         svc = PromptOptimizationService(MagicMock())
         repo, _ = _attach_run_repo(svc)
         await repo.create(
-            {"id": "r1", "status": "running", "group_id": "grp1",
-             "executions_used": 1}
+            {"id": "r1", "status": "running", "group_id": "grp1", "executions_used": 1}
         )
         # A cache entry recorded under a DIFFERENT group must not be overlaid.
         svc_module._RUNS["r1"] = {
@@ -1230,7 +1241,9 @@ class TestJudgeModelResolution:
                 _group(),
             )
             await svc_module._RUNS[result["run_id"]]["task"]
-            kwargs = PromptOptimizationService._execute_optimization_sync.call_args.kwargs
+            kwargs = (
+                PromptOptimizationService._execute_optimization_sync.call_args.kwargs
+            )
         assert kwargs["target_model"] == "target-model"
         assert kwargs["judge_model"] == "independent-judge"
         run = await svc.get_run(result["run_id"], _group())
@@ -1366,11 +1379,15 @@ class TestApplyIsReversible:
 
     @contextlib.contextmanager
     def _patched_entity_repos(self, agent_repo, task_repo):
-        with patch(
-            "src.repositories.agent_repository.AgentRepository",
-            return_value=agent_repo,
-        ), patch(
-            "src.repositories.task_repository.TaskRepository", return_value=task_repo
+        with (
+            patch(
+                "src.repositories.agent_repository.AgentRepository",
+                return_value=agent_repo,
+            ),
+            patch(
+                "src.repositories.task_repository.TaskRepository",
+                return_value=task_repo,
+            ),
         ):
             yield
 
@@ -1487,9 +1504,7 @@ class TestApplyIsReversible:
         template_service.update_with_group_check = AsyncMock(
             return_value=SimpleNamespace(id=7)
         )
-        with patch.object(
-            runs_mod, "TemplateService", return_value=template_service
-        ):
+        with patch.object(runs_mod, "TemplateService", return_value=template_service):
             await svc.apply_run("t1", _group("grp1"))
             assert repo.rows["t1"].before_image == {"template": "CURRENT TEMPLATE"}
             await svc.revert_run("t1", _group("grp1"))
@@ -1663,8 +1678,9 @@ def _fake_stack(optimize_prompts, completion):
     import sys
 
     stack = _FakeOptimizeStack(optimize_prompts)
-    with patch.dict(sys.modules, stack.modules), patch.object(
-        gepa_reflection, "_sync_llm_completion", completion
+    with (
+        patch.dict(sys.modules, stack.modules),
+        patch.object(gepa_reflection, "_sync_llm_completion", completion),
     ):
         # The bridge patches gepa.optimize in place; it must re-install against
         # the fake module rather than reuse a wrapper from a previous test.
@@ -1737,7 +1753,9 @@ class TestTemplateOptimizationOrchestration:
                 final_eval_score=0.82,
             )
 
-        with _fake_stack(optimize_prompts, _fake_completion(self._handler, calls)) as st:
+        with _fake_stack(
+            optimize_prompts, _fake_completion(self._handler, calls)
+        ) as st:
             result = PromptOptimizationService._execute_optimization_sync(
                 loop=MagicMock(),
                 template_name="detect_intent",
@@ -1768,7 +1786,9 @@ class TestTemplateOptimizationOrchestration:
         # Managed mode: tracking left alone, tracking writes skipped.
         assert stack.tracking_uris == []
         assert captured["enable_tracking"] is False
-        assert captured["prompt_uris"] == ["prompts:/main.kasal.kasal_detect_intent_grp1/1"]
+        assert captured["prompt_uris"] == [
+            "prompts:/main.kasal.kasal_detect_intent_grp1/1"
+        ]
 
     def test_predict_uses_the_candidate_template_and_target_model(self):
         calls = []
@@ -1786,7 +1806,9 @@ class TestTemplateOptimizationOrchestration:
         must not be issued to the model under optimization."""
         calls = []
         self._run(calls, target="target-model", judge="independent-judge")
-        judge_calls = [c for c in calls if "You judge an intent classifier" in c["text"]]
+        judge_calls = [
+            c for c in calls if "You judge an intent classifier" in c["text"]
+        ]
         assert judge_calls
         assert all(c["model"] == "independent-judge" for c in judge_calls)
         assert all(c["model"] != "target-model" for c in judge_calls)
@@ -1826,26 +1848,43 @@ class TestTemplateOptimizationOrchestration:
 def _crew_fixture():
     """A one-agent/one-task crew, serialized exactly as the service does."""
     agent = SimpleNamespace(
-        id="a1", name="Researcher", role="Researcher", goal="Find facts",
-        backstory="Experienced", tools=[], llm="m",
+        id="a1",
+        name="Researcher",
+        role="Researcher",
+        goal="Find facts",
+        backstory="Experienced",
+        tools=[],
+        llm="m",
     )
     task = SimpleNamespace(
-        id="t1", name="Research", description="Do the research",
-        expected_output="A table", tools=[], agent_id="a1",
+        id="t1",
+        name="Research",
+        description="Do the research",
+        expected_output="A table",
+        tools=[],
+        agent_id="a1",
     )
     doc, keys = svc_module._serialize_crew_doc([agent], [task])
     agents_yaml = {
         "Researcher": {
-            "name": "Researcher", "role": agent.role, "goal": agent.goal,
-            "backstory": agent.backstory, "tools": [], "llm": "m",
+            "name": "Researcher",
+            "role": agent.role,
+            "goal": agent.goal,
+            "backstory": agent.backstory,
+            "tools": [],
+            "llm": "m",
             "_field_prefix": "agent.a1",
         }
     }
     tasks_yaml = {
         "Research": {
-            "name": "Research", "description": task.description,
-            "expected_output": task.expected_output, "tools": [],
-            "agent": "Researcher", "async_execution": False, "context": [],
+            "name": "Research",
+            "description": task.description,
+            "expected_output": task.expected_output,
+            "tools": [],
+            "agent": "Researcher",
+            "async_execution": False,
+            "context": [],
             "_field_prefix": "task.t1",
         }
     }
@@ -1906,8 +1945,14 @@ class TestCrewOptimizationOrchestration:
             )
 
         def optimize_prompts(
-            *, predict_fn, train_data, prompt_uris, optimizer, scorers,
-            aggregation, enable_tracking,
+            *,
+            predict_fn,
+            train_data,
+            prompt_uris,
+            optimizer,
+            scorers,
+            aggregation,
+            enable_tracking,
         ):
             fmt, correct = scorers
             for index, doc in enumerate(docs):
@@ -1955,8 +2000,12 @@ class TestCrewOptimizationOrchestration:
                     group_context=None,
                 )
         return SimpleNamespace(
-            result=result, calls=calls, executions=executions, scored=scored,
-            baseline_doc=baseline_doc, stack=stack,
+            result=result,
+            calls=calls,
+            executions=executions,
+            scored=scored,
+            baseline_doc=baseline_doc,
+            stack=stack,
         )
 
     # -- cap -----------------------------------------------------------------
@@ -2007,9 +2056,10 @@ class TestCrewOptimizationOrchestration:
         run = self._drive([base, base, base], max_metric_calls=10)
         grading = [c for c in run.calls if "HARSH grader" in c["text"]]
         assert len(grading) == 1
-        assert run.scored[0][1]["output_correct"].value == run.scored[2][1][
-            "output_correct"
-        ].value
+        assert (
+            run.scored[0][1]["output_correct"].value
+            == run.scored[2][1]["output_correct"].value
+        )
 
     def test_malformed_candidate_is_rejected_for_free(self, monkeypatch):
         monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
@@ -2044,9 +2094,11 @@ class TestCrewOptimizationOrchestration:
         base, _, _, _ = _crew_fixture()
         run = self._drive([base, _variant(base, "a")], max_metric_calls=10)
         kinds = [
-            "reference" if "GROUND TRUTH" in c["text"]
-            else "grade" if "HARSH grader" in c["text"]
-            else "other"
+            (
+                "reference"
+                if "GROUND TRUTH" in c["text"]
+                else "grade" if "HARSH grader" in c["text"] else "other"
+            )
             for c in run.calls
         ]
         assert "reference" in kinds and "grade" in kinds
@@ -2084,8 +2136,14 @@ class TestCrewOptimizationOrchestration:
             return "6"
 
         def optimize_prompts(
-            *, predict_fn, train_data, prompt_uris, optimizer, scorers,
-            aggregation, enable_tracking,
+            *,
+            predict_fn,
+            train_data,
+            prompt_uris,
+            optimizer,
+            scorers,
+            aggregation,
+            enable_tracking,
         ):
             fmt, correct = scorers
             output = predict_fn(**train_data[0]["inputs"])
@@ -2098,7 +2156,9 @@ class TestCrewOptimizationOrchestration:
 
         baseline_doc, keys, agents_yaml, tasks_yaml = _crew_fixture()
         svc_module._RUNS[self.RUN_ID] = {
-            "run_id": self.RUN_ID, "status": "running", "group_id": "grp1",
+            "run_id": self.RUN_ID,
+            "status": "running",
+            "group_id": "grp1",
             "executions_used": 0,
         }
         with caplog.at_level("WARNING"):
@@ -2109,14 +2169,23 @@ class TestCrewOptimizationOrchestration:
                     lambda *a, **k: "A deliverable long enough to clear the format floor easily.",
                 ):
                     PromptOptimizationService._execute_crew_optimization_sync(
-                        loop=MagicMock(), baseline_doc=baseline_doc, field_keys=keys,
-                        objective="obj", rubric="- r", agents_yaml=agents_yaml,
-                        tasks_yaml=tasks_yaml, target_model="crew-model",
+                        loop=MagicMock(),
+                        baseline_doc=baseline_doc,
+                        field_keys=keys,
+                        objective="obj",
+                        rubric="- r",
+                        agents_yaml=agents_yaml,
+                        tasks_yaml=tasks_yaml,
+                        target_model="crew-model",
                         judge_model="independent-judge",
-                        reflection_model="reflect-model", max_metric_calls=10,
-                        execution_timeout=60, registry_uri="databricks-uc",
-                        prompt_name="p", crew_id="crew-uuid",
-                        cancel_run_id=self.RUN_ID, group_context=None,
+                        reflection_model="reflect-model",
+                        max_metric_calls=10,
+                        execution_timeout=60,
+                        registry_uri="databricks-uc",
+                        prompt_name="p",
+                        crew_id="crew-uuid",
+                        cancel_run_id=self.RUN_ID,
+                        group_context=None,
                     )
         assert "REFERENCE-FREE" in caplog.text
         assert scored[0].value == pytest.approx(0.6)  # grading still happened
@@ -2128,8 +2197,11 @@ class TestCrewOptimizationOrchestration:
         Median of three ignores the outlier; a mean would not."""
         base, _, _, _ = _crew_fixture()
         run = self._drive(
-            [base], judge_replies=["0", "8", "7"], max_metric_calls=10,
-            samples_env="3", monkeypatch=monkeypatch,
+            [base],
+            judge_replies=["0", "8", "7"],
+            max_metric_calls=10,
+            samples_env="3",
+            monkeypatch=monkeypatch,
         )
         grading = [c for c in run.calls if "HARSH grader" in c["text"]]
         assert len(grading) == 3
@@ -2140,8 +2212,11 @@ class TestCrewOptimizationOrchestration:
         replay sample 1 as samples 2..N."""
         base, _, _, _ = _crew_fixture()
         run = self._drive(
-            [base], judge_replies=["5", "6", "7"], max_metric_calls=10,
-            samples_env="3", monkeypatch=monkeypatch,
+            [base],
+            judge_replies=["5", "6", "7"],
+            max_metric_calls=10,
+            samples_env="3",
+            monkeypatch=monkeypatch,
         )
         grading = [c for c in run.calls if "HARSH grader" in c["text"]]
         busters = [c["messages"][0]["content"] for c in grading]
@@ -2152,8 +2227,11 @@ class TestCrewOptimizationOrchestration:
         """N=1 must be byte-identical to the old single-draw prompt: no buster."""
         base, _, _, _ = _crew_fixture()
         run = self._drive(
-            [base], judge_replies=["6"], max_metric_calls=10,
-            samples_env="1", monkeypatch=monkeypatch,
+            [base],
+            judge_replies=["6"],
+            max_metric_calls=10,
+            samples_env="1",
+            monkeypatch=monkeypatch,
         )
         grading = [c for c in run.calls if "HARSH grader" in c["text"]]
         assert len(grading) == 1
@@ -2180,34 +2258,53 @@ class TestCrewOptimizationOrchestration:
             return "8"
 
         def optimize_prompts(
-            *, predict_fn, train_data, prompt_uris, optimizer, scorers,
-            aggregation, enable_tracking,
+            *,
+            predict_fn,
+            train_data,
+            prompt_uris,
+            optimizer,
+            scorers,
+            aggregation,
+            enable_tracking,
         ):
             _, correct = scorers
             output = predict_fn(**train_data[0]["inputs"])
             scored.append(correct(inputs=train_data[0]["inputs"], outputs=output))
             return SimpleNamespace(
                 optimized_prompts=[SimpleNamespace(template=base, uri="u")],
-                initial_eval_score=0.1, final_eval_score=0.2,
+                initial_eval_score=0.1,
+                final_eval_score=0.2,
             )
 
         svc_module._RUNS[self.RUN_ID] = {
-            "run_id": self.RUN_ID, "status": "running", "group_id": "grp1",
+            "run_id": self.RUN_ID,
+            "status": "running",
+            "group_id": "grp1",
             "executions_used": 0,
         }
         with _fake_stack(optimize_prompts, _fake_completion(handler, calls)):
             with patch.object(
-                gepa_reflection, "_sync_run_crew",
+                gepa_reflection,
+                "_sync_run_crew",
                 lambda *a, **k: "A deliverable long enough to clear the format floor easily.",
             ):
                 PromptOptimizationService._execute_crew_optimization_sync(
-                    loop=MagicMock(), baseline_doc=baseline_doc, field_keys=keys,
-                    objective="obj", rubric="- r", agents_yaml=agents_yaml,
-                    tasks_yaml=tasks_yaml, target_model="crew-model",
-                    judge_model="independent-judge", reflection_model="reflect-model",
-                    max_metric_calls=10, execution_timeout=60,
-                    registry_uri="databricks-uc", prompt_name="p",
-                    crew_id="crew-uuid", cancel_run_id=self.RUN_ID,
+                    loop=MagicMock(),
+                    baseline_doc=baseline_doc,
+                    field_keys=keys,
+                    objective="obj",
+                    rubric="- r",
+                    agents_yaml=agents_yaml,
+                    tasks_yaml=tasks_yaml,
+                    target_model="crew-model",
+                    judge_model="independent-judge",
+                    reflection_model="reflect-model",
+                    max_metric_calls=10,
+                    execution_timeout=60,
+                    registry_uri="databricks-uc",
+                    prompt_name="p",
+                    crew_id="crew-uuid",
+                    cancel_run_id=self.RUN_ID,
                     group_context=None,
                 )
         assert scored[0].value == pytest.approx(0.8)
@@ -2232,35 +2329,54 @@ class TestCrewOptimizationOrchestration:
         baseline_doc, keys, agents_yaml, tasks_yaml = _crew_fixture()
         calls = []
         svc_module._RUNS[self.RUN_ID] = {
-            "run_id": self.RUN_ID, "status": "running", "group_id": "grp1",
+            "run_id": self.RUN_ID,
+            "status": "running",
+            "group_id": "grp1",
             "executions_used": 0,
         }
 
         def optimize_prompts(
-            *, predict_fn, train_data, prompt_uris, optimizer, scorers,
-            aggregation, enable_tracking,
+            *,
+            predict_fn,
+            train_data,
+            prompt_uris,
+            optimizer,
+            scorers,
+            aggregation,
+            enable_tracking,
         ):
             _, correct = scorers
             output = predict_fn(**train_data[0]["inputs"])
             correct(inputs=train_data[0]["inputs"], outputs=output)
             return SimpleNamespace(
                 optimized_prompts=[SimpleNamespace(template=docs[0], uri="u")],
-                initial_eval_score=0.1, final_eval_score=0.2,
+                initial_eval_score=0.1,
+                final_eval_score=0.2,
             )
 
         with _fake_stack(optimize_prompts, _fake_completion(handler, calls)):
             with patch.object(
-                gepa_reflection, "_sync_run_crew",
+                gepa_reflection,
+                "_sync_run_crew",
                 lambda *a, **k: "A deliverable long enough to clear the format floor easily.",
             ):
                 return PromptOptimizationService._execute_crew_optimization_sync(
-                    loop=MagicMock(), baseline_doc=baseline_doc, field_keys=keys,
-                    objective="obj", rubric="- r", agents_yaml=agents_yaml,
-                    tasks_yaml=tasks_yaml, target_model="crew-model",
-                    judge_model="independent-judge", reflection_model="reflect-model",
-                    max_metric_calls=10, execution_timeout=60,
-                    registry_uri="databricks-uc", prompt_name="p",
-                    crew_id="crew-uuid", cancel_run_id=self.RUN_ID,
+                    loop=MagicMock(),
+                    baseline_doc=baseline_doc,
+                    field_keys=keys,
+                    objective="obj",
+                    rubric="- r",
+                    agents_yaml=agents_yaml,
+                    tasks_yaml=tasks_yaml,
+                    target_model="crew-model",
+                    judge_model="independent-judge",
+                    reflection_model="reflect-model",
+                    max_metric_calls=10,
+                    execution_timeout=60,
+                    registry_uri="databricks-uc",
+                    prompt_name="p",
+                    crew_id="crew-uuid",
+                    cancel_run_id=self.RUN_ID,
                     group_context=None,
                 )
 
@@ -2282,7 +2398,9 @@ class TestCrewOptimizationOrchestration:
         monkeypatch.setenv("GEPA_JUDGE_SAMPLES", "1")
         base, _, _, _ = _crew_fixture()
         run = self._drive([_variant(base, "wind")], max_metric_calls=10)
-        assert run.result["optimized_fields"]["agent.a1.goal"] == "Find facts about wind"
+        assert (
+            run.result["optimized_fields"]["agent.a1.goal"] == "Find facts about wind"
+        )
         assert run.result["initial_score"] == pytest.approx(0.4)
         assert run.result["final_score"] == pytest.approx(0.7)
 
@@ -2305,19 +2423,30 @@ class TestCrewOptimizationOrchestration:
             captured["optimizer"] = optimizer
             return SimpleNamespace(
                 optimized_prompts=[SimpleNamespace(template=base, uri="u")],
-                initial_eval_score=0.1, final_eval_score=0.2,
+                initial_eval_score=0.1,
+                final_eval_score=0.2,
             )
 
         baseline_doc, keys, agents_yaml, tasks_yaml = _crew_fixture()
         with _fake_stack(optimize_prompts, _fake_completion(lambda c: "OK", [])):
             PromptOptimizationService._execute_crew_optimization_sync(
-                loop=MagicMock(), baseline_doc=baseline_doc, field_keys=keys,
-                objective="obj", rubric="- r", agents_yaml=agents_yaml,
-                tasks_yaml=tasks_yaml, target_model="crew-model",
-                judge_model="j", reflection_model="reflect-model",
-                max_metric_calls=7, execution_timeout=60,
-                registry_uri="databricks-uc", prompt_name="p", crew_id="c",
-                cancel_run_id="", group_context=None,
+                loop=MagicMock(),
+                baseline_doc=baseline_doc,
+                field_keys=keys,
+                objective="obj",
+                rubric="- r",
+                agents_yaml=agents_yaml,
+                tasks_yaml=tasks_yaml,
+                target_model="crew-model",
+                judge_model="j",
+                reflection_model="reflect-model",
+                max_metric_calls=7,
+                execution_timeout=60,
+                registry_uri="databricks-uc",
+                prompt_name="p",
+                crew_id="c",
+                cancel_run_id="",
+                group_context=None,
             )
         gepa_kwargs = captured["optimizer"].gepa_kwargs
         # Minibatch 1: the default 3 sampled our SINGLE example three times, so

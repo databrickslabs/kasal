@@ -4,15 +4,16 @@ Repository for execution logs data access.
 This module provides database operations for execution logs.
 """
 
-from typing import List, Optional
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import desc, func, delete
 import logging
 from datetime import datetime, timezone
+from typing import List, Optional
 
-from src.models.execution_logs import ExecutionLog
+from sqlalchemy import delete, desc, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+
 from src.core.logger import LoggerManager
+from src.models.execution_logs import ExecutionLog
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
@@ -30,7 +31,14 @@ class ExecutionLogsRepository:
         """
         self.session = session
 
-    async def create_log(self, execution_id: str, content: str, timestamp=None, group_id: str = None, group_email: str = None) -> ExecutionLog:
+    async def create_log(
+        self,
+        execution_id: str,
+        content: str,
+        timestamp=None,
+        group_id: str = None,
+        group_email: str = None,
+    ) -> ExecutionLog:
         """
         Create a new execution log entry using injected session.
 
@@ -65,13 +73,18 @@ class ExecutionLogsRepository:
 
             return log
         except Exception as e:
-            logger.error(f"[ExecutionLogsRepository.create_log] Error creating log: {e}", exc_info=True)
+            logger.error(
+                f"[ExecutionLogsRepository.create_log] Error creating log: {e}",
+                exc_info=True,
+            )
 
             # Try to rollback if possible
             try:
                 await self.session.rollback()
             except Exception as rollback_error:
-                logger.error(f"[ExecutionLogsRepository.create_log] Rollback failed: {rollback_error}")
+                logger.error(
+                    f"[ExecutionLogsRepository.create_log] Rollback failed: {rollback_error}"
+                )
 
             # Re-raise to caller
             raise
@@ -82,7 +95,7 @@ class ExecutionLogsRepository:
         limit: int = 1000,
         offset: int = 0,
         newest_first: bool = False,
-        group_ids: list = None
+        group_ids: list = None,
     ) -> List[ExecutionLog]:
         """
         Retrieve logs for a specific execution using injected session.
@@ -97,9 +110,7 @@ class ExecutionLogsRepository:
         Returns:
             List of ExecutionLog objects
         """
-        query = select(ExecutionLog).where(
-            ExecutionLog.execution_id == execution_id
-        )
+        query = select(ExecutionLog).where(ExecutionLog.execution_id == execution_id)
         if group_ids:
             query = query.where(ExecutionLog.group_id.in_(group_ids))
 
@@ -116,10 +127,10 @@ class ExecutionLogsRepository:
     def _normalize_timestamp(self, timestamp):
         """
         Convert timestamp to timezone-naive UTC datetime.
-        
+
         Args:
             timestamp: The timestamp to normalize
-            
+
         Returns:
             Timezone-naive UTC datetime
         """
@@ -140,16 +151,13 @@ class ExecutionLogsRepository:
                 return None
 
             # Normalize to timezone-naive UTC
-            if getattr(dt, 'tzinfo', None) is not None:
+            if getattr(dt, "tzinfo", None) is not None:
                 return dt.astimezone(timezone.utc).replace(tzinfo=None)
             return dt
         except Exception:
             # On any unexpected input, fall back to None so model default applies
             return None
-    
-    
-    
-    
+
     async def get_by_id(self, log_id: int) -> Optional[ExecutionLog]:
         """
         Retrieve a specific log by ID using injected session.
@@ -163,8 +171,10 @@ class ExecutionLogsRepository:
         query = select(ExecutionLog).where(ExecutionLog.id == log_id)
         result = await self.session.execute(query)
         return result.scalars().first()
-    
-    async def delete_by_execution_id(self, execution_id: str, group_ids: list = None) -> int:
+
+    async def delete_by_execution_id(
+        self, execution_id: str, group_ids: list = None
+    ) -> int:
         """
         Delete all logs for a specific execution using injected session.
 
@@ -182,7 +192,7 @@ class ExecutionLogsRepository:
         # Don't commit here - let the service/router manage transactions
         await self.session.flush()
         return result.rowcount
-    
+
     async def delete_all(self) -> int:
         """
         Delete all execution logs using injected session.
@@ -195,7 +205,7 @@ class ExecutionLogsRepository:
         # Don't commit here - let the service/router manage transactions
         await self.session.flush()
         return result.rowcount
-    
+
     async def delete_older_than(self, cutoff: datetime) -> int:
         """
         Delete all execution logs older than a cutoff date.
@@ -211,7 +221,9 @@ class ExecutionLogsRepository:
         await self.session.flush()
         return result.rowcount
 
-    async def count_by_execution_id(self, execution_id: str, group_ids: list = None) -> int:
+    async def count_by_execution_id(
+        self, execution_id: str, group_ids: list = None
+    ) -> int:
         """
         Count logs for a specific execution using injected session.
 
@@ -222,17 +234,12 @@ class ExecutionLogsRepository:
         Returns:
             Number of logs
         """
-        stmt = select(func.count()).select_from(ExecutionLog).where(
-            ExecutionLog.execution_id == execution_id
+        stmt = (
+            select(func.count())
+            .select_from(ExecutionLog)
+            .where(ExecutionLog.execution_id == execution_id)
         )
         if group_ids:
             stmt = stmt.where(ExecutionLog.group_id.in_(group_ids))
         result = await self.session.execute(stmt)
         return result.scalar_one()
-    
-    
-    
-    
-            
-    
- 

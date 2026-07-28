@@ -13,16 +13,16 @@ Date: 2025
 import asyncio
 import logging
 import time
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
 from .models import (
-    SemanticModel,
+    MQueryConversionConfig,
     PowerBITable,
-    TableRelationship,
     ScanStatus,
-    MQueryConversionConfig
+    SemanticModel,
+    TableRelationship,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,9 +44,7 @@ class PowerBIAdminScanner:
     API_BASE = "https://api.powerbi.com/v1.0/myorg"
 
     def __init__(
-        self,
-        access_token: str,
-        config: Optional[MQueryConversionConfig] = None
+        self, access_token: str, config: Optional[MQueryConversionConfig] = None
     ):
         """
         Initialize the scanner.
@@ -57,10 +55,7 @@ class PowerBIAdminScanner:
         """
         self.access_token = access_token
         self.config = config or MQueryConversionConfig(
-            tenant_id="",
-            client_id="",
-            client_secret="",
-            workspace_id=""
+            tenant_id="", client_id="", client_secret="", workspace_id=""
         )
         self._client: Optional[httpx.AsyncClient] = None
 
@@ -69,9 +64,9 @@ class PowerBIAdminScanner:
         self._client = httpx.AsyncClient(
             headers={
                 "Authorization": f"Bearer {self.access_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             },
-            timeout=180.0
+            timeout=180.0,
         )
         return self
 
@@ -84,7 +79,7 @@ class PowerBIAdminScanner:
         """Get request headers"""
         return {
             "Authorization": f"Bearer {self.access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
     def _build_scan_url(self) -> str:
@@ -124,9 +119,7 @@ class PowerBIAdminScanner:
         if not self._client:
             async with httpx.AsyncClient(timeout=180.0) as client:
                 response = await client.post(
-                    url,
-                    headers=self._get_headers(),
-                    json=payload
+                    url, headers=self._get_headers(), json=payload
                 )
         else:
             response = await self._client.post(url, json=payload)
@@ -138,9 +131,7 @@ class PowerBIAdminScanner:
         logger.info(f"Scan initiated with ID: {scan_id}")
 
         return ScanStatus(
-            scan_id=scan_id,
-            status="Running",
-            created_at=data.get("createdDateTime")
+            scan_id=scan_id, status="Running", created_at=data.get("createdDateTime")
         )
 
     async def check_scan_status(self, scan_id: str) -> ScanStatus:
@@ -167,7 +158,7 @@ class PowerBIAdminScanner:
         return ScanStatus(
             scan_id=scan_id,
             status=data.get("status", "Unknown"),
-            error=data.get("error")
+            error=data.get("error"),
         )
 
     async def get_scan_result(self, scan_id: str) -> Dict[str, Any]:
@@ -192,10 +183,7 @@ class PowerBIAdminScanner:
         return response.json()
 
     async def wait_for_scan(
-        self,
-        scan_id: str,
-        timeout_seconds: int = 300,
-        poll_interval: int = 5
+        self, scan_id: str, timeout_seconds: int = 300, poll_interval: int = 5
     ) -> ScanStatus:
         """
         Wait for a scan to complete with polling.
@@ -238,7 +226,7 @@ class PowerBIAdminScanner:
         self,
         workspace_id: str,
         dataset_id: Optional[str] = None,
-        timeout_seconds: int = 300
+        timeout_seconds: int = 300,
     ) -> Tuple[List[SemanticModel], Dict[str, Any]]:
         """
         Scan a workspace and extract semantic models.
@@ -256,8 +244,7 @@ class PowerBIAdminScanner:
 
         # Wait for completion
         final_status = await self.wait_for_scan(
-            scan_status.scan_id,
-            timeout_seconds=timeout_seconds
+            scan_status.scan_id, timeout_seconds=timeout_seconds
         )
 
         if final_status.status != "Succeeded":
@@ -278,19 +265,17 @@ class PowerBIAdminScanner:
                     continue
 
                 model = SemanticModel.from_scan_result(
-                    dataset,
-                    workspace_id=ws_id,
-                    workspace_name=ws_name
+                    dataset, workspace_id=ws_id, workspace_name=ws_name
                 )
                 semantic_models.append(model)
 
-        logger.info(f"Extracted {len(semantic_models)} semantic model(s) from workspace")
+        logger.info(
+            f"Extracted {len(semantic_models)} semantic model(s) from workspace"
+        )
         return semantic_models, raw_data
 
     async def scan_multiple_workspaces(
-        self,
-        workspace_ids: List[str],
-        timeout_seconds: int = 600
+        self, workspace_ids: List[str], timeout_seconds: int = 600
     ) -> Tuple[List[SemanticModel], Dict[str, Any]]:
         """
         Scan multiple workspaces at once.
@@ -309,7 +294,7 @@ class PowerBIAdminScanner:
         final_status = await self.wait_for_scan(
             scan_status.scan_id,
             timeout_seconds=timeout_seconds,
-            poll_interval=10  # Longer poll interval for multi-workspace scans
+            poll_interval=10,  # Longer poll interval for multi-workspace scans
         )
 
         if final_status.status != "Succeeded":
@@ -326,9 +311,7 @@ class PowerBIAdminScanner:
 
             for dataset in workspace.get("datasets", []):
                 model = SemanticModel.from_scan_result(
-                    dataset,
-                    workspace_id=ws_id,
-                    workspace_name=ws_name
+                    dataset, workspace_id=ws_id, workspace_name=ws_name
                 )
                 semantic_models.append(model)
 
@@ -339,9 +322,7 @@ class PowerBIAdminScanner:
         return semantic_models, raw_data
 
     def extract_tables_with_mquery(
-        self,
-        semantic_model: SemanticModel,
-        include_hidden: bool = False
+        self, semantic_model: SemanticModel, include_hidden: bool = False
     ) -> List[PowerBITable]:
         """
         Extract tables that have M-Query source expressions.
@@ -371,9 +352,7 @@ class PowerBIAdminScanner:
         return tables
 
     async def fetch_relationships_via_execute_queries(
-        self,
-        workspace_id: str,
-        dataset_id: str
+        self, workspace_id: str, dataset_id: str
     ) -> List[TableRelationship]:
         """
         Fetch relationships using the Execute Queries API with INFO.VIEW.RELATIONSHIPS().
@@ -398,18 +377,18 @@ class PowerBIAdminScanner:
 
         payload = {
             "queries": [{"query": "EVALUATE INFO.VIEW.RELATIONSHIPS()"}],
-            "serializerSettings": {"includeNulls": True}
+            "serializerSettings": {"includeNulls": True},
         }
 
-        logger.info(f"Fetching relationships via Execute Queries API for dataset {dataset_id}")
+        logger.info(
+            f"Fetching relationships via Execute Queries API for dataset {dataset_id}"
+        )
 
         try:
             # Use the Admin API token - may work if the SP also has workspace access
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
-                    url,
-                    headers=self._get_headers(),
-                    json=payload
+                    url, headers=self._get_headers(), json=payload
                 )
 
             response.raise_for_status()
@@ -456,13 +435,17 @@ class PowerBIAdminScanner:
                     from_column=row.get("[FromColumn]", ""),
                     to_table=to_table,
                     to_column=row.get("[ToColumn]", ""),
-                    cross_filtering_behavior=row.get("[CrossFilteringBehavior]", "OneDirection"),
+                    cross_filtering_behavior=row.get(
+                        "[CrossFilteringBehavior]", "OneDirection"
+                    ),
                     is_active=row.get("[IsActive]", True),
-                    cardinality=cardinality
+                    cardinality=cardinality,
                 )
                 relationships.append(relationship)
 
-            logger.info(f"Extracted {len(relationships)} relationship(s) via Execute Queries API")
+            logger.info(
+                f"Extracted {len(relationships)} relationship(s) via Execute Queries API"
+            )
             return relationships
 
         except httpx.HTTPStatusError as e:
@@ -477,9 +460,7 @@ class PowerBIAdminScanner:
             return []
 
     async def enrich_model_with_relationships(
-        self,
-        model: SemanticModel,
-        workspace_id: str
+        self, model: SemanticModel, workspace_id: str
     ) -> SemanticModel:
         """
         Enrich a semantic model with relationships fetched via Execute Queries API.
@@ -501,7 +482,6 @@ class PowerBIAdminScanner:
                 f"attempting to fetch via Execute Queries API..."
             )
             model.relationships = await self.fetch_relationships_via_execute_queries(
-                workspace_id=workspace_id,
-                dataset_id=model.id
+                workspace_id=workspace_id, dataset_id=model.id
             )
         return model

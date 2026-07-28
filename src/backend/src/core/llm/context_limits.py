@@ -58,7 +58,9 @@ def extend_engine_context_limit_phrases() -> None:
     added = [p for p in _KASAL_CONTEXT_LIMIT_PHRASES if p not in CONTEXT_LIMIT_ERRORS]
     CONTEXT_LIMIT_ERRORS.extend(added)
     if added:
-        logger.info("Extended engine CONTEXT_LIMIT_ERRORS with %d kasal phrases", len(added))
+        logger.info(
+            "Extended engine CONTEXT_LIMIT_ERRORS with %d kasal phrases", len(added)
+        )
 
 
 def is_context_limit_error(error_str: str) -> bool:

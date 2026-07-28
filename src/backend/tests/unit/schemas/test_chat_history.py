@@ -4,29 +4,39 @@ Unit tests for chat history schemas.
 Tests the functionality of Pydantic schemas for chat history operations
 including validation, serialization, and field constraints.
 """
-import pytest
+
 from datetime import datetime
+from typing import Any, Dict, List
+
+import pytest
 from pydantic import ValidationError
-from typing import Dict, Any, List
 
 from src.schemas.chat_history import (
-    ChatHistoryBase, ChatHistoryCreate, ChatHistoryUpdate,
-    ChatHistoryInDBBase, ChatHistoryResponse, ChatHistoryInDB,
-    ChatSessionInfo, ChatSessionListResponse, ChatHistoryListResponse,
-    SaveMessageRequest, GetSessionRequest, GetUserSessionsRequest
+    ChatHistoryBase,
+    ChatHistoryCreate,
+    ChatHistoryInDB,
+    ChatHistoryInDBBase,
+    ChatHistoryListResponse,
+    ChatHistoryResponse,
+    ChatHistoryUpdate,
+    ChatSessionInfo,
+    ChatSessionListResponse,
+    GetSessionRequest,
+    GetUserSessionsRequest,
+    SaveMessageRequest,
 )
 
 
 class TestChatHistoryBase:
     """Test cases for ChatHistoryBase schema."""
-    
+
     def test_valid_chat_history_base_minimal(self):
         """Test ChatHistoryBase with minimal required fields."""
         data = {
             "session_id": "session-123",
             "user_id": "user-456",
             "message_type": "user",
-            "content": "Hello world"
+            "content": "Hello world",
         }
         chat = ChatHistoryBase(**data)
         assert chat.session_id == "session-123"
@@ -46,7 +56,7 @@ class TestChatHistoryBase:
             "content": "I can help you with that",
             "intent": "generate_agent",
             "confidence": "0.95",
-            "generation_result": {"agent_id": "agent-123", "status": "success"}
+            "generation_result": {"agent_id": "agent-123", "status": "success"},
         }
         chat = ChatHistoryBase(**data)
         assert chat.session_id == "session-789"
@@ -63,7 +73,7 @@ class TestChatHistoryBase:
             "session_id": "session-result",
             "user_id": "user-result",
             "message_type": "result",
-            "content": "Final result content"
+            "content": "Final result content",
         }
         chat = ChatHistoryBase(**data)
         assert chat.message_type == "result"
@@ -77,7 +87,7 @@ class TestChatHistoryBase:
                 "session_id": "session-test",
                 "user_id": "user-test",
                 "message_type": msg_type,
-                "content": "Test content"
+                "content": "Test content",
             }
             chat = ChatHistoryBase(**data)
             assert chat.message_type == msg_type
@@ -88,11 +98,11 @@ class TestChatHistoryBase:
             "session_id": "session-test",
             "user_id": "user-test",
             "message_type": "invalid_type",
-            "content": "Test content"
+            "content": "Test content",
         }
         with pytest.raises(ValidationError) as exc_info:
             ChatHistoryBase(**data)
-        
+
         errors = exc_info.value.errors()
         assert any(error["loc"] == ("message_type",) for error in errors)
 
@@ -100,9 +110,11 @@ class TestChatHistoryBase:
         """Test validation with missing required fields."""
         with pytest.raises(ValidationError) as exc_info:
             ChatHistoryBase(session_id="test")
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "user_id" in missing_fields
         assert "message_type" in missing_fields
         assert "content" in missing_fields
@@ -113,36 +125,36 @@ class TestChatHistoryBase:
             "session_id": "session-test",
             "user_id": "user-test",
             "message_type": "user",
-            "content": ""
+            "content": "",
         }
         with pytest.raises(ValidationError) as exc_info:
             ChatHistoryBase(**data)
-        
+
         errors = exc_info.value.errors()
         assert any(error["loc"] == ("content",) for error in errors)
 
 
 class TestChatHistoryCreate:
     """Test cases for ChatHistoryCreate schema."""
-    
+
     def test_chat_history_create_inheritance(self):
         """Test that ChatHistoryCreate inherits from ChatHistoryBase."""
         data = {
             "session_id": "create-session",
             "user_id": "create-user",
             "message_type": "user",
-            "content": "Create test message"
+            "content": "Create test message",
         }
         create_chat = ChatHistoryCreate(**data)
-        
-        assert hasattr(create_chat, 'session_id')
-        assert hasattr(create_chat, 'user_id')
-        assert hasattr(create_chat, 'message_type')
-        assert hasattr(create_chat, 'content')
-        assert hasattr(create_chat, 'intent')
-        assert hasattr(create_chat, 'confidence')
-        assert hasattr(create_chat, 'generation_result')
-        
+
+        assert hasattr(create_chat, "session_id")
+        assert hasattr(create_chat, "user_id")
+        assert hasattr(create_chat, "message_type")
+        assert hasattr(create_chat, "content")
+        assert hasattr(create_chat, "intent")
+        assert hasattr(create_chat, "confidence")
+        assert hasattr(create_chat, "generation_result")
+
         assert create_chat.session_id == "create-session"
         assert create_chat.user_id == "create-user"
         assert create_chat.message_type == "user"
@@ -151,7 +163,7 @@ class TestChatHistoryCreate:
 
 class TestChatHistoryUpdate:
     """Test cases for ChatHistoryUpdate schema."""
-    
+
     def test_chat_history_update_all_optional(self):
         """Test that all ChatHistoryUpdate fields are optional."""
         update = ChatHistoryUpdate()
@@ -162,10 +174,7 @@ class TestChatHistoryUpdate:
 
     def test_chat_history_update_partial(self):
         """Test ChatHistoryUpdate with partial fields."""
-        update_data = {
-            "content": "Updated content",
-            "intent": "generate_task"
-        }
+        update_data = {"content": "Updated content", "intent": "generate_task"}
         update = ChatHistoryUpdate(**update_data)
         assert update.content == "Updated content"
         assert update.intent == "generate_task"
@@ -178,7 +187,7 @@ class TestChatHistoryUpdate:
             "content": "Fully updated content",
             "intent": "generate_crew",
             "confidence": "0.87",
-            "generation_result": {"crew_id": "crew-456", "status": "updated"}
+            "generation_result": {"crew_id": "crew-456", "status": "updated"},
         }
         update = ChatHistoryUpdate(**update_data)
         assert update.content == "Fully updated content"
@@ -191,14 +200,14 @@ class TestChatHistoryUpdate:
         update_data = {"content": ""}
         with pytest.raises(ValidationError) as exc_info:
             ChatHistoryUpdate(**update_data)
-        
+
         errors = exc_info.value.errors()
         assert any(error["loc"] == ("content",) for error in errors)
 
 
 class TestChatHistoryInDBBase:
     """Test cases for ChatHistoryInDBBase schema."""
-    
+
     def test_valid_chat_history_in_db_base(self):
         """Test ChatHistoryInDBBase with all required fields."""
         now = datetime.now()
@@ -210,7 +219,7 @@ class TestChatHistoryInDBBase:
             "content": "Database message",
             "timestamp": now,
             "group_id": "group-123",
-            "group_email": "group@example.com"
+            "group_email": "group@example.com",
         }
         db_chat = ChatHistoryInDBBase(**data)
         assert db_chat.id == "msg-123"
@@ -224,29 +233,31 @@ class TestChatHistoryInDBBase:
 
     def test_chat_history_in_db_base_config(self):
         """Test ChatHistoryInDBBase Config class."""
-        assert hasattr(ChatHistoryInDBBase, 'model_config')
-        assert ChatHistoryInDBBase.model_config.get('from_attributes') is True
+        assert hasattr(ChatHistoryInDBBase, "model_config")
+        assert ChatHistoryInDBBase.model_config.get("from_attributes") is True
 
     def test_missing_db_fields(self):
         """Test validation with missing database fields."""
         data = {
             "session_id": "session-test",
-            "user_id": "user-test", 
+            "user_id": "user-test",
             "message_type": "user",
-            "content": "Test content"
+            "content": "Test content",
         }
         with pytest.raises(ValidationError) as exc_info:
             ChatHistoryInDBBase(**data)
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "id" in missing_fields
         assert "timestamp" in missing_fields
 
 
 class TestChatHistoryResponse:
     """Test cases for ChatHistoryResponse schema."""
-    
+
     def test_chat_history_response_inheritance(self):
         """Test that ChatHistoryResponse inherits from ChatHistoryInDBBase."""
         now = datetime.now()
@@ -256,15 +267,15 @@ class TestChatHistoryResponse:
             "user_id": "response-user",
             "message_type": "execution",
             "content": "Response message",
-            "timestamp": now
+            "timestamp": now,
         }
         response_chat = ChatHistoryResponse(**data)
-        
-        assert hasattr(response_chat, 'id')
-        assert hasattr(response_chat, 'timestamp')
-        assert hasattr(response_chat, 'group_id')
-        assert hasattr(response_chat, 'group_email')
-        
+
+        assert hasattr(response_chat, "id")
+        assert hasattr(response_chat, "timestamp")
+        assert hasattr(response_chat, "group_id")
+        assert hasattr(response_chat, "group_email")
+
         assert response_chat.id == "response-123"
         assert response_chat.session_id == "response-session"
         assert response_chat.timestamp == now
@@ -272,7 +283,7 @@ class TestChatHistoryResponse:
 
 class TestChatSessionInfo:
     """Test cases for ChatSessionInfo schema."""
-    
+
     def test_valid_chat_session_info(self):
         """Test ChatSessionInfo with all fields."""
         now = datetime.now()
@@ -280,7 +291,7 @@ class TestChatSessionInfo:
             "session_id": "session-info-123",
             "user_id": "user-info",
             "latest_timestamp": now,
-            "message_count": 15
+            "message_count": 15,
         }
         session_info = ChatSessionInfo(**data)
         assert session_info.session_id == "session-info-123"
@@ -294,7 +305,7 @@ class TestChatSessionInfo:
         data = {
             "session_id": "session-minimal",
             "user_id": "user-minimal",
-            "latest_timestamp": now
+            "latest_timestamp": now,
         }
         session_info = ChatSessionInfo(**data)
         assert session_info.session_id == "session-minimal"
@@ -304,13 +315,13 @@ class TestChatSessionInfo:
 
     def test_session_info_config(self):
         """Test ChatSessionInfo Config class."""
-        assert hasattr(ChatSessionInfo, 'model_config')
-        assert ChatSessionInfo.model_config.get('from_attributes') is True
+        assert hasattr(ChatSessionInfo, "model_config")
+        assert ChatSessionInfo.model_config.get("from_attributes") is True
 
 
 class TestChatSessionListResponse:
     """Test cases for ChatSessionListResponse schema."""
-    
+
     def test_valid_chat_session_list_response(self):
         """Test ChatSessionListResponse with all fields."""
         now = datetime.now()
@@ -319,24 +330,19 @@ class TestChatSessionListResponse:
                 session_id="session-1",
                 user_id="user-1",
                 latest_timestamp=now,
-                message_count=10
+                message_count=10,
             ),
             ChatSessionInfo(
                 session_id="session-2",
                 user_id="user-1",
                 latest_timestamp=now,
-                message_count=5
-            )
+                message_count=5,
+            ),
         ]
-        
-        data = {
-            "sessions": sessions,
-            "total_sessions": 2,
-            "page": 0,
-            "per_page": 20
-        }
+
+        data = {"sessions": sessions, "total_sessions": 2, "page": 0, "per_page": 20}
         list_response = ChatSessionListResponse(**data)
-        
+
         assert len(list_response.sessions) == 2
         assert list_response.total_sessions == 2
         assert list_response.page == 0
@@ -346,12 +352,7 @@ class TestChatSessionListResponse:
 
     def test_empty_session_list(self):
         """Test ChatSessionListResponse with empty session list."""
-        data = {
-            "sessions": [],
-            "total_sessions": 0,
-            "page": 0,
-            "per_page": 20
-        }
+        data = {"sessions": [], "total_sessions": 0, "page": 0, "per_page": 20}
         list_response = ChatSessionListResponse(**data)
         assert len(list_response.sessions) == 0
         assert list_response.total_sessions == 0
@@ -359,7 +360,7 @@ class TestChatSessionListResponse:
 
 class TestChatHistoryListResponse:
     """Test cases for ChatHistoryListResponse schema."""
-    
+
     def test_valid_chat_history_list_response(self):
         """Test ChatHistoryListResponse with all fields."""
         now = datetime.now()
@@ -370,7 +371,7 @@ class TestChatHistoryListResponse:
                 user_id="list-user",
                 message_type="user",
                 content="First message",
-                timestamp=now
+                timestamp=now,
             ),
             ChatHistoryResponse(
                 id="msg-2",
@@ -378,19 +379,19 @@ class TestChatHistoryListResponse:
                 user_id="list-user",
                 message_type="assistant",
                 content="Second message",
-                timestamp=now
-            )
+                timestamp=now,
+            ),
         ]
-        
+
         data = {
             "messages": messages,
             "total_messages": 2,
             "page": 0,
             "per_page": 50,
-            "session_id": "list-session"
+            "session_id": "list-session",
         }
         list_response = ChatHistoryListResponse(**data)
-        
+
         assert len(list_response.messages) == 2
         assert list_response.total_messages == 2
         assert list_response.page == 0
@@ -402,7 +403,7 @@ class TestChatHistoryListResponse:
 
 class TestSaveMessageRequest:
     """Test cases for SaveMessageRequest schema."""
-    
+
     def test_valid_save_message_request(self):
         """Test SaveMessageRequest with all fields."""
         data = {
@@ -411,7 +412,7 @@ class TestSaveMessageRequest:
             "content": "Save this message",
             "intent": "generate_agent",
             "confidence": 0.92,
-            "generation_result": {"result": "success"}
+            "generation_result": {"result": "success"},
         }
         request = SaveMessageRequest(**data)
         assert request.session_id == "save-session"
@@ -426,7 +427,7 @@ class TestSaveMessageRequest:
         data = {
             "session_id": "save-session",
             "message_type": "result",
-            "content": "Final execution result"
+            "content": "Final execution result",
         }
         request = SaveMessageRequest(**data)
         assert request.message_type == "result"
@@ -436,7 +437,7 @@ class TestSaveMessageRequest:
         data = {
             "session_id": "minimal-session",
             "message_type": "assistant",
-            "content": "Minimal message"
+            "content": "Minimal message",
         }
         request = SaveMessageRequest(**data)
         assert request.session_id == "minimal-session"
@@ -454,7 +455,7 @@ class TestSaveMessageRequest:
                 "session_id": "conf-session",
                 "message_type": "user",
                 "content": "Test confidence",
-                "confidence": confidence
+                "confidence": confidence,
             }
             request = SaveMessageRequest(**data)
             assert request.confidence == confidence
@@ -465,7 +466,7 @@ class TestSaveMessageRequest:
                 "session_id": "conf-session",
                 "message_type": "user",
                 "content": "Test confidence",
-                "confidence": invalid_confidence
+                "confidence": invalid_confidence,
             }
             with pytest.raises(ValidationError):
                 SaveMessageRequest(**data)
@@ -473,13 +474,10 @@ class TestSaveMessageRequest:
 
 class TestGetSessionRequest:
     """Test cases for GetSessionRequest schema."""
-    
+
     def test_valid_get_session_request(self):
         """Test GetSessionRequest with all fields."""
-        data = {
-            "page": 2,
-            "per_page": 25
-        }
+        data = {"page": 2, "per_page": 25}
         request = GetSessionRequest(**data)
         assert request.page == 2
         assert request.per_page == 25
@@ -496,7 +494,7 @@ class TestGetSessionRequest:
         request = GetSessionRequest(page=0, per_page=1)
         assert request.page == 0
         assert request.per_page == 1
-        
+
         request = GetSessionRequest(page=10, per_page=100)
         assert request.page == 10
         assert request.per_page == 100
@@ -504,23 +502,20 @@ class TestGetSessionRequest:
         # Invalid values
         with pytest.raises(ValidationError):
             GetSessionRequest(page=-1)  # page must be >= 0
-            
+
         with pytest.raises(ValidationError):
             GetSessionRequest(per_page=0)  # per_page must be >= 1
-            
+
         with pytest.raises(ValidationError):
             GetSessionRequest(per_page=101)  # per_page must be <= 100
 
 
 class TestGetUserSessionsRequest:
     """Test cases for GetUserSessionsRequest schema."""
-    
+
     def test_valid_get_user_sessions_request(self):
         """Test GetUserSessionsRequest with all fields."""
-        data = {
-            "page": 1,
-            "per_page": 10
-        }
+        data = {"page": 1, "per_page": 10}
         request = GetUserSessionsRequest(**data)
         assert request.page == 1
         assert request.per_page == 10
@@ -537,7 +532,7 @@ class TestGetUserSessionsRequest:
         request = GetUserSessionsRequest(page=0, per_page=1)
         assert request.page == 0
         assert request.per_page == 1
-        
+
         request = GetUserSessionsRequest(page=5, per_page=50)
         assert request.page == 5
         assert request.per_page == 50
@@ -545,17 +540,17 @@ class TestGetUserSessionsRequest:
         # Invalid values
         with pytest.raises(ValidationError):
             GetUserSessionsRequest(page=-1)  # page must be >= 0
-            
+
         with pytest.raises(ValidationError):
             GetUserSessionsRequest(per_page=0)  # per_page must be >= 1
-            
+
         with pytest.raises(ValidationError):
             GetUserSessionsRequest(per_page=51)  # per_page must be <= 50
 
 
 class TestSchemaIntegration:
     """Integration tests for chat history schema interactions."""
-    
+
     def test_chat_message_workflow(self):
         """Test complete chat message workflow."""
         # Create message
@@ -564,17 +559,17 @@ class TestSchemaIntegration:
             "user_id": "workflow-user",
             "message_type": "user",
             "content": "Help me create an agent",
-            "intent": "generate_agent"
+            "intent": "generate_agent",
         }
         create_schema = ChatHistoryCreate(**create_data)
-        
+
         # Update message
         update_data = {
             "confidence": "0.95",
-            "generation_result": {"agent_id": "agent-123", "status": "created"}
+            "generation_result": {"agent_id": "agent-123", "status": "created"},
         }
         update_schema = ChatHistoryUpdate(**update_data)
-        
+
         # Simulate database entity
         now = datetime.now()
         db_data = {
@@ -587,10 +582,10 @@ class TestSchemaIntegration:
             "confidence": update_data["confidence"],
             "generation_result": update_data["generation_result"],
             "timestamp": now,
-            "group_id": "group-123"
+            "group_id": "group-123",
         }
         response = ChatHistoryResponse(**db_data)
-        
+
         # Verify the complete workflow
         assert create_schema.session_id == "workflow-session"
         assert create_schema.intent == "generate_agent"
@@ -598,7 +593,10 @@ class TestSchemaIntegration:
         assert response.id == "msg-workflow-1"
         assert response.session_id == "workflow-session"
         assert response.confidence == "0.95"
-        assert response.generation_result == {"agent_id": "agent-123", "status": "created"}
+        assert response.generation_result == {
+            "agent_id": "agent-123",
+            "status": "created",
+        }
         assert response.timestamp == now
 
     def test_session_management_workflow(self):
@@ -609,17 +607,14 @@ class TestSchemaIntegration:
             session_id="mgmt-session",
             user_id="mgmt-user",
             latest_timestamp=now,
-            message_count=25
+            message_count=25,
         )
-        
+
         # Create session list
         session_list = ChatSessionListResponse(
-            sessions=[session_info],
-            total_sessions=1,
-            page=0,
-            per_page=20
+            sessions=[session_info], total_sessions=1, page=0, per_page=20
         )
-        
+
         # Create message history
         message = ChatHistoryResponse(
             id="mgmt-msg-1",
@@ -627,17 +622,17 @@ class TestSchemaIntegration:
             user_id="mgmt-user",
             message_type="user",
             content="Session management test",
-            timestamp=now
+            timestamp=now,
         )
-        
+
         message_list = ChatHistoryListResponse(
             messages=[message],
             total_messages=1,
             page=0,
             per_page=50,
-            session_id="mgmt-session"
+            session_id="mgmt-session",
         )
-        
+
         # Verify workflow
         assert session_list.sessions[0].session_id == "mgmt-session"
         assert session_list.sessions[0].message_count == 25
@@ -645,13 +640,16 @@ class TestSchemaIntegration:
         assert message_list.session_id == "mgmt-session"
         assert message_list.total_messages == 1
 
+
 # ---------------------------------------------------------------------------
 # Named-session + message-update schemas (server-side chat-mode sessions)
 # ---------------------------------------------------------------------------
 
+
 class TestNamedSessionSchemas:
     def test_save_message_accepts_client_id_and_system_type(self):
         from src.schemas.chat_history import SaveMessageRequest
+
         req = SaveMessageRequest(
             session_id="s1", id="client-1", message_type="system", content="notice"
         )
@@ -660,40 +658,53 @@ class TestNamedSessionSchemas:
 
     def test_save_message_id_optional(self):
         from src.schemas.chat_history import SaveMessageRequest
+
         req = SaveMessageRequest(session_id="s1", message_type="user", content="hi")
         assert req.id is None
 
     def test_save_message_rejects_unknown_type(self):
         import pydantic
         import pytest as _pytest
+
         from src.schemas.chat_history import SaveMessageRequest
+
         with _pytest.raises(pydantic.ValidationError):
             SaveMessageRequest(session_id="s1", message_type="robot", content="x")
 
     def test_update_message_request_all_optional(self):
         from src.schemas.chat_history import UpdateMessageRequest
+
         req = UpdateMessageRequest()
         assert req.content is None and req.generation_result is None
 
     def test_session_create_defaults(self):
         from src.schemas.chat_history import ChatSessionCreateRequest
+
         req = ChatSessionCreateRequest()
         assert req.title == "New Chat" and req.id is None
 
     def test_session_rename_requires_title(self):
         import pydantic
         import pytest as _pytest
+
         from src.schemas.chat_history import ChatSessionRenameRequest
+
         with _pytest.raises(pydantic.ValidationError):
             ChatSessionRenameRequest(title="")
 
     def test_named_session_response_from_orm_row(self):
         from datetime import datetime
-        from src.schemas.chat_history import NamedChatSessionResponse
+
         from src.models.chat_session import ChatSession
+        from src.schemas.chat_history import NamedChatSessionResponse
+
         row = ChatSession(
-            id="s1", title="T", user_id="u@x.com", group_id="g1",
-            created_at=datetime(2026, 6, 11), updated_at=datetime(2026, 6, 11),
+            id="s1",
+            title="T",
+            user_id="u@x.com",
+            group_id="g1",
+            created_at=datetime(2026, 6, 11),
+            updated_at=datetime(2026, 6, 11),
         )
         resp = NamedChatSessionResponse.model_validate(row)
         assert resp.id == "s1" and resp.group_id == "g1"

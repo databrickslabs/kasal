@@ -160,6 +160,8 @@ class ConsolidationPlan(BaseModel):
                 if isinstance(item, (dict, ConsolidationAction)):
                     kept.append(item)
                 else:
-                    logger.warning("dropping malformed consolidation action: %.100r", item)
+                    logger.warning(
+                        "dropping malformed consolidation action: %.100r", item
+                    )
             return kept
         return []

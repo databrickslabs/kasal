@@ -145,9 +145,12 @@ for _key, _mock_mod in _MOCK_MODULES.items():
 # with "not a package"). Hence the try/finally too — restore must be
 # unconditional.
 _handler_path = str(
-    __import__("pathlib").Path(__file__).resolve().parents[5].joinpath(
-        *_HANDLER_MODULE_KEY.split(".")
-    ).with_suffix(".py")
+    __import__("pathlib")
+    .Path(__file__)
+    .resolve()
+    .parents[5]
+    .joinpath(*_HANDLER_MODULE_KEY.split("."))
+    .with_suffix(".py")
 )
 assert __import__("os").path.exists(_handler_path), f"handler moved? {_handler_path}"
 try:

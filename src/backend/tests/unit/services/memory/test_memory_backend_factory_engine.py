@@ -8,22 +8,23 @@ Tests cover:
 - create_memory_backends with validation
 """
 
-import pytest
+from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
-from typing import Dict, Any
 
-from src.services.memory.backend_factory import (
-    MemoryBackendFactory,
-    DatabricksIndexValidationError
-)
+import pytest
+
 from src.schemas.memory_backend import (
+    DatabricksMemoryConfig,
     MemoryBackendConfig,
     MemoryBackendType,
-    DatabricksMemoryConfig
+)
+from src.services.memory.backend_factory import (
+    DatabricksIndexValidationError,
+    MemoryBackendFactory,
 )
 
 # Correct path for patching - the import happens inside the method
-REPO_PATCH_PATH = 'src.repositories.databricks_vector_index_repository.DatabricksVectorIndexRepository'
+REPO_PATCH_PATH = "src.repositories.databricks_vector_index_repository.DatabricksVectorIndexRepository"
 
 
 class TestDatabricksIndexValidationError:
@@ -37,7 +38,7 @@ class TestDatabricksIndexValidationError:
             "missing_indexes": ["short_term: catalog.schema.stm_index"],
             "provisioning_indexes": [],
             "error_message": "Indexes not found",
-            "error_type": "missing_indexes"
+            "error_type": "missing_indexes",
         }
 
         error = DatabricksIndexValidationError("Test error", validation_result)
@@ -54,23 +55,24 @@ class TestDatabricksIndexValidationError:
             "valid": False,
             "valid_indexes": [],
             "missing_indexes": [],
-            "provisioning_indexes": ["entity: catalog.schema.entity_index (state: PROVISIONING)"],
+            "provisioning_indexes": [
+                "entity: catalog.schema.entity_index (state: PROVISIONING)"
+            ],
             "error_message": "Indexes provisioning",
-            "error_type": "provisioning_indexes"
+            "error_type": "provisioning_indexes",
         }
 
         error = DatabricksIndexValidationError("Provisioning error", validation_result)
 
         assert error.error_type == "provisioning_indexes"
         assert error.missing_indexes == []
-        assert error.provisioning_indexes == ["entity: catalog.schema.entity_index (state: PROVISIONING)"]
+        assert error.provisioning_indexes == [
+            "entity: catalog.schema.entity_index (state: PROVISIONING)"
+        ]
 
     def test_exception_creation_with_unknown_error_type(self):
         """Test exception creation with unknown error type defaults correctly."""
-        validation_result = {
-            "valid": False,
-            "error_message": "Unknown error"
-        }
+        validation_result = {"valid": False, "error_message": "Unknown error"}
 
         error = DatabricksIndexValidationError("Unknown", validation_result)
 
@@ -85,11 +87,12 @@ class TestCreateMemoryBackendsValidation:
     @pytest.fixture
     def databricks_config(self):
         """Create a standard Databricks memory config for testing."""
-        return DatabricksMemoryConfig(memory_index="catalog.schema.memory_index", 
+        return DatabricksMemoryConfig(
+            memory_index="catalog.schema.memory_index",
             workspace_url="https://example.databricks.com",
             endpoint_name="test-endpoint",
             short_term_index="catalog.schema.stm_index",
-            embedding_dimension=1024
+            embedding_dimension=1024,
         )
 
     @pytest.fixture
@@ -100,24 +103,19 @@ class TestCreateMemoryBackendsValidation:
             databricks_config=databricks_config,
             enable_short_term=True,
             enable_long_term=False,
-            enable_entity=False
+            enable_entity=False,
         )
 
     @pytest.mark.asyncio
     async def test_create_default_backend_skips_validation(self):
         """Test that DEFAULT backend type skips Databricks validation."""
         config = MemoryBackendConfig(
-            backend_type=MemoryBackendType.DEFAULT,
-            enable_short_term=True
+            backend_type=MemoryBackendType.DEFAULT, enable_short_term=True
         )
 
         # Should not raise any errors - DEFAULT backend doesn't validate Databricks indexes
         result = await MemoryBackendFactory.create_memory_backends(
-            config=config,
-            crew_id="test_crew_123",
-            embedder=None
+            config=config, crew_id="test_crew_123", embedder=None
         )
 
         assert result == {}  # Default backend returns empty dict
-
-

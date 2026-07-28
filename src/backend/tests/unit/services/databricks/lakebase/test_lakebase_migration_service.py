@@ -4,10 +4,11 @@ Unit tests for services/lakebase_migration_service.py
 Auto-generated test template. TODO: Add comprehensive test coverage.
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from src.services.databricks.lakebase.migration import LakebaseMigrationService
+from unittest.mock import MagicMock, Mock, patch
 
+import pytest
+
+from src.services.databricks.lakebase.migration import LakebaseMigrationService
 
 
 class TestLakebaseMigrationService:
@@ -280,7 +281,9 @@ class TestMigrateTableDataSyncFKFilter:
         """execution_trace SELECT should include a WHERE clause for FK filtering (SQLite)."""
         rows = [(1, "job-1", "{}", "2024-01-01")]
         columns = ["id", "job_id", "output", "created_at"]
-        source_engine, source_conn = self._make_source_engine(rows, columns, is_sqlite=True)
+        source_engine, source_conn = self._make_source_engine(
+            rows, columns, is_sqlite=True
+        )
         lakebase_engine = self._make_lakebase_engine()
 
         row_count, error = service.migrate_table_data_sync(
@@ -300,7 +303,9 @@ class TestMigrateTableDataSyncFKFilter:
         """execution_trace SELECT should include a WHERE clause for FK filtering (PostgreSQL)."""
         rows = [(1, "job-1", "{}", "2024-01-01")]
         columns = ["id", "job_id", "output", "created_at"]
-        source_engine, source_conn = self._make_source_engine(rows, columns, is_sqlite=False)
+        source_engine, source_conn = self._make_source_engine(
+            rows, columns, is_sqlite=False
+        )
         lakebase_engine = self._make_lakebase_engine()
 
         row_count, error = service.migrate_table_data_sync(
@@ -320,7 +325,9 @@ class TestMigrateTableDataSyncFKFilter:
         """A table not in fk_existence_filters should NOT get a WHERE clause."""
         rows = [(1, "val")]
         columns = ["id", "col1"]
-        source_engine, source_conn = self._make_source_engine(rows, columns, is_sqlite=True)
+        source_engine, source_conn = self._make_source_engine(
+            rows, columns, is_sqlite=True
+        )
         lakebase_engine = self._make_lakebase_engine()
 
         row_count, error = service.migrate_table_data_sync(
@@ -519,7 +526,9 @@ class TestConvertRowTypesExtended:
     def test_boolean_int_to_bool_conversion(self, service):
         """SQLite integer 0/1 should be converted to Python bool for boolean columns."""
         row = {"verbose": 1, "allow_delegation": 0, "name": "test"}
-        result = service.convert_row_types(row, "agents", ["verbose", "allow_delegation", "name"])
+        result = service.convert_row_types(
+            row, "agents", ["verbose", "allow_delegation", "name"]
+        )
         assert result["verbose"] is True
         assert result["allow_delegation"] is False
         assert result["name"] == "test"
@@ -527,6 +536,7 @@ class TestConvertRowTypesExtended:
     def test_json_dict_serialized(self, service):
         """Dict values in JSON columns should be serialized to JSON strings."""
         import json
+
         row = {"config": {"key": "value"}, "id": 1}
         result = service.convert_row_types(row, "tools", ["config", "id"])
         assert result["config"] == json.dumps({"key": "value"})
@@ -537,6 +547,7 @@ class TestConvertRowTypesExtended:
         row = {"created_at": "2024-06-15T10:30:00", "id": 1}
         result = service.convert_row_types(row, "agents", ["created_at", "id"])
         from datetime import datetime
+
         assert isinstance(result["created_at"], datetime)
         assert result["created_at"].year == 2024
         assert result["created_at"].month == 6
@@ -546,12 +557,15 @@ class TestConvertRowTypesExtended:
         row = {"created_at": "2024-06-15T10:30:00Z"}
         result = service.convert_row_types(row, "agents", ["created_at"])
         from datetime import datetime
+
         assert isinstance(result["created_at"], datetime)
 
     def test_none_values_preserved(self, service):
         """None values should pass through unchanged regardless of column type."""
         row = {"config": None, "verbose": None, "created_at": None, "name": None}
-        result = service.convert_row_types(row, "agents", ["config", "verbose", "created_at", "name"])
+        result = service.convert_row_types(
+            row, "agents", ["config", "verbose", "created_at", "name"]
+        )
         # JSON None -> None, bool None -> None, datetime None -> None
         assert result["config"] is None
         assert result["verbose"] is None
@@ -579,7 +593,7 @@ class TestResetSequencesSync:
         mock_conn = MagicMock()
 
         def execute_side_effect(stmt):
-            sql = stmt.text if hasattr(stmt, 'text') else str(stmt)
+            sql = stmt.text if hasattr(stmt, "text") else str(stmt)
             if "pg_sequences" in sql:
                 result = MagicMock()
                 result.fetchall.return_value = sequences
@@ -610,8 +624,7 @@ class TestResetSequencesSync:
     def test_resets_sequence_to_max_id(self, service):
         """Sequences should be reset to MAX(id) of their table."""
         engine, mock_conn = self._make_engine(
-            sequences=[("executionhistory_id_seq",)],
-            max_ids={"executionhistory": 42}
+            sequences=[("executionhistory_id_seq",)], max_ids={"executionhistory": 42}
         )
 
         results = service.reset_sequences_sync(engine, ["executionhistory"])
@@ -624,8 +637,7 @@ class TestResetSequencesSync:
     def test_empty_table_resets_to_one(self, service):
         """Empty tables should have sequence reset to 1 with is_called=false."""
         engine, mock_conn = self._make_engine(
-            sequences=[("users_id_seq",)],
-            max_ids={"users": 0}
+            sequences=[("users_id_seq",)], max_ids={"users": 0}
         )
 
         results = service.reset_sequences_sync(engine, ["users"])
@@ -649,10 +661,12 @@ class TestResetSequencesSync:
                 ("agents_id_seq",),
                 ("tasks_id_seq",),
             ],
-            max_ids={"executionhistory": 100, "agents": 50, "tasks": 25}
+            max_ids={"executionhistory": 100, "agents": 50, "tasks": 25},
         )
 
-        results = service.reset_sequences_sync(engine, ["executionhistory", "agents", "tasks"])
+        results = service.reset_sequences_sync(
+            engine, ["executionhistory", "agents", "tasks"]
+        )
 
         assert len(results) == 3
         assert all(ok for _, ok, _ in results)
@@ -663,7 +677,7 @@ class TestResetSequencesSync:
         call_count = [0]
 
         def execute_side_effect(stmt):
-            sql = stmt.text if hasattr(stmt, 'text') else str(stmt)
+            sql = stmt.text if hasattr(stmt, "text") else str(stmt)
             if "pg_sequences" in sql:
                 result = MagicMock()
                 result.fetchall.return_value = [
@@ -701,8 +715,7 @@ class TestResetSequencesSync:
     def test_short_sequence_name_uses_first_part(self, service):
         """Sequence names with fewer than 3 underscore parts use parts[0] as table."""
         engine, mock_conn = self._make_engine(
-            sequences=[("id_seq",)],
-            max_ids={"id": 5}
+            sequences=[("id_seq",)], max_ids={"id": 5}
         )
 
         results = service.reset_sequences_sync(engine, [])
@@ -716,7 +729,7 @@ class TestResetSequencesSync:
         call_count = [0]
 
         def execute_side_effect(stmt):
-            sql = stmt.text if hasattr(stmt, 'text') else str(stmt)
+            sql = stmt.text if hasattr(stmt, "text") else str(stmt)
             if "pg_sequences" in sql:
                 result = MagicMock()
                 result.fetchall.return_value = [("bad_table_id_seq",)]

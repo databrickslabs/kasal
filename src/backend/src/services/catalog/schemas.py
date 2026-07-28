@@ -1,20 +1,30 @@
-from typing import List, Optional, Dict, Any
-import logging
 import json
+import logging
+from typing import Any, Dict, List, Optional
 
-from src.core.exceptions import KasalError, NotFoundError, ConflictError, BadRequestError
-
+from src.core.exceptions import (
+    BadRequestError,
+    ConflictError,
+    KasalError,
+    NotFoundError,
+)
 from src.repositories.schema_repository import SchemaRepository
-from src.schemas.schema import SchemaCreate, SchemaUpdate, SchemaResponse, SchemaListResponse
+from src.schemas.schema import (
+    SchemaCreate,
+    SchemaListResponse,
+    SchemaResponse,
+    SchemaUpdate,
+)
 
 logger = logging.getLogger(__name__)
+
 
 class SchemaService:
     """
     Service for Schema business logic and error handling.
     Acts as an intermediary between the API routers and the repository.
     """
-    
+
     def __init__(self, session=None, repository: SchemaRepository = None):
         """
         Initialize service with session or repository.
@@ -31,7 +41,7 @@ class SchemaService:
             self.repository = SchemaRepository(session)
         else:
             raise ValueError("Either session or repository must be provided")
-    
+
     async def get_all_schemas(self) -> SchemaListResponse:
         """
         Get all schemas using repository injection.
@@ -42,9 +52,9 @@ class SchemaService:
         schemas = await self.repository.list()
         return SchemaListResponse(
             schemas=[SchemaResponse.model_validate(schema) for schema in schemas],
-            count=len(schemas)
+            count=len(schemas),
         )
-    
+
     async def get_schema_by_name(self, name: str) -> SchemaResponse:
         """
         Get a schema by name using repository injection.
@@ -77,9 +87,9 @@ class SchemaService:
         schemas = await self.repository.find_by_type(schema_type)
         return SchemaListResponse(
             schemas=[SchemaResponse.model_validate(schema) for schema in schemas],
-            count=len(schemas)
+            count=len(schemas),
         )
-    
+
     async def create_schema(self, schema_data: SchemaCreate) -> SchemaResponse:
         """
         Create a new schema using repository injection.
@@ -97,14 +107,16 @@ class SchemaService:
         existing_schema = await self.repository.find_by_name(schema_data.name)
         if existing_schema:
             logger.warning(f"Schema with name '{schema_data.name}' already exists")
-            raise ConflictError(detail=f"Schema with name '{schema_data.name}' already exists")
+            raise ConflictError(
+                detail=f"Schema with name '{schema_data.name}' already exists"
+            )
 
         # Handle legacy schema_json field if provided
         schema_dict = schema_data.model_dump()
 
         # Remove legacy_schema_json to prevent SQLAlchemy error
-        if 'legacy_schema_json' in schema_dict:
-            schema_dict.pop('legacy_schema_json')
+        if "legacy_schema_json" in schema_dict:
+            schema_dict.pop("legacy_schema_json")
 
         # Validate JSON fields
         try:
@@ -120,8 +132,10 @@ class SchemaService:
         except Exception as e:
             logger.error(f"Error creating schema: {str(e)}")
             raise KasalError(detail=f"Error creating schema: {str(e)}")
-    
-    async def update_schema(self, name: str, schema_data: SchemaUpdate) -> SchemaResponse:
+
+    async def update_schema(
+        self, name: str, schema_data: SchemaUpdate
+    ) -> SchemaResponse:
         """
         Update an existing schema.
 
@@ -145,12 +159,16 @@ class SchemaService:
         update_data = schema_data.model_dump(exclude_unset=True, by_alias=True)
 
         # Handle legacy schema_json field if provided
-        if 'schema_json' in update_data and update_data.get('schema_json') and 'schema_definition' not in update_data:
-            update_data['schema_definition'] = update_data.pop('schema_json')
+        if (
+            "schema_json" in update_data
+            and update_data.get("schema_json")
+            and "schema_definition" not in update_data
+        ):
+            update_data["schema_definition"] = update_data.pop("schema_json")
 
         # Remove legacy_schema_json to prevent SQLAlchemy error
-        if 'legacy_schema_json' in update_data:
-            update_data.pop('legacy_schema_json')
+        if "legacy_schema_json" in update_data:
+            update_data.pop("legacy_schema_json")
 
         # Validate JSON fields
         try:
@@ -167,7 +185,7 @@ class SchemaService:
         except Exception as e:
             logger.error(f"Error updating schema: {str(e)}")
             raise KasalError(detail=f"Error updating schema: {str(e)}")
-    
+
     async def delete_schema(self, name: str) -> bool:
         """
         Delete a schema by name.
@@ -191,47 +209,50 @@ class SchemaService:
         await self.repository.delete(schema.id)
         # Repository handles commit internally for single operations
         return True
-    
+
     def _validate_json_fields(self, data: Dict[str, Any]) -> None:
         """
         Validate JSON fields in schema data.
-        
+
         Args:
             data: Dictionary of schema data
-            
+
         Raises:
             ValueError: If JSON validation fails
         """
         json_fields = {
-            'schema_definition': 'Schema definition',
-            'field_descriptions': 'Field descriptions',
-            'example_data': 'Example data',
-            'keywords': 'Keywords',
-            'tools': 'Tools'
+            "schema_definition": "Schema definition",
+            "field_descriptions": "Field descriptions",
+            "example_data": "Example data",
+            "keywords": "Keywords",
+            "tools": "Tools",
         }
-        
+
         for field, label in json_fields.items():
             if field in data and data[field] is not None:
                 value = data[field]
-                
+
                 # If it's a string, try to parse it as JSON
                 if isinstance(value, str):
                     try:
                         data[field] = json.loads(value)
                     except json.JSONDecodeError as e:
                         raise ValueError(f"{label} contains invalid JSON: {str(e)}")
-                
+
                 # Additional validation for array fields
-                if field in ['keywords', 'tools'] and data[field] is not None:
+                if field in ["keywords", "tools"] and data[field] is not None:
                     if not isinstance(data[field], list):
                         data[field] = []  # Default to empty list
-                
+
                 # Additional validation for object fields
-                if field in ['schema_definition', 'field_descriptions'] and data[field] is not None:
+                if (
+                    field in ["schema_definition", "field_descriptions"]
+                    and data[field] is not None
+                ):
                     if not isinstance(data[field], dict):
                         raise ValueError(f"{label} must be a valid JSON object")
-        
+
         # Schema definition must be a non-empty object if provided
-        if 'schema_definition' in data and data['schema_definition'] is not None:
-            if not data['schema_definition']:
-                raise ValueError("Schema definition cannot be empty") 
+        if "schema_definition" in data and data["schema_definition"] is not None:
+            if not data["schema_definition"]:
+                raise ValueError("Schema definition cannot be empty")

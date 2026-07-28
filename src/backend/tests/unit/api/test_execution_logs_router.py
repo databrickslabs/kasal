@@ -3,22 +3,23 @@
 Tests all three routers (logs_router, runs_router, router) and their endpoints
 using direct async function calls with mocked service dependencies.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-from types import SimpleNamespace
-from datetime import datetime
 
+from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from src.api.execution_logs_router import (
-    get_execution_logs,
-    get_run_logs,
-    get_execution_logs_main,
     create_execution_log,
+    get_execution_logs,
+    get_execution_logs_main,
+    get_run_logs,
     logs_router,
-    runs_router,
     router,
+    runs_router,
 )
 from src.utils.user_context import GroupContext
 
@@ -44,6 +45,7 @@ def make_log(content="Test log", ts=None):
 # logs_router: GET /logs/executions/{execution_id}
 # ---------------------------------------------------------------------------
 
+
 class TestGetExecutionLogs:
     """Tests for get_execution_logs endpoint on logs_router."""
 
@@ -63,9 +65,7 @@ class TestGetExecutionLogs:
 
         assert len(result) == 2
         assert result[0]["content"] == "log1"
-        svc.get_execution_logs_by_group.assert_called_once_with(
-            "exec-1", gc(), 1000, 0
-        )
+        svc.get_execution_logs_by_group.assert_called_once_with("exec-1", gc(), 1000, 0)
 
     @pytest.mark.asyncio
     async def test_returns_empty_list_when_no_logs(self):
@@ -81,16 +81,12 @@ class TestGetExecutionLogs:
         )
 
         assert result == []
-        svc.get_execution_logs_by_group.assert_called_once_with(
-            "exec-2", gc(), 500, 10
-        )
+        svc.get_execution_logs_by_group.assert_called_once_with("exec-2", gc(), 500, 10)
 
     @pytest.mark.asyncio
     async def test_propagates_service_exception(self):
         svc = AsyncMock()
-        svc.get_execution_logs_by_group = AsyncMock(
-            side_effect=Exception("db down")
-        )
+        svc.get_execution_logs_by_group = AsyncMock(side_effect=Exception("db down"))
 
         with pytest.raises(Exception, match="db down"):
             await get_execution_logs(
@@ -105,6 +101,7 @@ class TestGetExecutionLogs:
 # ---------------------------------------------------------------------------
 # runs_router: GET /runs/{run_id}/outputs
 # ---------------------------------------------------------------------------
+
 
 class TestGetRunLogs:
     """Tests for get_run_logs endpoint on runs_router."""
@@ -155,14 +152,13 @@ class TestGetRunLogs:
             offset=50,
         )
 
-        svc.get_execution_logs_by_group.assert_called_once_with(
-            "run-3", gc(), 500, 50
-        )
+        svc.get_execution_logs_by_group.assert_called_once_with("run-3", gc(), 500, 50)
 
 
 # ---------------------------------------------------------------------------
 # router: GET /execution-logs/{execution_id}
 # ---------------------------------------------------------------------------
+
 
 class TestGetExecutionLogsMain:
     """Tests for get_execution_logs_main endpoint on router."""
@@ -205,6 +201,7 @@ class TestGetExecutionLogsMain:
 # router: POST /execution-logs/
 # ---------------------------------------------------------------------------
 
+
 class TestCreateExecutionLog:
     """Tests for create_execution_log endpoint (501 not implemented)."""
 
@@ -223,6 +220,7 @@ class TestCreateExecutionLog:
 # ---------------------------------------------------------------------------
 # Router configuration
 # ---------------------------------------------------------------------------
+
 
 class TestRouterConfiguration:
     """Tests for router prefix and tags."""
@@ -244,14 +242,15 @@ class TestRouterConfiguration:
 # TestClient integration tests for query-parameter validation
 # ---------------------------------------------------------------------------
 
+
 class TestQueryParameterValidation:
     """Tests that FastAPI enforces query parameter constraints."""
 
     @pytest.fixture
     def client(self):
         from src.api.execution_logs_router import (
-            logs_router,
             get_execution_logs_service,
+            logs_router,
         )
         from src.core.dependencies import get_group_context
 

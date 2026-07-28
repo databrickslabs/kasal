@@ -9,7 +9,7 @@ base for THAT group only. Disabled base servers are hidden from workspaces.
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.models.mcp_server import MCPServer
@@ -125,9 +125,9 @@ async def test_find_by_names_group_scope_base_resolves_without_group(session):
     await _add(session, "global_a", group_id=None, enabled=True)
     await _add(session, "global_off", group_id=None, enabled=False)
 
-    assert _names(await repo.find_by_names_group_scope(
-        ["global_a", "global_off"], None
-    )) == ["global_a"]
+    assert _names(
+        await repo.find_by_names_group_scope(["global_a", "global_off"], None)
+    ) == ["global_a"]
 
 
 # ── Global disable cascades to workspaces ─────────────────────────────────────
@@ -138,8 +138,8 @@ async def test_disabled_base_hides_enabled_workspace_override_in_list(session):
     """Global disable cascades: when a system admin disables the base, a workspace
     that opted in (enabled override) no longer sees the server."""
     repo = MCPServerRepository(session)
-    await _add(session, "shared", group_id=None, enabled=False)   # global disabled
-    await _add(session, "shared", group_id="ws1", enabled=True)   # ws1 opted in
+    await _add(session, "shared", group_id=None, enabled=False)  # global disabled
+    await _add(session, "shared", group_id="ws1", enabled=True)  # ws1 opted in
 
     assert await repo.list_for_group_scope("ws1") == []
 
@@ -149,9 +149,9 @@ async def test_disabled_base_blocks_resolution_despite_enabled_override(session)
     """Execution-time: a disabled global base blocks resolution even where the
     workspace override is enabled. A workspace-only server (no base) is unaffected."""
     repo = MCPServerRepository(session)
-    await _add(session, "shared", group_id=None, enabled=False)   # global disabled
-    await _add(session, "shared", group_id="ws1", enabled=True)   # ws1 opted in
-    await _add(session, "wsonly", group_id="ws1", enabled=True)   # no base row
+    await _add(session, "shared", group_id=None, enabled=False)  # global disabled
+    await _add(session, "shared", group_id="ws1", enabled=True)  # ws1 opted in
+    await _add(session, "wsonly", group_id="ws1", enabled=True)  # no base row
 
     resolved = await repo.find_by_names_group_scope(["shared", "wsonly"], "ws1")
     assert _names(resolved) == ["wsonly"]
@@ -204,10 +204,10 @@ async def test_picker_source_excludes_globally_disabled_even_for_admins(session)
     (enabled_only=False), where workspace-disabled servers are still shown."""
     from src.services.mcp.service import MCPService
 
-    await _add(session, "shared", group_id=None, enabled=False)   # globally disabled
-    await _add(session, "shared", group_id="ws1", enabled=True)   # ws1 opted in
-    await _add(session, "live", group_id=None, enabled=True)      # globally available
-    await _add(session, "live", group_id="ws1", enabled=True)     # ws1 opted in
+    await _add(session, "shared", group_id=None, enabled=False)  # globally disabled
+    await _add(session, "shared", group_id="ws1", enabled=True)  # ws1 opted in
+    await _add(session, "live", group_id=None, enabled=True)  # globally available
+    await _add(session, "live", group_id="ws1", enabled=True)  # ws1 opted in
 
     svc = MCPService(session)
     resp = await svc.get_all_servers_effective("ws1", enabled_only=False)

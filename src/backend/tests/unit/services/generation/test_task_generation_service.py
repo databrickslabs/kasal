@@ -13,24 +13,25 @@ Covers all methods, branches, and error paths including:
 """
 
 import json
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.generation.tasks import TaskGenerationService
+import pytest
+
 from src.schemas.task_generation import (
-    TaskGenerationRequest,
-    TaskGenerationResponse,
     AdvancedConfig,
     Agent,
     LLMGuardrailConfig,
+    TaskGenerationRequest,
+    TaskGenerationResponse,
 )
+from src.services.generation.tasks import TaskGenerationService
 from src.utils.user_context import GroupContext
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_group_context(**overrides):
     defaults = dict(
@@ -40,7 +41,6 @@ def _make_group_context(**overrides):
     )
     defaults.update(overrides)
     return GroupContext(**defaults)
-
 
 
 def _valid_task_json(**overrides):
@@ -110,8 +110,10 @@ class TestInit:
 
     def test_log_service_created(self):
         session = MagicMock()
-        with patch("src.services.generation.tasks.LLMLogRepository") as MockRepo, \
-             patch("src.services.generation.tasks.LLMLogService") as MockLogSvc:
+        with (
+            patch("src.services.generation.tasks.LLMLogRepository") as MockRepo,
+            patch("src.services.generation.tasks.LLMLogService") as MockLogSvc,
+        ):
             svc = TaskGenerationService(session)
             MockRepo.assert_called_once_with(session)
             MockLogSvc.assert_called_once_with(MockRepo.return_value)
@@ -129,14 +131,21 @@ class TestSuggestGuardrail:
         svc = TaskGenerationService(MagicMock())
         svc._log_llm_interaction = AsyncMock()
         with patch("src.services.generation.tasks.LLMManager") as MockLLM:
-            MockLLM.completion = AsyncMock(return_value='  "Must include at least 4 KPI tiles."  ')
+            MockLLM.completion = AsyncMock(
+                return_value='  "Must include at least 4 KPI tiles."  '
+            )
             result = await svc.suggest_guardrail(
-                "Build a dashboard", "A dashboard with KPIs", model="databricks-claude-sonnet-4-5",
+                "Build a dashboard",
+                "A dashboard with KPIs",
+                model="databricks-claude-sonnet-4-5",
             )
         # Surrounding whitespace/quotes stripped.
         assert result == "Must include at least 4 KPI tiles."
         # Uses the model passed (the chat-input selection), not a hardcoded one.
-        assert MockLLM.completion.call_args.kwargs["model"] == "databricks-claude-sonnet-4-5"
+        assert (
+            MockLLM.completion.call_args.kwargs["model"]
+            == "databricks-claude-sonnet-4-5"
+        )
         svc._log_llm_interaction.assert_awaited()
 
     @pytest.mark.asyncio
@@ -246,9 +255,13 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="build a research task")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
-            MockTS.get_effective_template_content = AsyncMock(return_value="System prompt here")
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
+            MockTS.get_effective_template_content = AsyncMock(
+                return_value="System prompt here"
+            )
             MockLLM.completion = AsyncMock(return_value=_valid_task_json())
 
             result = await svc.generate_task(request)
@@ -265,8 +278,10 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task", model="my-custom-model")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=_valid_task_json())
 
@@ -280,9 +295,11 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM, \
-             patch.dict("os.environ", {"TASK_MODEL": "env-model"}):
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+            patch.dict("os.environ", {"TASK_MODEL": "env-model"}),
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=_valid_task_json())
 
@@ -320,17 +337,25 @@ class TestGenerateTask:
     @pytest.mark.asyncio
     async def test_agent_context_appended_to_prompt(self):
         svc = self._build_service()
-        agent = Agent(name="Analyst", role="Data Analyst", goal="Analyze data", backstory="Expert")
+        agent = Agent(
+            name="Analyst", role="Data Analyst", goal="Analyze data", backstory="Expert"
+        )
         request = TaskGenerationRequest(text="analyze sales", agent=agent)
         captured_messages = []
 
-        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000, **kwargs):
+        async def capture_completion(
+            messages, model, temperature=0.7, max_tokens=4000, **kwargs
+        ):
             captured_messages.extend(messages)
             return _valid_task_json()
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
-            MockTS.get_effective_template_content = AsyncMock(return_value="Base prompt")
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
+            MockTS.get_effective_template_content = AsyncMock(
+                return_value="Base prompt"
+            )
             MockLLM.completion = capture_completion
 
             await svc.generate_task(request)
@@ -347,10 +372,12 @@ class TestGenerateTask:
     async def test_json_in_code_block_extracted(self):
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
-        wrapped = '```json\n' + _valid_task_json() + '\n```'
+        wrapped = "```json\n" + _valid_task_json() + "\n```"
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=wrapped)
 
@@ -362,10 +389,12 @@ class TestGenerateTask:
     async def test_json_in_plain_code_block_extracted(self):
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
-        wrapped = '```\n' + _valid_task_json() + '\n```'
+        wrapped = "```\n" + _valid_task_json() + "\n```"
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=wrapped)
 
@@ -381,10 +410,12 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
         # No closing ``` — simulates truncated LLM response
-        wrapped = '```json\n' + _valid_task_json() + '\n'
+        wrapped = "```json\n" + _valid_task_json() + "\n"
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=wrapped)
 
@@ -400,8 +431,10 @@ class TestGenerateTask:
         # Content with ``` prefix but JSON is also truncated
         wrapped = '```json\n{"name": "T", "description": "D", "expected_output": "E'
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=wrapped)
 
@@ -419,8 +452,10 @@ class TestGenerateTask:
         # JSON with trailing comma
         bad_json = '{"name": "T", "description": "D", "expected_output": "E",}'
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=bad_json)
 
@@ -435,8 +470,10 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value="")
 
@@ -448,8 +485,10 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=None)
 
@@ -463,8 +502,10 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
 
@@ -483,9 +524,11 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM, \
-             patch("src.services.generation.tasks.robust_json_parser") as mock_parser:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+            patch("src.services.generation.tasks.robust_json_parser") as mock_parser,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value="not valid json")
             mock_parser.side_effect = ValueError("cannot parse")
@@ -504,8 +547,10 @@ class TestGenerateTask:
         request = TaskGenerationRequest(text="task")
         incomplete = json.dumps({"description": "D", "expected_output": "E"})
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=incomplete)
 
@@ -518,8 +563,10 @@ class TestGenerateTask:
         request = TaskGenerationRequest(text="task")
         incomplete = json.dumps({"name": "N", "expected_output": "E"})
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=incomplete)
 
@@ -532,12 +579,16 @@ class TestGenerateTask:
         request = TaskGenerationRequest(text="task")
         incomplete = json.dumps({"name": "N", "description": "D"})
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=incomplete)
 
-            with pytest.raises(ValueError, match="Missing required field: expected_output"):
+            with pytest.raises(
+                ValueError, match="Missing required field: expected_output"
+            ):
                 await svc.generate_task(request)
 
     # -- tools default --
@@ -547,8 +598,10 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=_valid_task_json())
 
@@ -562,8 +615,10 @@ class TestGenerateTask:
         request = TaskGenerationRequest(text="task")
         task_json = _valid_task_json(tools=[{"name": "web_search"}])
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=task_json)
 
@@ -578,8 +633,10 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=_valid_task_json())
 
@@ -606,12 +663,16 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
         task_data = {
-            "name": "T", "description": "D", "expected_output": "E",
+            "name": "T",
+            "description": "D",
+            "expected_output": "E",
             "advanced_config": {"output_json": True},
         }
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=json.dumps(task_data))
 
@@ -624,12 +685,16 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
         task_data = {
-            "name": "T", "description": "D", "expected_output": "E",
+            "name": "T",
+            "description": "D",
+            "expected_output": "E",
             "advanced_config": {"output_json": '{"key": "value"}'},
         }
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=json.dumps(task_data))
 
@@ -642,12 +707,16 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
         task_data = {
-            "name": "T", "description": "D", "expected_output": "E",
+            "name": "T",
+            "description": "D",
+            "expected_output": "E",
             "advanced_config": {"output_json": "not-json-at-all"},
         }
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=json.dumps(task_data))
 
@@ -660,12 +729,16 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
         task_data = {
-            "name": "T", "description": "D", "expected_output": "E",
+            "name": "T",
+            "description": "D",
+            "expected_output": "E",
             "advanced_config": {"output_pydantic": True},
         }
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=json.dumps(task_data))
 
@@ -678,12 +751,16 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
         task_data = {
-            "name": "T", "description": "D", "expected_output": "E",
+            "name": "T",
+            "description": "D",
+            "expected_output": "E",
             "advanced_config": {"context": "not-a-list"},
         }
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=json.dumps(task_data))
 
@@ -696,12 +773,16 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
         task_data = {
-            "name": "T", "description": "D", "expected_output": "E",
+            "name": "T",
+            "description": "D",
+            "expected_output": "E",
             "advanced_config": {"dependencies": "not-a-list"},
         }
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=json.dumps(task_data))
 
@@ -714,12 +795,16 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
         task_data = {
-            "name": "T", "description": "D", "expected_output": "E",
+            "name": "T",
+            "description": "D",
+            "expected_output": "E",
             "advanced_config": {"async_execution": True},
         }
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=json.dumps(task_data))
 
@@ -736,12 +821,16 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
         task_data = {
-            "name": "T", "description": "D", "expected_output": "E",
+            "name": "T",
+            "description": "D",
+            "expected_output": "E",
             "advanced_config": {"markdown": True},
         }
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=json.dumps(task_data))
 
@@ -755,12 +844,16 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
         task_data = {
-            "name": "T", "description": "Desc only", "expected_output": "Out only",
+            "name": "T",
+            "description": "Desc only",
+            "expected_output": "Out only",
             "advanced_config": {"markdown": False},
         }
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=json.dumps(task_data))
 
@@ -777,12 +870,23 @@ class TestGenerateTask:
         request = TaskGenerationRequest(text="task")
         captured_kwargs = {}
 
-        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000, **kwargs):
-            captured_kwargs.update(dict(messages=messages, model=model, temperature=temperature, max_tokens=max_tokens))
+        async def capture_completion(
+            messages, model, temperature=0.7, max_tokens=4000, **kwargs
+        ):
+            captured_kwargs.update(
+                dict(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            )
             return _valid_task_json()
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = capture_completion
 
@@ -797,12 +901,23 @@ class TestGenerateTask:
         request = TaskGenerationRequest(text="task")
         captured_kwargs = {}
 
-        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000, **kwargs):
-            captured_kwargs.update(dict(messages=messages, model=model, temperature=temperature, max_tokens=max_tokens))
+        async def capture_completion(
+            messages, model, temperature=0.7, max_tokens=4000, **kwargs
+        ):
+            captured_kwargs.update(
+                dict(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            )
             return _valid_task_json()
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = capture_completion
 
@@ -818,12 +933,19 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
         task_data = {
-            "name": "T", "description": "D", "expected_output": "E",
-            "llm_guardrail": {"description": "Check for correctness", "llm_model": "some-model"},
+            "name": "T",
+            "description": "D",
+            "expected_output": "E",
+            "llm_guardrail": {
+                "description": "Check for correctness",
+                "llm_model": "some-model",
+            },
         }
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=json.dumps(task_data))
 
@@ -837,8 +959,10 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=_valid_task_json())
 
@@ -854,8 +978,10 @@ class TestGenerateTask:
         gc = _make_group_context()
         request = TaskGenerationRequest(text="task")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=_valid_task_json())
 
@@ -872,12 +998,16 @@ class TestGenerateTask:
         request = TaskGenerationRequest(text="task")
         # Provide advanced_config with only one field
         task_data = {
-            "name": "T", "description": "D", "expected_output": "E",
+            "name": "T",
+            "description": "D",
+            "expected_output": "E",
             "advanced_config": {"priority": 5},
         }
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=json.dumps(task_data))
 
@@ -896,12 +1026,16 @@ class TestGenerateTask:
         svc = self._build_service()
         request = TaskGenerationRequest(text="task")
         task_data = {
-            "name": "T", "description": "D", "expected_output": "E",
+            "name": "T",
+            "description": "D",
+            "expected_output": "E",
             "advanced_config": {"output_json": {"schema": "v1"}},
         }
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=json.dumps(task_data))
 
@@ -926,8 +1060,10 @@ class TestGenerateAndSaveTask:
         gc = _make_group_context()
         request = TaskGenerationRequest(text="task")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=_valid_task_json())
 
@@ -948,12 +1084,23 @@ class TestGenerateAndSaveTask:
 
         captured_kwargs = {}
 
-        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000, **kwargs):
-            captured_kwargs.update(dict(messages=messages, model=model, temperature=temperature, max_tokens=max_tokens))
+        async def capture_completion(
+            messages, model, temperature=0.7, max_tokens=4000, **kwargs
+        ):
+            captured_kwargs.update(
+                dict(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            )
             return _valid_task_json()
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = capture_completion
 
@@ -971,8 +1118,10 @@ class TestGenerateAndSaveTask:
         gc = _make_group_context()
         request = TaskGenerationRequest(text="task")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=_valid_task_json())
 
@@ -1019,7 +1168,9 @@ class TestConvertToTaskCreate:
     def test_dict_tools_converted_to_names(self):
         session = MagicMock()
         svc = TaskGenerationService(session)
-        resp = self._make_response(tools=[{"name": "web_search"}, {"name": "calculator"}])
+        resp = self._make_response(
+            tools=[{"name": "web_search"}, {"name": "calculator"}]
+        )
 
         result = svc.convert_to_task_create(resp)
 
@@ -1044,7 +1195,9 @@ class TestConvertToTaskCreate:
         """Test mixed dict/string tools, verifying dicts without 'name' are skipped."""
         session = MagicMock()
         svc = TaskGenerationService(session)
-        resp = _make_generation_response_ns(tools=[{"name": "t1"}, "t2", {"no_name": True}])
+        resp = _make_generation_response_ns(
+            tools=[{"name": "t1"}, "t2", {"no_name": True}]
+        )
 
         result = svc.convert_to_task_create(resp)
 
@@ -1153,8 +1306,10 @@ class TestGenerateTaskErrorLogging:
         gc = _make_group_context()
         request = TaskGenerationRequest(text="task")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(side_effect=RuntimeError("fail"))
 
@@ -1174,9 +1329,11 @@ class TestGenerateTaskErrorLogging:
         gc = _make_group_context()
         request = TaskGenerationRequest(text="task")
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM, \
-             patch("src.services.generation.tasks.robust_json_parser") as mock_parser:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+            patch("src.services.generation.tasks.robust_json_parser") as mock_parser,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value="bad json")
             mock_parser.side_effect = ValueError("parse fail")
@@ -1209,9 +1366,13 @@ class TestMessageConstruction:
             captured_messages.extend(kwargs.get("messages", []))
             return _valid_task_json()
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
-            MockTS.get_effective_template_content = AsyncMock(return_value="System template")
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
+            MockTS.get_effective_template_content = AsyncMock(
+                return_value="System template"
+            )
             MockLLM.completion = capture_completion
 
             await svc.generate_task(request)
@@ -1231,12 +1392,23 @@ class TestMessageConstruction:
         request = TaskGenerationRequest(text="task")
         captured_kwargs = {}
 
-        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000, **kwargs):
-            captured_kwargs.update(dict(messages=messages, model=model, temperature=temperature, max_tokens=max_tokens))
+        async def capture_completion(
+            messages, model, temperature=0.7, max_tokens=4000, **kwargs
+        ):
+            captured_kwargs.update(
+                dict(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            )
             return _valid_task_json()
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = capture_completion
 
@@ -1276,13 +1448,19 @@ class TestAvailableTools:
         request = TaskGenerationRequest(text="research task", available_tools=available)
         captured_messages = []
 
-        async def capture_completion(messages, model, temperature=0.7, max_tokens=4000, **kwargs):
+        async def capture_completion(
+            messages, model, temperature=0.7, max_tokens=4000, **kwargs
+        ):
             captured_messages.extend(messages)
             return _valid_task_json()
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
-            MockTS.get_effective_template_content = AsyncMock(return_value="Base prompt")
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
+            MockTS.get_effective_template_content = AsyncMock(
+                return_value="Base prompt"
+            )
             MockLLM.completion = capture_completion
 
             await svc.generate_task(request)
@@ -1300,8 +1478,10 @@ class TestAvailableTools:
         svc = self._build_service()
         request = TaskGenerationRequest(text="simple task", available_tools=None)
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=_valid_task_json())
 
@@ -1320,13 +1500,17 @@ class TestAvailableTools:
         request = TaskGenerationRequest(text="task", available_tools=available)
 
         # LLM returns tools that include both allowed and disallowed
-        task_json = _valid_task_json(tools=[
-            {"name": "web_search"},
-            {"name": "calculator"},
-        ])
+        task_json = _valid_task_json(
+            tools=[
+                {"name": "web_search"},
+                {"name": "calculator"},
+            ]
+        )
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=task_json)
 
@@ -1350,21 +1534,27 @@ class TestAvailableTools:
         request = TaskGenerationRequest(text="task", available_tools=available)
 
         # LLM returns a mix of dict tools and string tools
-        task_json = _valid_task_json(tools=[
-            {"name": "web_search"},
-            "file_reader",
-            "unknown_tool",
-        ])
+        task_json = _valid_task_json(
+            tools=[
+                {"name": "web_search"},
+                "file_reader",
+                "unknown_tool",
+            ]
+        )
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=task_json)
 
             result = await svc.generate_task(request)
 
         # web_search (dict) and file_reader (str) are allowed; unknown_tool is not
-        tool_names = [t["name"] if isinstance(t, dict) else str(t) for t in result.tools]
+        tool_names = [
+            t["name"] if isinstance(t, dict) else str(t) for t in result.tools
+        ]
         assert "web_search" in tool_names
         assert "file_reader" in tool_names
         assert "unknown_tool" not in tool_names
@@ -1380,8 +1570,10 @@ class TestAvailableTools:
         # LLM returns tools, but none are allowed
         task_json = _valid_task_json(tools=[{"name": "web_search"}])
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
             MockTS.get_effective_template_content = AsyncMock(return_value="prompt")
             MockLLM.completion = AsyncMock(return_value=task_json)
 
@@ -1417,14 +1609,20 @@ class TestGenieDirectiveNotDuplicated:
             ],
         )
 
-        with patch("src.services.generation.tasks.TemplateService") as MockTS, \
-             patch("src.services.generation.tasks.LLMManager") as MockLLM:
-            MockTS.get_effective_template_content = AsyncMock(return_value="System prompt here")
+        with (
+            patch("src.services.generation.tasks.TemplateService") as MockTS,
+            patch("src.services.generation.tasks.LLMManager") as MockLLM,
+        ):
+            MockTS.get_effective_template_content = AsyncMock(
+                return_value="System prompt here"
+            )
             MockLLM.completion = AsyncMock(return_value=_valid_task_json())
 
             await svc.generate_task(request)
 
-            system_message = MockLLM.completion.call_args.kwargs["messages"][0]["content"]
+            system_message = MockLLM.completion.call_args.kwargs["messages"][0][
+                "content"
+            ]
 
         # Tool list still present so the LLM knows what it may assign
         assert "GenieTool" in system_message

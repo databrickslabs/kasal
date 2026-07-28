@@ -127,6 +127,7 @@ def suppresses_poller_broadcast(execution_id: str, event_type: str) -> bool:
     del _recently_closed_pipes[execution_id]
     return False
 
+
 # One execution per subprocess, so one writer per process. Lets teardown code
 # close the pipe without threading the writer through deeply nested scopes.
 _active_writer: "EventPipeWriter | None" = None
@@ -146,6 +147,7 @@ class EventPipeWriter:
 
     def register(self, bus: Any) -> "EventPipeWriter":
         from kasal_engine import events as engine_events
+
         from src.core.events import (
             LLMCallCompletedEvent,
             LLMStreamChunkEvent,
@@ -186,7 +188,9 @@ class EventPipeWriter:
         except Exception as proj_err:
             # A projection failure must never touch the emitting thread; the
             # DB trace row still records the event.
-            logger.debug(f"[EventPipe] trace projection failed ({event_type}): {proj_err}")
+            logger.debug(
+                f"[EventPipe] trace projection failed ({event_type}): {proj_err}"
+            )
             return
         if frame is not None:
             self._put(frame)
@@ -340,7 +344,9 @@ async def relay_execution_events(
     """
     from src.core.sse_manager import SSEEvent, sse_manager
 
-    group_id = getattr(group_context, "primary_group_id", None) if group_context else None
+    group_id = (
+        getattr(group_context, "primary_group_id", None) if group_context else None
+    )
     group_email = getattr(group_context, "group_email", None) if group_context else None
 
     logger.info(f"[EventPipe] relay started for {execution_id}")
@@ -450,17 +456,22 @@ async def _relay_loop(
                 # Replay stays ON, unlike hitl_request: status is durable lifecycle
                 # state, so a client that reconnects must still catch up to it —
                 # dropping it is what leaves a badge stuck on a stale status.
-                payload = {k: v for k, v in frame.items() if k not in ("kind", "_event_id")}
+                payload = {
+                    k: v for k, v in frame.items() if k not in ("kind", "_event_id")
+                }
                 payload.setdefault("job_id", execution_id)
                 await sse_manager.broadcast_to_job(
                     execution_id,
                     SSEEvent(
                         data=payload,
                         event="execution_update",
-                        id=frame.get("_event_id") or f"{execution_id}_{payload.get('status')}",
+                        id=frame.get("_event_id")
+                        or f"{execution_id}_{payload.get('status')}",
                     ),
                 )
             else:
                 continue  # forward compatibility: ignore unknown frame kinds
         except Exception as sse_err:
-            logger.warning(f"[EventPipe] {kind} broadcast failed for {execution_id}: {sse_err}")
+            logger.warning(
+                f"[EventPipe] {kind} broadcast failed for {execution_id}: {sse_err}"
+            )

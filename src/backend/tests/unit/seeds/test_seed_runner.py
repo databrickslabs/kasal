@@ -21,10 +21,10 @@ import pytest
 
 from src.seeds import seed_runner
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_seeders_dict(*names: str) -> dict:
     """Return an OrderedDict of {name: AsyncMock()} for predictable iteration."""
@@ -106,9 +106,11 @@ class TestRunSeeders:
     @pytest.mark.asyncio
     async def test_runs_multiple_seeders_in_order(self):
         call_order = []
+
         async def _make(name):
             async def _fn():
                 call_order.append(name)
+
             return _fn
 
         seeders = OrderedDict()
@@ -140,9 +142,7 @@ class TestRunSeeders:
     async def test_continues_on_failure(self):
         failing = AsyncMock(side_effect=RuntimeError("boom"))
         passing = AsyncMock()
-        with patch.object(
-            seed_runner, "SEEDERS", {"fail": failing, "pass": passing}
-        ):
+        with patch.object(seed_runner, "SEEDERS", {"fail": failing, "pass": passing}):
             await seed_runner.run_seeders(["fail", "pass"])
         failing.assert_awaited_once()
         passing.assert_awaited_once()
@@ -253,10 +253,12 @@ class TestRunAllSeeders:
         """Seeders in the slow list should not be directly awaited."""
         fast_mock = AsyncMock()
         slow_mock = AsyncMock()
-        seeders = OrderedDict([
-            ("api_keys", fast_mock),
-            ("documentation", slow_mock),
-        ])
+        seeders = OrderedDict(
+            [
+                ("api_keys", fast_mock),
+                ("documentation", slow_mock),
+            ]
+        )
         with patch.object(seed_runner, "SEEDERS", seeders):
             with patch.object(
                 seed_runner, "resync_postgres_sequences", new_callable=AsyncMock
@@ -288,8 +290,13 @@ class TestRunAllSeeders:
     async def test_all_fast_seeder_names_handled(self):
         """Every name in the fast_seeders list should be directly awaited."""
         fast_names = [
-            "groups", "api_keys", "tools", "schemas",
-            "prompt_templates", "model_configs", "example_crews",
+            "groups",
+            "api_keys",
+            "tools",
+            "schemas",
+            "prompt_templates",
+            "model_configs",
+            "example_crews",
         ]
         seeders = _make_seeders_dict(*fast_names)
         with patch.object(seed_runner, "SEEDERS", seeders):
@@ -353,7 +360,11 @@ class TestResyncPostgresSequences:
                 # The function does 'from src.config.settings import settings'
                 # and 'from src.db.session import async_session_factory'
                 # Use a direct patch approach
-                with patch("src.db.session.async_session_factory", return_value=mock_factory, create=True):
+                with patch(
+                    "src.db.session.async_session_factory",
+                    return_value=mock_factory,
+                    create=True,
+                ):
                     await seed_runner.resync_postgres_sequences()
 
         # The function should have executed SQL statements
@@ -373,7 +384,11 @@ class TestResyncPostgresSequences:
     @pytest.mark.asyncio
     async def test_handles_settings_import_error(self):
         """If settings import fails, the outer except should catch it."""
-        original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+        original_import = (
+            __builtins__.__import__
+            if hasattr(__builtins__, "__import__")
+            else __import__
+        )
 
         def failing_import(name, *args, **kwargs):
             if name == "src.config.settings":
@@ -418,7 +433,9 @@ class TestResyncPostgresSequences:
         settings_mod = MagicMock(settings=mock_settings)
 
         with patch.dict("sys.modules", {"src.config.settings": settings_mod}):
-            with patch("src.db.session.async_session_factory", mock_factory_fn, create=True):
+            with patch(
+                "src.db.session.async_session_factory", mock_factory_fn, create=True
+            ):
                 await seed_runner.resync_postgres_sequences()
 
         # execute should be called for: initial query + valid_table setval
@@ -459,7 +476,9 @@ class TestResyncPostgresSequences:
 
         settings_mod = MagicMock(settings=mock_settings)
         with patch.dict("sys.modules", {"src.config.settings": settings_mod}):
-            with patch("src.db.session.async_session_factory", mock_factory_fn, create=True):
+            with patch(
+                "src.db.session.async_session_factory", mock_factory_fn, create=True
+            ):
                 await seed_runner.resync_postgres_sequences()
 
         # 3 calls total: listing + tbl_a (fails) + tbl_b (succeeds)
@@ -584,9 +603,7 @@ class TestRunSeedersWithFactory:
         seeders = OrderedDict([("a", mock_a), ("b", mock_b), ("c", mock_c)])
 
         with patch.object(seed_runner, "SEEDERS", seeders):
-            await seed_runner.run_seeders_with_factory(
-                MagicMock(), exclude={"a", "c"}
-            )
+            await seed_runner.run_seeders_with_factory(MagicMock(), exclude={"a", "c"})
 
         mock_a.assert_not_awaited()
         mock_b.assert_awaited_once()
@@ -768,9 +785,7 @@ class TestMain:
     @pytest.mark.asyncio
     async def test_debug_flag_enables_debug(self):
         with patch("sys.argv", ["script", "--debug", "--all"]):
-            with patch.object(
-                seed_runner, "run_all_seeders", new_callable=AsyncMock
-            ):
+            with patch.object(seed_runner, "run_all_seeders", new_callable=AsyncMock):
                 # Patch logging import that main() uses
                 with patch.object(seed_runner, "DEBUG", False):
                     try:
@@ -836,10 +851,12 @@ class TestRunAllSeedersIntegration:
         slow_mock = AsyncMock()
         fake_task = MagicMock()
 
-        seeders = OrderedDict([
-            ("tools", fast_mock),
-            ("documentation", slow_mock),
-        ])
+        seeders = OrderedDict(
+            [
+                ("tools", fast_mock),
+                ("documentation", slow_mock),
+            ]
+        )
 
         with patch.object(seed_runner, "SEEDERS", seeders):
             with patch.object(
@@ -862,8 +879,14 @@ class TestRunAllSeedersIntegration:
     async def test_all_seeders_scenario(self):
         """Simulate having every registerable seeder present at once."""
         all_names = [
-            "tools", "schemas", "prompt_templates", "model_configs",
-            "documentation", "groups", "api_keys", "example_crews",
+            "tools",
+            "schemas",
+            "prompt_templates",
+            "model_configs",
+            "documentation",
+            "groups",
+            "api_keys",
+            "example_crews",
         ]
         seeders = _make_seeders_dict(*all_names)
 
@@ -879,8 +902,13 @@ class TestRunAllSeedersIntegration:
 
         # Fast seeders should be awaited
         fast_names = [
-            "tools", "schemas", "prompt_templates", "model_configs",
-            "groups", "api_keys", "example_crews",
+            "tools",
+            "schemas",
+            "prompt_templates",
+            "model_configs",
+            "groups",
+            "api_keys",
+            "example_crews",
         ]
         for name in fast_names:
             seeders[name].assert_awaited_once()

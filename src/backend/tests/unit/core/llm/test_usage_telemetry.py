@@ -37,14 +37,16 @@ class TestShouldSend:
 
     def test_local_deployment_short_circuits(self):
         """No workspace and no user token: nothing to report to."""
-        with patch.dict("os.environ", {}, clear=True), patch.object(
-            usage_telemetry, "_resolve_user_token", return_value=None
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(usage_telemetry, "_resolve_user_token", return_value=None),
         ):
             assert usage_telemetry._should_send({"total_tokens": 10}) is False
 
     def test_obo_without_databricks_host_still_sends(self):
-        with patch.dict("os.environ", {}, clear=True), patch.object(
-            usage_telemetry, "_resolve_user_token", return_value="tok"
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(usage_telemetry, "_resolve_user_token", return_value="tok"),
         ):
             assert usage_telemetry._should_send({"total_tokens": 10}) is True
 
@@ -76,9 +78,11 @@ class TestHandler:
         async def _fake_send(**kwargs):
             sent.update(kwargs)
 
-        with patch.dict("os.environ", {"DATABRICKS_HOST": "https://example.com"}), patch(
-            "src.utils.telemetry.send_logfood_telemetry", _fake_send
-        ), patch.object(usage_telemetry, "_resolve_user_token", return_value="tok"):
+        with (
+            patch.dict("os.environ", {"DATABRICKS_HOST": "https://example.com"}),
+            patch("src.utils.telemetry.send_logfood_telemetry", _fake_send),
+            patch.object(usage_telemetry, "_resolve_user_token", return_value="tok"),
+        ):
             usage_telemetry._on_llm_call_completed(_source(), _event(usage))
 
         assert sent["usage"] == usage
@@ -89,10 +93,17 @@ class TestHandler:
         assert sent["skip_db_auth"] is True
 
     def test_telemetry_failure_never_propagates(self):
-        with patch.dict("os.environ", {"DATABRICKS_HOST": "https://example.com"}), patch(
-            "src.utils.telemetry.send_logfood_telemetry", side_effect=RuntimeError("boom")
-        ), patch.object(usage_telemetry, "_resolve_user_token", return_value="tok"):
-            usage_telemetry._on_llm_call_completed(_source(), _event({"total_tokens": 1}))
+        with (
+            patch.dict("os.environ", {"DATABRICKS_HOST": "https://example.com"}),
+            patch(
+                "src.utils.telemetry.send_logfood_telemetry",
+                side_effect=RuntimeError("boom"),
+            ),
+            patch.object(usage_telemetry, "_resolve_user_token", return_value="tok"),
+        ):
+            usage_telemetry._on_llm_call_completed(
+                _source(), _event({"total_tokens": 1})
+            )
 
 
 class TestRegistration:

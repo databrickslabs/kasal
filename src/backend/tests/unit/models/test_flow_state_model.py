@@ -3,6 +3,7 @@ Unit tests for the FlowState model.
 
 Verifies table name, columns, index, and the created_at default.
 """
+
 from datetime import datetime
 
 from src.models.flow_state import FlowState

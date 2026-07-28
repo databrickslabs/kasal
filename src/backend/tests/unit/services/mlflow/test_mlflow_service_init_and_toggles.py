@@ -1,10 +1,11 @@
-import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-# Test MLflowService - based on actual code inspection
+import pytest
 
 from src.services.mlflow.service import MLflowService
+
+# Test MLflowService - based on actual code inspection
 
 
 class TestMLflowServiceInit:
@@ -19,21 +20,21 @@ class TestMLflowServiceInit:
 
         assert service.session == mock_session
         assert service.group_id == group_id
-        assert hasattr(service, 'repo')
-        assert hasattr(service, 'exec_repo')
-        assert hasattr(service, 'model_config_service')
+        assert hasattr(service, "repo")
+        assert hasattr(service, "exec_repo")
+        assert hasattr(service, "model_config_service")
 
     def test_mlflow_service_init_none_group_id(self):
         """Test MLflowService __init__ raises ValueError for None group_id"""
         mock_session = Mock()
-        
+
         with pytest.raises(ValueError, match="SECURITY: group_id is REQUIRED"):
             MLflowService(mock_session, None)
 
     def test_mlflow_service_init_empty_group_id(self):
         """Test MLflowService __init__ raises ValueError for empty group_id"""
         mock_session = Mock()
-        
+
         with pytest.raises(ValueError, match="SECURITY: group_id is REQUIRED"):
             MLflowService(mock_session, "")
 
@@ -59,9 +60,9 @@ class TestMLflowServiceBasicMethods:
     async def test_is_enabled(self):
         """Test is_enabled method"""
         self.service.repo.is_enabled = AsyncMock(return_value=True)
-        
+
         result = await self.service.is_enabled()
-        
+
         assert result is True
         self.service.repo.is_enabled.assert_called_once_with(group_id=self.group_id)
 
@@ -69,9 +70,9 @@ class TestMLflowServiceBasicMethods:
     async def test_is_enabled_false(self):
         """Test is_enabled method returns False"""
         self.service.repo.is_enabled = AsyncMock(return_value=False)
-        
+
         result = await self.service.is_enabled()
-        
+
         assert result is False
         self.service.repo.is_enabled.assert_called_once_with(group_id=self.group_id)
 
@@ -79,51 +80,61 @@ class TestMLflowServiceBasicMethods:
     async def test_set_enabled_true(self):
         """Test set_enabled method with True"""
         self.service.repo.set_enabled = AsyncMock(return_value=True)
-        
+
         result = await self.service.set_enabled(True)
-        
+
         assert result is True
-        self.service.repo.set_enabled.assert_called_once_with(enabled=True, group_id=self.group_id)
+        self.service.repo.set_enabled.assert_called_once_with(
+            enabled=True, group_id=self.group_id
+        )
 
     @pytest.mark.asyncio
     async def test_set_enabled_false(self):
         """Test set_enabled method with False"""
         self.service.repo.set_enabled = AsyncMock(return_value=False)
-        
+
         result = await self.service.set_enabled(False)
-        
+
         assert result is False
-        self.service.repo.set_enabled.assert_called_once_with(enabled=False, group_id=self.group_id)
+        self.service.repo.set_enabled.assert_called_once_with(
+            enabled=False, group_id=self.group_id
+        )
 
     @pytest.mark.asyncio
     async def test_is_evaluation_enabled(self):
         """Test is_evaluation_enabled method"""
         self.service.repo.is_evaluation_enabled = AsyncMock(return_value=True)
-        
+
         result = await self.service.is_evaluation_enabled()
-        
+
         assert result is True
-        self.service.repo.is_evaluation_enabled.assert_called_once_with(group_id=self.group_id)
+        self.service.repo.is_evaluation_enabled.assert_called_once_with(
+            group_id=self.group_id
+        )
 
     @pytest.mark.asyncio
     async def test_set_evaluation_enabled_true(self):
         """Test set_evaluation_enabled method with True"""
         self.service.repo.set_evaluation_enabled = AsyncMock(return_value=True)
-        
+
         result = await self.service.set_evaluation_enabled(True)
-        
+
         assert result is True
-        self.service.repo.set_evaluation_enabled.assert_called_once_with(enabled=True, group_id=self.group_id)
+        self.service.repo.set_evaluation_enabled.assert_called_once_with(
+            enabled=True, group_id=self.group_id
+        )
 
     @pytest.mark.asyncio
     async def test_set_evaluation_enabled_false(self):
         """Test set_evaluation_enabled method with False"""
         self.service.repo.set_evaluation_enabled = AsyncMock(return_value=False)
-        
+
         result = await self.service.set_evaluation_enabled(False)
-        
+
         assert result is False
-        self.service.repo.set_evaluation_enabled.assert_called_once_with(enabled=False, group_id=self.group_id)
+        self.service.repo.set_evaluation_enabled.assert_called_once_with(
+            enabled=False, group_id=self.group_id
+        )
 
 
 class TestMLflowServiceSetupAuth:
@@ -142,9 +153,14 @@ class TestMLflowServiceSetupAuth:
         mock_auth.workspace_url = "https://workspace.databricks.com"
         mock_auth.auth_method = "pat"
 
-        with patch.dict('os.environ', {}, clear=False), \
-             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with (
+            patch.dict("os.environ", {}, clear=False),
+            patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_get_auth,
+        ):
             import os
+
             os.environ.pop("DATABRICKS_CLIENT_ID", None)
             os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
             mock_get_auth.return_value = mock_auth
@@ -161,9 +177,14 @@ class TestMLflowServiceSetupAuth:
         mock_auth.workspace_url = "https://workspace.databricks.com"
         mock_auth.auth_method = "pat"
 
-        with patch.dict('os.environ', {}, clear=False), \
-             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with (
+            patch.dict("os.environ", {}, clear=False),
+            patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_get_auth,
+        ):
             import os
+
             os.environ.pop("DATABRICKS_CLIENT_ID", None)
             os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
             mock_get_auth.return_value = mock_auth
@@ -177,9 +198,14 @@ class TestMLflowServiceSetupAuth:
     @pytest.mark.asyncio
     async def test_setup_mlflow_auth_no_auth(self):
         """Test _setup_mlflow_auth when no authentication available"""
-        with patch.dict('os.environ', {}, clear=False), \
-             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with (
+            patch.dict("os.environ", {}, clear=False),
+            patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_get_auth,
+        ):
             import os
+
             os.environ.pop("DATABRICKS_CLIENT_ID", None)
             os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
             mock_get_auth.return_value = None
@@ -194,9 +220,14 @@ class TestMLflowServiceSetupAuth:
         mock_auth = Mock()
         mock_auth.workspace_url = None
 
-        with patch.dict('os.environ', {}, clear=False), \
-             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with (
+            patch.dict("os.environ", {}, clear=False),
+            patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_get_auth,
+        ):
             import os
+
             os.environ.pop("DATABRICKS_CLIENT_ID", None)
             os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
             mock_get_auth.return_value = mock_auth
@@ -208,9 +239,14 @@ class TestMLflowServiceSetupAuth:
     @pytest.mark.asyncio
     async def test_setup_mlflow_auth_exception(self):
         """Test _setup_mlflow_auth handles exceptions"""
-        with patch.dict('os.environ', {}, clear=False), \
-             patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with (
+            patch.dict("os.environ", {}, clear=False),
+            patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_get_auth,
+        ):
             import os
+
             os.environ.pop("DATABRICKS_CLIENT_ID", None)
             os.environ.pop("DATABRICKS_CLIENT_SECRET", None)
             mock_get_auth.side_effect = Exception("Test error")
@@ -231,11 +267,11 @@ class TestMLflowServiceAttributes:
         service = MLflowService(mock_session, group_id)
 
         # Check all required attributes exist
-        assert hasattr(service, 'session')
-        assert hasattr(service, 'group_id')
-        assert hasattr(service, 'repo')
-        assert hasattr(service, 'exec_repo')
-        assert hasattr(service, 'model_config_service')
+        assert hasattr(service, "session")
+        assert hasattr(service, "group_id")
+        assert hasattr(service, "repo")
+        assert hasattr(service, "exec_repo")
+        assert hasattr(service, "model_config_service")
 
         # Check attribute types
         assert service.session == mock_session
@@ -254,7 +290,7 @@ class TestMLflowServiceAsyncMethods:
     @pytest.mark.asyncio
     async def test_is_enabled_true(self):
         """Test is_enabled returns True"""
-        with patch.object(self.service.repo, 'is_enabled', return_value=True):
+        with patch.object(self.service.repo, "is_enabled", return_value=True):
             result = await self.service.is_enabled()
 
             assert result is True
@@ -262,7 +298,7 @@ class TestMLflowServiceAsyncMethods:
     @pytest.mark.asyncio
     async def test_is_enabled_false(self):
         """Test is_enabled returns False"""
-        with patch.object(self.service.repo, 'is_enabled', return_value=False):
+        with patch.object(self.service.repo, "is_enabled", return_value=False):
             result = await self.service.is_enabled()
 
             assert result is False
@@ -270,7 +306,7 @@ class TestMLflowServiceAsyncMethods:
     @pytest.mark.asyncio
     async def test_set_enabled_true(self):
         """Test set_enabled with True"""
-        with patch.object(self.service.repo, 'set_enabled', return_value=True):
+        with patch.object(self.service.repo, "set_enabled", return_value=True):
             result = await self.service.set_enabled(True)
 
             assert result is True
@@ -278,7 +314,7 @@ class TestMLflowServiceAsyncMethods:
     @pytest.mark.asyncio
     async def test_set_enabled_false(self):
         """Test set_enabled with False"""
-        with patch.object(self.service.repo, 'set_enabled', return_value=True):
+        with patch.object(self.service.repo, "set_enabled", return_value=True):
             result = await self.service.set_enabled(False)
 
             assert result is True
@@ -286,7 +322,9 @@ class TestMLflowServiceAsyncMethods:
     @pytest.mark.asyncio
     async def test_is_evaluation_enabled_true(self):
         """Test is_evaluation_enabled returns True"""
-        with patch.object(self.service.repo, 'is_evaluation_enabled', return_value=True):
+        with patch.object(
+            self.service.repo, "is_evaluation_enabled", return_value=True
+        ):
             result = await self.service.is_evaluation_enabled()
 
             assert result is True
@@ -294,7 +332,9 @@ class TestMLflowServiceAsyncMethods:
     @pytest.mark.asyncio
     async def test_is_evaluation_enabled_false(self):
         """Test is_evaluation_enabled returns False"""
-        with patch.object(self.service.repo, 'is_evaluation_enabled', return_value=False):
+        with patch.object(
+            self.service.repo, "is_evaluation_enabled", return_value=False
+        ):
             result = await self.service.is_evaluation_enabled()
 
             assert result is False
@@ -302,7 +342,9 @@ class TestMLflowServiceAsyncMethods:
     @pytest.mark.asyncio
     async def test_set_evaluation_enabled_true(self):
         """Test set_evaluation_enabled with True"""
-        with patch.object(self.service.repo, 'set_evaluation_enabled', return_value=True):
+        with patch.object(
+            self.service.repo, "set_evaluation_enabled", return_value=True
+        ):
             result = await self.service.set_evaluation_enabled(True)
 
             assert result is True
@@ -310,7 +352,9 @@ class TestMLflowServiceAsyncMethods:
     @pytest.mark.asyncio
     async def test_set_evaluation_enabled_false(self):
         """Test set_evaluation_enabled with False"""
-        with patch.object(self.service.repo, 'set_evaluation_enabled', return_value=True):
+        with patch.object(
+            self.service.repo, "set_evaluation_enabled", return_value=True
+        ):
             result = await self.service.set_evaluation_enabled(False)
 
             assert result is True
@@ -320,7 +364,9 @@ class TestMLflowServiceAsyncMethods:
         """Test _resolve_judge_model with configured model"""
         configured_model = "test-judge-model"
 
-        with patch.object(self.service.model_config_service, 'get_model_config') as mock_get_config:
+        with patch.object(
+            self.service.model_config_service, "get_model_config"
+        ) as mock_get_config:
             mock_get_config.return_value = {"key": "test-judge-model"}
 
             result = await self.service._resolve_judge_model(configured_model)

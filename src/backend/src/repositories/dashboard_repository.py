@@ -7,13 +7,14 @@ Auth strategy (avoids the slow SPN token-refresh path):
   Token priority:  OBO user_token → PAT from DB (via ApiKeysService) → env var
   URL priority:    already-loaded _databricks_auth host → SDK Config host → None
 """
+
 import logging
 import os
 from typing import Any, Dict, List, Optional
 
 import httpx
 
-from src.utils.telemetry import get_user_agent_header, KasalProduct
+from src.utils.telemetry import KasalProduct, get_user_agent_header
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class DashboardRepository:
         # 1. Already-loaded internal config (set by _load_config earlier in process lifetime)
         try:
             from src.utils.databricks_auth import _databricks_auth
+
             if _databricks_auth._workspace_host:
                 return _databricks_auth._workspace_host.rstrip("/")
         except Exception:
@@ -54,6 +56,7 @@ class DashboardRepository:
         # 2. SDK Config — reads ~/.databrickscfg / env vars, no network call
         try:
             from databricks.sdk.config import Config
+
             sdk_cfg = Config()
             if sdk_cfg.host:
                 return sdk_cfg.host.rstrip("/")
@@ -81,7 +84,9 @@ class DashboardRepository:
 
         headers, error = await get_databricks_auth_headers(user_token=self._user_token)
         if error or not headers:
-            logger.warning(f"[DashboardRepo] no auth headers: {error or 'none returned'}")
+            logger.warning(
+                f"[DashboardRepo] no auth headers: {error or 'none returned'}"
+            )
             return {}
         return {k: v for k, v in headers.items() if k.lower() == "authorization"}
 
@@ -103,7 +108,9 @@ class DashboardRepository:
         """Fetch a Lakeview dashboard by ID. Returns None if not found."""
         base_url = await self._get_base_url()
         headers = await self._get_headers()
-        resp = await self._client.get(f"{base_url}/dashboards/{dashboard_id}", headers=headers)
+        resp = await self._client.get(
+            f"{base_url}/dashboards/{dashboard_id}", headers=headers
+        )
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
@@ -121,7 +128,9 @@ class DashboardRepository:
 
         resp = await self._client.get(url, headers=headers, params=params)
         if resp.status_code == 429:
-            logger.warning("[DashboardRepo] Rate limited by Databricks, returning empty list")
+            logger.warning(
+                "[DashboardRepo] Rate limited by Databricks, returning empty list"
+            )
             return []
         resp.raise_for_status()
         data = resp.json()

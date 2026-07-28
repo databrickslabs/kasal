@@ -4,7 +4,8 @@ Generates SQL/DAX code for unit of measure conversion based on KPI configuration
 Supports both fixed and dynamic UOM sources with predefined conversion presets.
 """
 
-from typing import Optional, Tuple, List, Dict
+from typing import Dict, List, Optional, Tuple
+
 from ...base.models import KPI
 
 
@@ -31,7 +32,7 @@ class UnitOfMeasureConverter:
                 "LB": 0.453592,  # Pound
                 "OZ": 0.0283495,  # Ounce
                 "TON": 907.185,  # US ton
-            }
+            },
         },
         "length": {
             "base_unit": "M",
@@ -44,7 +45,7 @@ class UnitOfMeasureConverter:
                 "FT": 0.3048,  # Foot
                 "YD": 0.9144,  # Yard
                 "MI": 1609.34,  # Mile
-            }
+            },
         },
         "volume": {
             "base_unit": "L",
@@ -58,7 +59,7 @@ class UnitOfMeasureConverter:
                 "QT": 0.946353,  # Quart
                 "PT": 0.473176,  # Pint
                 "FL_OZ": 0.0295735,  # Fluid ounce
-            }
+            },
         },
         "temperature": {
             "base_unit": "C",
@@ -66,7 +67,7 @@ class UnitOfMeasureConverter:
                 "C": 1.0,  # Celsius (base)
                 # Note: Temperature requires offset conversion, not just multiplication
                 # Implemented separately in conversion logic
-            }
+            },
         },
         "time": {
             "base_unit": "S",
@@ -76,14 +77,16 @@ class UnitOfMeasureConverter:
                 "H": 3600.0,  # Hour
                 "D": 86400.0,  # Day
                 "W": 604800.0,  # Week
-            }
-        }
+            },
+        },
     }
 
     def __init__(self):
         self.uom_conversion_table = "UnitConversions"  # Default UOM conversion table
 
-    def get_kbi_uom_recursive(self, kbi: KPI, kpi_lookup: Optional[dict] = None) -> Tuple[Optional[str], Optional[str]]:
+    def get_kbi_uom_recursive(
+        self, kbi: KPI, kpi_lookup: Optional[dict] = None
+    ) -> Tuple[Optional[str], Optional[str]]:
         """
         Get source unit of measure for given KPI by checking all dependencies.
 
@@ -114,18 +117,23 @@ class UnitOfMeasureConverter:
         if kpi_lookup and kbi.formula:
             # Extract KBI references from formula (pattern: [KBI_NAME])
             import re
-            kbi_refs = re.findall(r'\[([^\]]+)\]', kbi.formula)
+
+            kbi_refs = re.findall(r"\[([^\]]+)\]", kbi.formula)
 
             for kbi_name in kbi_refs:
                 if kbi_name in kpi_lookup:
                     child_kbi = kpi_lookup[kbi_name]
-                    uom_type, uom_value = self.get_kbi_uom_recursive(child_kbi, kpi_lookup)
+                    uom_type, uom_value = self.get_kbi_uom_recursive(
+                        child_kbi, kpi_lookup
+                    )
                     if uom_type:
                         return uom_type, uom_value
 
         return None, None
 
-    def get_conversion_factor(self, preset: str, source_unit: str, target_unit: str) -> Optional[float]:
+    def get_conversion_factor(
+        self, preset: str, source_unit: str, target_unit: str
+    ) -> Optional[float]:
         """
         Get conversion factor between two units in the same preset.
 
@@ -163,7 +171,7 @@ class UnitOfMeasureConverter:
         source_unit: str,
         target_unit: str,
         uom_type: str = "fixed",
-        uom_column: Optional[str] = None
+        uom_column: Optional[str] = None,
     ) -> str:
         """
         Generate SQL code for unit of measure conversion.
@@ -205,9 +213,13 @@ class UnitOfMeasureConverter:
             for unit_code in conversions.keys():
                 factor = self.get_conversion_factor(preset, unit_code, target_unit)
                 if factor is not None and factor != 1.0:
-                    cases.append(f"        WHEN {uom_column} = '{unit_code}' THEN {value_expression} * {factor}")
+                    cases.append(
+                        f"        WHEN {uom_column} = '{unit_code}' THEN {value_expression} * {factor}"
+                    )
                 elif factor == 1.0:
-                    cases.append(f"        WHEN {uom_column} = '{unit_code}' THEN {value_expression}")
+                    cases.append(
+                        f"        WHEN {uom_column} = '{unit_code}' THEN {value_expression}"
+                    )
 
             if not cases:
                 return value_expression
@@ -224,7 +236,7 @@ class UnitOfMeasureConverter:
         source_unit: str,
         target_unit: str,
         uom_type: str = "fixed",
-        uom_column: Optional[str] = None
+        uom_column: Optional[str] = None,
     ) -> str:
         """
         Generate DAX code for unit of measure conversion.
@@ -267,9 +279,13 @@ class UnitOfMeasureConverter:
                 factor = self.get_conversion_factor(preset, unit_code, target_unit)
                 if factor is not None:
                     if factor == 1.0:
-                        switch_cases.append(f'        "{unit_code}", {value_expression}')
+                        switch_cases.append(
+                            f'        "{unit_code}", {value_expression}'
+                        )
                     else:
-                        switch_cases.append(f'        "{unit_code}", {value_expression} * {factor}')
+                        switch_cases.append(
+                            f'        "{unit_code}", {value_expression} * {factor}'
+                        )
 
             if not switch_cases:
                 return value_expression

@@ -20,10 +20,10 @@ from src.core.exceptions import (
     NotFoundError,
 )
 
-
 # ---------------------------------------------------------------------------
 # Build a minimal test app that mirrors the production exception handlers
 # ---------------------------------------------------------------------------
+
 
 def _build_test_app() -> FastAPI:
     """Create a small FastAPI app with the same global exception handlers as main.py."""
@@ -48,6 +48,7 @@ def _build_test_app() -> FastAPI:
             request: Request, exc: PydanticValidationError
         ) -> JSONResponse:
             return JSONResponse(status_code=422, content={"detail": str(exc)})
+
     except ImportError:
         pass
 
@@ -62,6 +63,7 @@ def _build_test_app() -> FastAPI:
             return JSONResponse(
                 status_code=409, content={"detail": "Database integrity conflict"}
             )
+
     except ImportError:
         pass
 
@@ -101,6 +103,7 @@ def _build_test_app() -> FastAPI:
     @app.get("/raise-integrity-error")
     async def raise_integrity_error():
         from sqlalchemy.exc import IntegrityError
+
         raise IntegrityError("INSERT ...", {}, Exception("UNIQUE constraint"))
 
     @app.get("/raise-generic-exception")
@@ -128,6 +131,7 @@ def client():
 # ---------------------------------------------------------------------------
 # Tests: KasalError hierarchy
 # ---------------------------------------------------------------------------
+
 
 class TestKasalErrorHandler:
     def test_base_kasal_error(self, client):
@@ -160,6 +164,7 @@ class TestKasalErrorHandler:
 # Tests: ValueError -> 400
 # ---------------------------------------------------------------------------
 
+
 class TestValueErrorHandler:
     def test_value_error_returns_400(self, client):
         r = client.get("/raise-value-error")
@@ -170,6 +175,7 @@ class TestValueErrorHandler:
 # ---------------------------------------------------------------------------
 # Tests: IntegrityError -> 409
 # ---------------------------------------------------------------------------
+
 
 class TestIntegrityErrorHandler:
     def test_integrity_error_returns_409(self, client):
@@ -188,6 +194,7 @@ class TestIntegrityErrorHandler:
 # Tests: Generic Exception -> 500 (no leak)
 # ---------------------------------------------------------------------------
 
+
 class TestGenericExceptionHandler:
     def test_generic_exception_returns_500(self, client):
         r = client.get("/raise-generic-exception")
@@ -205,6 +212,7 @@ class TestGenericExceptionHandler:
 # Tests: HTTPException passthrough (FastAPI native)
 # ---------------------------------------------------------------------------
 
+
 class TestHTTPExceptionPassthrough:
     def test_http_exception_passthrough(self, client):
         r = client.get("/raise-http-exception")
@@ -215,6 +223,7 @@ class TestHTTPExceptionPassthrough:
 # ---------------------------------------------------------------------------
 # Tests: Happy path still works
 # ---------------------------------------------------------------------------
+
 
 class TestHappyPath:
     def test_normal_endpoint(self, client):

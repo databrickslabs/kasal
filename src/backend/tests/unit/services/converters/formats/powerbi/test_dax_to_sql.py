@@ -6,8 +6,12 @@ and transpilability validation.
 """
 
 import pytest
+
+from src.services.converters.formats.powerbi.dax_parser import (
+    DAXExpressionParser,
+    DaxToken,
+)
 from src.services.converters.formats.powerbi.dax_to_sql import DaxToSqlTranspiler
-from src.services.converters.formats.powerbi.dax_parser import DaxToken, DAXExpressionParser
 
 
 class TestDaxToSqlTranspiler:
@@ -23,29 +27,29 @@ class TestDaxToSqlTranspiler:
     def test_transpiler_initialization(self, transpiler):
         """Test DaxToSqlTranspiler initializes correctly"""
         assert transpiler is not None
-        assert hasattr(transpiler, 'dax_to_sql_mappings')
-        assert hasattr(transpiler, 'NON_TRANSPILABLE_OPERATORS')
+        assert hasattr(transpiler, "dax_to_sql_mappings")
+        assert hasattr(transpiler, "NON_TRANSPILABLE_OPERATORS")
 
     def test_transpiler_has_mappings(self, transpiler):
         """Test transpiler has DAX to SQL mappings"""
         assert len(transpiler.dax_to_sql_mappings) > 0
         # Check for basic aggregations
-        assert 'sum ( <<table:1>> <<column:1>> )' in transpiler.dax_to_sql_mappings
+        assert "sum ( <<table:1>> <<column:1>> )" in transpiler.dax_to_sql_mappings
 
     def test_transpiler_non_transpilable_operators(self, transpiler):
         """Test transpiler defines non-transpilable operators"""
         assert len(transpiler.NON_TRANSPILABLE_OPERATORS) > 0
-        assert 'KEEPFILTERS' in transpiler.NON_TRANSPILABLE_OPERATORS
-        assert 'CALCULATETABLE' in transpiler.NON_TRANSPILABLE_OPERATORS
+        assert "KEEPFILTERS" in transpiler.NON_TRANSPILABLE_OPERATORS
+        assert "CALCULATETABLE" in transpiler.NON_TRANSPILABLE_OPERATORS
 
     # ========== Can Transpile Tests ==========
 
     def test_can_transpile_simple_sum(self, transpiler):
         """Test can transpile simple SUM"""
         tokens = [
-            DaxToken(type='function', value='SUM'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Amount]')
+            DaxToken(type="function", value="SUM"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Amount]"),
         ]
         can_transpile, reason = transpiler.can_transpile(tokens)
 
@@ -55,27 +59,27 @@ class TestDaxToSqlTranspiler:
     def test_can_transpile_with_non_transpilable_operator(self, transpiler):
         """Test cannot transpile with KEEPFILTERS"""
         tokens = [
-            DaxToken(type='function', value='SUM'),
-            DaxToken(type='function', value='KEEPFILTERS'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Amount]')
+            DaxToken(type="function", value="SUM"),
+            DaxToken(type="function", value="KEEPFILTERS"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Amount]"),
         ]
         can_transpile, reason = transpiler.can_transpile(tokens)
 
         assert can_transpile is False
         assert reason is not None
-        assert 'KEEPFILTERS' in reason
+        assert "KEEPFILTERS" in reason
 
     def test_can_transpile_with_calculatetable(self, transpiler):
         """Test cannot transpile with CALCULATETABLE"""
         tokens = [
-            DaxToken(type='function', value='CALCULATETABLE'),
-            DaxToken(type='table', value='Sales')
+            DaxToken(type="function", value="CALCULATETABLE"),
+            DaxToken(type="table", value="Sales"),
         ]
         can_transpile, reason = transpiler.can_transpile(tokens)
 
         assert can_transpile is False
-        assert 'CALCULATETABLE' in reason
+        assert "CALCULATETABLE" in reason
 
     def test_can_transpile_empty_tokens(self, transpiler):
         """Test can transpile with empty tokens"""
@@ -87,9 +91,9 @@ class TestDaxToSqlTranspiler:
     def test_can_transpile_with_average(self, transpiler):
         """Test can transpile AVERAGE"""
         tokens = [
-            DaxToken(type='function', value='AVERAGE'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Price]')
+            DaxToken(type="function", value="AVERAGE"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Price]"),
         ]
         can_transpile, reason = transpiler.can_transpile(tokens)
 
@@ -100,119 +104,117 @@ class TestDaxToSqlTranspiler:
 
     def test_transpile_simple_sum(self, transpiler):
         """Test transpiling simple SUM"""
-        signature = 'sum ( <<table:1>> <<column:1>> )'
+        signature = "sum ( <<table:1>> <<column:1>> )"
         tokens = [
-            DaxToken(type='function', value='SUM'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Amount]')
+            DaxToken(type="function", value="SUM"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Amount]"),
         ]
         result = transpiler.transpile(signature, tokens)
 
         assert result is not None
-        assert 'SUM(' in result
-        assert 'Amount' in result
+        assert "SUM(" in result
+        assert "Amount" in result
 
     def test_transpile_average(self, transpiler):
         """Test transpiling AVERAGE"""
-        signature = 'average ( <<table:1>> <<column:1>> )'
+        signature = "average ( <<table:1>> <<column:1>> )"
         tokens = [
-            DaxToken(type='function', value='AVERAGE'),
-            DaxToken(type='table', value='Products'),
-            DaxToken(type='column', value='[Price]')
+            DaxToken(type="function", value="AVERAGE"),
+            DaxToken(type="table", value="Products"),
+            DaxToken(type="column", value="[Price]"),
         ]
         result = transpiler.transpile(signature, tokens)
 
         assert result is not None
-        assert 'AVG(' in result
-        assert 'Price' in result
+        assert "AVG(" in result
+        assert "Price" in result
 
     def test_transpile_distinctcount(self, transpiler):
         """Test transpiling DISTINCTCOUNT"""
-        signature = 'distinctcount ( <<table:1>> <<column:1>> )'
+        signature = "distinctcount ( <<table:1>> <<column:1>> )"
         tokens = [
-            DaxToken(type='function', value='DISTINCTCOUNT'),
-            DaxToken(type='table', value='Orders'),
-            DaxToken(type='column', value='[CustomerID]')
+            DaxToken(type="function", value="DISTINCTCOUNT"),
+            DaxToken(type="table", value="Orders"),
+            DaxToken(type="column", value="[CustomerID]"),
         ]
         result = transpiler.transpile(signature, tokens)
 
         assert result is not None
-        assert 'COUNT(DISTINCT' in result
-        assert 'CustomerID' in result
+        assert "COUNT(DISTINCT" in result
+        assert "CustomerID" in result
 
     def test_transpile_min_max(self, transpiler):
         """Test transpiling MIN and MAX"""
-        min_signature = 'min ( <<table:1>> <<column:1>> )'
+        min_signature = "min ( <<table:1>> <<column:1>> )"
         min_tokens = [
-            DaxToken(type='function', value='MIN'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Date]')
+            DaxToken(type="function", value="MIN"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Date]"),
         ]
         min_result = transpiler.transpile(min_signature, min_tokens)
 
         assert min_result is not None
-        assert 'MIN(' in min_result
-        assert 'Date' in min_result
+        assert "MIN(" in min_result
+        assert "Date" in min_result
 
-        max_signature = 'max ( <<table:1>> <<column:1>> )'
+        max_signature = "max ( <<table:1>> <<column:1>> )"
         max_tokens = [
-            DaxToken(type='function', value='MAX'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Date]')
+            DaxToken(type="function", value="MAX"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Date]"),
         ]
         max_result = transpiler.transpile(max_signature, max_tokens)
 
         assert max_result is not None
-        assert 'MAX(' in max_result
+        assert "MAX(" in max_result
 
     def test_transpile_divide(self, transpiler):
         """Test transpiling DIVIDE"""
-        signature = 'divide ( <<measure:1>> , <<number:1>> )'
+        signature = "divide ( <<measure:1>> , <<number:1>> )"
         tokens = [
-            DaxToken(type='function', value='DIVIDE'),
-            DaxToken(type='measure', value='[Revenue]'),
-            DaxToken(type='number', value='100')
+            DaxToken(type="function", value="DIVIDE"),
+            DaxToken(type="measure", value="[Revenue]"),
+            DaxToken(type="number", value="100"),
         ]
         result = transpiler.transpile(signature, tokens)
 
         assert result is not None
-        assert 'TRY_DIVIDE' in result
-        assert 'Revenue' in result
-        assert '100' in result
+        assert "TRY_DIVIDE" in result
+        assert "Revenue" in result
+        assert "100" in result
 
     def test_transpile_calculate_with_sum(self, transpiler):
         """Test transpiling CALCULATE with SUM"""
-        signature = 'calculate ( sum ( <<table:1>> <<column:1>> ) )'
+        signature = "calculate ( sum ( <<table:1>> <<column:1>> ) )"
         tokens = [
-            DaxToken(type='function', value='CALCULATE'),
-            DaxToken(type='function', value='SUM'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Amount]')
+            DaxToken(type="function", value="CALCULATE"),
+            DaxToken(type="function", value="SUM"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Amount]"),
         ]
         result = transpiler.transpile(signature, tokens)
 
         assert result is not None
-        assert 'SUM(' in result
-        assert 'Amount' in result
+        assert "SUM(" in result
+        assert "Amount" in result
 
     def test_transpile_measure_reference(self, transpiler):
         """Test transpiling measure reference"""
-        signature = '<<measure:1>>'
-        tokens = [
-            DaxToken(type='measure', value='[TotalSales]')
-        ]
+        signature = "<<measure:1>>"
+        tokens = [DaxToken(type="measure", value="[TotalSales]")]
         result = transpiler.transpile(signature, tokens)
 
         assert result is not None
-        assert 'TotalSales' in result
+        assert "TotalSales" in result
 
     def test_transpile_unknown_signature(self, transpiler):
         """Test transpiling unknown signature returns None"""
-        signature = 'unknown ( <<table:1>> <<column:1>> )'
+        signature = "unknown ( <<table:1>> <<column:1>> )"
         tokens = [
-            DaxToken(type='function', value='UNKNOWN'),
-            DaxToken(type='table', value='Table'),
-            DaxToken(type='column', value='[Column]')
+            DaxToken(type="function", value="UNKNOWN"),
+            DaxToken(type="table", value="Table"),
+            DaxToken(type="column", value="[Column]"),
         ]
         result = transpiler.transpile(signature, tokens)
 
@@ -220,74 +222,70 @@ class TestDaxToSqlTranspiler:
 
     def test_transpile_number_literal(self, transpiler):
         """Test transpiling number literal"""
-        signature = '<<number:1>>'
-        tokens = [
-            DaxToken(type='number', value='42')
-        ]
+        signature = "<<number:1>>"
+        tokens = [DaxToken(type="number", value="42")]
         result = transpiler.transpile(signature, tokens)
 
         assert result is not None
-        assert '42' in result
+        assert "42" in result
 
     def test_transpile_string_literal(self, transpiler):
         """Test transpiling string literal"""
-        signature = '<<string:1>>'
-        tokens = [
-            DaxToken(type='string', value='"test"')
-        ]
+        signature = "<<string:1>>"
+        tokens = [DaxToken(type="string", value='"test"')]
         result = transpiler.transpile(signature, tokens)
 
         assert result is not None
-        assert 'test' in result
+        assert "test" in result
 
     def test_transpile_measure_arithmetic(self, transpiler):
         """Test transpiling measure arithmetic"""
-        signature = '<<measure:1>> - <<measure:2>>'
+        signature = "<<measure:1>> - <<measure:2>>"
         tokens = [
-            DaxToken(type='measure', value='[Revenue]'),
-            DaxToken(type='measure', value='[Cost]')
+            DaxToken(type="measure", value="[Revenue]"),
+            DaxToken(type="measure", value="[Cost]"),
         ]
         result = transpiler.transpile(signature, tokens)
 
         assert result is not None
-        assert 'Revenue' in result
-        assert 'Cost' in result
-        assert '-' in result
+        assert "Revenue" in result
+        assert "Cost" in result
+        assert "-" in result
 
     def test_transpile_date_functions(self, transpiler):
         """Test transpiling date functions"""
         # LASTDATE
-        last_signature = 'lastdate ( <<table:1>> <<column:1>> )'
+        last_signature = "lastdate ( <<table:1>> <<column:1>> )"
         last_tokens = [
-            DaxToken(type='function', value='LASTDATE'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Date]')
+            DaxToken(type="function", value="LASTDATE"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Date]"),
         ]
         last_result = transpiler.transpile(last_signature, last_tokens)
 
         assert last_result is not None
-        assert 'MAX(' in last_result
+        assert "MAX(" in last_result
 
         # FIRSTDATE
-        first_signature = 'firstdate ( <<table:1>> <<column:1>> )'
+        first_signature = "firstdate ( <<table:1>> <<column:1>> )"
         first_tokens = [
-            DaxToken(type='function', value='FIRSTDATE'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Date]')
+            DaxToken(type="function", value="FIRSTDATE"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Date]"),
         ]
         first_result = transpiler.transpile(first_signature, first_tokens)
 
         assert first_result is not None
-        assert 'MIN(' in first_result
+        assert "MIN(" in first_result
 
     def test_transpile_case_insensitive(self, transpiler):
         """Test transpile is case insensitive for signatures"""
-        signature_upper = 'SUM ( <<table:1>> <<column:1>> )'
-        signature_lower = 'sum ( <<table:1>> <<column:1>> )'
+        signature_upper = "SUM ( <<table:1>> <<column:1>> )"
+        signature_lower = "sum ( <<table:1>> <<column:1>> )"
         tokens = [
-            DaxToken(type='function', value='SUM'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Amount]')
+            DaxToken(type="function", value="SUM"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Amount]"),
         ]
 
         result_upper = transpiler.transpile(signature_upper, tokens)
@@ -301,41 +299,43 @@ class TestDaxToSqlTranspiler:
 
     def test_transpile_multiple_columns(self, transpiler):
         """Test transpiling with multiple columns"""
-        signature = 'sum ( <<table:1>> <<column:1>> ) - sum ( <<table:1>> <<column:2>> )'
+        signature = (
+            "sum ( <<table:1>> <<column:1>> ) - sum ( <<table:1>> <<column:2>> )"
+        )
         tokens = [
-            DaxToken(type='function', value='SUM'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Revenue]'),
-            DaxToken(type='function', value='SUM'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Cost]')
+            DaxToken(type="function", value="SUM"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Revenue]"),
+            DaxToken(type="function", value="SUM"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Cost]"),
         ]
         result = transpiler.transpile(signature, tokens)
 
         assert result is not None
-        assert 'Revenue' in result
-        assert 'Cost' in result
-        assert 'SUM(' in result
+        assert "Revenue" in result
+        assert "Cost" in result
+        assert "SUM(" in result
 
     def test_transpile_removes_brackets_from_columns(self, transpiler):
         """Test transpile removes brackets from column names"""
-        signature = 'sum ( <<table:1>> <<column:1>> )'
+        signature = "sum ( <<table:1>> <<column:1>> )"
         tokens = [
-            DaxToken(type='function', value='SUM'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Amount with Brackets]')
+            DaxToken(type="function", value="SUM"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Amount with Brackets]"),
         ]
         result = transpiler.transpile(signature, tokens)
 
         assert result is not None
-        assert '[' not in result or '`[' not in result  # Should not have bare brackets
-        assert 'Amount with Brackets' in result
+        assert "[" not in result or "`[" not in result  # Should not have bare brackets
+        assert "Amount with Brackets" in result
 
     def test_can_transpile_with_multiple_non_transpilable(self, transpiler):
         """Test cannot transpile with multiple non-transpilable operators"""
         tokens = [
-            DaxToken(type='function', value='KEEPFILTERS'),
-            DaxToken(type='function', value='ALLSELECTED')
+            DaxToken(type="function", value="KEEPFILTERS"),
+            DaxToken(type="function", value="ALLSELECTED"),
         ]
         can_transpile, reason = transpiler.can_transpile(tokens)
 
@@ -344,22 +344,22 @@ class TestDaxToSqlTranspiler:
 
     def test_transpile_complex_calculate_pattern(self, transpiler):
         """Test transpiling complex CALCULATE pattern"""
-        signature = 'calculate ( sum ( <<table:1>> <<column:1>> ) , <<table:1>> <<column:2>> == <<string:1>> )'
+        signature = "calculate ( sum ( <<table:1>> <<column:1>> ) , <<table:1>> <<column:2>> == <<string:1>> )"
         tokens = [
-            DaxToken(type='function', value='CALCULATE'),
-            DaxToken(type='function', value='SUM'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Amount]'),
-            DaxToken(type='table', value='Sales'),
-            DaxToken(type='column', value='[Region]'),
-            DaxToken(type='string', value='"EMEA"')
+            DaxToken(type="function", value="CALCULATE"),
+            DaxToken(type="function", value="SUM"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Amount]"),
+            DaxToken(type="table", value="Sales"),
+            DaxToken(type="column", value="[Region]"),
+            DaxToken(type="string", value='"EMEA"'),
         ]
         result = transpiler.transpile(signature, tokens)
 
         assert result is not None
-        assert 'SUM(' in result
-        assert 'CASE WHEN' in result
-        assert 'Region' in result
+        assert "SUM(" in result
+        assert "CASE WHEN" in result
+        assert "Region" in result
 
 
 class TestDaxToSqlTranspilerExtended:
@@ -386,7 +386,7 @@ class TestDaxToSqlTranspilerExtended:
         tokens = [
             DaxToken(type="function", value="SUM"),
             DaxToken(type="table", value="Sales"),
-            DaxToken(type="column", value="[Amount]")
+            DaxToken(type="column", value="[Amount]"),
         ]
         is_transpilable, reason = transpiler.can_transpile(tokens)
         assert is_transpilable is True
@@ -396,7 +396,7 @@ class TestDaxToSqlTranspilerExtended:
         """Test can_transpile fails for KEEPFILTERS"""
         tokens = [
             DaxToken(type="function", value="KEEPFILTERS"),
-            DaxToken(type="table", value="Sales")
+            DaxToken(type="table", value="Sales"),
         ]
         is_transpilable, reason = transpiler.can_transpile(tokens)
         assert is_transpilable is False
@@ -407,7 +407,7 @@ class TestDaxToSqlTranspilerExtended:
         """Test can_transpile fails for ALLSELECTED"""
         tokens = [
             DaxToken(type="function", value="ALLSELECTED"),
-            DaxToken(type="table", value="Sales")
+            DaxToken(type="table", value="Sales"),
         ]
         is_transpilable, reason = transpiler.can_transpile(tokens)
         assert is_transpilable is False
@@ -416,7 +416,7 @@ class TestDaxToSqlTranspilerExtended:
         """Test can_transpile fails for ISINSCOPE"""
         tokens = [
             DaxToken(type="function", value="ISINSCOPE"),
-            DaxToken(type="table", value="Sales")
+            DaxToken(type="table", value="Sales"),
         ]
         is_transpilable, reason = transpiler.can_transpile(tokens)
         assert is_transpilable is False
@@ -425,7 +425,7 @@ class TestDaxToSqlTranspilerExtended:
         """Test can_transpile fails for PATHCONTAINS"""
         tokens = [
             DaxToken(type="function", value="PATHCONTAINS"),
-            DaxToken(type="column", value="[ID]")
+            DaxToken(type="column", value="[ID]"),
         ]
         is_transpilable, reason = transpiler.can_transpile(tokens)
         assert is_transpilable is False
@@ -442,7 +442,7 @@ class TestDaxToSqlTranspilerExtended:
         """Test can_transpile fails for REMOVEFILTERS"""
         tokens = [
             DaxToken(type="function", value="REMOVEFILTERS"),
-            DaxToken(type="column", value="[Region]")
+            DaxToken(type="column", value="[Region]"),
         ]
         is_transpilable, reason = transpiler.can_transpile(tokens)
         assert is_transpilable is False
@@ -469,49 +469,49 @@ class TestDaxToSqlTranspilerExtended:
         expression = "SUM(Sales[Amount])"
         result = parser.parse_advanced(expression)
 
-        if result['is_transpilable'] and result['transpiled_sql']:
-            assert "SUM" in result['transpiled_sql'].upper()
-            assert "Amount" in result['transpiled_sql']
+        if result["is_transpilable"] and result["transpiled_sql"]:
+            assert "SUM" in result["transpiled_sql"].upper()
+            assert "Amount" in result["transpiled_sql"]
 
     def test_transpile_count_pattern(self, transpiler, parser):
         """Test transpiling COUNT pattern"""
         expression = "COUNT(Sales[OrderID])"
         result = parser.parse_advanced(expression)
 
-        if result['is_transpilable'] and result['transpiled_sql']:
-            assert "COUNT" in result['transpiled_sql'].upper()
+        if result["is_transpilable"] and result["transpiled_sql"]:
+            assert "COUNT" in result["transpiled_sql"].upper()
 
     def test_transpile_average_pattern(self, transpiler, parser):
         """Test transpiling AVERAGE pattern"""
         expression = "AVERAGE(Products[Price])"
         result = parser.parse_advanced(expression)
 
-        if result['is_transpilable'] and result['transpiled_sql']:
-            assert "AVG" in result['transpiled_sql'].upper()
+        if result["is_transpilable"] and result["transpiled_sql"]:
+            assert "AVG" in result["transpiled_sql"].upper()
 
     def test_transpile_distinctcount_pattern(self, transpiler, parser):
         """Test transpiling DISTINCTCOUNT pattern"""
         expression = "DISTINCTCOUNT(Customers[CustomerID])"
         result = parser.parse_advanced(expression)
 
-        if result['is_transpilable'] and result['transpiled_sql']:
-            assert "DISTINCT" in result['transpiled_sql'].upper()
+        if result["is_transpilable"] and result["transpiled_sql"]:
+            assert "DISTINCT" in result["transpiled_sql"].upper()
 
     def test_transpile_min_pattern(self, transpiler, parser):
         """Test transpiling MIN pattern"""
         expression = "MIN(Sales[Price])"
         result = parser.parse_advanced(expression)
 
-        if result['is_transpilable'] and result['transpiled_sql']:
-            assert "MIN" in result['transpiled_sql'].upper()
+        if result["is_transpilable"] and result["transpiled_sql"]:
+            assert "MIN" in result["transpiled_sql"].upper()
 
     def test_transpile_max_pattern(self, transpiler, parser):
         """Test transpiling MAX pattern"""
         expression = "MAX(Sales[Price])"
         result = parser.parse_advanced(expression)
 
-        if result['is_transpilable'] and result['transpiled_sql']:
-            assert "MAX" in result['transpiled_sql'].upper()
+        if result["is_transpilable"] and result["transpiled_sql"]:
+            assert "MAX" in result["transpiled_sql"].upper()
 
     def test_transpile_measure_reference(self, transpiler, parser):
         """Test transpiling simple measure reference"""
@@ -519,27 +519,25 @@ class TestDaxToSqlTranspilerExtended:
         measures_list = ["Total Sales"]
         result = parser.parse_advanced(expression, measures_list)
 
-        if result['is_transpilable'] and result['transpiled_sql']:
-            assert "Total Sales" in result['transpiled_sql']
+        if result["is_transpilable"] and result["transpiled_sql"]:
+            assert "Total Sales" in result["transpiled_sql"]
 
     def test_transpiler_has_mappings(self, transpiler):
         """Test transpiler has DAX-to-SQL mappings"""
-        assert hasattr(transpiler, 'dax_to_sql_mappings')
+        assert hasattr(transpiler, "dax_to_sql_mappings")
         assert len(transpiler.dax_to_sql_mappings) > 0
 
     def test_transpiler_has_non_transpilable_operators(self, transpiler):
         """Test transpiler has list of non-transpilable operators"""
-        assert hasattr(transpiler, 'NON_TRANSPILABLE_OPERATORS')
+        assert hasattr(transpiler, "NON_TRANSPILABLE_OPERATORS")
         assert len(transpiler.NON_TRANSPILABLE_OPERATORS) > 0
-        assert 'KEEPFILTERS' in transpiler.NON_TRANSPILABLE_OPERATORS
+        assert "KEEPFILTERS" in transpiler.NON_TRANSPILABLE_OPERATORS
 
     def test_transpile_replaces_placeholders(self, transpiler):
         """Test that transpile replaces placeholders with actual values"""
         # Manually build tokens that match a known pattern
         # "<<measure:1>>" pattern maps to "`<<measure:1>>`"
-        tokens = [
-            DaxToken(type="measure", value="[Total Sales]", group=0)
-        ]
+        tokens = [DaxToken(type="measure", value="[Total Sales]", group=0)]
         signature = "<<measure:1>>"
         result = transpiler.transpile(signature, tokens)
 
@@ -551,5 +549,5 @@ class TestDaxToSqlTranspilerExtended:
         expression = "CALCULATE(SUM(Sales[Amount]))"
         result = parser.parse_advanced(expression)
 
-        if result['is_transpilable'] and result['transpiled_sql']:
-            assert "SUM" in result['transpiled_sql'].upper()
+        if result["is_transpilable"] and result["transpiled_sql"]:
+            assert "SUM" in result["transpiled_sql"].upper()

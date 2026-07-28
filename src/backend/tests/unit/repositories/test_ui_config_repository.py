@@ -1,9 +1,11 @@
 """Unit tests for UIConfigRepository.get_for_group."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock
 
-from src.repositories.ui_config_repository import UIConfigRepository
+import pytest
+
 from src.models.ui_config import UIConfig
+from src.repositories.ui_config_repository import UIConfigRepository
 
 
 def _result_with(value):
@@ -15,7 +17,9 @@ def _result_with(value):
 @pytest.mark.asyncio
 async def test_get_for_group_with_group_id():
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=_result_with(UIConfig(id=1, group_id="g1")))
+    session.execute = AsyncMock(
+        return_value=_result_with(UIConfig(id=1, group_id="g1"))
+    )
 
     repo = UIConfigRepository(session)
     out = await repo.get_for_group("g1")

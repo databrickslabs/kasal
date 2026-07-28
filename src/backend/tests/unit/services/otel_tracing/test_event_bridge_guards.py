@@ -8,17 +8,18 @@ Covers:
 - _emit_span with event that has no agent/task/tool
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.services.otel_tracing.event_bridge import (
+    OTelEventBridge,
     _get_agent_name,
+    _get_output,
     _get_task_name,
     _get_tool_name,
-    _get_output,
     _safe_str,
-    OTelEventBridge,
 )
 
 
@@ -86,16 +87,12 @@ class TestGetTaskNameNullGuards:
 
     def test_task_description(self):
         """Falls back to event.task.description."""
-        event = SimpleNamespace(
-            task=SimpleNamespace(description="Analyze data")
-        )
+        event = SimpleNamespace(task=SimpleNamespace(description="Analyze data"))
         assert _get_task_name(event) == "Analyze data"
 
     def test_task_name_attr(self):
         """Falls back to event.task.name if no description."""
-        event = SimpleNamespace(
-            task=SimpleNamespace(name="WriteReport")
-        )
+        event = SimpleNamespace(task=SimpleNamespace(name="WriteReport"))
         assert _get_task_name(event) == "WriteReport"
 
     def test_no_task_returns_empty(self):
@@ -174,8 +171,12 @@ class TestEmitSpanNullGuards:
         """_emit_span works with an event that has no attributes at all."""
         mock_tracer = MagicMock()
         mock_span = MagicMock()
-        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(return_value=False)
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=False
+        )
 
         bridge = OTelEventBridge(tracer=mock_tracer, job_id="job-1")
 
@@ -196,8 +197,12 @@ class TestEmitSpanNullGuards:
         """_emit_span captures crew_name from event and stores it for later spans."""
         mock_tracer = MagicMock()
         mock_span = MagicMock()
-        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(return_value=False)
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=False
+        )
 
         bridge = OTelEventBridge(tracer=mock_tracer, job_id="job-1")
 
@@ -212,8 +217,12 @@ class TestEmitSpanNullGuards:
 
         mock_tracer = MagicMock()
         mock_span = MagicMock()
-        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(return_value=False)
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=False
+        )
 
         bridge = OTelEventBridge(tracer=mock_tracer, job_id="job-1")
 

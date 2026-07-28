@@ -3,23 +3,25 @@ Unit tests for src/engines/kasal/helpers/model_conversion_handler.py
 
 Targets uncovered converter class lines (42% → 85%+).
 """
+
 import json
-import pytest
-from unittest.mock import MagicMock, patch, Mock
-from pydantic import BaseModel
 from typing import List, Optional
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
+from pydantic import BaseModel
 
 from src.services.execution.kernel.model_conversion_handler import (
-    detect_llm_provider,
-    simplify_schema,
-    get_compatible_converter_for_model,
     configure_output_json_approach,
+    detect_llm_provider,
+    get_compatible_converter_for_model,
+    simplify_schema,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test Pydantic models
 # ---------------------------------------------------------------------------
+
 
 class SimpleModel(BaseModel):
     name: str
@@ -36,6 +38,7 @@ class NestedModel(BaseModel):
 # ---------------------------------------------------------------------------
 # detect_llm_provider
 # ---------------------------------------------------------------------------
+
 
 class TestDetectLlmProvider:
     def test_gemini(self):
@@ -72,6 +75,7 @@ class TestDetectLlmProvider:
 # ---------------------------------------------------------------------------
 # simplify_schema
 # ---------------------------------------------------------------------------
+
 
 class TestSimplifySchema:
     def test_removes_default_field(self):
@@ -148,6 +152,7 @@ class TestSimplifySchema:
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 
+
 class TestGetCompatibleConverterForModel:
     def test_no_llm_returns_default(self):
         agent = MagicMock(spec=[])  # no 'llm' attribute
@@ -171,7 +176,9 @@ class TestGetCompatibleConverterForModel:
         agent = MagicMock()
         agent.llm = MagicMock()
         agent.llm.model = "gemini-pro"
-        converter_cls, pydantic_cls, use_json, is_compatible = get_compatible_converter_for_model(agent, SimpleModel)
+        converter_cls, pydantic_cls, use_json, is_compatible = (
+            get_compatible_converter_for_model(agent, SimpleModel)
+        )
         assert use_json is True
         assert is_compatible is True
         assert pydantic_cls is None
@@ -180,7 +187,9 @@ class TestGetCompatibleConverterForModel:
         agent = MagicMock()
         agent.llm = MagicMock()
         agent.llm.model = "databricks/meta-llama"
-        converter_cls, pydantic_cls, use_json, is_compatible = get_compatible_converter_for_model(agent, SimpleModel)
+        converter_cls, pydantic_cls, use_json, is_compatible = (
+            get_compatible_converter_for_model(agent, SimpleModel)
+        )
         assert use_json is True
         assert is_compatible is True
 
@@ -202,6 +211,7 @@ class TestGetCompatibleConverterForModel:
 # ---------------------------------------------------------------------------
 # configure_output_json_approach
 # ---------------------------------------------------------------------------
+
 
 class TestConfigureOutputJsonApproach:
     def test_adds_output_json_true(self):
@@ -234,6 +244,7 @@ class TestConfigureOutputJsonApproach:
         # The schema appended should be valid JSON
         # Extract JSON from expected output
         import re
+
         match = re.search(r"```json\s*([\s\S]+?)\s*```", result["expected_output"])
         if match:
             schema_json = json.loads(match.group(1))
@@ -256,6 +267,7 @@ class TestConfigureOutputJsonWithComplexSchema:
 
     def test_schema_with_nested_default(self):
         """Schema with nested default fields gets simplified."""
+
         class ComplexModel(BaseModel):
             name: str
             tags: list = []
@@ -268,4 +280,3 @@ class TestConfigureOutputJsonWithComplexSchema:
         result = configure_output_json_approach(task_args, ComplexModel)
         assert result["output_json"] is True
         assert "json" in result["expected_output"].lower()
-

@@ -7,15 +7,17 @@ Tests:
 - is_valid_for_today() returns True for today and False for past/future dates
 - __tablename__, unique constraints, and indexes are correctly defined
 """
+
+from datetime import date, datetime, timedelta, timezone
+
 import pytest
-from datetime import date, datetime, timezone, timedelta
 
 from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_cache(**overrides) -> PowerBISemanticModelCache:
     defaults = dict(
@@ -38,6 +40,7 @@ def _make_cache(**overrides) -> PowerBISemanticModelCache:
 # ---------------------------------------------------------------------------
 # Tests: instantiation
 # ---------------------------------------------------------------------------
+
 
 class TestPowerBISemanticModelCacheInstantiation:
 
@@ -98,6 +101,7 @@ class TestPowerBISemanticModelCacheInstantiation:
 # Tests: is_valid_for_today()
 # ---------------------------------------------------------------------------
 
+
 class TestIsValidForToday:
 
     def test_today_is_valid(self):
@@ -145,6 +149,7 @@ class TestIsValidForToday:
 # Tests: table name
 # ---------------------------------------------------------------------------
 
+
 class TestTableName:
 
     def test_tablename(self):
@@ -155,6 +160,7 @@ class TestTableName:
 # ---------------------------------------------------------------------------
 # Tests: column definitions
 # ---------------------------------------------------------------------------
+
 
 class TestColumnDefinitions:
 
@@ -212,9 +218,15 @@ class TestColumnDefinitions:
     def test_all_expected_columns_present(self):
         """All expected columns exist in the table definition."""
         expected = {
-            "id", "group_id", "dataset_id", "workspace_id",
-            "report_id", "cached_date", "cache_data",
-            "created_at", "updated_at",
+            "id",
+            "group_id",
+            "dataset_id",
+            "workspace_id",
+            "report_id",
+            "cached_date",
+            "cache_data",
+            "created_at",
+            "updated_at",
         }
         actual = set(PowerBISemanticModelCache.__table__.columns.keys())
         assert expected.issubset(actual)
@@ -223,6 +235,7 @@ class TestColumnDefinitions:
 # ---------------------------------------------------------------------------
 # Tests: unique constraints and indexes
 # ---------------------------------------------------------------------------
+
 
 class TestConstraintsAndIndexes:
 
@@ -239,11 +252,14 @@ class TestConstraintsAndIndexes:
     def test_unique_constraint_covers_correct_columns(self):
         """The daily unique constraint covers group_id, dataset_id, cached_date, report_id."""
         uc = next(
-            c for c in PowerBISemanticModelCache.__table__.constraints
+            c
+            for c in PowerBISemanticModelCache.__table__.constraints
             if getattr(c, "name", None) == "uq_semantic_model_cache_daily"
         )
         col_names = {col.name for col in uc.columns}
-        assert {"group_id", "dataset_id", "cached_date", "report_id"}.issubset(col_names)
+        assert {"group_id", "dataset_id", "cached_date", "report_id"}.issubset(
+            col_names
+        )
 
     def test_group_dataset_index_exists(self):
         """The composite index 'idx_semantic_cache_group_dataset' is defined."""

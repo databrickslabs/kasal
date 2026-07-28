@@ -11,7 +11,6 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import UploadFile
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import KasalError, UnprocessableEntityError
@@ -292,7 +291,11 @@ class DatabricksKnowledgeService:
                 # pdfminer.six (MIT-licensed) — pure-Python PDF text extraction.
                 from pdfminer.high_level import extract_text
 
-                raw = content if isinstance(content, bytes) else str(content).encode("utf-8")
+                raw = (
+                    content
+                    if isinstance(content, bytes)
+                    else str(content).encode("utf-8")
+                )
                 text_content = extract_text(io.BytesIO(raw)) or ""
             except ImportError:
                 # Fail loudly instead of embedding a placeholder as "success":
@@ -734,8 +737,10 @@ class DatabricksKnowledgeService:
 
             # Generate a dummy query embedding for fetching sources, using the
             # shared knowledge embedder so it matches the ingest/search model.
+            from src.services.knowledge.embedder import (
+                resolve_knowledge_embedder_config,
+            )
             from src.services.llm.manager import LLMManager
-            from src.services.knowledge.embedder import resolve_knowledge_embedder_config
 
             embedder_config = await resolve_knowledge_embedder_config(
                 user_token=user_token, group_id=self.group_id

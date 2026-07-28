@@ -20,19 +20,21 @@ Targets uncovered lines:
 - Lines 797-798: get_local_db
 - Lines 819-830, 854-855: dispose_engines edge cases
 """
-import os
+
 import asyncio
 import logging
+import os
 import sqlite3
 import tempfile
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
-from sqlalchemy.exc import OperationalError
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
+import pytest
+from sqlalchemy.exc import OperationalError
 
 # ---------------------------------------------------------------------------
 # retry_db_operation: exhaust retries (raise last_exception) and general exc
 # ---------------------------------------------------------------------------
+
 
 class TestRetryDbOperationEdgeCases:
 
@@ -141,6 +143,7 @@ class TestRetryDbOperationEdgeCases:
 # configure_sqlite
 # ---------------------------------------------------------------------------
 
+
 class TestConfigureSqlite:
     """Tests for the configure_sqlite connection event handler."""
 
@@ -191,22 +194,20 @@ class TestConfigureSqlite:
         from src.db.session import configure_sqlite
 
         mock_record = MagicMock()
-        with patch("src.db.session.settings") as mock_settings, \
-             patch.object(session_module, "logger") as mock_logger, \
-             patch.object(session_module, "_sqlite_configured_logged", False):
+        with (
+            patch("src.db.session.settings") as mock_settings,
+            patch.object(session_module, "logger") as mock_logger,
+            patch.object(session_module, "_sqlite_configured_logged", False),
+        ):
             mock_settings.DATABASE_URI = "sqlite:///test.db"
             configure_sqlite(MagicMock(), mock_record)
             configure_sqlite(MagicMock(), mock_record)
             configure_sqlite(MagicMock(), mock_record)
 
         info_lines = [
-            c for c in mock_logger.info.call_args_list
-            if "WAL mode" in str(c)
+            c for c in mock_logger.info.call_args_list if "WAL mode" in str(c)
         ]
-        debug_lines = [
-            c for c in mock_logger.debug.call_args_list
-            if "WAL" in str(c)
-        ]
+        debug_lines = [c for c in mock_logger.debug.call_args_list if "WAL" in str(c)]
         assert len(info_lines) == 1
         assert len(debug_lines) == 2
 
@@ -214,6 +215,7 @@ class TestConfigureSqlite:
 # ---------------------------------------------------------------------------
 # init_db
 # ---------------------------------------------------------------------------
+
 
 def _make_async_cm(return_value=None):
     """Helper: create an object that works as 'async with obj as x: ...'."""
@@ -238,17 +240,22 @@ class TestInitDb:
             mock_inner_conn.run_sync = AsyncMock()
 
             mock_engine = MagicMock()
-            mock_engine.connect = MagicMock(return_value=_make_async_cm(mock_inner_conn))
+            mock_engine.connect = MagicMock(
+                return_value=_make_async_cm(mock_inner_conn)
+            )
             mock_engine.begin = MagicMock(return_value=_make_async_cm(mock_inner_conn))
             mock_engine.dispose = AsyncMock()
 
             import src.db.all_models as _all_models_mod
-            with patch("src.db.session.settings") as mock_settings, \
-                 patch.object(_all_models_mod, "Base", MagicMock()), \
-                 patch("importlib.reload"), \
-                 patch("src.db.session.create_async_engine", return_value=mock_engine), \
-                 patch("src.db.session.NullPool"), \
-                 patch("sqlite3.connect") as mock_sqlite_connect:
+
+            with (
+                patch("src.db.session.settings") as mock_settings,
+                patch.object(_all_models_mod, "Base", MagicMock()),
+                patch("importlib.reload"),
+                patch("src.db.session.create_async_engine", return_value=mock_engine),
+                patch("src.db.session.NullPool"),
+                patch("sqlite3.connect") as mock_sqlite_connect,
+            ):
 
                 mock_settings.DATABASE_URI = db_uri
                 mock_settings.SQLITE_DB_PATH = db_path
@@ -259,10 +266,11 @@ class TestInitDb:
                 mock_sqlite_connect.return_value = mock_sqlite_conn
 
                 # Create the db file so existence check passes
-                with open(db_path, 'w'):
+                with open(db_path, "w"):
                     pass
 
                 from src.db.session import init_db
+
                 await init_db()
 
     @pytest.mark.asyncio
@@ -280,26 +288,33 @@ class TestInitDb:
             conn.close()
 
             import src.db.all_models as _all_models_mod2
-            with patch("src.db.session.settings") as mock_settings, \
-                 patch.object(_all_models_mod2, "Base", MagicMock()), \
-                 patch("importlib.reload"):
+
+            with (
+                patch("src.db.session.settings") as mock_settings,
+                patch.object(_all_models_mod2, "Base", MagicMock()),
+                patch("importlib.reload"),
+            ):
 
                 mock_settings.DATABASE_URI = db_uri
                 mock_settings.SQLITE_DB_PATH = db_path
 
                 from src.db.session import init_db
+
                 # Should complete without error (tables exist, no creation needed)
                 await init_db()
 
     @pytest.mark.asyncio
     async def test_init_db_exception_propagates(self):
         """init_db propagates unexpected exceptions."""
-        with patch("src.db.session.settings") as mock_settings, \
-             patch("importlib.reload", side_effect=RuntimeError("import error")):
+        with (
+            patch("src.db.session.settings") as mock_settings,
+            patch("importlib.reload", side_effect=RuntimeError("import error")),
+        ):
             mock_settings.DATABASE_URI = "sqlite:///test.db"
             mock_settings.SQLITE_DB_PATH = "/tmp/test.db"
 
             from src.db.session import init_db
+
             with pytest.raises(RuntimeError, match="import error"):
                 await init_db()
 
@@ -314,15 +329,19 @@ class TestInitDb:
             mock_inner_conn.run_sync = AsyncMock()
 
             mock_engine = MagicMock()
-            mock_engine.connect = MagicMock(return_value=_make_async_cm(mock_inner_conn))
+            mock_engine.connect = MagicMock(
+                return_value=_make_async_cm(mock_inner_conn)
+            )
             mock_engine.begin = MagicMock(return_value=_make_async_cm(mock_inner_conn))
             mock_engine.dispose = AsyncMock()
 
-            with patch("src.db.session.settings") as mock_settings, \
-                 patch("src.db.all_models"), \
-                 patch("importlib.reload"), \
-                 patch("src.db.session.create_async_engine", return_value=mock_engine), \
-                 patch("sqlite3.connect") as mock_sqlite_connect:
+            with (
+                patch("src.db.session.settings") as mock_settings,
+                patch("src.db.all_models"),
+                patch("importlib.reload"),
+                patch("src.db.session.create_async_engine", return_value=mock_engine),
+                patch("sqlite3.connect") as mock_sqlite_connect,
+            ):
 
                 mock_settings.DATABASE_URI = db_uri
                 mock_settings.SQLITE_DB_PATH = db_path
@@ -333,13 +352,16 @@ class TestInitDb:
                 mock_sqlite_connect.return_value = mock_sqlite_conn
 
                 from src.db.session import init_db
+
                 await init_db()
 
     @pytest.mark.asyncio
     async def test_init_db_postgresql_path(self):
         """init_db takes the PostgreSQL branch without errors."""
         mock_inner_conn = AsyncMock()
-        mock_inner_conn.execute = AsyncMock(return_value=MagicMock(fetchone=MagicMock(return_value=None)))
+        mock_inner_conn.execute = AsyncMock(
+            return_value=MagicMock(fetchone=MagicMock(return_value=None))
+        )
         mock_inner_conn.run_sync = AsyncMock()
         mock_inner_conn.commit = AsyncMock()
 
@@ -348,14 +370,18 @@ class TestInitDb:
         mock_engine.begin = MagicMock(return_value=_make_async_cm(mock_inner_conn))
         mock_engine.dispose = AsyncMock()
 
-        with patch("src.db.session.settings") as mock_settings, \
-             patch("importlib.reload"), \
-             patch("src.db.all_models"), \
-             patch("asyncpg.connect", new_callable=AsyncMock) as mock_pg_connect, \
-             patch("src.db.session.create_async_engine", return_value=mock_engine), \
-             patch("src.db.session.NullPool"):
+        with (
+            patch("src.db.session.settings") as mock_settings,
+            patch("importlib.reload"),
+            patch("src.db.all_models"),
+            patch("asyncpg.connect", new_callable=AsyncMock) as mock_pg_connect,
+            patch("src.db.session.create_async_engine", return_value=mock_engine),
+            patch("src.db.session.NullPool"),
+        ):
 
-            mock_settings.DATABASE_URI = "postgresql+asyncpg://user" ":pass@localhost/testdb"
+            mock_settings.DATABASE_URI = (
+                "postgresql+asyncpg://user" ":pass@localhost/testdb"
+            )
             mock_settings.POSTGRES_DB = "testdb"
             mock_settings.POSTGRES_SERVER = "localhost"
             mock_settings.POSTGRES_PORT = 5432
@@ -366,12 +392,14 @@ class TestInitDb:
             mock_pg_connect.return_value = mock_pg_conn
 
             from src.db.session import init_db
+
             await init_db()
 
 
 # ---------------------------------------------------------------------------
 # _ensure_databricks_config_columns: idempotent ai_gateway_enabled ALTER
 # ---------------------------------------------------------------------------
+
 
 def _make_pragma_result(column_names):
     """Build a fake PRAGMA table_info result.
@@ -419,7 +447,9 @@ class TestEnsureDatabricksConfigColumns:
 
         conn = MagicMock()
         conn.exec_driver_sql = AsyncMock(
-            return_value=_make_pragma_result(["id", "workspace_url", "ai_gateway_enabled"])
+            return_value=_make_pragma_result(
+                ["id", "workspace_url", "ai_gateway_enabled"]
+            )
         )
 
         with patch("src.db.session.settings") as mock_settings:
@@ -480,6 +510,7 @@ class TestEnsureDatabricksConfigColumns:
 # get_db: OperationalError retry paths and token reset ValueError
 # ---------------------------------------------------------------------------
 
+
 class TestGetDbEdgeCases:
 
     @pytest.mark.asyncio
@@ -490,6 +521,7 @@ class TestGetDbEdgeCases:
         class MockCtx:
             async def __aenter__(self):
                 return mock_session
+
             async def __aexit__(self, *args):
                 pass
 
@@ -513,6 +545,7 @@ class TestGetDbEdgeCases:
         class MockCtx:
             async def __aenter__(self):
                 return mock_session
+
             async def __aexit__(self, *args):
                 pass
 
@@ -536,13 +569,16 @@ class TestGetDbEdgeCases:
         class MockCtx:
             async def __aenter__(self):
                 return mock_session
+
             async def __aexit__(self, *args):
                 pass
 
         mock_factory = MagicMock(return_value=MockCtx())
 
-        with patch("src.db.session.async_session_factory", mock_factory), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch("src.db.session.async_session_factory", mock_factory),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
             from src.db.session import get_db
 
             gen = get_db()
@@ -566,13 +602,16 @@ class TestGetDbEdgeCases:
         class MockCtx:
             async def __aenter__(self):
                 return mock_session
+
             async def __aexit__(self, *args):
                 pass
 
         mock_factory = MagicMock(return_value=MockCtx())
 
-        with patch("src.db.session.async_session_factory", mock_factory), \
-             patch("src.db.session._request_session") as mock_ctx_var:
+        with (
+            patch("src.db.session.async_session_factory", mock_factory),
+            patch("src.db.session._request_session") as mock_ctx_var,
+        ):
             mock_token = MagicMock()
             mock_ctx_var.set.return_value = mock_token
             mock_ctx_var.reset.side_effect = ValueError("token mismatch")
@@ -598,15 +637,20 @@ class TestGetDbEdgeCases:
                 nonlocal call_count
                 call_count += 1
                 ctx = AsyncMock()
-                ctx.__aenter__ = AsyncMock(side_effect=OperationalError("database is locked", None, None))
+                ctx.__aenter__ = AsyncMock(
+                    side_effect=OperationalError("database is locked", None, None)
+                )
                 ctx.__aexit__ = AsyncMock(return_value=False)
                 return ctx
 
         mock_factory = MockCtxFactory()
 
-        with patch("src.db.session.async_session_factory", mock_factory), \
-             patch("asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch("src.db.session.async_session_factory", mock_factory),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
             from src.db.session import get_db
+
             with pytest.raises(OperationalError):
                 gen = get_db()
                 await gen.__anext__()
@@ -617,6 +661,7 @@ class TestGetDbEdgeCases:
     @pytest.mark.asyncio
     async def test_get_db_outer_operational_error_non_lock_raises_immediately(self):
         """get_db raises immediately when outer OperationalError is not a lock error."""
+
         class MockCtxFactory:
             def __call__(self):
                 ctx = AsyncMock()
@@ -628,6 +673,7 @@ class TestGetDbEdgeCases:
 
         with patch("src.db.session.async_session_factory", MockCtxFactory()):
             from src.db.session import get_db
+
             with pytest.raises(OperationalError, match="server gone away"):
                 gen = get_db()
                 await gen.__anext__()
@@ -636,6 +682,7 @@ class TestGetDbEdgeCases:
 # ---------------------------------------------------------------------------
 # get_local_db: additional edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestGetLocalDbEdgeCases:
 
@@ -647,11 +694,17 @@ class TestGetLocalDbEdgeCases:
         class MockCtx:
             async def __aenter__(self):
                 return mock_session
+
             async def __aexit__(self, *args):
                 pass
 
-        with patch("src.db.session._local_session_factory", MagicMock(return_value=MockCtx())), \
-             patch("src.db.session._request_session") as mock_ctx_var:
+        with (
+            patch(
+                "src.db.session._local_session_factory",
+                MagicMock(return_value=MockCtx()),
+            ),
+            patch("src.db.session._request_session") as mock_ctx_var,
+        ):
             mock_token = MagicMock()
             mock_ctx_var.set.return_value = mock_token
             mock_ctx_var.reset.side_effect = ValueError("bad token")
@@ -674,6 +727,7 @@ class TestGetLocalDbEdgeCases:
 # dispose_engines: deduplicate engines
 # ---------------------------------------------------------------------------
 
+
 class TestDisposeEnginesDeduplication:
 
     @pytest.mark.asyncio
@@ -682,12 +736,12 @@ class TestDisposeEnginesDeduplication:
         from src.db.session import dispose_engines
 
         mock_engine = AsyncMock()
-        mock_engine.__class__ = type(
-            "MockEngine", (), {"dispose": mock_engine.dispose}
-        )
+        mock_engine.__class__ = type("MockEngine", (), {"dispose": mock_engine.dispose})
 
-        with patch("src.db.session.engine", mock_engine), \
-             patch("src.db.lakebase_session.dispose_lakebase_factory", new=AsyncMock()):
+        with (
+            patch("src.db.session.engine", mock_engine),
+            patch("src.db.lakebase_session.dispose_lakebase_factory", new=AsyncMock()),
+        ):
             await dispose_engines()
 
         # dispose was called at least once
@@ -698,8 +752,10 @@ class TestDisposeEnginesDeduplication:
         """dispose_engines handles unexpected outer exceptions gracefully."""
         from src.db.session import dispose_engines
 
-        with patch("src.db.session.engine", None), \
-             patch("src.db.lakebase_session.dispose_lakebase_factory", new=AsyncMock()):
+        with (
+            patch("src.db.session.engine", None),
+            patch("src.db.lakebase_session.dispose_lakebase_factory", new=AsyncMock()),
+        ):
             # Should not raise even when engine is None
             await dispose_engines()
 
@@ -708,21 +764,25 @@ class TestDisposeEnginesDeduplication:
 # SwappableSessionFactory: is_lakebase property
 # ---------------------------------------------------------------------------
 
+
 class TestSwappableSessionFactoryProperty:
 
     def test_is_lakebase_false_by_default(self):
         from src.db.session import _SwappableSessionFactory
+
         factory = _SwappableSessionFactory(MagicMock())
         assert factory.is_lakebase is False
 
     def test_is_lakebase_true_after_activate(self):
         from src.db.session import _SwappableSessionFactory
+
         factory = _SwappableSessionFactory(MagicMock())
         factory.activate_lakebase(MagicMock())
         assert factory.is_lakebase is True
 
     def test_is_lakebase_false_after_deactivate(self):
         from src.db.session import _SwappableSessionFactory
+
         factory = _SwappableSessionFactory(MagicMock())
         factory.activate_lakebase(MagicMock())
         factory.deactivate_lakebase()

@@ -1,8 +1,10 @@
 from datetime import datetime
-from typing import List, Optional, Dict, Any, Union
-from sqlalchemy import select, update, or_, func
-from src.models.user import User
+from typing import Any, Dict, List, Optional, Union
+
+from sqlalchemy import func, or_, select, update
+
 from src.core.base_repository import BaseRepository
+from src.models.user import User
 
 
 class UserRepository(BaseRepository[User]):
@@ -22,24 +24,34 @@ class UserRepository(BaseRepository[User]):
 
     async def update_last_login(self, user_id: str) -> None:
         """Update user's last login timestamp"""
-        query = update(self.model).where(self.model.id == user_id).values(last_login=datetime.utcnow())
+        query = (
+            update(self.model)
+            .where(self.model.id == user_id)
+            .values(last_login=datetime.utcnow())
+        )
         await self.session.execute(query)
 
     async def search_users(self, search_term: str, limit: int = 10) -> List[User]:
         """Search users by email or username"""
-        query = select(self.model).where(
-            or_(
-                self.model.email.ilike(f"%{search_term}%"),
-                self.model.username.ilike(f"%{search_term}%")
+        query = (
+            select(self.model)
+            .where(
+                or_(
+                    self.model.email.ilike(f"%{search_term}%"),
+                    self.model.username.ilike(f"%{search_term}%"),
+                )
             )
-        ).limit(limit)
+            .limit(limit)
+        )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
     async def count_system_admins(self) -> int:
         """How many users hold system-admin privileges."""
         result = await self.session.execute(
-            select(func.count(self.model.id)).where(self.model.is_system_admin.is_(True))
+            select(func.count(self.model.id)).where(
+                self.model.is_system_admin.is_(True)
+            )
         )
         return result.scalar() or 0
 

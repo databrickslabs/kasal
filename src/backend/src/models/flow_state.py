@@ -31,6 +31,4 @@ class FlowState(Base):
     # to stay consistent with flow_execution / execution_history.
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
-    __table_args__ = (
-        Index("ix_flow_states_uuid_created", "flow_uuid", "created_at"),
-    )
+    __table_args__ = (Index("ix_flow_states_uuid_created", "flow_uuid", "created_at"),)

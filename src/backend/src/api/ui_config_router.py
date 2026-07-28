@@ -49,6 +49,8 @@ async def update_ui_config(
 ) -> UIConfigResponse:
     """Update the workspace's Predefined UI configuration (workspace admins only)."""
     if not is_workspace_admin(group_context):
-        raise ForbiddenError("Only workspace admins can change the Predefined UI configuration")
+        raise ForbiddenError(
+            "Only workspace admins can change the Predefined UI configuration"
+        )
     created_by_email = group_context.group_email if group_context else None
     return await service.update_config(config_in, created_by_email=created_by_email)

@@ -1,6 +1,8 @@
 """Tests for metric_view_validation_utils.measure_table_mapping_parser."""
+
 import json
 import textwrap
+
 import pytest
 
 from src.services.tools.metric_view_validation_utils.measure_table_mapping_parser import (
@@ -41,6 +43,7 @@ def _parser_with_data(mappings: list, tmp_path) -> MeasureTableMappingParser:
 # __init__
 # ---------------------------------------------------------------------------
 
+
 class TestInit:
     def test_stores_path(self, tmp_path):
         p = tmp_path / "m.json"
@@ -54,6 +57,7 @@ class TestInit:
 # ---------------------------------------------------------------------------
 # load()
 # ---------------------------------------------------------------------------
+
 
 class TestLoad:
     def test_load_returns_list(self, tmp_path):
@@ -85,6 +89,7 @@ class TestLoad:
 # get_measure_by_name()
 # ---------------------------------------------------------------------------
 
+
 class TestGetMeasureByName:
     def test_exact_match(self, tmp_path):
         parser = _parser_with_data(SAMPLE_MAPPINGS, tmp_path)
@@ -113,6 +118,7 @@ class TestGetMeasureByName:
 # ---------------------------------------------------------------------------
 # get_measures_for_table()
 # ---------------------------------------------------------------------------
+
 
 class TestGetMeasuresForTable:
     def test_returns_correct_measures(self, tmp_path):

@@ -1,6 +1,6 @@
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select, update, delete
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.group_tool import GroupTool
@@ -15,22 +15,32 @@ class GroupToolRepository:
         self.session = session
 
     async def get_by_id(self, mapping_id: int) -> Optional[GroupTool]:
-        result = await self.session.execute(select(GroupTool).where(GroupTool.id == mapping_id))
+        result = await self.session.execute(
+            select(GroupTool).where(GroupTool.id == mapping_id)
+        )
         return result.scalars().first()
 
-    async def find_by_tool_and_group(self, tool_id: int, group_id: str) -> Optional[GroupTool]:
+    async def find_by_tool_and_group(
+        self, tool_id: int, group_id: str
+    ) -> Optional[GroupTool]:
         result = await self.session.execute(
-            select(GroupTool).where((GroupTool.tool_id == tool_id) & (GroupTool.group_id == group_id))
+            select(GroupTool).where(
+                (GroupTool.tool_id == tool_id) & (GroupTool.group_id == group_id)
+            )
         )
         return result.scalars().first()
 
     async def list_for_group(self, group_id: str) -> List[GroupTool]:
-        result = await self.session.execute(select(GroupTool).where(GroupTool.group_id == group_id))
+        result = await self.session.execute(
+            select(GroupTool).where(GroupTool.group_id == group_id)
+        )
         return list(result.scalars().all())
 
     async def list_enabled_for_group(self, group_id: str) -> List[GroupTool]:
         result = await self.session.execute(
-            select(GroupTool).where((GroupTool.group_id == group_id) & (GroupTool.enabled == True))  # noqa: E712
+            select(GroupTool).where(
+                (GroupTool.group_id == group_id) & (GroupTool.enabled == True)
+            )  # noqa: E712
         )
         return list(result.scalars().all())
 
@@ -41,7 +51,9 @@ class GroupToolRepository:
         await self.session.refresh(mapping)
         return mapping
 
-    async def upsert(self, tool_id: int, group_id: str, defaults: Optional[Dict[str, Any]] = None) -> GroupTool:
+    async def upsert(
+        self, tool_id: int, group_id: str, defaults: Optional[Dict[str, Any]] = None
+    ) -> GroupTool:
         mapping = await self.find_by_tool_and_group(tool_id, group_id)
         if mapping:
             return mapping
@@ -50,7 +62,9 @@ class GroupToolRepository:
             payload.update(defaults)
         return await self.create(payload)
 
-    async def update_config(self, tool_id: int, group_id: str, config: Dict[str, Any]) -> Optional[GroupTool]:
+    async def update_config(
+        self, tool_id: int, group_id: str, config: Dict[str, Any]
+    ) -> Optional[GroupTool]:
         mapping = await self.find_by_tool_and_group(tool_id, group_id)
         if not mapping:
             return None
@@ -63,7 +77,9 @@ class GroupToolRepository:
         await self.session.refresh(mapping)
         return mapping
 
-    async def set_enabled(self, tool_id: int, group_id: str, enabled: bool) -> Optional[GroupTool]:
+    async def set_enabled(
+        self, tool_id: int, group_id: str, enabled: bool
+    ) -> Optional[GroupTool]:
         mapping = await self.find_by_tool_and_group(tool_id, group_id)
         if not mapping:
             return None
@@ -78,8 +94,9 @@ class GroupToolRepository:
 
     async def delete_mapping(self, tool_id: int, group_id: str) -> int:
         result = await self.session.execute(
-            delete(GroupTool).where((GroupTool.tool_id == tool_id) & (GroupTool.group_id == group_id))
+            delete(GroupTool).where(
+                (GroupTool.tool_id == tool_id) & (GroupTool.group_id == group_id)
+            )
         )
         await self.session.flush()
         return result.rowcount or 0
-

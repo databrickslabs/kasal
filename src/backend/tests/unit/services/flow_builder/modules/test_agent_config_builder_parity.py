@@ -2,12 +2,14 @@
 (build_agent_kwargs + build_agent_llm). These tests prove the flow adapter maps
 fields correctly and that flow builds its LLM the crew way (explicit group_id +
 temperature via configure_kasal_llm), so the two paths can't diverge."""
-import pytest
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from src.services.flow_builder.modules.agent_adapter import AgentConfig
+import pytest
+
 from src.services.execution.kernel.agent_builder import build_agent_kwargs
+from src.services.flow_builder.modules.agent_adapter import AgentConfig
 
 
 def _agent(**over):
@@ -26,7 +28,13 @@ class TestAgentDataToSpec:
 
     def test_optional_fields_included_when_set(self):
         spec = AgentConfig._agent_data_to_spec(
-            _agent(verbose=False, cache=True, max_retry_limit=5, max_iter=9, system_template="SYS")
+            _agent(
+                verbose=False,
+                cache=True,
+                max_retry_limit=5,
+                max_iter=9,
+                system_template="SYS",
+            )
         )
         assert spec["verbose"] is False
         assert spec["cache"] is True
@@ -68,8 +76,12 @@ class TestFlowCrewAgentKwargsParity:
         agent_data = _agent(verbose=False, max_iter=4, allow_delegation=True)
         flow_spec = AgentConfig._agent_data_to_spec(agent_data)
         crew_dict = {
-            "role": "R", "goal": "G", "backstory": "B",
-            "verbose": False, "max_iter": 4, "allow_delegation": True,
+            "role": "R",
+            "goal": "G",
+            "backstory": "B",
+            "verbose": False,
+            "max_iter": 4,
+            "allow_delegation": True,
         }
         flow_kwargs = build_agent_kwargs(flow_spec, [], "llm")
         crew_kwargs = build_agent_kwargs(crew_dict, [], "llm")

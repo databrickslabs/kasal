@@ -12,13 +12,13 @@ Date: 2026
 import asyncio
 import contextvars
 import logging
-from typing import Any, Dict, Optional, Type
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, Optional, Type
+
+import httpx
+from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
-from pydantic import BaseModel, Field, PrivateAttr
-import httpx
-
 from src.services.tools.powerbi_auth_utils import get_powerbi_access_token
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ class PowerBIDaxExecutorSchema(BaseModel):
 
     dax_query: Optional[str] = Field(
         None,
-        description="[Required] The DAX EVALUATE statement to execute against the Power BI semantic model."
+        description="[Required] The DAX EVALUATE statement to execute against the Power BI semantic model.",
     )
 
     # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
@@ -62,11 +62,10 @@ class PowerBIDaxExecutorSchema(BaseModel):
     # Output options
     output_format: Optional[str] = Field(
         "markdown",
-        description="Output format: 'markdown' (default), 'json', or 'table'."
+        description="Output format: 'markdown' (default), 'json', or 'table'.",
     )
     max_rows: Optional[int] = Field(
-        1000,
-        description="Maximum number of rows to return (default 1000)."
+        1000, description="Maximum number of rows to return (default 1000)."
     )
 
 
@@ -92,14 +91,24 @@ class PowerBIDaxExecutorTool(BaseTool):
 
     def __init__(self, **kwargs):
         config_keys = [
-            "workspace_id", "dataset_id", "dax_query",
-            "auth_method", "tenant_id", "client_id", "client_secret",
-            "username", "password", "access_token",
-            "output_format", "max_rows",
+            "workspace_id",
+            "dataset_id",
+            "dax_query",
+            "auth_method",
+            "tenant_id",
+            "client_id",
+            "client_secret",
+            "username",
+            "password",
+            "access_token",
+            "output_format",
+            "max_rows",
         ]
         default_config = {k: kwargs.pop(k, None) for k in config_keys}
         super().__init__(**kwargs)
-        self._default_config = {k: v for k, v in default_config.items() if v is not None}
+        self._default_config = {
+            k: v for k, v in default_config.items() if v is not None
+        }
 
     def _run(self, **kwargs) -> str:
         """Synchronous entry point — delegates to async _execute."""
@@ -108,7 +117,10 @@ class PowerBIDaxExecutorTool(BaseTool):
     async def _execute(self, kwargs: Dict[str, Any]) -> str:
         """Async execution: merge config, auth, execute DAX, format output."""
         # Merge runtime kwargs with defaults (runtime kwargs take priority)
-        config = {**self._default_config, **{k: v for k, v in kwargs.items() if v is not None}}
+        config = {
+            **self._default_config,
+            **{k: v for k, v in kwargs.items() if v is not None},
+        }
 
         workspace_id = config.get("workspace_id", "")
         dataset_id = config.get("dataset_id", "")
@@ -138,7 +150,9 @@ class PowerBIDaxExecutorTool(BaseTool):
             return f"Error obtaining Power BI access token: {e}"
 
         # Execute DAX
-        result = await self._execute_dax_query(workspace_id, dataset_id, access_token, dax_query)
+        result = await self._execute_dax_query(
+            workspace_id, dataset_id, access_token, dax_query
+        )
 
         if not result["success"]:
             return f"DAX execution failed: {result.get('error', 'Unknown error')}"
@@ -169,9 +183,21 @@ class PowerBIDaxExecutorTool(BaseTool):
     ) -> Dict[str, Any]:
         """Execute DAX query via Power BI Execute Queries API."""
         url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
-        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-        payload = {"queries": [{"query": dax_query}], "serializerSettings": {"includeNulls": True}}
-        result: Dict[str, Any] = {"success": False, "data": [], "row_count": 0, "columns": [], "error": None}
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "queries": [{"query": dax_query}],
+            "serializerSettings": {"includeNulls": True},
+        }
+        result: Dict[str, Any] = {
+            "success": False,
+            "data": [],
+            "row_count": 0,
+            "columns": [],
+            "error": None,
+        }
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             try:
@@ -209,7 +235,9 @@ class PowerBIDaxExecutorTool(BaseTool):
             return "No columns returned."
 
         # Clean column names (Power BI returns "[TableName].[ColumnName]" style)
-        clean_cols = [c.split("].[")[-1].rstrip("]") if "].[" in c else c for c in columns]
+        clean_cols = [
+            c.split("].[")[-1].rstrip("]") if "].[" in c else c for c in columns
+        ]
 
         header = "| " + " | ".join(clean_cols) + " |"
         separator = "| " + " | ".join(["---"] * len(clean_cols)) + " |"

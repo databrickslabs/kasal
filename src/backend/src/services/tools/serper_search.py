@@ -24,6 +24,7 @@ from .web_fetch import (
 
 logger = logging.getLogger(__name__)
 
+
 class SerperDevToolSchema(BaseModel):
     """Input for SerperDevTool."""
 
@@ -215,5 +216,3 @@ class SerperDevTool(BaseTool):
 
 
 # -------------------------- ScrapeWebsiteTool --------------------------
-
-

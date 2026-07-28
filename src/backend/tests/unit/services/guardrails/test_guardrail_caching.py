@@ -4,16 +4,23 @@ Unit tests for LLM guardrail result caching.
 Verifies that identical outputs hit the cache and skip LLM calls,
 and that the LRU eviction policy works correctly.
 """
-import pytest
+
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 _INJECTION_RC = "src.services.guardrails.core.llm_injection_guardrail._run_completion"
-_REFLECTION_RC = "src.services.guardrails.core.self_reflection_guardrail._run_completion"
+_REFLECTION_RC = (
+    "src.services.guardrails.core.self_reflection_guardrail._run_completion"
+)
 
 
 def _make_injection_guardrail(config=None, cache_size=128):
     cfg = config or {"llm_model": "databricks-test-model", "cache_size": cache_size}
-    from src.services.guardrails.core.llm_injection_guardrail import LLMInjectionGuardrail
+    from src.services.guardrails.core.llm_injection_guardrail import (
+        LLMInjectionGuardrail,
+    )
+
     return LLMInjectionGuardrail(cfg)
 
 
@@ -23,7 +30,10 @@ def _make_self_reflection_guardrail(config=None, cache_size=128):
         "task_description": "Summarise revenue.",
         "cache_size": cache_size,
     }
-    from src.services.guardrails.core.self_reflection_guardrail import SelfReflectionGuardrail
+    from src.services.guardrails.core.self_reflection_guardrail import (
+        SelfReflectionGuardrail,
+    )
+
     return SelfReflectionGuardrail(cfg)
 
 
@@ -114,14 +124,18 @@ class TestSelfReflectionGuardrailCaching:
 
     def test_cache_includes_task_description(self):
         """Different task descriptions → different cache keys."""
-        g1 = _make_self_reflection_guardrail({
-            "llm_model": "databricks-test-model",
-            "task_description": "Task A",
-        })
-        g2 = _make_self_reflection_guardrail({
-            "llm_model": "databricks-test-model",
-            "task_description": "Task B",
-        })
+        g1 = _make_self_reflection_guardrail(
+            {
+                "llm_model": "databricks-test-model",
+                "task_description": "Task A",
+            }
+        )
+        g2 = _make_self_reflection_guardrail(
+            {
+                "llm_model": "databricks-test-model",
+                "task_description": "Task B",
+            }
+        )
         with patch(_REFLECTION_RC, return_value="PASS") as mock_rc:
             g1.validate("Same output.")
             g2.validate("Same output.")

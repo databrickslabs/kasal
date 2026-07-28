@@ -2,18 +2,20 @@
 Tests for error handling paths in tasks_router.
 Covers lines 36, 70-72, 92-94, 129, 134-136, 180-182, 226-228, 266-268, 293-295
 """
-import pytest
+
 from unittest.mock import AsyncMock
+
+import pytest
 from fastapi import HTTPException
 
 from src.api.tasks_router import (
     create_task,
-    list_tasks,
-    get_task,
-    update_task_full,
-    update_task,
-    delete_task,
     delete_all_tasks,
+    delete_task,
+    get_task,
+    list_tasks,
+    update_task,
+    update_task_full,
 )
 from src.schemas.task import TaskCreate, TaskUpdate
 from src.utils.user_context import GroupContext
@@ -32,7 +34,10 @@ class TestCreateTaskErrorPath:
         svc = AsyncMock()
         svc.create_with_group = AsyncMock(side_effect=Exception("DB connection failed"))
         from src.schemas.task import TaskCreate
-        task_in = TaskCreate(name="T", description="d", expected_output="o", agent_id=None)
+
+        task_in = TaskCreate(
+            name="T", description="d", expected_output="o", agent_id=None
+        )
         with pytest.raises(HTTPException) as exc_info:
             await create_task(task_in, service=svc, group_context=gc("admin"))
         assert exc_info.value.status_code == 500
@@ -67,7 +72,9 @@ class TestUpdateTaskFullErrorPath:
         svc = AsyncMock()
         svc.update_full_with_group_check = AsyncMock(side_effect=Exception("DB error"))
         with pytest.raises(HTTPException) as exc_info:
-            await update_task_full("task-1", {"name": "X"}, service=svc, group_context=gc("admin"))
+            await update_task_full(
+                "task-1", {"name": "X"}, service=svc, group_context=gc("admin")
+            )
         assert exc_info.value.status_code == 500
 
 
@@ -78,7 +85,9 @@ class TestUpdateTaskErrorPath:
         svc = AsyncMock()
         svc.update_with_group_check = AsyncMock(side_effect=Exception("Update error"))
         with pytest.raises(HTTPException) as exc_info:
-            await update_task("task-1", TaskUpdate(name="Y"), service=svc, group_context=gc("admin"))
+            await update_task(
+                "task-1", TaskUpdate(name="Y"), service=svc, group_context=gc("admin")
+            )
         assert exc_info.value.status_code == 500
 
 

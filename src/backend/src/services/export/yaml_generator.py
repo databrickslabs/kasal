@@ -2,9 +2,10 @@
 YAML configuration generator for CrewAI agents and tasks.
 """
 
-from typing import Dict, Any, List, Optional
-import yaml
 import logging
+from typing import Any, Dict, List, Optional
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ class YAMLGenerator:
         self,
         agents: List[Dict[str, Any]],
         model_override: Optional[str] = None,
-        include_comments: bool = True
+        include_comments: bool = True,
     ) -> str:
         """
         Generate agents.yaml content
@@ -35,32 +36,38 @@ class YAMLGenerator:
         # non-MCP exports are unchanged. When present, each agent gets exactly the
         # servers it's configured for ([] = none); the deployed app then attaches
         # MCP per agent instead of to all agents. (Absent => legacy all-agents.)
-        crew_uses_mcp = any(a.get('mcp_servers') for a in agents)
+        crew_uses_mcp = any(a.get("mcp_servers") for a in agents)
 
         for agent in agents:
-            agent_name = agent.get('name', 'agent').lower().replace(' ', '_')
+            agent_name = agent.get("name", "agent").lower().replace(" ", "_")
 
             # Build agent configuration
             agent_config = {
-                'role': agent.get('role', f'{agent_name} role'),
-                'goal': agent.get('goal', f'{agent_name} goal'),
-                'backstory': agent.get('backstory', f'{agent_name} backstory'),
+                "role": agent.get("role", f"{agent_name} role"),
+                "goal": agent.get("goal", f"{agent_name} goal"),
+                "backstory": agent.get("backstory", f"{agent_name} backstory"),
             }
 
             # LLM configuration
-            llm = model_override or agent.get('llm', 'databricks-llama-4-maverick')
-            agent_config['llm'] = llm
+            llm = model_override or agent.get("llm", "databricks-llama-4-maverick")
+            agent_config["llm"] = llm
 
             # Add tools if present
-            agent_tools = agent.get('tools', [])
+            agent_tools = agent.get("tools", [])
             if agent_tools:
-                agent_config['tools'] = agent_tools
+                agent_config["tools"] = agent_tools
 
             # Add optional configurations if present
             optional_fields = [
-                'max_iter', 'max_rpm', 'max_execution_time', 'verbose',
-                'allow_delegation', 'cache', 'system_template',
-                'prompt_template', 'response_template'
+                "max_iter",
+                "max_rpm",
+                "max_execution_time",
+                "verbose",
+                "allow_delegation",
+                "cache",
+                "system_template",
+                "prompt_template",
+                "response_template",
             ]
 
             for field in optional_fields:
@@ -68,16 +75,13 @@ class YAMLGenerator:
                     agent_config[field] = agent[field]
 
             if crew_uses_mcp:
-                agent_config['mcp_servers'] = agent.get('mcp_servers', [])
+                agent_config["mcp_servers"] = agent.get("mcp_servers", [])
 
             agents_config[agent_name] = agent_config
 
         # Convert to YAML
         yaml_content = yaml.dump(
-            agents_config,
-            default_flow_style=False,
-            sort_keys=False,
-            allow_unicode=True
+            agents_config, default_flow_style=False, sort_keys=False, allow_unicode=True
         )
 
         # Add header comment if requested
@@ -123,8 +127,8 @@ class YAMLGenerator:
         # Create agent ID to name mapping
         agent_map = {}
         for agent in agents:
-            agent_id = agent.get('id')
-            agent_name = agent.get('name', 'agent').lower().replace(' ', '_')
+            agent_id = agent.get("id")
+            agent_name = agent.get("name", "agent").lower().replace(" ", "_")
             if agent_id:
                 # Store both string and int versions of ID for flexible matching
                 agent_map[agent_id] = agent_name
@@ -140,28 +144,34 @@ class YAMLGenerator:
         tasks_config = {}
 
         for task in tasks:
-            task_name = task.get('name', 'task').lower().replace(' ', '_')
+            task_name = task.get("name", "task").lower().replace(" ", "_")
 
             # Build task configuration
             task_config = {
-                'description': task.get('description', f'{task_name} description'),
-                'expected_output': task.get('expected_output', f'{task_name} output'),
+                "description": task.get("description", f"{task_name} description"),
+                "expected_output": task.get("expected_output", f"{task_name} output"),
             }
 
             # Map agent ID to agent name
-            agent_id = task.get('agent_id')
-            logger.info(f"[YAML Debug] Task '{task_name}' has agent_id: {agent_id} (type: {type(agent_id).__name__})")
+            agent_id = task.get("agent_id")
+            logger.info(
+                f"[YAML Debug] Task '{task_name}' has agent_id: {agent_id} (type: {type(agent_id).__name__})"
+            )
 
             agent_assigned = False
             if agent_id and agent_id in agent_map:
-                task_config['agent'] = agent_map[agent_id]
-                logger.info(f"[YAML Debug] Task '{task_name}' mapped to agent: {agent_map[agent_id]}")
+                task_config["agent"] = agent_map[agent_id]
+                logger.info(
+                    f"[YAML Debug] Task '{task_name}' mapped to agent: {agent_map[agent_id]}"
+                )
                 agent_assigned = True
-            elif 'agent_id' in task:
+            elif "agent_id" in task:
                 # Fallback to direct name if available
-                if task['agent_id']:  # Only set if not None
-                    task_config['agent'] = task['agent_id']
-                    logger.info(f"[YAML Debug] Task '{task_name}' using direct agent_id: {task['agent_id']}")
+                if task["agent_id"]:  # Only set if not None
+                    task_config["agent"] = task["agent_id"]
+                    logger.info(
+                        f"[YAML Debug] Task '{task_name}' using direct agent_id: {task['agent_id']}"
+                    )
                     agent_assigned = True
                 else:
                     logger.warning(f"[YAML Debug] Task '{task_name}' has null agent_id")
@@ -171,35 +181,45 @@ class YAMLGenerator:
             # CRITICAL: In sequential process, all tasks must have an agent
             # Assign first agent as default if no agent is assigned
             if not agent_assigned and agents:
-                first_agent_name = agents[0].get('name', 'agent').lower().replace(' ', '_')
-                task_config['agent'] = first_agent_name
-                logger.warning(f"[YAML Debug] Task '{task_name}' has no agent - assigning first agent: {first_agent_name}")
+                first_agent_name = (
+                    agents[0].get("name", "agent").lower().replace(" ", "_")
+                )
+                task_config["agent"] = first_agent_name
+                logger.warning(
+                    f"[YAML Debug] Task '{task_name}' has no agent - assigning first agent: {first_agent_name}"
+                )
 
             # Add optional task configurations
             optional_fields = {
-                'async_execution': False,
-                'context': [],
-                'output_file': None,
-                'output_json': None,
-                'output_pydantic': None,
-                'callback': None,
-                'human_input': False,
+                "async_execution": False,
+                "context": [],
+                "output_file": None,
+                "output_json": None,
+                "output_pydantic": None,
+                "callback": None,
+                "human_input": False,
             }
 
             for field, default in optional_fields.items():
                 value = task.get(field, default)
                 if value != default and value is not None:
                     # Handle context - map task IDs to task names
-                    if field == 'context' and isinstance(value, list):
+                    if field == "context" and isinstance(value, list):
                         context_names = []
                         for ctx_id in value:
                             # Find task name by ID
-                            ctx_task = next((t for t in tasks if t.get('id') == ctx_id), None)
+                            ctx_task = next(
+                                (t for t in tasks if t.get("id") == ctx_id), None
+                            )
                             if ctx_task:
-                                ctx_name = ctx_task.get('name', 'task').lower().replace(' ', '_')
+                                ctx_name = (
+                                    ctx_task.get("name", "task")
+                                    .lower()
+                                    .replace(" ", "_")
+                                )
                                 context_names.append(ctx_name)
                         if context_names:
-                            task_config['context'] = context_names
+                            task_config["context"] = context_names
                     else:
                         task_config[field] = value
 
@@ -212,17 +232,17 @@ class YAMLGenerator:
                 from .code_generator import _parse_task_guardrail
 
                 parsed = _parse_task_guardrail(task)
-                if parsed and parsed[0] == 'llm':
-                    task_config['guardrail'] = parsed[1]
+                if parsed and parsed[0] == "llm":
+                    task_config["guardrail"] = parsed[1]
 
             # Add tools if present
-            task_tools = task.get('tools', [])
+            task_tools = task.get("tools", [])
             if task_tools:
-                task_config['tools'] = task_tools
+                task_config["tools"] = task_tools
 
             # Add task config options if present
-            if 'config' in task and isinstance(task['config'], dict):
-                config = task['config']
+            if "config" in task and isinstance(task["config"], dict):
+                config = task["config"]
                 for key, value in config.items():
                     if value is not None and key not in task_config:
                         task_config[key] = value
@@ -231,10 +251,7 @@ class YAMLGenerator:
 
         # Convert to YAML
         yaml_content = yaml.dump(
-            tasks_config,
-            default_flow_style=False,
-            sort_keys=False,
-            allow_unicode=True
+            tasks_config, default_flow_style=False, sort_keys=False, allow_unicode=True
         )
 
         # Add header comment if requested

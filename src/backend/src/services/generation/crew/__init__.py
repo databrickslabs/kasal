@@ -10,11 +10,11 @@ single afternoon, and every collision was between changes to DIFFERENT
 strategies that merely happened to share a filename.
 """
 
-from src.services.generation.crew.recipes import RecipeHooksMixin
-from src.services.generation.crew.complete import CompleteGenerationMixin
-from src.services.generation.crew.progressive import ProgressiveGenerationMixin
-from src.services.generation.crew.conversation import ConversationGenerationMixin
 from src.services.generation.crew.chat_fast_path import ChatFastPathMixin
+from src.services.generation.crew.complete import CompleteGenerationMixin
+from src.services.generation.crew.conversation import ConversationGenerationMixin
+from src.services.generation.crew.progressive import ProgressiveGenerationMixin
+from src.services.generation.crew.recipes import RecipeHooksMixin
 
 __all__ = [
     "RecipeHooksMixin",

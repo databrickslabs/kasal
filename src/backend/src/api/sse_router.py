@@ -37,8 +37,8 @@ router = APIRouter(prefix="/sse", tags=["Server-Sent Events"])
 # for SSE to stream through without being held back.
 SSE_HEADERS = {
     "Cache-Control": "no-cache, no-transform",
-    "Content-Encoding": "none",          # Prevent proxy buffering/compression
-    "X-Accel-Buffering": "no",           # Disable buffering in nginx / envoy
+    "Content-Encoding": "none",  # Prevent proxy buffering/compression
+    "X-Accel-Buffering": "no",  # Disable buffering in nginx / envoy
     "X-Content-Type-Options": "nosniff",
 }
 
@@ -85,7 +85,9 @@ async def stream_execution_updates(
     # cross-tenant mismatch (a not-yet-persisted job is allowed, mirroring the
     # flow-execution read path).
     group_ids = group_context.group_ids or []
-    execution = await ExecutionHistoryRepository(session).get_execution_by_job_id(job_id)
+    execution = await ExecutionHistoryRepository(session).get_execution_by_job_id(
+        job_id
+    )
     if (
         execution
         and getattr(execution, "group_id", None)

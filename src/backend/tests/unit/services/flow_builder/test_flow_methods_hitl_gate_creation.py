@@ -15,22 +15,22 @@ flow_processors.py targets:
  858-859, 886
 """
 
-import pytest
-import uuid
 import asyncio
+import uuid
 from types import SimpleNamespace
-from unittest.mock import MagicMock, AsyncMock, patch, Mock, call
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
+import pytest
+
+from src.services.flow_builder.modules.flow_methods import (
+    FlowMethodFactory,
+    extract_final_answer,
+    get_model_context_limits,
+)
 
 # ---------------------------------------------------------------------------
 # flow_methods.py
 # ---------------------------------------------------------------------------
-
-from src.services.flow_builder.modules.flow_methods import (
-    extract_final_answer,
-    get_model_context_limits,
-    FlowMethodFactory,
-)
 
 
 class TestExtractFinalAnswer:
@@ -71,6 +71,7 @@ class TestExtractFinalAnswer:
         class WeirdObj:
             def __str__(self):
                 return "weird object"
+
         result = extract_final_answer([WeirdObj()])
         assert result == "weird object"
 
@@ -134,8 +135,12 @@ class TestGetModelContextLimits:
         mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.db.session.request_scoped_session", return_value=mock_session_ctx), \
-             patch("src.services.settings.models.ModelConfigService") as MockMCS:
+        with (
+            patch(
+                "src.db.session.request_scoped_session", return_value=mock_session_ctx
+            ),
+            patch("src.services.settings.models.ModelConfigService") as MockMCS,
+        ):
             mcs_instance = MagicMock()
             mcs_instance.find_by_key = AsyncMock(return_value=mock_config)
             MockMCS.return_value = mcs_instance
@@ -158,8 +163,12 @@ class TestGetModelContextLimits:
         mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.db.session.request_scoped_session", return_value=mock_session_ctx), \
-             patch("src.services.settings.models.ModelConfigService") as MockMCS:
+        with (
+            patch(
+                "src.db.session.request_scoped_session", return_value=mock_session_ctx
+            ),
+            patch("src.services.settings.models.ModelConfigService") as MockMCS,
+        ):
             mcs_instance = MagicMock()
             mcs_instance.find_by_key = AsyncMock(return_value=None)
             MockMCS.return_value = mcs_instance
@@ -306,7 +315,7 @@ class TestFlowMethodFactoryCreateSkippedCrew:
             crew_name="Skip Crew",
             crew_sequence=0,
             is_starting_point=True,
-            checkpoint_output="previous result"
+            checkpoint_output="previous result",
         )
         assert callable(method)
         assert method.__name__ == "starting_point_0"
@@ -330,7 +339,7 @@ class TestFlowMethodFactoryCreateSkippedCrew:
             crew_name="Crew",
             crew_sequence=0,
             is_starting_point=True,
-            checkpoint_output=checkpoint
+            checkpoint_output=checkpoint,
         )
 
         mock_self = MagicMock()
@@ -345,7 +354,7 @@ class TestFlowMethodFactoryCreateSkippedCrew:
             crew_name="Crew",
             crew_sequence=0,
             is_starting_point=True,
-            checkpoint_output=None
+            checkpoint_output=None,
         )
 
         mock_self = MagicMock()
@@ -362,7 +371,7 @@ class TestFlowMethodFactoryCreateSkippedCrew:
             crew_name="My Crew",
             crew_sequence=0,
             is_starting_point=True,
-            checkpoint_output=None
+            checkpoint_output=None,
         )
 
         mock_self = MagicMock()
@@ -378,7 +387,7 @@ class TestFlowMethodFactoryCreateSkippedCrew:
             crew_name="My Crew",
             crew_sequence=0,
             is_starting_point=True,
-            checkpoint_output=None
+            checkpoint_output=None,
         )
 
         mock_self = MagicMock()
@@ -395,7 +404,7 @@ class TestFlowMethodFactoryCreateSkippedCrew:
             crew_sequence=1,
             is_starting_point=False,
             method_condition="starting_point_0",
-            checkpoint_output="listener checkpoint"
+            checkpoint_output="listener checkpoint",
         )
 
         mock_self = MagicMock()
@@ -411,7 +420,7 @@ class TestFlowMethodFactoryCreateSkippedCrew:
             crew_sequence=1,
             is_starting_point=False,
             method_condition="starting_point_0",
-            checkpoint_output=None
+            checkpoint_output=None,
         )
 
         mock_self = MagicMock()
@@ -428,7 +437,7 @@ class TestFlowMethodFactoryCreateSkippedCrew:
             crew_sequence=1,
             is_starting_point=False,
             method_condition="starting_point_0",
-            checkpoint_output=None
+            checkpoint_output=None,
         )
 
         mock_self = MagicMock()
@@ -444,7 +453,7 @@ class TestFlowMethodFactoryCreateSkippedCrew:
             crew_name="Crew",
             crew_sequence=0,
             is_starting_point=True,
-            checkpoint_output=None
+            checkpoint_output=None,
         )
 
         mock_self = MagicMock()
@@ -460,7 +469,7 @@ class TestFlowMethodFactoryCreateSkippedCrew:
             crew_name="Crew",
             crew_sequence=3,
             is_starting_point=True,
-            checkpoint_output=None
+            checkpoint_output=None,
         )
 
         mock_self = MagicMock()
@@ -558,9 +567,15 @@ class TestFlowMethodFactoryCreateHitlGate:
 
         session_ctx = self._make_session_ctx()
 
-        with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.repositories.hitl_repository.HITLApprovalRepository") as MockRepo, \
-             patch("src.repositories.execution_history_repository.ExecutionHistoryRepository") as MockExecRepo:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch(
+                "src.repositories.hitl_repository.HITLApprovalRepository"
+            ) as MockRepo,
+            patch(
+                "src.repositories.execution_history_repository.ExecutionHistoryRepository"
+            ) as MockExecRepo,
+        ):
 
             repo_instance = MagicMock()
             repo_instance.get_all_for_execution = AsyncMock(return_value=[approved])
@@ -605,9 +620,15 @@ class TestFlowMethodFactoryCreateHitlGate:
 
         session_ctx = self._make_session_ctx()
 
-        with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.repositories.hitl_repository.HITLApprovalRepository") as MockRepo, \
-             patch("src.repositories.execution_history_repository.ExecutionHistoryRepository") as MockExecRepo:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch(
+                "src.repositories.hitl_repository.HITLApprovalRepository"
+            ) as MockRepo,
+            patch(
+                "src.repositories.execution_history_repository.ExecutionHistoryRepository"
+            ) as MockExecRepo,
+        ):
 
             repo_instance = MagicMock()
             repo_instance.get_all_for_execution = AsyncMock(return_value=[approved])
@@ -620,6 +641,7 @@ class TestFlowMethodFactoryCreateHitlGate:
             result = await method._meth(mock_self, previous_output="prev data")
 
         import json
+
         assert result == json.dumps({"key": "edited_value"})
 
     @pytest.mark.asyncio
@@ -649,10 +671,14 @@ class TestFlowMethodFactoryCreateHitlGate:
 
         session_ctx = self._make_session_ctx()
 
-        with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.repositories.hitl_repository.HITLApprovalRepository") as MockRepo, \
-             patch("src.services.hitl.service.HITLService") as MockHITLSvc, \
-             patch("src.services.hitl.webhook.HITLWebhookService") as MockWebhook:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch(
+                "src.repositories.hitl_repository.HITLApprovalRepository"
+            ) as MockRepo,
+            patch("src.services.hitl.service.HITLService") as MockHITLSvc,
+            patch("src.services.hitl.webhook.HITLWebhookService") as MockWebhook,
+        ):
 
             repo_instance = MagicMock()
             repo_instance.get_all_for_execution = AsyncMock(return_value=[])
@@ -699,10 +725,14 @@ class TestFlowMethodFactoryCreateHitlGate:
 
         session_ctx = self._make_session_ctx()
 
-        with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.repositories.hitl_repository.HITLApprovalRepository") as MockRepo, \
-             patch("src.services.hitl.service.HITLService") as MockHITLSvc, \
-             patch("src.services.hitl.webhook.HITLWebhookService") as MockWebhook:
+        with (
+            patch("src.db.session.request_scoped_session", return_value=session_ctx),
+            patch(
+                "src.repositories.hitl_repository.HITLApprovalRepository"
+            ) as MockRepo,
+            patch("src.services.hitl.service.HITLService") as MockHITLSvc,
+            patch("src.services.hitl.webhook.HITLWebhookService") as MockWebhook,
+        ):
 
             repo_instance = MagicMock()
             repo_instance.get_all_for_execution = AsyncMock(return_value=[])
@@ -727,7 +757,10 @@ class TestFlowMethodFactoryCreateHitlGate:
 # flow_processors.py
 # ---------------------------------------------------------------------------
 
-from src.services.flow_builder.modules.flow_processors import FlowProcessorManager, _to_uuid
+from src.services.flow_builder.modules.flow_processors import (
+    FlowProcessorManager,
+    _to_uuid,
+)
 
 
 class TestToUuid:
@@ -751,19 +784,17 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_empty_flow_config_returns_empty(self):
         result = await FlowProcessorManager.process_starting_points(
-            flow_config={},
-            all_tasks={},
-            repositories={}
+            flow_config={}, all_tasks={}, repositories={}
         )
         assert result == []
 
     @pytest.mark.asyncio
     async def test_no_task_repo_returns_empty(self):
-        flow_config = {"startingPoints": [{"crewId": str(uuid.uuid4()), "taskId": "t1"}]}
+        flow_config = {
+            "startingPoints": [{"crewId": str(uuid.uuid4()), "taskId": "t1"}]
+        }
         result = await FlowProcessorManager.process_starting_points(
-            flow_config=flow_config,
-            all_tasks={},
-            repositories={}  # No task repo
+            flow_config=flow_config, all_tasks={}, repositories={}  # No task repo
         )
         assert result == []
 
@@ -780,7 +811,7 @@ class TestProcessStartingPoints:
         result = await FlowProcessorManager.process_starting_points(
             flow_config=flow_config,
             all_tasks={},
-            repositories={"task": task_repo, "crew": crew_repo}
+            repositories={"task": task_repo, "crew": crew_repo},
         )
         assert result == []
 
@@ -803,7 +834,7 @@ class TestProcessStartingPoints:
         result = await FlowProcessorManager.process_starting_points(
             flow_config=flow_config,
             all_tasks={},
-            repositories={"task": task_repo, "crew": crew_repo}
+            repositories={"task": task_repo, "crew": crew_repo},
         )
         assert result == []
 
@@ -814,10 +845,18 @@ class TestProcessStartingPoints:
         flow_config = {"startingPoints": [{"crewId": crew_id, "taskId": task_id}]}
 
         task_data = SimpleNamespace(
-            id=task_id, name="Task", description="desc", expected_output="output",
+            id=task_id,
+            name="Task",
+            description="desc",
+            expected_output="output",
             agent_id=None,  # No agent_id
-            tools=[], tool_configs={}, async_execution=False, config={}, memory=False,
-            markdown=False, guardrail=None
+            tools=[],
+            tool_configs={},
+            async_execution=False,
+            config={},
+            memory=False,
+            markdown=False,
+            guardrail=None,
         )
         task_repo = MagicMock()
         task_repo.get = AsyncMock(return_value=task_data)
@@ -833,7 +872,7 @@ class TestProcessStartingPoints:
         result = await FlowProcessorManager.process_starting_points(
             flow_config=flow_config,
             all_tasks={},
-            repositories={"task": task_repo, "crew": crew_repo}
+            repositories={"task": task_repo, "crew": crew_repo},
         )
         assert result == []
 
@@ -847,9 +886,18 @@ class TestProcessStartingPoints:
         flow_config = {"startingPoints": [{"crewId": crew_id, "taskId": task_id}]}
 
         task_data = SimpleNamespace(
-            id=task_id, name="Task", description="desc", expected_output="output",
-            agent_id=agent_id, tools=[], tool_configs={}, async_execution=False,
-            config={}, memory=False, markdown=False, guardrail=None
+            id=task_id,
+            name="Task",
+            description="desc",
+            expected_output="output",
+            agent_id=agent_id,
+            tools=[],
+            tool_configs={},
+            async_execution=False,
+            config={},
+            memory=False,
+            markdown=False,
+            guardrail=None,
         )
         task_repo = MagicMock()
         task_repo.get = AsyncMock(return_value=task_data)
@@ -871,14 +919,24 @@ class TestProcessStartingPoints:
         mock_task_obj = MagicMock()
         mock_task_obj.async_execution = False
 
-        with patch("src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
-                   new=AsyncMock(return_value=mock_agent_obj)), \
-             patch("src.services.flow_builder.modules.task_adapter.TaskConfig.configure_task",
-                   new=AsyncMock(return_value=mock_task_obj)):
+        with (
+            patch(
+                "src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
+                new=AsyncMock(return_value=mock_agent_obj),
+            ),
+            patch(
+                "src.services.flow_builder.modules.task_adapter.TaskConfig.configure_task",
+                new=AsyncMock(return_value=mock_task_obj),
+            ),
+        ):
             result = await FlowProcessorManager.process_starting_points(
                 flow_config=flow_config,
                 all_tasks={},
-                repositories={"task": task_repo, "crew": crew_repo, "agent": agent_repo}
+                repositories={
+                    "task": task_repo,
+                    "crew": crew_repo,
+                    "agent": agent_repo,
+                },
             )
 
         assert len(result) == 1
@@ -890,28 +948,35 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_empty_listeners_returns_empty(self):
         result = await FlowProcessorManager.process_listeners(
-            flow_config={},
-            all_tasks={},
-            repositories={}
+            flow_config={}, all_tasks={}, repositories={}
         )
         assert result == []
 
     @pytest.mark.asyncio
     async def test_no_task_repo_returns_empty(self):
-        flow_config = {"listeners": [{"crewId": str(uuid.uuid4()), "taskIds": ["t1"], "listenTo": ["sp0"]}]}
+        flow_config = {
+            "listeners": [
+                {"crewId": str(uuid.uuid4()), "taskIds": ["t1"], "listenTo": ["sp0"]}
+            ]
+        }
         result = await FlowProcessorManager.process_listeners(
-            flow_config=flow_config,
-            all_tasks={},
-            repositories={}
+            flow_config=flow_config, all_tasks={}, repositories={}
         )
         assert result == []
 
     @pytest.mark.asyncio
     async def test_crew_not_found_continues(self):
         crew_id = str(uuid.uuid4())
-        flow_config = {"listeners": [
-            {"crewId": crew_id, "taskIds": ["t1"], "listenTo": ["sp0"], "conditionType": "NONE"}
-        ]}
+        flow_config = {
+            "listeners": [
+                {
+                    "crewId": crew_id,
+                    "taskIds": ["t1"],
+                    "listenTo": ["sp0"],
+                    "conditionType": "NONE",
+                }
+            ]
+        }
 
         task_repo = MagicMock()
         crew_repo = MagicMock()
@@ -920,7 +985,7 @@ class TestProcessListeners:
         result = await FlowProcessorManager.process_listeners(
             flow_config=flow_config,
             all_tasks={},
-            repositories={"task": task_repo, "crew": crew_repo}
+            repositories={"task": task_repo, "crew": crew_repo},
         )
         assert result == []
 
@@ -930,20 +995,31 @@ class TestProcessListeners:
         task_id = str(uuid.uuid4())
         agent_id = str(uuid.uuid4())
 
-        flow_config = {"listeners": [
-            {
-                "crewId": crew_id,
-                "tasks": [{"id": task_id}],
-                "listenToTaskIds": ["starting_point_0"],
-                "conditionType": "NONE",
-                "crewName": "Listener Crew"
-            }
-        ]}
+        flow_config = {
+            "listeners": [
+                {
+                    "crewId": crew_id,
+                    "tasks": [{"id": task_id}],
+                    "listenToTaskIds": ["starting_point_0"],
+                    "conditionType": "NONE",
+                    "crewName": "Listener Crew",
+                }
+            ]
+        }
 
         task_data = SimpleNamespace(
-            id=task_id, name="Listener Task", description="desc", expected_output="output",
-            agent_id=agent_id, tools=[], tool_configs={}, async_execution=False,
-            config={}, memory=False, markdown=False, guardrail=None
+            id=task_id,
+            name="Listener Task",
+            description="desc",
+            expected_output="output",
+            agent_id=agent_id,
+            tools=[],
+            tool_configs={},
+            async_execution=False,
+            config={},
+            memory=False,
+            markdown=False,
+            guardrail=None,
         )
         task_repo = MagicMock()
         task_repo.get = AsyncMock(return_value=task_data)
@@ -965,14 +1041,24 @@ class TestProcessListeners:
         mock_task_obj = MagicMock()
         mock_task_obj.async_execution = False
 
-        with patch("src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
-                   new=AsyncMock(return_value=mock_agent_obj)), \
-             patch("src.services.flow_builder.modules.task_adapter.TaskConfig.configure_task",
-                   new=AsyncMock(return_value=mock_task_obj)):
+        with (
+            patch(
+                "src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
+                new=AsyncMock(return_value=mock_agent_obj),
+            ),
+            patch(
+                "src.services.flow_builder.modules.task_adapter.TaskConfig.configure_task",
+                new=AsyncMock(return_value=mock_task_obj),
+            ),
+        ):
             result = await FlowProcessorManager.process_listeners(
                 flow_config=flow_config,
                 all_tasks={},
-                repositories={"task": task_repo, "crew": crew_repo, "agent": agent_repo}
+                repositories={
+                    "task": task_repo,
+                    "crew": crew_repo,
+                    "agent": agent_repo,
+                },
             )
 
         assert len(result) == 1
@@ -984,9 +1070,7 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_empty_routers_returns_empty(self):
         result = await FlowProcessorManager.process_routers(
-            flow_config={},
-            all_tasks={},
-            repositories={}
+            flow_config={}, all_tasks={}, repositories={}
         )
         assert result == []
 
@@ -994,9 +1078,7 @@ class TestProcessRouters:
     async def test_no_task_repo_returns_empty(self):
         flow_config = {"routers": [{"listenTo": "sp0", "routes": {}}]}
         result = await FlowProcessorManager.process_routers(
-            flow_config=flow_config,
-            all_tasks={},
-            repositories={}
+            flow_config=flow_config, all_tasks={}, repositories={}
         )
         assert result == []
 
@@ -1008,25 +1090,27 @@ class TestProcessRouters:
         result = await FlowProcessorManager.process_routers(
             flow_config=flow_config,
             all_tasks={},
-            repositories={"task": task_repo, "crew": crew_repo}
+            repositories={"task": task_repo, "crew": crew_repo},
         )
         assert result == []
 
     @pytest.mark.asyncio
     async def test_router_empty_route_task_configs(self):
         flow_config = {
-            "routers": [{
-                "listenTo": "sp0",
-                "routes": {"route_a": []},  # Empty list
-                "routeConditions": {"route_a": "condition_a"}
-            }]
+            "routers": [
+                {
+                    "listenTo": "sp0",
+                    "routes": {"route_a": []},  # Empty list
+                    "routeConditions": {"route_a": "condition_a"},
+                }
+            ]
         }
         task_repo = MagicMock()
         crew_repo = MagicMock()
         result = await FlowProcessorManager.process_routers(
             flow_config=flow_config,
             all_tasks={},
-            repositories={"task": task_repo, "crew": crew_repo}
+            repositories={"task": task_repo, "crew": crew_repo},
         )
         assert result == []
 
@@ -1035,11 +1119,13 @@ class TestProcessRouters:
         crew_id = str(uuid.uuid4())
         task_id = str(uuid.uuid4())
         flow_config = {
-            "routers": [{
-                "listenTo": "sp0",
-                "routes": {"route_a": [{"id": task_id, "crewId": crew_id}]},
-                "routeConditions": {}
-            }]
+            "routers": [
+                {
+                    "listenTo": "sp0",
+                    "routes": {"route_a": [{"id": task_id, "crewId": crew_id}]},
+                    "routeConditions": {},
+                }
+            ]
         }
         task_repo = MagicMock()
         task_repo.get = AsyncMock(return_value=None)
@@ -1049,7 +1135,7 @@ class TestProcessRouters:
         result = await FlowProcessorManager.process_routers(
             flow_config=flow_config,
             all_tasks={},
-            repositories={"task": task_repo, "crew": crew_repo}
+            repositories={"task": task_repo, "crew": crew_repo},
         )
         assert result == []
 
@@ -1057,11 +1143,13 @@ class TestProcessRouters:
     async def test_router_route_missing_crew_id(self):
         task_id = str(uuid.uuid4())
         flow_config = {
-            "routers": [{
-                "listenTo": "sp0",
-                "routes": {"route_a": [{"id": task_id}]},  # No crewId
-                "routeConditions": {}
-            }]
+            "routers": [
+                {
+                    "listenTo": "sp0",
+                    "routes": {"route_a": [{"id": task_id}]},  # No crewId
+                    "routeConditions": {},
+                }
+            ]
         }
         task_repo = MagicMock()
         crew_repo = MagicMock()
@@ -1069,7 +1157,7 @@ class TestProcessRouters:
         result = await FlowProcessorManager.process_routers(
             flow_config=flow_config,
             all_tasks={},
-            repositories={"task": task_repo, "crew": crew_repo}
+            repositories={"task": task_repo, "crew": crew_repo},
         )
         assert result == []
 
@@ -1080,19 +1168,28 @@ class TestProcessRouters:
         agent_id = str(uuid.uuid4())
 
         flow_config = {
-            "routers": [{
-                "listenTo": "starting_point_0",
-                "routes": {
-                    "route_a": [{"id": task_id, "crewId": crew_id}]
-                },
-                "routeConditions": {"route_a": "result == 'A'"}
-            }]
+            "routers": [
+                {
+                    "listenTo": "starting_point_0",
+                    "routes": {"route_a": [{"id": task_id, "crewId": crew_id}]},
+                    "routeConditions": {"route_a": "result == 'A'"},
+                }
+            ]
         }
 
         task_data = SimpleNamespace(
-            id=task_id, name="Router Task", description="desc", expected_output="output",
-            agent_id=agent_id, tools=[], tool_configs={}, async_execution=False,
-            config={}, memory=False, markdown=False, guardrail=None
+            id=task_id,
+            name="Router Task",
+            description="desc",
+            expected_output="output",
+            agent_id=agent_id,
+            tools=[],
+            tool_configs={},
+            async_execution=False,
+            config={},
+            memory=False,
+            markdown=False,
+            guardrail=None,
         )
         task_repo = MagicMock()
         task_repo.get = AsyncMock(return_value=task_data)
@@ -1112,14 +1209,24 @@ class TestProcessRouters:
         mock_agent_obj = MagicMock()
         mock_task_obj = MagicMock()
 
-        with patch("src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
-                   new=AsyncMock(return_value=mock_agent_obj)), \
-             patch("src.services.flow_builder.modules.task_adapter.TaskConfig.configure_task",
-                   new=AsyncMock(return_value=mock_task_obj)):
+        with (
+            patch(
+                "src.services.flow_builder.modules.agent_adapter.AgentConfig.configure_agent_and_tools",
+                new=AsyncMock(return_value=mock_agent_obj),
+            ),
+            patch(
+                "src.services.flow_builder.modules.task_adapter.TaskConfig.configure_task",
+                new=AsyncMock(return_value=mock_task_obj),
+            ),
+        ):
             result = await FlowProcessorManager.process_routers(
                 flow_config=flow_config,
                 all_tasks={},
-                repositories={"task": task_repo, "crew": crew_repo, "agent": agent_repo}
+                repositories={
+                    "task": task_repo,
+                    "crew": crew_repo,
+                    "agent": agent_repo,
+                },
             )
 
         assert len(result) == 1

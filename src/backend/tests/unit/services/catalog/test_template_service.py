@@ -2,23 +2,37 @@
 Coverage-focused tests for TemplateService.
 Targets uncovered branches to push coverage to 85%+.
 """
-import pytest
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.catalog.templates import TemplateService
-from src.schemas.template import PromptTemplateCreate, PromptTemplateUpdate
-from src.utils.user_context import GroupContext
+import pytest
 
+from src.schemas.template import PromptTemplateCreate, PromptTemplateUpdate
+from src.services.catalog.templates import TemplateService
+from src.utils.user_context import GroupContext
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_template(id=1, name="test-template", group_id=None, template="content", description="desc",
-                  is_active=True):
-    return SimpleNamespace(id=id, name=name, group_id=group_id, template=template,
-                           description=description, is_active=is_active)
+
+def make_template(
+    id=1,
+    name="test-template",
+    group_id=None,
+    template="content",
+    description="desc",
+    is_active=True,
+):
+    return SimpleNamespace(
+        id=id,
+        name=name,
+        group_id=group_id,
+        template=template,
+        description=description,
+        is_active=is_active,
+    )
 
 
 class FakeRepo:
@@ -80,6 +94,7 @@ def make_gc(group_ids=None, primary=None, email=None):
 # find_all_templates / find_all
 # ---------------------------------------------------------------------------
 
+
 class TestFindAll:
     @pytest.mark.asyncio
     async def test_find_all_templates_delegates(self):
@@ -101,6 +116,7 @@ class TestFindAll:
 # ---------------------------------------------------------------------------
 # find_all_templates_for_group
 # ---------------------------------------------------------------------------
+
 
 class TestFindAllTemplatesForGroup:
     @pytest.mark.asyncio
@@ -126,7 +142,12 @@ class TestFindAllTemplatesForGroup:
         svc = make_svc()
         svc.repository.active_templates = []
         gc = make_gc(group_ids=["g1"])
-        seed = {"name": "new-seed", "description": "d", "template": "t", "is_active": True}
+        seed = {
+            "name": "new-seed",
+            "description": "d",
+            "template": "t",
+            "is_active": True,
+        }
         with patch("src.services.catalog.templates.DEFAULT_TEMPLATES", [seed]):
             result = await svc.find_all_templates_for_group(gc)
         # Should have tried to create the base template
@@ -137,7 +158,12 @@ class TestFindAllTemplatesForGroup:
         svc = make_svc()
         svc.repository.active_templates = []
         gc = make_gc(group_ids=["g1"])
-        seed = {"name": "failing-seed", "description": "d", "template": "t", "is_active": True}
+        seed = {
+            "name": "failing-seed",
+            "description": "d",
+            "template": "t",
+            "is_active": True,
+        }
 
         original_create = svc.repository.create
 
@@ -153,6 +179,7 @@ class TestFindAllTemplatesForGroup:
 # ---------------------------------------------------------------------------
 # find_by_group
 # ---------------------------------------------------------------------------
+
 
 class TestFindByGroup:
     @pytest.mark.asyncio
@@ -181,6 +208,7 @@ class TestFindByGroup:
 # ---------------------------------------------------------------------------
 # get / get_template_by_id / get_with_group_check
 # ---------------------------------------------------------------------------
+
 
 class TestGet:
     @pytest.mark.asyncio
@@ -235,6 +263,7 @@ class TestGet:
 # find_by_name / find_template_by_name
 # ---------------------------------------------------------------------------
 
+
 class TestFindByName:
     @pytest.mark.asyncio
     async def test_find_by_name_returns_template(self):
@@ -256,6 +285,7 @@ class TestFindByName:
 # ---------------------------------------------------------------------------
 # find_by_name_with_group_check
 # ---------------------------------------------------------------------------
+
 
 class TestFindByNameWithGroupCheck:
     @pytest.mark.asyncio
@@ -299,7 +329,12 @@ class TestFindByNameWithGroupCheck:
         svc.repository.create = mock_create
 
         gc = make_gc(primary="g1")
-        seed = {"name": "seed-template", "description": "d", "template": "t", "is_active": True}
+        seed = {
+            "name": "seed-template",
+            "description": "d",
+            "template": "t",
+            "is_active": True,
+        }
         with patch("src.services.catalog.templates.DEFAULT_TEMPLATES", [seed]):
             result = await svc.find_by_name_with_group_check("seed-template", gc)
         assert result == created_t
@@ -323,7 +358,12 @@ class TestFindByNameWithGroupCheck:
 
         svc.repository.create = failing_create
         gc = make_gc(primary="g1")
-        seed = {"name": "seed-fail", "description": "d", "template": "t", "is_active": True}
+        seed = {
+            "name": "seed-fail",
+            "description": "d",
+            "template": "t",
+            "is_active": True,
+        }
         with patch("src.services.catalog.templates.DEFAULT_TEMPLATES", [seed]):
             result = await svc.find_by_name_with_group_check("seed-fail", gc)
         assert result is None
@@ -333,25 +373,32 @@ class TestFindByNameWithGroupCheck:
 # create_template / create_with_group / create_new_template / create_template_with_group
 # ---------------------------------------------------------------------------
 
+
 class TestCreateTemplate:
     @pytest.mark.asyncio
     async def test_create_template(self):
         svc = make_svc()
-        data = PromptTemplateCreate(name="t1", description="d", template="content", is_active=True)
+        data = PromptTemplateCreate(
+            name="t1", description="d", template="content", is_active=True
+        )
         result = await svc.create_template(data)
         assert result.name == "t1"
 
     @pytest.mark.asyncio
     async def test_create_new_template_delegates(self):
         svc = make_svc()
-        data = PromptTemplateCreate(name="t2", description="d", template="c", is_active=True)
+        data = PromptTemplateCreate(
+            name="t2", description="d", template="c", is_active=True
+        )
         result = await svc.create_new_template(data)
         assert result.name == "t2"
 
     @pytest.mark.asyncio
     async def test_create_with_group_assigns_group(self):
         svc = make_svc()
-        data = PromptTemplateCreate(name="t3", description="d", template="c", is_active=True)
+        data = PromptTemplateCreate(
+            name="t3", description="d", template="c", is_active=True
+        )
         gc = make_gc(primary="g1", email="u@test.com")
         result = await svc.create_with_group(data, gc)
         assert result.group_id == "g1"
@@ -360,7 +407,9 @@ class TestCreateTemplate:
     @pytest.mark.asyncio
     async def test_create_template_with_group_delegates(self):
         svc = make_svc()
-        data = PromptTemplateCreate(name="t4", description="d", template="c", is_active=True)
+        data = PromptTemplateCreate(
+            name="t4", description="d", template="c", is_active=True
+        )
         gc = make_gc(primary="g1")
         result = await svc.create_template_with_group(data, gc)
         assert result is not None
@@ -369,6 +418,7 @@ class TestCreateTemplate:
 # ---------------------------------------------------------------------------
 # update_template / update_with_group_check
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateTemplate:
     @pytest.mark.asyncio
@@ -435,6 +485,7 @@ class TestUpdateTemplate:
 # delete_template / delete_with_group_check / delete_all_templates
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteTemplate:
     @pytest.mark.asyncio
     async def test_delete_template_returns_true(self):
@@ -469,6 +520,7 @@ class TestDeleteTemplate:
 # delete_all_for_group_internal
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteAllForGroup:
     @pytest.mark.asyncio
     async def test_returns_zero_when_no_context(self):
@@ -496,6 +548,7 @@ class TestDeleteAllForGroup:
 # reset_templates / reset_templates_with_group
 # ---------------------------------------------------------------------------
 
+
 class TestResetTemplates:
     @pytest.mark.asyncio
     async def test_reset_templates_creates_defaults(self):
@@ -514,7 +567,12 @@ class TestResetTemplates:
         existing_t = make_template(name="s1", group_id=None)
         svc.repository._find_by_name_and_group_return = existing_t
         seeds = [
-            {"name": "s1", "description": "new desc", "template": "new tmpl", "is_active": True},
+            {
+                "name": "s1",
+                "description": "new desc",
+                "template": "new tmpl",
+                "is_active": True,
+            },
         ]
         with patch("src.services.catalog.templates.DEFAULT_TEMPLATES", seeds):
             gc = make_gc(primary="g1")
@@ -526,7 +584,12 @@ class TestResetTemplates:
         svc = make_svc()
         svc.repository._find_by_name_and_group_return = None
         seeds = [
-            {"name": "brand-new", "description": "d", "template": "t", "is_active": True},
+            {
+                "name": "brand-new",
+                "description": "d",
+                "template": "t",
+                "is_active": True,
+            },
         ]
         with patch("src.services.catalog.templates.DEFAULT_TEMPLATES", seeds):
             gc = make_gc(primary="g1")
@@ -542,7 +605,9 @@ class TestResetTemplates:
             raise Exception("DB error")
 
         svc.repository.create = failing_create
-        seeds = [{"name": "err-seed", "description": "d", "template": "t", "is_active": True}]
+        seeds = [
+            {"name": "err-seed", "description": "d", "template": "t", "is_active": True}
+        ]
         with patch("src.services.catalog.templates.DEFAULT_TEMPLATES", seeds):
             gc = make_gc(primary="g1")
             count = await svc.reset_templates_with_group(gc)
@@ -552,6 +617,7 @@ class TestResetTemplates:
 # ---------------------------------------------------------------------------
 # get_template_content / _get_template_content_instance
 # ---------------------------------------------------------------------------
+
 
 class TestGetTemplateContent:
     @pytest.mark.asyncio
@@ -602,6 +668,7 @@ class TestGetTemplateContent:
 # ---------------------------------------------------------------------------
 # _get_effective_template_content_instance
 # ---------------------------------------------------------------------------
+
 
 class TestGetEffectiveTemplateContent:
     @pytest.mark.asyncio
@@ -658,6 +725,7 @@ class TestGetEffectiveTemplateContent:
 # find_template_by_name_with_group delegates to find_by_name_with_group_check
 # ---------------------------------------------------------------------------
 
+
 class TestFindTemplateByNameWithGroup:
     @pytest.mark.asyncio
     async def test_delegates(self):
@@ -680,6 +748,7 @@ class TestFindTemplateByNameWithGroup:
 # ---------------------------------------------------------------------------
 # Template TTL cache (perf W5.4)
 # ---------------------------------------------------------------------------
+
 
 class TestTemplateContentCache:
     """Resolving a template costs 2 DB queries and runs before EVERY LLM
@@ -719,13 +788,19 @@ class TestTemplateContentCache:
 
         svc.repository.find_by_name_and_group = find_by_name_and_group
 
-        assert await svc._get_effective_template_content_instance(
-            "t-scope", make_gc(primary="g1")
-        ) == "g1 content"
+        assert (
+            await svc._get_effective_template_content_instance(
+                "t-scope", make_gc(primary="g1")
+            )
+            == "g1 content"
+        )
         # A different group must NOT see g1's cached content.
-        assert await svc._get_effective_template_content_instance(
-            "t-scope", make_gc(primary="g2")
-        ) == "base content"
+        assert (
+            await svc._get_effective_template_content_instance(
+                "t-scope", make_gc(primary="g2")
+            )
+            == "base content"
+        )
 
     @pytest.mark.asyncio
     async def test_mutation_invalidates_the_cache(self):
@@ -733,17 +808,27 @@ class TestTemplateContentCache:
         content = {"value": "before"}
 
         async def find_by_name_and_group(name, gid):
-            return make_template(template=content["value"], group_id=None) if gid is None else None
+            return (
+                make_template(template=content["value"], group_id=None)
+                if gid is None
+                else None
+            )
 
         svc.repository.find_by_name_and_group = find_by_name_and_group
         gc = make_gc(primary="g1")
 
-        assert await svc._get_effective_template_content_instance("t-inv", gc) == "before"
+        assert (
+            await svc._get_effective_template_content_instance("t-inv", gc) == "before"
+        )
         content["value"] = "after"
         # Still cached until a mutation clears it...
-        assert await svc._get_effective_template_content_instance("t-inv", gc) == "before"
+        assert (
+            await svc._get_effective_template_content_instance("t-inv", gc) == "before"
+        )
         await TemplateService.invalidate_template_cache()
-        assert await svc._get_effective_template_content_instance("t-inv", gc) == "after"
+        assert (
+            await svc._get_effective_template_content_instance("t-inv", gc) == "after"
+        )
 
     @pytest.mark.asyncio
     async def test_failures_are_not_cached(self):
@@ -754,11 +839,18 @@ class TestTemplateContentCache:
             attempts["n"] += 1
             if attempts["n"] == 1:
                 raise RuntimeError("db blip")
-            return make_template(template="recovered", group_id=None) if gid is None else None
+            return (
+                make_template(template="recovered", group_id=None)
+                if gid is None
+                else None
+            )
 
         svc.repository.find_by_name_and_group = find_by_name_and_group
         gc = make_gc(primary="g1")
 
         assert await svc._get_effective_template_content_instance("t-fail", gc) == ""
         # The failure was NOT cached — the next call retries and succeeds.
-        assert await svc._get_effective_template_content_instance("t-fail", gc) == "recovered"
+        assert (
+            await svc._get_effective_template_content_instance("t-fail", gc)
+            == "recovered"
+        )

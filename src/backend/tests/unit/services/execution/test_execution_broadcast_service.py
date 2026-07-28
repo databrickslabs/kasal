@@ -4,10 +4,12 @@ Unit tests for ExecutionBroadcastService.
 Tests the functionality of execution status broadcasting via SSE,
 including polling, status tracking, and event broadcasting.
 """
-import pytest
+
 import asyncio
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+
+import pytest
 
 from src.services.execution.broadcast import (
     ExecutionBroadcastService,
@@ -26,7 +28,7 @@ class MockExecutionHistory:
         error=None,
         result=None,
         group_id="group-123",
-        completed_at=None
+        completed_at=None,
     ):
         self.id = id
         self.job_id = job_id
@@ -47,7 +49,7 @@ class MockSSEManager:
         return {
             "total_connections": 1,
             "active_jobs": ["job-123"],
-            "connections_per_job": {"job-123": 1}
+            "connections_per_job": {"job-123": 1},
         }
 
     async def broadcast_to_job(self, job_id, event):
@@ -102,7 +104,7 @@ class TestExecutionBroadcastServiceStart:
         """Test that start creates a background task."""
         service = ExecutionBroadcastService()
 
-        with patch.object(asyncio, 'create_task') as mock_create_task:
+        with patch.object(asyncio, "create_task") as mock_create_task:
             mock_task = MagicMock()
             mock_create_task.return_value = mock_task
 
@@ -119,7 +121,7 @@ class TestExecutionBroadcastServiceStart:
         original_task = MagicMock()
         service._task = original_task
 
-        with patch.object(asyncio, 'create_task') as mock_create_task:
+        with patch.object(asyncio, "create_task") as mock_create_task:
             service.start()
 
             mock_create_task.assert_not_called()
@@ -161,7 +163,7 @@ class TestGetActiveJobIds:
         """Test getting active job IDs from SSE manager."""
         service = ExecutionBroadcastService()
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager:
+        with patch("src.services.execution.broadcast.sse_manager") as mock_manager:
             mock_manager.get_statistics.return_value = {
                 "active_jobs": ["job-1", "job-2", "job-3"]
             }
@@ -174,7 +176,7 @@ class TestGetActiveJobIds:
         """Test that global stream IDs are excluded."""
         service = ExecutionBroadcastService()
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager:
+        with patch("src.services.execution.broadcast.sse_manager") as mock_manager:
             mock_manager.get_statistics.return_value = {
                 "active_jobs": ["job-1", "all_groups_group1-group2", "job-2"]
             }
@@ -188,7 +190,7 @@ class TestGetActiveJobIds:
         """Test getting active job IDs when none exist."""
         service = ExecutionBroadcastService()
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager:
+        with patch("src.services.execution.broadcast.sse_manager") as mock_manager:
             mock_manager.get_statistics.return_value = {"active_jobs": []}
 
             active_jobs = service._get_active_job_ids()
@@ -213,7 +215,7 @@ class TestPollLoop:
             if call_count >= 2:
                 service._running = False
 
-        with patch.object(service, '_poll_for_status_changes', mock_poll):
+        with patch.object(service, "_poll_for_status_changes", mock_poll):
             await service._poll_loop()
 
         assert call_count >= 2
@@ -227,7 +229,7 @@ class TestPollLoop:
         async def mock_poll():
             raise asyncio.CancelledError()
 
-        with patch.object(service, '_poll_for_status_changes', mock_poll):
+        with patch.object(service, "_poll_for_status_changes", mock_poll):
             # Should not raise
             await service._poll_loop()
 
@@ -247,7 +249,7 @@ class TestPollLoop:
             if call_count >= 2:
                 service._running = False
 
-        with patch.object(service, '_poll_for_status_changes', mock_poll):
+        with patch.object(service, "_poll_for_status_changes", mock_poll):
             await service._poll_loop()
 
         assert call_count >= 2
@@ -261,8 +263,10 @@ class TestPollForStatusChanges:
         """Test that poll returns early when no active jobs."""
         service = ExecutionBroadcastService()
 
-        with patch.object(service, '_get_active_job_ids', return_value=set()):
-            with patch('src.services.execution.broadcast.async_session_factory') as mock_factory:
+        with patch.object(service, "_get_active_job_ids", return_value=set()):
+            with patch(
+                "src.services.execution.broadcast.async_session_factory"
+            ) as mock_factory:
                 await service._poll_for_status_changes()
 
                 mock_factory.assert_not_called()
@@ -274,12 +278,16 @@ class TestPollForStatusChanges:
         service._last_statuses = {"job-1": "running", "job-2": "running"}
         service._last_completed_at = {"job-1": None, "job-2": None}
 
-        with patch.object(service, '_get_active_job_ids', return_value={"job-1"}):
-            with patch('src.services.execution.broadcast.async_session_factory') as mock_factory:
+        with patch.object(service, "_get_active_job_ids", return_value={"job-1"}):
+            with patch(
+                "src.services.execution.broadcast.async_session_factory"
+            ) as mock_factory:
                 mock_session = AsyncMock()
                 mock_factory.return_value.__aenter__.return_value = mock_session
 
-                with patch.object(service, '_check_and_broadcast_status', new_callable=AsyncMock):
+                with patch.object(
+                    service, "_check_and_broadcast_status", new_callable=AsyncMock
+                ):
                     await service._poll_for_status_changes()
 
                 assert "job-2" not in service._last_statuses
@@ -290,12 +298,18 @@ class TestPollForStatusChanges:
         """Test that poll checks status for all active jobs."""
         service = ExecutionBroadcastService()
 
-        with patch.object(service, '_get_active_job_ids', return_value={"job-1", "job-2"}):
-            with patch('src.services.execution.broadcast.async_session_factory') as mock_factory:
+        with patch.object(
+            service, "_get_active_job_ids", return_value={"job-1", "job-2"}
+        ):
+            with patch(
+                "src.services.execution.broadcast.async_session_factory"
+            ) as mock_factory:
                 mock_session = AsyncMock()
                 mock_factory.return_value.__aenter__.return_value = mock_session
 
-                with patch.object(service, '_check_and_broadcast_status', new_callable=AsyncMock) as mock_check:
+                with patch.object(
+                    service, "_check_and_broadcast_status", new_callable=AsyncMock
+                ) as mock_check:
                     await service._poll_for_status_changes()
 
                 assert mock_check.call_count == 2
@@ -310,8 +324,12 @@ class TestCheckAndBroadcastStatus:
         service = ExecutionBroadcastService()
         mock_session = AsyncMock()
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager, \
-                patch('src.services.execution.broadcast.ExecutionHistoryRepository') as MockRepo:
+        with (
+            patch("src.services.execution.broadcast.sse_manager") as mock_manager,
+            patch(
+                "src.services.execution.broadcast.ExecutionHistoryRepository"
+            ) as MockRepo,
+        ):
             MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=None)
 
             await service._check_and_broadcast_status(mock_session, "job-123")
@@ -326,9 +344,15 @@ class TestCheckAndBroadcastStatus:
 
         mock_execution = MockExecutionHistory(status="running")
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager, \
-                patch('src.services.execution.broadcast.ExecutionHistoryRepository') as MockRepo:
-            MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
+        with (
+            patch("src.services.execution.broadcast.sse_manager") as mock_manager,
+            patch(
+                "src.services.execution.broadcast.ExecutionHistoryRepository"
+            ) as MockRepo,
+        ):
+            MockRepo.return_value.get_execution_by_job_id = AsyncMock(
+                return_value=mock_execution
+            )
 
             await service._check_and_broadcast_status(mock_session, "job-123")
 
@@ -345,9 +369,15 @@ class TestCheckAndBroadcastStatus:
 
         mock_execution = MockExecutionHistory(status="completed")
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager, \
-                patch('src.services.execution.broadcast.ExecutionHistoryRepository') as MockRepo:
-            MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
+        with (
+            patch("src.services.execution.broadcast.sse_manager") as mock_manager,
+            patch(
+                "src.services.execution.broadcast.ExecutionHistoryRepository"
+            ) as MockRepo,
+        ):
+            MockRepo.return_value.get_execution_by_job_id = AsyncMock(
+                return_value=mock_execution
+            )
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._check_and_broadcast_status(mock_session, "job-123")
@@ -367,12 +397,18 @@ class TestCheckAndBroadcastStatus:
             status="completed",
             error=None,
             group_id="group-abc",
-            result={"output": "success"}
+            result={"output": "success"},
         )
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager, \
-                patch('src.services.execution.broadcast.ExecutionHistoryRepository') as MockRepo:
-            MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
+        with (
+            patch("src.services.execution.broadcast.sse_manager") as mock_manager,
+            patch(
+                "src.services.execution.broadcast.ExecutionHistoryRepository"
+            ) as MockRepo,
+        ):
+            MockRepo.return_value.get_execution_by_job_id = AsyncMock(
+                return_value=mock_execution
+            )
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._check_and_broadcast_status(mock_session, "job-123")
@@ -395,9 +431,15 @@ class TestCheckAndBroadcastStatus:
 
         mock_execution = MockExecutionHistory(status="running")
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager, \
-                patch('src.services.execution.broadcast.ExecutionHistoryRepository') as MockRepo:
-            MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
+        with (
+            patch("src.services.execution.broadcast.sse_manager") as mock_manager,
+            patch(
+                "src.services.execution.broadcast.ExecutionHistoryRepository"
+            ) as MockRepo,
+        ):
+            MockRepo.return_value.get_execution_by_job_id = AsyncMock(
+                return_value=mock_execution
+            )
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._check_and_broadcast_status(mock_session, "job-123")
@@ -413,11 +455,19 @@ class TestCheckAndBroadcastStatus:
         mock_session = AsyncMock()
 
         completed_time = datetime.now()
-        mock_execution = MockExecutionHistory(status="completed", completed_at=completed_time)
+        mock_execution = MockExecutionHistory(
+            status="completed", completed_at=completed_time
+        )
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager, \
-                patch('src.services.execution.broadcast.ExecutionHistoryRepository') as MockRepo:
-            MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
+        with (
+            patch("src.services.execution.broadcast.sse_manager") as mock_manager,
+            patch(
+                "src.services.execution.broadcast.ExecutionHistoryRepository"
+            ) as MockRepo,
+        ):
+            MockRepo.return_value.get_execution_by_job_id = AsyncMock(
+                return_value=mock_execution
+            )
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._check_and_broadcast_status(mock_session, "job-123")
@@ -433,7 +483,7 @@ class TestCheckAndBroadcastStatus:
 
         mock_session.execute.side_effect = Exception("Database error")
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager:
+        with patch("src.services.execution.broadcast.sse_manager") as mock_manager:
             # Should not raise
             await service._check_and_broadcast_status(mock_session, "job-123")
 
@@ -448,13 +498,18 @@ class TestCheckAndBroadcastStatus:
         mock_session = AsyncMock()
 
         mock_execution = MockExecutionHistory(
-            status="completed",
-            result={"output": "test result", "count": 42}
+            status="completed", result={"output": "test result", "count": 42}
         )
 
-        with patch('src.services.execution.broadcast.sse_manager') as mock_manager, \
-                patch('src.services.execution.broadcast.ExecutionHistoryRepository') as MockRepo:
-            MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=mock_execution)
+        with (
+            patch("src.services.execution.broadcast.sse_manager") as mock_manager,
+            patch(
+                "src.services.execution.broadcast.ExecutionHistoryRepository"
+            ) as MockRepo,
+        ):
+            MockRepo.return_value.get_execution_by_job_id = AsyncMock(
+                return_value=mock_execution
+            )
             mock_manager.broadcast_to_job = AsyncMock(return_value=1)
 
             await service._check_and_broadcast_status(mock_session, "job-123")
@@ -479,8 +534,8 @@ class TestGlobalServiceInstance:
 
     def test_global_instance_has_required_methods(self):
         """Test that global instance has all required methods."""
-        assert hasattr(execution_broadcast_service, 'start')
-        assert hasattr(execution_broadcast_service, 'stop')
+        assert hasattr(execution_broadcast_service, "start")
+        assert hasattr(execution_broadcast_service, "stop")
         assert callable(execution_broadcast_service.start)
         assert callable(execution_broadcast_service.stop)
 
@@ -492,7 +547,7 @@ class TestServiceLifecycle:
         """Test starting and stopping the service."""
         service = ExecutionBroadcastService()
 
-        with patch.object(asyncio, 'create_task') as mock_create_task:
+        with patch.object(asyncio, "create_task") as mock_create_task:
             mock_task = MagicMock()
             mock_create_task.return_value = mock_task
 
@@ -507,7 +562,7 @@ class TestServiceLifecycle:
         """Test that multiple start calls don't create multiple tasks."""
         service = ExecutionBroadcastService()
 
-        with patch.object(asyncio, 'create_task') as mock_create_task:
+        with patch.object(asyncio, "create_task") as mock_create_task:
             mock_task = MagicMock()
             mock_create_task.return_value = mock_task
 

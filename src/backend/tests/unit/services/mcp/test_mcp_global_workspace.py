@@ -5,14 +5,15 @@ Service tests for the GLOBAL + per-workspace override behavior:
   - enable_server_for_group no longer disables the base row
 """
 
-import pytest
-from types import SimpleNamespace
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from src.services.mcp.service import MCPService
-from src.schemas.mcp import MCPServerCreate
+import pytest
+
 from src.core.exceptions import BadRequestError, NotFoundError
+from src.schemas.mcp import MCPServerCreate
+from src.services.mcp.service import MCPService
 
 
 def mk_server(id=1, name="s1", group_id=None, enabled=True, encrypted_api_key=None):

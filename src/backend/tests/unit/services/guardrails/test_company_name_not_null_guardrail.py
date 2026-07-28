@@ -4,10 +4,11 @@ Comprehensive unit tests for company_name_not_null_guardrail.py
 Targets: CompanyNameNotNullGuardrail.__init__, .validate
 Goal: push coverage from 33.3% to 50%+
 """
+
 import json
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helper: suppress the logger so tests stay silent
@@ -23,6 +24,7 @@ class TestCompanyNameNotNullGuardrailInit:
         from src.services.guardrails.demo.company_name_not_null_guardrail import (
             CompanyNameNotNullGuardrail,
         )
+
         return CompanyNameNotNullGuardrail
 
     def test_init_with_dict_config(self):
@@ -69,6 +71,7 @@ class TestCompanyNameNotNullGuardrailValidate:
         from src.services.guardrails.demo.company_name_not_null_guardrail import (
             CompanyNameNotNullGuardrail,
         )
+
         return CompanyNameNotNullGuardrail(config={})
 
     def test_validate_returns_dict(self):
@@ -90,7 +93,10 @@ class TestCompanyNameNotNullGuardrailValidate:
     def test_validate_feedback_mentions_skipped(self):
         g = self._make_guardrail()
         result = g.validate("any output")
-        assert "skip" in result["feedback"].lower() or "disabled" in result["feedback"].lower()
+        assert (
+            "skip" in result["feedback"].lower()
+            or "disabled" in result["feedback"].lower()
+        )
 
     def test_validate_with_none_output(self):
         g = self._make_guardrail()

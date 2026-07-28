@@ -13,14 +13,15 @@ Focuses on:
 """
 
 import pytest
-from src.services.converters.formats.sql.yaml_to_sql import SQLGenerator
+
 from src.services.converters.base.models import KPI, KPIDefinition, QueryFilter
 from src.services.converters.formats.sql.models import (
-    SQLDialect,
     SQLAggregationType,
+    SQLDialect,
     SQLTranslationOptions,
-    SQLTranslationResult
+    SQLTranslationResult,
 )
+from src.services.converters.formats.sql.yaml_to_sql import SQLGenerator
 
 
 class TestSQLGeneratorInit:
@@ -212,55 +213,113 @@ class TestSQLGeneratorSQLExpression:
 
     def test_sum_simple_column(self, databricks_gen):
         """Test SUM expression for simple column"""
-        kpi = KPI(description="Revenue", formula="amount", aggregation_type="SUM", source_table="Sales")
-        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
-        result = databricks_gen._generate_sql_expression(kpi, SQLAggregationType.SUM, definition)
+        kpi = KPI(
+            description="Revenue",
+            formula="amount",
+            aggregation_type="SUM",
+            source_table="Sales",
+        )
+        definition = KPIDefinition(
+            description="Test", technical_name="test", kpis=[kpi]
+        )
+        result = databricks_gen._generate_sql_expression(
+            kpi, SQLAggregationType.SUM, definition
+        )
         assert "SUM" in result.upper()
         assert "amount" in result
 
     def test_count_star(self, databricks_gen):
         """Test COUNT(*) expression"""
-        kpi = KPI(description="Count", formula="*", aggregation_type="COUNT", source_table="Sales")
-        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
-        result = databricks_gen._generate_sql_expression(kpi, SQLAggregationType.COUNT, definition)
+        kpi = KPI(
+            description="Count",
+            formula="*",
+            aggregation_type="COUNT",
+            source_table="Sales",
+        )
+        definition = KPIDefinition(
+            description="Test", technical_name="test", kpis=[kpi]
+        )
+        result = databricks_gen._generate_sql_expression(
+            kpi, SQLAggregationType.COUNT, definition
+        )
         assert "COUNT(*)" in result
 
     def test_count_column(self, databricks_gen):
         """Test COUNT column expression"""
-        kpi = KPI(description="Count", formula="order_id", aggregation_type="COUNT", source_table="Sales")
-        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
-        result = databricks_gen._generate_sql_expression(kpi, SQLAggregationType.COUNT, definition)
+        kpi = KPI(
+            description="Count",
+            formula="order_id",
+            aggregation_type="COUNT",
+            source_table="Sales",
+        )
+        definition = KPIDefinition(
+            description="Test", technical_name="test", kpis=[kpi]
+        )
+        result = databricks_gen._generate_sql_expression(
+            kpi, SQLAggregationType.COUNT, definition
+        )
         assert "COUNT" in result.upper()
         assert "order_id" in result
 
     def test_count_distinct(self, databricks_gen):
         """Test COUNT DISTINCT expression"""
         kpi = KPI(description="Distinct", formula="customer_id", source_table="Sales")
-        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
-        result = databricks_gen._generate_sql_expression(kpi, SQLAggregationType.COUNT_DISTINCT, definition)
+        definition = KPIDefinition(
+            description="Test", technical_name="test", kpis=[kpi]
+        )
+        result = databricks_gen._generate_sql_expression(
+            kpi, SQLAggregationType.COUNT_DISTINCT, definition
+        )
         assert "COUNT" in result.upper()
         assert "DISTINCT" in result.upper()
 
     def test_avg_expression(self, databricks_gen):
         """Test AVG expression"""
-        kpi = KPI(description="Avg", formula="price", aggregation_type="AVERAGE", source_table="Products")
-        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
-        result = databricks_gen._generate_sql_expression(kpi, SQLAggregationType.AVG, definition)
+        kpi = KPI(
+            description="Avg",
+            formula="price",
+            aggregation_type="AVERAGE",
+            source_table="Products",
+        )
+        definition = KPIDefinition(
+            description="Test", technical_name="test", kpis=[kpi]
+        )
+        result = databricks_gen._generate_sql_expression(
+            kpi, SQLAggregationType.AVG, definition
+        )
         assert "AVG" in result.upper()
         assert "price" in result
 
     def test_min_expression(self, databricks_gen):
         """Test MIN expression"""
-        kpi = KPI(description="Min", formula="price", aggregation_type="MIN", source_table="Products")
-        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
-        result = databricks_gen._generate_sql_expression(kpi, SQLAggregationType.MIN, definition)
+        kpi = KPI(
+            description="Min",
+            formula="price",
+            aggregation_type="MIN",
+            source_table="Products",
+        )
+        definition = KPIDefinition(
+            description="Test", technical_name="test", kpis=[kpi]
+        )
+        result = databricks_gen._generate_sql_expression(
+            kpi, SQLAggregationType.MIN, definition
+        )
         assert "MIN" in result.upper()
 
     def test_max_expression(self, databricks_gen):
         """Test MAX expression"""
-        kpi = KPI(description="Max", formula="price", aggregation_type="MAX", source_table="Products")
-        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
-        result = databricks_gen._generate_sql_expression(kpi, SQLAggregationType.MAX, definition)
+        kpi = KPI(
+            description="Max",
+            formula="price",
+            aggregation_type="MAX",
+            source_table="Products",
+        )
+        definition = KPIDefinition(
+            description="Test", technical_name="test", kpis=[kpi]
+        )
+        result = databricks_gen._generate_sql_expression(
+            kpi, SQLAggregationType.MAX, definition
+        )
         assert "MAX" in result.upper()
 
     def test_sum_complex_formula(self, databricks_gen):
@@ -268,11 +327,15 @@ class TestSQLGeneratorSQLExpression:
         kpi = KPI(
             description="Revenue",
             formula="CASE WHEN status = 'active' THEN amount ELSE 0 END",
-            source_table="Sales"
+            source_table="Sales",
         )
-        definition = KPIDefinition(description="Test", technical_name="test", kpis=[kpi])
+        definition = KPIDefinition(
+            description="Test", technical_name="test", kpis=[kpi]
+        )
         try:
-            result = databricks_gen._generate_sql_expression(kpi, SQLAggregationType.SUM, definition)
+            result = databricks_gen._generate_sql_expression(
+                kpi, SQLAggregationType.SUM, definition
+            )
             assert "SUM" in result.upper()
         except RecursionError:
             # Known bug: infinite recursion in CASE WHEN formula handling
@@ -333,6 +396,7 @@ class TestSQLGeneratorEstimateComplexity:
     def test_low_complexity_few_measures(self, generator):
         """Test LOW complexity for few measures"""
         from src.services.converters.formats.sql.models import SQLDefinition, SQLMeasure
+
         sql_def = SQLDefinition(
             description="Test",
             technical_name="test",
@@ -345,9 +409,9 @@ class TestSQLGeneratorEstimateComplexity:
                     aggregation_type=SQLAggregationType.SUM,
                     source_table="Sales",
                     filters=[],
-                    technical_name="revenue"
+                    technical_name="revenue",
                 )
-            ]
+            ],
         )
 
         result = generator._estimate_complexity(sql_def)
@@ -356,23 +420,26 @@ class TestSQLGeneratorEstimateComplexity:
     def test_high_complexity_many_measures(self, generator):
         """Test HIGH complexity for many measures"""
         from src.services.converters.formats.sql.models import SQLDefinition, SQLMeasure
+
         measures = []
         for i in range(15):
-            measures.append(SQLMeasure(
-                name=f"Measure {i}",
-                description=f"Measure {i}",
-                sql_expression=f"SUM(col_{i})",
-                aggregation_type=SQLAggregationType.SUM,
-                source_table="Sales",
-                filters=[],
-                technical_name=f"measure_{i}"
-            ))
+            measures.append(
+                SQLMeasure(
+                    name=f"Measure {i}",
+                    description=f"Measure {i}",
+                    sql_expression=f"SUM(col_{i})",
+                    aggregation_type=SQLAggregationType.SUM,
+                    source_table="Sales",
+                    filters=[],
+                    technical_name=f"measure_{i}",
+                )
+            )
 
         sql_def = SQLDefinition(
             description="Test",
             technical_name="test",
             dialect=SQLDialect.DATABRICKS,
-            sql_measures=measures
+            sql_measures=measures,
         )
 
         result = generator._estimate_complexity(sql_def)
@@ -397,9 +464,9 @@ class TestSQLGeneratorGenerateSQLFromKBIDefinition:
                     technical_name="revenue",
                     formula="amount",
                     aggregation_type="SUM",
-                    source_table="FactSales"
+                    source_table="FactSales",
                 )
-            ]
+            ],
         )
 
     def test_returns_sql_translation_result(self, generator, simple_definition):
@@ -412,14 +479,14 @@ class TestSQLGeneratorGenerateSQLFromKBIDefinition:
         """Test result contains SQL queries"""
         result = generator.generate_sql_from_kbi_definition(simple_definition)
 
-        assert hasattr(result, 'sql_queries')
+        assert hasattr(result, "sql_queries")
         assert isinstance(result.sql_queries, list)
 
     def test_result_has_measures(self, generator, simple_definition):
         """Test result contains SQL measures"""
         result = generator.generate_sql_from_kbi_definition(simple_definition)
 
-        assert hasattr(result, 'sql_measures')
+        assert hasattr(result, "sql_measures")
 
     def test_result_with_options(self, generator, simple_definition):
         """Test generate with explicit options"""
@@ -432,15 +499,15 @@ class TestSQLGeneratorGenerateSQLFromKBIDefinition:
         """Test result has syntax validity flag"""
         result = generator.generate_sql_from_kbi_definition(simple_definition)
 
-        assert hasattr(result, 'syntax_valid')
+        assert hasattr(result, "syntax_valid")
         assert isinstance(result.syntax_valid, bool)
 
     def test_result_counts(self, generator, simple_definition):
         """Test result has measure and query counts"""
         result = generator.generate_sql_from_kbi_definition(simple_definition)
 
-        assert hasattr(result, 'measures_count')
-        assert hasattr(result, 'queries_count')
+        assert hasattr(result, "measures_count")
+        assert hasattr(result, "queries_count")
 
     def test_multiple_kpis_generates_multiple_measures(self, generator):
         """Test multiple KPIs generate multiple measures"""
@@ -453,23 +520,23 @@ class TestSQLGeneratorGenerateSQLFromKBIDefinition:
                     technical_name="revenue",
                     formula="amount",
                     aggregation_type="SUM",
-                    source_table="Sales"
+                    source_table="Sales",
                 ),
                 KPI(
                     description="Cost",
                     technical_name="cost",
                     formula="cost",
                     aggregation_type="SUM",
-                    source_table="Sales"
+                    source_table="Sales",
                 ),
                 KPI(
                     description="Orders",
                     technical_name="orders",
                     formula="order_id",
                     aggregation_type="COUNT",
-                    source_table="Sales"
-                )
-            ]
+                    source_table="Sales",
+                ),
+            ],
         )
 
         result = generator.generate_sql_from_kbi_definition(definition)
@@ -479,10 +546,10 @@ class TestSQLGeneratorGenerateSQLFromKBIDefinition:
         """Test get_formatted_sql_output or get_all_sql_statements returns SQL text"""
         result = generator.generate_sql_from_kbi_definition(simple_definition)
         # Use the actual method names available on SQLTranslationResult
-        if hasattr(result, 'get_formatted_sql_output'):
+        if hasattr(result, "get_formatted_sql_output"):
             output = result.get_formatted_sql_output()
             assert isinstance(output, str)
-        elif hasattr(result, 'get_all_sql_statements'):
+        elif hasattr(result, "get_all_sql_statements"):
             output = result.get_all_sql_statements()
             assert isinstance(output, (str, list))
 
@@ -499,9 +566,9 @@ class TestSQLGeneratorGenerateSQLFromKBIDefinition:
                     formula="amount",
                     aggregation_type="SUM",
                     source_table="Sales",
-                    filters=["fiscyear = $var_year"]
+                    filters=["fiscyear = $var_year"],
                 )
-            ]
+            ],
         )
 
         result = generator.generate_sql_from_kbi_definition(definition)
@@ -518,9 +585,9 @@ class TestSQLGeneratorGenerateSQLFromKBIDefinition:
                     technical_name="rows",
                     formula="row_count",
                     aggregation_type="COUNTROWS",
-                    source_table="Sales"
+                    source_table="Sales",
                 )
-            ]
+            ],
         )
 
         result = generator.generate_sql_from_kbi_definition(definition)

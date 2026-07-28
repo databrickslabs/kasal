@@ -4,7 +4,9 @@ Unit tests for execution_status model.
 Tests the functionality of the ExecutionStatus enum including
 value validation and completeness.
 """
+
 import pytest
+
 from src.models.execution_status import ExecutionStatus
 
 
@@ -86,8 +88,16 @@ class TestExecutionStatus:
 
         # Assert - includes HITL statuses in actual enum definition order
         expected_values = [
-            "PENDING", "PREPARING", "RUNNING", "WAITING_FOR_APPROVAL",
-            "STOPPING", "STOPPED", "COMPLETED", "FAILED", "REJECTED", "CANCELLED"
+            "PENDING",
+            "PREPARING",
+            "RUNNING",
+            "WAITING_FOR_APPROVAL",
+            "STOPPING",
+            "STOPPED",
+            "COMPLETED",
+            "FAILED",
+            "REJECTED",
+            "CANCELLED",
         ]
         assert status_values == expected_values
 
@@ -122,7 +132,7 @@ class TestExecutionStatus:
         """Test identification of initial execution states."""
         # Arrange
         initial_states = [ExecutionStatus.PENDING, ExecutionStatus.PREPARING]
-        
+
         # Act & Assert
         for status in initial_states:
             assert status in [ExecutionStatus.PENDING, ExecutionStatus.PREPARING]
@@ -131,7 +141,7 @@ class TestExecutionStatus:
         """Test identification of active execution states."""
         # Arrange
         active_states = [ExecutionStatus.PREPARING, ExecutionStatus.RUNNING]
-        
+
         # Act & Assert
         for status in active_states:
             assert status in [ExecutionStatus.PREPARING, ExecutionStatus.RUNNING]
@@ -139,11 +149,21 @@ class TestExecutionStatus:
     def test_execution_status_final_states(self):
         """Test identification of final execution states."""
         # Arrange
-        final_states = [ExecutionStatus.STOPPED, ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]
-        
+        final_states = [
+            ExecutionStatus.STOPPED,
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.CANCELLED,
+        ]
+
         # Act & Assert
         for status in final_states:
-            assert status in [ExecutionStatus.STOPPED, ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]
+            assert status in [
+                ExecutionStatus.STOPPED,
+                ExecutionStatus.COMPLETED,
+                ExecutionStatus.FAILED,
+                ExecutionStatus.CANCELLED,
+            ]
 
     def test_execution_status_success_states(self):
         """Test identification of successful execution states."""
@@ -154,11 +174,19 @@ class TestExecutionStatus:
     def test_execution_status_error_states(self):
         """Test identification of error execution states."""
         # Arrange
-        error_states = [ExecutionStatus.FAILED, ExecutionStatus.CANCELLED, ExecutionStatus.STOPPED]
-        
+        error_states = [
+            ExecutionStatus.FAILED,
+            ExecutionStatus.CANCELLED,
+            ExecutionStatus.STOPPED,
+        ]
+
         # Act & Assert
         for status in error_states:
-            assert status in [ExecutionStatus.FAILED, ExecutionStatus.CANCELLED, ExecutionStatus.STOPPED]
+            assert status in [
+                ExecutionStatus.FAILED,
+                ExecutionStatus.CANCELLED,
+                ExecutionStatus.STOPPED,
+            ]
 
     def test_execution_status_docstring(self):
         """Test that ExecutionStatus has proper documentation."""
@@ -171,7 +199,7 @@ class TestExecutionStatus:
         """Test that the module has proper documentation."""
         # Act
         import src.models.execution_status as execution_status_module
-        
+
         # Assert
         assert execution_status_module.__doc__ is not None
         assert "execution status" in execution_status_module.__doc__.lower()
@@ -186,11 +214,11 @@ class TestExecutionStatusUseCases:
         # Test typical workflow
         workflow_states = [
             ExecutionStatus.PENDING,
-            ExecutionStatus.PREPARING, 
+            ExecutionStatus.PREPARING,
             ExecutionStatus.RUNNING,
-            ExecutionStatus.COMPLETED
+            ExecutionStatus.COMPLETED,
         ]
-        
+
         # Assert workflow progression makes sense
         assert workflow_states[0] == ExecutionStatus.PENDING
         assert workflow_states[1] == ExecutionStatus.PREPARING
@@ -206,9 +234,9 @@ class TestExecutionStatusUseCases:
             (ExecutionStatus.RUNNING, ExecutionStatus.FAILED),
             (ExecutionStatus.PENDING, ExecutionStatus.CANCELLED),
             (ExecutionStatus.PREPARING, ExecutionStatus.CANCELLED),
-            (ExecutionStatus.RUNNING, ExecutionStatus.CANCELLED)
+            (ExecutionStatus.RUNNING, ExecutionStatus.CANCELLED),
         ]
-        
+
         for start_state, end_state in error_scenarios:
             # Assert that error transitions are valid
             assert start_state != end_state
@@ -218,20 +246,28 @@ class TestExecutionStatusUseCases:
         """Test filtering executions by status."""
         # Arrange
         all_statuses = list(ExecutionStatus)
-        
+
         # Test filtering active executions
-        active_filter = lambda s: s in [ExecutionStatus.PREPARING, ExecutionStatus.RUNNING]
+        active_filter = lambda s: s in [
+            ExecutionStatus.PREPARING,
+            ExecutionStatus.RUNNING,
+        ]
         active_statuses = [s for s in all_statuses if active_filter(s)]
-        
+
         # Test filtering completed executions
-        completed_filter = lambda s: s in [ExecutionStatus.STOPPED, ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]
+        completed_filter = lambda s: s in [
+            ExecutionStatus.STOPPED,
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.CANCELLED,
+        ]
         completed_statuses = [s for s in all_statuses if completed_filter(s)]
-        
+
         # Assert
         assert len(active_statuses) == 2
         assert ExecutionStatus.PREPARING in active_statuses
         assert ExecutionStatus.RUNNING in active_statuses
-        
+
         assert len(completed_statuses) == 4
         assert ExecutionStatus.STOPPED in completed_statuses
         assert ExecutionStatus.COMPLETED in completed_statuses
@@ -254,7 +290,7 @@ class TestExecutionStatusUseCases:
             "FAILED": "FAILED",
             "CANCELLED": "CANCELLED",
             "WAITING_FOR_APPROVAL": "WAITING_FOR_APPROVAL",
-            "REJECTED": "REJECTED"
+            "REJECTED": "REJECTED",
         }
 
         assert status_values == expected_mapping
@@ -287,7 +323,7 @@ class TestExecutionStatusUseCases:
         # Test that status values work well in log messages
         for status in ExecutionStatus:
             log_message = f"Execution status changed to {status}"
-            
+
             # Assert
             assert status.value in log_message
             assert len(log_message) > 20  # Should create meaningful log messages

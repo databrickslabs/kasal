@@ -11,13 +11,13 @@ Provides intelligent metadata reduction for Power BI semantic models:
 - DimensionResolver: Explicit dimension keyword → table-qualified column binding
 """
 
-from .fuzzy_scorer import FuzzyScorer
-from .dependency_resolver import MeasureDependencyResolver
-from .value_normalizer import ValueNormalizer
-from .question_preprocessor import QuestionPreprocessor
-from .measure_resolver import MeasureResolver
 from .dax_skeleton_builder import DaxSkeletonBuilder
-from .dimension_resolver import DimensionResolver, DimensionBinding
+from .dependency_resolver import MeasureDependencyResolver
+from .dimension_resolver import DimensionBinding, DimensionResolver
+from .fuzzy_scorer import FuzzyScorer
+from .measure_resolver import MeasureResolver
+from .question_preprocessor import QuestionPreprocessor
+from .value_normalizer import ValueNormalizer
 
 __all__ = [
     "FuzzyScorer",

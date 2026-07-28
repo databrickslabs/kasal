@@ -4,17 +4,19 @@ Tests all CRUD endpoints using direct async function calls with mocked
 service dependencies. Permission checks verify that only admin and editor
 roles can create, update, and delete API keys.
 """
-import pytest
-from unittest.mock import AsyncMock
-from types import SimpleNamespace
+
 from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from src.api.api_keys_router import (
-    get_api_keys_metadata,
     create_api_key,
-    update_api_key,
     delete_api_key,
+    get_api_keys_metadata,
     router,
+    update_api_key,
 )
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.schemas.api_key import ApiKeyCreate, ApiKeyUpdate
@@ -45,6 +47,7 @@ def make_api_key(kid=1, name="test-key", value=""):
 # GET /api-keys
 # ---------------------------------------------------------------------------
 
+
 class TestGetApiKeysMetadata:
     """Tests for get_api_keys_metadata endpoint."""
 
@@ -72,9 +75,7 @@ class TestGetApiKeysMetadata:
     @pytest.mark.asyncio
     async def test_propagates_exception(self):
         svc = AsyncMock()
-        svc.get_api_keys_metadata = AsyncMock(
-            side_effect=RuntimeError("db error")
-        )
+        svc.get_api_keys_metadata = AsyncMock(side_effect=RuntimeError("db error"))
 
         with pytest.raises(RuntimeError, match="db error"):
             await get_api_keys_metadata(service=svc)
@@ -83,6 +84,7 @@ class TestGetApiKeysMetadata:
 # ---------------------------------------------------------------------------
 # POST /api-keys
 # ---------------------------------------------------------------------------
+
 
 class TestCreateApiKey:
     """Tests for create_api_key endpoint."""
@@ -152,9 +154,7 @@ class TestCreateApiKey:
 
         data = ApiKeyCreate(name="key", value="sk-123")
 
-        await create_api_key(
-            api_key_data=data, group_context=gc("admin"), service=svc
-        )
+        await create_api_key(api_key_data=data, group_context=gc("admin"), service=svc)
 
         call_kwargs = svc.create_api_key.call_args
         assert call_kwargs[1]["created_by_email"] == "u@x.com"
@@ -176,6 +176,7 @@ class TestCreateApiKey:
 # ---------------------------------------------------------------------------
 # PUT /api-keys/{api_key_name}
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateApiKey:
     """Tests for update_api_key endpoint."""
@@ -266,6 +267,7 @@ class TestUpdateApiKey:
 # DELETE /api-keys/{api_key_name}
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteApiKey:
     """Tests for delete_api_key endpoint."""
 
@@ -351,6 +353,7 @@ class TestDeleteApiKey:
 # ---------------------------------------------------------------------------
 # Router configuration
 # ---------------------------------------------------------------------------
+
 
 class TestRouterConfiguration:
     """Tests for router prefix and tags."""

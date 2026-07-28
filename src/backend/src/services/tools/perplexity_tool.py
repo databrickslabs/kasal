@@ -1,19 +1,26 @@
-from src.services.tools.base import BaseTool
-from typing import Optional, Type, Dict, Any, List
-from pydantic import BaseModel, Field, PrivateAttr
-import logging
-import requests
-import os
 import json
+import logging
+import os
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Type
+
+import requests
+from pydantic import BaseModel, Field, PrivateAttr
+
+from src.services.tools.base import BaseTool
 
 # Configure logger
 logger = logging.getLogger(__name__)
 
+
 # Input schema for PerplexitySearchTool
 class PerplexitySearchInput(BaseModel):
     """Input schema for PerplexitySearchTool."""
-    query: str = Field(..., description="The search query or question to pass to Perplexity AI.")
+
+    query: str = Field(
+        ..., description="The search query or question to pass to Perplexity AI."
+    )
+
 
 class PerplexitySearchTool(BaseTool):
     name: str = "PerplexityTool"
@@ -35,10 +42,12 @@ class PerplexitySearchTool(BaseTool):
     _stream: bool = PrivateAttr(default=False)
     _presence_penalty: float = PrivateAttr(default=0)
     _frequency_penalty: float = PrivateAttr(default=1)
-    _web_search_options: Dict[str, Any] = PrivateAttr(default={"search_context_size": "high"})
+    _web_search_options: Dict[str, Any] = PrivateAttr(
+        default={"search_context_size": "high"}
+    )
 
     def __init__(
-        self, 
+        self,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         temperature: Optional[float] = None,
@@ -56,29 +65,37 @@ class PerplexitySearchTool(BaseTool):
         result_as_answer: bool = False,
     ):
         super().__init__()
-        
+
         # Log all relevant info about key source
         logger.info(f"Initializing PerplexitySearchTool")
         logger.info(f"API key provided directly: {bool(api_key)}")
-        logger.info(f"API key in environment: {bool(os.environ.get('PERPLEXITY_API_KEY'))}")
+        logger.info(
+            f"API key in environment: {bool(os.environ.get('PERPLEXITY_API_KEY'))}"
+        )
         logger.info(f"result_as_answer: {result_as_answer}")
-        
+
         # Try to get API key from environment or parameter
         if not api_key:
             api_key = os.environ.get("PERPLEXITY_API_KEY")
             if not api_key:
-                logger.error("No Perplexity API key provided. Please configure PERPLEXITY_API_KEY in the API Keys settings.")
-                raise ValueError("Perplexity API key is required. Please configure it in the API Keys settings.")
-                
+                logger.error(
+                    "No Perplexity API key provided. Please configure PERPLEXITY_API_KEY in the API Keys settings."
+                )
+                raise ValueError(
+                    "Perplexity API key is required. Please configure it in the API Keys settings."
+                )
+
         self._api_key = api_key
-        
+
         # Safely log a portion of the key for diagnostic purposes
         if api_key:
-            masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "***"
+            masked_key = (
+                f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "***"
+            )
             logger.info(f"Initialized Perplexity tool with API key: {masked_key}")
         else:
             logger.error("Failed to initialize Perplexity tool with a valid API key")
-        
+
         # Set optional parameters if provided
         if model is not None:
             self._model = model
@@ -118,14 +135,8 @@ class PerplexitySearchTool(BaseTool):
             payload = {
                 "model": self._model,
                 "messages": [
-                    {
-                        "role": "system",
-                        "content": "Be precise and concise."
-                    },
-                    {
-                        "role": "user",
-                        "content": query
-                    }
+                    {"role": "system", "content": "Be precise and concise."},
+                    {"role": "user", "content": query},
                 ],
                 "max_tokens": self._max_tokens,
                 "temperature": self._temperature,
@@ -157,7 +168,7 @@ class PerplexitySearchTool(BaseTool):
 
             headers = {
                 "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             }
 
             logger.info(f"Executing Perplexity API request with query: {query}")
@@ -165,39 +176,43 @@ class PerplexitySearchTool(BaseTool):
 
             response = requests.post(url, json=payload, headers=headers)
             if not response.ok:
-                logger.error(f"Error from Perplexity API: {response.status_code} - {response.text}")
+                logger.error(
+                    f"Error from Perplexity API: {response.status_code} - {response.text}"
+                )
                 return f"Error from Perplexity API: {response.status_code} - {response.text}"
-                
+
             response.raise_for_status()  # Raise exception for bad status codes
-            
+
             result = response.json()
             logger.debug(f"Full API response: {json.dumps(result, indent=2)}")
-            
-            answer = result.get('choices', [{}])[0].get('message', {}).get('content', '')
-            
+
+            answer = (
+                result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            )
+
             # Extract citations/search_results from the response
             # Check for both 'search_results' (new format) and 'citations' (old format)
-            search_results = result.get('search_results', [])
+            search_results = result.get("search_results", [])
             if not search_results:
                 # Check if citations are in the old format
-                search_results = result.get('citations', [])
-            
+                search_results = result.get("citations", [])
+
             # Format the answer with citations if available
             if search_results:
                 formatted_answer = f"{answer}\n\n**Sources:**\n"
                 for idx, citation in enumerate(search_results, 1):
                     if isinstance(citation, dict):
-                        title = citation.get('title', 'Unknown')
-                        url = citation.get('url', '')
+                        title = citation.get("title", "Unknown")
+                        url = citation.get("url", "")
                         formatted_answer += f"[{idx}] {title}: {url}\n"
                     elif isinstance(citation, str):
                         # Handle case where citations are just URLs
                         formatted_answer += f"[{idx}] {citation}\n"
                 answer = formatted_answer
-            
+
             # Log a preview of the answer
             logger.info(f"Perplexity answer with citations: {answer[:200]}...")
-            
+
             # Create a structured response that matches our PerplexityToolOutput schema
             output = {
                 "answer": answer,
@@ -205,10 +220,10 @@ class PerplexitySearchTool(BaseTool):
                 "model": self._model,
                 "search_context": {
                     "query": query,
-                    "timestamp": datetime.now().isoformat()
-                }
+                    "timestamp": datetime.now().isoformat(),
+                },
             }
-            
+
             # Return the formatted answer with citations
             logger.debug(f"Structured output: {json.dumps(output, indent=2)}")
             return answer

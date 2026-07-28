@@ -10,26 +10,26 @@ Authentication for Lakebase memory operations:
   - Local dev: PAT (Personal Access Token from API Keys or environment)
   - OBO is NEVER used for Lakebase connections
 """
-import os
-import uuid
-import time
+
 import asyncio
 import logging
+import os
 import threading
-from typing import AsyncGenerator, Optional
+import time
+import uuid
 from contextlib import asynccontextmanager
+from typing import AsyncGenerator, Optional
 
-from sqlalchemy import event, text
-from sqlalchemy.exc import IllegalStateChangeError
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.useragent import with_product
-from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
+from sqlalchemy import event, text
+from sqlalchemy.exc import IllegalStateChangeError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.core.exceptions import KasalError, LakebaseInstanceUnavailableError
 from src.core.logger import LoggerManager
 from src.utils.databricks_auth import get_current_databricks_user, get_workspace_client
-from src.utils.telemetry import get_application_name
+from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct, get_application_name
 
 logger_manager = LoggerManager.get_instance()
 logger = logging.getLogger(__name__)
@@ -63,6 +63,7 @@ def _unavailable_message(instance_name: str, w, orig: Exception) -> str:
         f"instance; provision it, correct the instance name, or disable the Lakebase "
         f"backend. Underlying error: {orig}"
     )
+
 
 # Cached SPN credentials, captured the first time all three env vars are present.
 # CRITICAL (deployed Databricks Apps): the crew subprocess is multi-threaded and
@@ -109,7 +110,13 @@ _resolve_spn_creds()
 class LakebaseSessionFactory:
     """Factory for creating Lakebase database sessions with do_connect token injection."""
 
-    def __init__(self, instance_name: str = "kasal-lakebase", user_token: Optional[str] = None, user_email: Optional[str] = None, group_id: Optional[str] = None):
+    def __init__(
+        self,
+        instance_name: str = "kasal-lakebase",
+        user_token: Optional[str] = None,
+        user_email: Optional[str] = None,
+        group_id: Optional[str] = None,
+    ):
         """
         Initialize Lakebase session factory.
 
@@ -129,7 +136,9 @@ class LakebaseSessionFactory:
         self._session_factory = None
         self._token_holder: dict = {"token": "", "refreshed_at": 0.0}
         self._refresh_task: Optional[asyncio.Task] = None
-        self._engine_loop_id: Optional[int] = None  # Track which event loop owns the engine
+        self._engine_loop_id: Optional[int] = (
+            None  # Track which event loop owns the engine
+        )
 
     async def _get_workspace_client(self) -> WorkspaceClient:
         """
@@ -169,16 +178,25 @@ class LakebaseSessionFactory:
                     )
                 finally:
                     os.environ.update(_pat_backup)
-                logger.info("[LAKEBASE SESSION] SPN WorkspaceClient created successfully")
-                logger.info("[LAKEBASE SESSION] SPN WorkspaceClient created successfully")
+                logger.info(
+                    "[LAKEBASE SESSION] SPN WorkspaceClient created successfully"
+                )
+                logger.info(
+                    "[LAKEBASE SESSION] SPN WorkspaceClient created successfully"
+                )
                 return self._workspace_client
 
             # Priority 2: PAT — pass user_token=None to skip OBO entirely
             # Pass group_id explicitly so PAT lookup works in background threads
             # where UserContext is not available.
-            logger.info(f"[LAKEBASE SESSION] No SPN credentials, trying PAT (local dev, group_id={self.group_id})")
+            logger.info(
+                f"[LAKEBASE SESSION] No SPN credentials, trying PAT (local dev, group_id={self.group_id})"
+            )
             from src.utils.databricks_auth import get_workspace_client
-            self._workspace_client = await get_workspace_client(user_token=None, group_id=self.group_id)
+
+            self._workspace_client = await get_workspace_client(
+                user_token=None, group_id=self.group_id
+            )
 
             if not self._workspace_client:
                 raise ValueError(
@@ -223,8 +241,14 @@ class LakebaseSessionFactory:
         try:
             w = await self._get_workspace_client()
             current_user = w.current_user.me()
-            if current_user and hasattr(current_user, 'user_name') and current_user.user_name:
-                logger.info(f"Using workspace current user as PG username: {current_user.user_name}")
+            if (
+                current_user
+                and hasattr(current_user, "user_name")
+                and current_user.user_name
+            ):
+                logger.info(
+                    f"Using workspace current user as PG username: {current_user.user_name}"
+                )
                 return current_user.user_name
         except Exception as e:
             logger.warning(f"Could not get current user from workspace client: {e}")
@@ -248,23 +272,28 @@ class LakebaseSessionFactory:
         # Try provisioned instance first
         try:
             cred = w.database.generate_database_credential(
-                request_id=str(uuid.uuid4()),
-                instance_names=[self.instance_name]
+                request_id=str(uuid.uuid4()), instance_names=[self.instance_name]
             )
             self._token_holder["token"] = cred.token
             self._token_holder["refreshed_at"] = time.time()
-            logger.info(f"Refreshed Lakebase token for instance {self.instance_name} (length: {len(cred.token)})")
+            logger.info(
+                f"Refreshed Lakebase token for instance {self.instance_name} (length: {len(cred.token)})"
+            )
             return cred.token
         except Exception as e:
             if not _is_not_found(e):
                 raise
-            logger.info(f"Instance {self.instance_name} not in DatabaseAPI, trying PostgresAPI")
+            logger.info(
+                f"Instance {self.instance_name} not in DatabaseAPI, trying PostgresAPI"
+            )
 
         # Fall back to autoscaling project
         try:
-            endpoints = list(w.postgres.list_endpoints(
-                parent=f"projects/{self.instance_name}/branches/production"
-            ))
+            endpoints = list(
+                w.postgres.list_endpoints(
+                    parent=f"projects/{self.instance_name}/branches/production"
+                )
+            )
         except Exception as autoscale_err:
             # Neither API knows this instance — surface a legible error.
             if _is_not_found(autoscale_err):
@@ -277,7 +306,9 @@ class LakebaseSessionFactory:
         cred = w.postgres.generate_database_credential(endpoint=endpoints[0].name)
         self._token_holder["token"] = cred.token
         self._token_holder["refreshed_at"] = time.time()
-        logger.info(f"Refreshed Lakebase token for project {self.instance_name} (length: {len(cred.token)})")
+        logger.info(
+            f"Refreshed Lakebase token for project {self.instance_name} (length: {len(cred.token)})"
+        )
         return cred.token
 
     async def _schedule_token_refresh(self):
@@ -286,7 +317,9 @@ class LakebaseSessionFactory:
             try:
                 await asyncio.sleep(TOKEN_REFRESH_INTERVAL_SECONDS)
                 await self._refresh_token()
-                logger.info(f"Background token refresh completed for {self.instance_name}")
+                logger.info(
+                    f"Background token refresh completed for {self.instance_name}"
+                )
             except asyncio.CancelledError:
                 logger.info(f"Token refresh task cancelled for {self.instance_name}")
                 break
@@ -314,17 +347,23 @@ class LakebaseSessionFactory:
                 instance = w.database.get_database_instance(name=self.instance_name)
                 state_str = str(instance.state).upper()
                 if "AVAILABLE" not in state_str and "READY" not in state_str:
-                    raise ValueError(f"Lakebase instance {self.instance_name} is not ready (state: {instance.state})")
+                    raise ValueError(
+                        f"Lakebase instance {self.instance_name} is not ready (state: {instance.state})"
+                    )
                 dns = instance.read_write_dns
             except Exception as e:
                 if not _is_not_found(e):
                     raise
                 # Provisioned instance not found — try the autoscaling project API.
-                logger.info(f"Instance {self.instance_name} not in DatabaseAPI, trying PostgresAPI")
+                logger.info(
+                    f"Instance {self.instance_name} not in DatabaseAPI, trying PostgresAPI"
+                )
                 try:
-                    endpoints = list(w.postgres.list_endpoints(
-                        parent=f"projects/{self.instance_name}/branches/production"
-                    ))
+                    endpoints = list(
+                        w.postgres.list_endpoints(
+                            parent=f"projects/{self.instance_name}/branches/production"
+                        )
+                    )
                 except Exception as autoscale_err:
                     # Neither API knows this instance — surface a legible error
                     # instead of the raw SDK NotFound buried in the memory drain.
@@ -334,13 +373,15 @@ class LakebaseSessionFactory:
                         ) from autoscale_err
                     raise
                 for ep in endpoints:
-                    if hasattr(ep, 'status') and ep.status:
-                        hosts = getattr(ep.status, 'hosts', None)
-                        if hosts and hasattr(hosts, 'host') and hosts.host:
+                    if hasattr(ep, "status") and ep.status:
+                        hosts = getattr(ep.status, "hosts", None)
+                        if hosts and hasattr(hosts, "host") and hosts.host:
                             dns = hosts.host
                             break
                 if not dns:
-                    raise ValueError(f"No endpoint found for Lakebase instance/project {self.instance_name}")
+                    raise ValueError(
+                        f"No endpoint found for Lakebase instance/project {self.instance_name}"
+                    )
 
             username = await self._get_username()
 
@@ -388,6 +429,7 @@ class LakebaseSessionFactory:
             pool_kwargs = {}
             if use_nullpool:
                 from sqlalchemy.pool import NullPool
+
                 pool_kwargs["poolclass"] = NullPool
                 logger.info("[LAKEBASE SESSION] Using NullPool (crew thread mode)")
             else:
@@ -400,7 +442,7 @@ class LakebaseSessionFactory:
                 connection_url,
                 echo=False,
                 future=True,
-                pool_pre_ping=False,   # Required: conflicts with do_connect token injection
+                pool_pre_ping=False,  # Required: conflicts with do_connect token injection
                 connect_args={
                     "ssl": "require",
                     "server_settings": {
@@ -410,10 +452,10 @@ class LakebaseSessionFactory:
                         # so HNSW indexes and the embedding column only resolve
                         # when public is searchable alongside the kasal schema.
                         "search_path": "kasal, public",
-                        "application_name": get_application_name()  # Kasal/0.1.0
-                    }
+                        "application_name": get_application_name(),  # Kasal/0.1.0
+                    },
                 },
-                **pool_kwargs
+                **pool_kwargs,
             )
 
             # Attach do_connect event listener to inject token from holder
@@ -428,7 +470,7 @@ class LakebaseSessionFactory:
                 self._engine,
                 expire_on_commit=False,
                 autoflush=False,
-                class_=AsyncSession
+                class_=AsyncSession,
             )
 
             # Track which event loop owns this engine
@@ -445,7 +487,9 @@ class LakebaseSessionFactory:
             # creation and every connection fails once it expires (~60 min).
             self._refresh_task = asyncio.create_task(self._schedule_token_refresh())
 
-            logger.info(f"Created Lakebase engine for instance: {self.instance_name} (nullpool={use_nullpool})")
+            logger.info(
+                f"Created Lakebase engine for instance: {self.instance_name} (nullpool={use_nullpool})"
+            )
 
         except Exception as e:
             logger.error(f"Error creating Lakebase engine: {e}")
@@ -463,7 +507,9 @@ class LakebaseSessionFactory:
 
     def _is_token_stale(self) -> bool:
         """True when the holder's credential is older than the refresh window."""
-        return (time.time() - self._token_holder.get("refreshed_at", 0.0)) >= TOKEN_REFRESH_INTERVAL_SECONDS
+        return (
+            time.time() - self._token_holder.get("refreshed_at", 0.0)
+        ) >= TOKEN_REFRESH_INTERVAL_SECONDS
 
     @asynccontextmanager
     async def get_session(self):
@@ -475,10 +521,16 @@ class LakebaseSessionFactory:
             AsyncSession connected to Lakebase
         """
         # Recreate engine if not exists, or if event loop changed (crew thread)
-        if not self._engine or not self._session_factory or self._is_engine_loop_stale():
+        if (
+            not self._engine
+            or not self._session_factory
+            or self._is_engine_loop_stale()
+        ):
             try:
                 if self._is_engine_loop_stale():
-                    logger.info("[LAKEBASE SESSION] Event loop changed, recreating engine")
+                    logger.info(
+                        "[LAKEBASE SESSION] Event loop changed, recreating engine"
+                    )
                 await self.create_engine()
             except Exception as e:
                 logger.error(f"Error creating Lakebase session: {e}")
@@ -491,7 +543,9 @@ class LakebaseSessionFactory:
             try:
                 await self._refresh_token()
             except Exception as e:
-                logger.warning(f"[LAKEBASE SESSION] Lazy token refresh failed (will retry next op): {e}")
+                logger.warning(
+                    f"[LAKEBASE SESSION] Lazy token refresh failed (will retry next op): {e}"
+                )
 
         # Manual session lifecycle (not `async with self._session_factory()`):
         # the sessionmaker's __aexit__ close() is NOT cancellation-safe — a
@@ -515,8 +569,14 @@ class LakebaseSessionFactory:
             except Exception as e:
                 # Check if this is a token/auth error that might be fixable by refreshing
                 err_str = str(e).lower()
-                if "token" in err_str or "authentication" in err_str or "password" in err_str:
-                    logger.info("Token may have expired, refreshing and recreating engine...")
+                if (
+                    "token" in err_str
+                    or "authentication" in err_str
+                    or "password" in err_str
+                ):
+                    logger.info(
+                        "Token may have expired, refreshing and recreating engine..."
+                    )
                     await self.create_engine()
                     # Re-raise so the caller can retry with a fresh session
                     raise
@@ -533,9 +593,13 @@ class LakebaseSessionFactory:
                 # raise from teardown — the client is already gone.
                 try:
                     await session.invalidate()
-                    logger.debug("[LAKEBASE SESSION] Session cancelled mid-operation; connection invalidated")
+                    logger.debug(
+                        "[LAKEBASE SESSION] Session cancelled mid-operation; connection invalidated"
+                    )
                 except Exception:
-                    logger.debug("[LAKEBASE SESSION] Session cancelled mid-operation; abandoned to GC")
+                    logger.debug(
+                        "[LAKEBASE SESSION] Session cancelled mid-operation; abandoned to GC"
+                    )
             except Exception as close_err:
                 # Connection may already be closed / broken (e.g. asyncpg
                 # InterfaceError during concurrent cleanup).
@@ -633,11 +697,15 @@ async def get_lakebase_session(
 
     # Crew threads: use thread-local factory to avoid event loop conflicts
     if _is_crew_thread():
-        factory = getattr(_thread_local, 'factory', None)
+        factory = getattr(_thread_local, "factory", None)
         if not factory or factory.instance_name != instance_name:
-            factory = LakebaseSessionFactory(instance_name, user_email=user_email, group_id=group_id)
+            factory = LakebaseSessionFactory(
+                instance_name, user_email=user_email, group_id=group_id
+            )
             _thread_local.factory = factory
-            logger.info(f"[LAKEBASE SESSION] Created thread-local factory for crew thread (instance: {instance_name}, group_id={group_id})")
+            logger.info(
+                f"[LAKEBASE SESSION] Created thread-local factory for crew thread (instance: {instance_name}, group_id={group_id})"
+            )
 
         async with factory.get_session() as session:
             try:
@@ -660,7 +728,9 @@ async def get_lakebase_session(
 
     # Main event loop: use global factory
     if not _lakebase_factory or _lakebase_factory.instance_name != instance_name:
-        _lakebase_factory = LakebaseSessionFactory(instance_name, user_email=user_email, group_id=group_id)
+        _lakebase_factory = LakebaseSessionFactory(
+            instance_name, user_email=user_email, group_id=group_id
+        )
 
     if user_email and _lakebase_factory.user_email != user_email:
         _lakebase_factory.user_email = user_email

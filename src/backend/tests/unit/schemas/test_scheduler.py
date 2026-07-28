@@ -4,26 +4,28 @@ Unit tests for scheduler schemas.
 Tests the functionality of Pydantic schemas for scheduler job operations
 including validation, serialization, and field constraints.
 """
-import pytest
+
 from datetime import datetime
+from typing import Any, Dict
+
+import pytest
 from pydantic import ValidationError
-from typing import Dict, Any
 
 from src.schemas.scheduler import (
-    SchedulerJobBase, SchedulerJobSchema, SchedulerJobCreate,
-    SchedulerJobUpdate, SchedulerJobResponse
+    SchedulerJobBase,
+    SchedulerJobCreate,
+    SchedulerJobResponse,
+    SchedulerJobSchema,
+    SchedulerJobUpdate,
 )
 
 
 class TestSchedulerJobBase:
     """Test cases for SchedulerJobBase schema."""
-    
+
     def test_valid_scheduler_job_base_minimal(self):
         """Test SchedulerJobBase with minimal required fields."""
-        data = {
-            "name": "test-job",
-            "schedule": "0 9 * * MON-FRI"
-        }
+        data = {"name": "test-job", "schedule": "0 9 * * MON-FRI"}
         job = SchedulerJobBase(**data)
         assert job.name == "test-job"
         assert job.schedule == "0 9 * * MON-FRI"
@@ -42,8 +44,8 @@ class TestSchedulerJobBase:
                 "type": "data_processing",
                 "source": "database",
                 "output": "report.pdf",
-                "notifications": ["admin@example.com"]
-            }
+                "notifications": ["admin@example.com"],
+            },
         }
         job = SchedulerJobBase(**data)
         assert job.name == "full-job"
@@ -54,35 +56,29 @@ class TestSchedulerJobBase:
             "type": "data_processing",
             "source": "database",
             "output": "report.pdf",
-            "notifications": ["admin@example.com"]
+            "notifications": ["admin@example.com"],
         }
 
     def test_scheduler_job_base_missing_required_fields(self):
         """Test SchedulerJobBase validation with missing required fields."""
         with pytest.raises(ValidationError) as exc_info:
             SchedulerJobBase(name="incomplete-job")
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "schedule" in missing_fields
 
     def test_scheduler_job_base_boolean_conversions(self):
         """Test SchedulerJobBase boolean field conversions."""
-        data = {
-            "name": "bool-job",
-            "schedule": "0 12 * * *",
-            "enabled": "false"
-        }
+        data = {"name": "bool-job", "schedule": "0 12 * * *", "enabled": "false"}
         job = SchedulerJobBase(**data)
         assert job.enabled is False
 
     def test_scheduler_job_base_empty_job_data(self):
         """Test SchedulerJobBase with empty job_data."""
-        data = {
-            "name": "empty-data-job",
-            "schedule": "0 15 * * *",
-            "job_data": {}
-        }
+        data = {"name": "empty-data-job", "schedule": "0 15 * * *", "job_data": {}}
         job = SchedulerJobBase(**data)
         assert job.job_data == {}
 
@@ -93,24 +89,20 @@ class TestSchedulerJobBase:
                 "steps": [
                     {"action": "extract", "source": "api"},
                     {"action": "transform", "rules": ["normalize", "validate"]},
-                    {"action": "load", "destination": "warehouse"}
+                    {"action": "load", "destination": "warehouse"},
                 ]
             },
-            "retry_config": {
-                "max_attempts": 3,
-                "backoff_factor": 2,
-                "timeout": 300
-            },
+            "retry_config": {"max_attempts": 3, "backoff_factor": 2, "timeout": 300},
             "monitoring": {
                 "alerts": True,
-                "metrics": ["duration", "success_rate", "error_count"]
-            }
+                "metrics": ["duration", "success_rate", "error_count"],
+            },
         }
-        
+
         data = {
             "name": "complex-job",
             "schedule": "0 3 * * *",
-            "job_data": complex_data
+            "job_data": complex_data,
         }
         job = SchedulerJobBase(**data)
         assert job.job_data == complex_data
@@ -121,13 +113,13 @@ class TestSchedulerJobBase:
 
 class TestSchedulerJobSchema:
     """Test cases for SchedulerJobSchema schema."""
-    
+
     def test_valid_scheduler_job_schema(self):
         """Test SchedulerJobSchema with all required fields."""
         now = datetime.now()
         last_run = datetime(2023, 12, 1, 9, 0, 0)
         next_run = datetime(2023, 12, 2, 9, 0, 0)
-        
+
         data = {
             "id": 1,
             "name": "schema-job",
@@ -138,7 +130,7 @@ class TestSchedulerJobSchema:
             "created_at": now,
             "updated_at": now,
             "last_run_at": last_run,
-            "next_run_at": next_run
+            "next_run_at": next_run,
         }
         job = SchedulerJobSchema(**data)
         assert job.id == 1
@@ -154,8 +146,8 @@ class TestSchedulerJobSchema:
 
     def test_scheduler_job_schema_config(self):
         """Test SchedulerJobSchema model config."""
-        assert hasattr(SchedulerJobSchema, 'model_config')
-        assert SchedulerJobSchema.model_config['from_attributes'] is True
+        assert hasattr(SchedulerJobSchema, "model_config")
+        assert SchedulerJobSchema.model_config["from_attributes"] is True
 
     def test_scheduler_job_schema_missing_fields(self):
         """Test SchedulerJobSchema validation with missing fields."""
@@ -165,11 +157,13 @@ class TestSchedulerJobSchema:
                 name="incomplete-job",
                 schedule="0 9 * * *",
                 created_at=now,
-                updated_at=now
+                updated_at=now,
             )
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "id" in missing_fields
 
     def test_scheduler_job_schema_optional_timestamps(self):
@@ -182,7 +176,7 @@ class TestSchedulerJobSchema:
             "enabled": True,
             "job_data": {},
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         job = SchedulerJobSchema(**data)
         assert job.id == 2
@@ -200,7 +194,7 @@ class TestSchedulerJobSchema:
             "created_at": "2023-01-01T10:00:00",
             "updated_at": "2023-01-01T11:00:00",
             "last_run_at": "2023-01-01T12:00:00",
-            "next_run_at": "2023-01-02T12:00:00"
+            "next_run_at": "2023-01-02T12:00:00",
         }
         job = SchedulerJobSchema(**data)
         assert job.id == 3
@@ -212,7 +206,7 @@ class TestSchedulerJobSchema:
 
 class TestSchedulerJobCreate:
     """Test cases for SchedulerJobCreate schema."""
-    
+
     def test_scheduler_job_create_inheritance(self):
         """Test that SchedulerJobCreate inherits from SchedulerJobBase."""
         data = {
@@ -220,17 +214,17 @@ class TestSchedulerJobCreate:
             "description": "Job for creation testing",
             "schedule": "0 10 * * *",
             "enabled": False,
-            "job_data": {"operation": "cleanup"}
+            "job_data": {"operation": "cleanup"},
         }
         create_job = SchedulerJobCreate(**data)
-        
+
         # Should have all base class attributes
-        assert hasattr(create_job, 'name')
-        assert hasattr(create_job, 'description')
-        assert hasattr(create_job, 'schedule')
-        assert hasattr(create_job, 'enabled')
-        assert hasattr(create_job, 'job_data')
-        
+        assert hasattr(create_job, "name")
+        assert hasattr(create_job, "description")
+        assert hasattr(create_job, "schedule")
+        assert hasattr(create_job, "enabled")
+        assert hasattr(create_job, "job_data")
+
         # Should behave like base class
         assert create_job.name == "create-job"
         assert create_job.description == "Job for creation testing"
@@ -240,10 +234,7 @@ class TestSchedulerJobCreate:
 
     def test_scheduler_job_create_minimal(self):
         """Test SchedulerJobCreate with minimal required fields."""
-        data = {
-            "name": "minimal-create-job",
-            "schedule": "0 8 * * MON-FRI"
-        }
+        data = {"name": "minimal-create-job", "schedule": "0 8 * * MON-FRI"}
         create_job = SchedulerJobCreate(**data)
         assert create_job.name == "minimal-create-job"
         assert create_job.schedule == "0 8 * * MON-FRI"
@@ -259,21 +250,21 @@ class TestSchedulerJobCreate:
                 "config": {
                     "parallel": True,
                     "max_workers": 4,
-                    "timeout_per_stage": 600
-                }
+                    "timeout_per_stage": 600,
+                },
             },
             "notifications": {
                 "on_success": ["success@example.com"],
                 "on_failure": ["alerts@example.com", "oncall@example.com"],
-                "channels": ["email", "slack"]
-            }
+                "channels": ["email", "slack"],
+            },
         }
-        
+
         data = {
             "name": "complex-create-job",
             "description": "Complex data processing job",
             "schedule": "0 2 * * *",
-            "job_data": complex_job_data
+            "job_data": complex_job_data,
         }
         create_job = SchedulerJobCreate(**data)
         assert create_job.name == "complex-create-job"
@@ -284,7 +275,7 @@ class TestSchedulerJobCreate:
 
 class TestSchedulerJobUpdate:
     """Test cases for SchedulerJobUpdate schema."""
-    
+
     def test_scheduler_job_update_all_optional(self):
         """Test that all SchedulerJobUpdate fields are optional."""
         update = SchedulerJobUpdate()
@@ -296,10 +287,7 @@ class TestSchedulerJobUpdate:
 
     def test_scheduler_job_update_partial(self):
         """Test SchedulerJobUpdate with partial fields."""
-        update_data = {
-            "name": "updated-job-name",
-            "enabled": False
-        }
+        update_data = {"name": "updated-job-name", "enabled": False}
         update = SchedulerJobUpdate(**update_data)
         assert update.name == "updated-job-name"
         assert update.enabled is False
@@ -317,8 +305,8 @@ class TestSchedulerJobUpdate:
             "job_data": {
                 "updated": True,
                 "version": "2.0",
-                "changes": ["performance improvements", "bug fixes"]
-            }
+                "changes": ["performance improvements", "bug fixes"],
+            },
         }
         update = SchedulerJobUpdate(**update_data)
         assert update.name == "fully-updated-job"
@@ -328,7 +316,7 @@ class TestSchedulerJobUpdate:
         assert update.job_data == {
             "updated": True,
             "version": "2.0",
-            "changes": ["performance improvements", "bug fixes"]
+            "changes": ["performance improvements", "bug fixes"],
         }
 
     def test_scheduler_job_update_none_values(self):
@@ -338,7 +326,7 @@ class TestSchedulerJobUpdate:
             "description": None,
             "schedule": None,
             "enabled": None,
-            "job_data": None
+            "job_data": None,
         }
         update = SchedulerJobUpdate(**update_data)
         assert update.name is None
@@ -349,9 +337,7 @@ class TestSchedulerJobUpdate:
 
     def test_scheduler_job_update_empty_job_data(self):
         """Test SchedulerJobUpdate with empty job_data."""
-        update_data = {
-            "job_data": {}
-        }
+        update_data = {"job_data": {}}
         update = SchedulerJobUpdate(**update_data)
         assert update.job_data == {}
         assert update.name is None
@@ -360,10 +346,7 @@ class TestSchedulerJobUpdate:
         """Test SchedulerJobUpdate with partial job_data updates."""
         update_data = {
             "enabled": False,
-            "job_data": {
-                "maintenance_mode": True,
-                "reason": "scheduled maintenance"
-            }
+            "job_data": {"maintenance_mode": True, "reason": "scheduled maintenance"},
         }
         update = SchedulerJobUpdate(**update_data)
         assert update.enabled is False
@@ -373,7 +356,7 @@ class TestSchedulerJobUpdate:
 
 class TestSchedulerJobResponse:
     """Test cases for SchedulerJobResponse schema."""
-    
+
     def test_scheduler_job_response_inheritance(self):
         """Test that SchedulerJobResponse inherits from SchedulerJobSchema."""
         now = datetime.now()
@@ -385,22 +368,22 @@ class TestSchedulerJobResponse:
             "enabled": True,
             "job_data": {"response": "test"},
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         response_job = SchedulerJobResponse(**data)
-        
+
         # Should have all SchedulerJobSchema attributes
-        assert hasattr(response_job, 'id')
-        assert hasattr(response_job, 'name')
-        assert hasattr(response_job, 'description')
-        assert hasattr(response_job, 'schedule')
-        assert hasattr(response_job, 'enabled')
-        assert hasattr(response_job, 'job_data')
-        assert hasattr(response_job, 'created_at')
-        assert hasattr(response_job, 'updated_at')
-        assert hasattr(response_job, 'last_run_at')
-        assert hasattr(response_job, 'next_run_at')
-        
+        assert hasattr(response_job, "id")
+        assert hasattr(response_job, "name")
+        assert hasattr(response_job, "description")
+        assert hasattr(response_job, "schedule")
+        assert hasattr(response_job, "enabled")
+        assert hasattr(response_job, "job_data")
+        assert hasattr(response_job, "created_at")
+        assert hasattr(response_job, "updated_at")
+        assert hasattr(response_job, "last_run_at")
+        assert hasattr(response_job, "next_run_at")
+
         # Should behave like SchedulerJobSchema
         assert response_job.id == 10
         assert response_job.name == "response-job"
@@ -416,7 +399,7 @@ class TestSchedulerJobResponse:
         now = datetime.now()
         last_run = datetime(2023, 12, 1, 16, 0, 0)
         next_run = datetime(2023, 12, 2, 16, 0, 0)
-        
+
         data = {
             "id": 11,
             "name": "timestamp-response-job",
@@ -426,7 +409,7 @@ class TestSchedulerJobResponse:
             "created_at": now,
             "updated_at": now,
             "last_run_at": last_run,
-            "next_run_at": next_run
+            "next_run_at": next_run,
         }
         response_job = SchedulerJobResponse(**data)
         assert response_job.id == 11
@@ -436,7 +419,7 @@ class TestSchedulerJobResponse:
 
 class TestSchemaIntegration:
     """Integration tests for scheduler schema interactions."""
-    
+
     def test_scheduler_job_workflow(self):
         """Test complete scheduler job workflow."""
         # Create job
@@ -449,14 +432,11 @@ class TestSchemaIntegration:
                 "workflow_type": "data_processing",
                 "input_source": "api",
                 "output_destination": "database",
-                "retry_policy": {
-                    "max_retries": 3,
-                    "retry_delay": 300
-                }
-            }
+                "retry_policy": {"max_retries": 3, "retry_delay": 300},
+            },
         }
         create_job = SchedulerJobCreate(**create_data)
-        
+
         # Update job
         update_data = {
             "description": "Updated workflow test job",
@@ -465,20 +445,17 @@ class TestSchemaIntegration:
                 "workflow_type": "data_processing",
                 "input_source": "api",
                 "output_destination": "warehouse",  # Changed
-                "retry_policy": {
-                    "max_retries": 5,  # Changed
-                    "retry_delay": 300
-                },
-                "maintenance_mode": True  # Added
-            }
+                "retry_policy": {"max_retries": 5, "retry_delay": 300},  # Changed
+                "maintenance_mode": True,  # Added
+            },
         }
         update_job = SchedulerJobUpdate(**update_data)
-        
+
         # Simulate database entity
         now = datetime.now()
         last_run = datetime(2023, 12, 1, 9, 0, 0)
         next_run = datetime(2023, 12, 4, 9, 0, 0)  # Next Monday
-        
+
         db_data = {
             "id": 1,
             "name": create_job.name,
@@ -489,20 +466,20 @@ class TestSchemaIntegration:
             "created_at": now,
             "updated_at": now,
             "last_run_at": last_run,
-            "next_run_at": next_run
+            "next_run_at": next_run,
         }
         job_response = SchedulerJobResponse(**db_data)
-        
+
         # Verify the complete workflow
         assert create_job.name == "workflow-job"
         assert create_job.enabled is True
         assert create_job.job_data["retry_policy"]["max_retries"] == 3
-        
+
         assert update_job.description == "Updated workflow test job"
         assert update_job.enabled is False
         assert update_job.job_data["retry_policy"]["max_retries"] == 5
         assert update_job.job_data["maintenance_mode"] is True
-        
+
         assert job_response.id == 1
         assert job_response.name == "workflow-job"
         assert job_response.description == "Updated workflow test job"
@@ -517,12 +494,12 @@ class TestSchemaIntegration:
         basic_job = SchedulerJobCreate(
             name="basic-cleanup-job",
             schedule="0 2 * * *",  # Daily at 2 AM
-            job_data={"task": "cleanup_temp_files", "directory": "/tmp"}
+            job_data={"task": "cleanup_temp_files", "directory": "/tmp"},
         )
         assert basic_job.name == "basic-cleanup-job"
         assert basic_job.enabled is True  # Default
         assert basic_job.job_data["task"] == "cleanup_temp_files"
-        
+
         # Complex data pipeline job
         pipeline_job = SchedulerJobCreate(
             name="data-pipeline-job",
@@ -537,8 +514,8 @@ class TestSchemaIntegration:
                             "config": {
                                 "endpoint": "https://api.example.com/data",
                                 "auth": {"type": "bearer_token"},
-                                "rate_limit": 100
-                            }
+                                "rate_limit": 100,
+                            },
                         },
                         {
                             "name": "transform",
@@ -546,8 +523,8 @@ class TestSchemaIntegration:
                             "config": {
                                 "rules": ["normalize", "validate", "enrich"],
                                 "parallel": True,
-                                "max_workers": 4
-                            }
+                                "max_workers": 4,
+                            },
                         },
                         {
                             "name": "load",
@@ -555,23 +532,27 @@ class TestSchemaIntegration:
                             "config": {
                                 "connection": "data_warehouse",
                                 "table": "processed_data",
-                                "batch_size": 1000
-                            }
-                        }
+                                "batch_size": 1000,
+                            },
+                        },
                     ]
                 },
                 "error_handling": {
                     "retry_policy": {"max_retries": 3, "backoff": "exponential"},
                     "notifications": ["admin@example.com"],
-                    "fallback_action": "log_and_continue"
-                }
-            }
+                    "fallback_action": "log_and_continue",
+                },
+            },
         )
         assert pipeline_job.name == "data-pipeline-job"
         assert len(pipeline_job.job_data["pipeline"]["stages"]) == 3
-        assert pipeline_job.job_data["pipeline"]["stages"][1]["config"]["max_workers"] == 4
-        assert pipeline_job.job_data["error_handling"]["retry_policy"]["max_retries"] == 3
-        
+        assert (
+            pipeline_job.job_data["pipeline"]["stages"][1]["config"]["max_workers"] == 4
+        )
+        assert (
+            pipeline_job.job_data["error_handling"]["retry_policy"]["max_retries"] == 3
+        )
+
         # Monitoring and alerting job
         monitoring_job = SchedulerJobCreate(
             name="system-monitoring-job",
@@ -579,28 +560,16 @@ class TestSchemaIntegration:
             schedule="*/15 * * * *",  # Every 15 minutes
             job_data={
                 "monitors": [
-                    {
-                        "name": "cpu_usage",
-                        "threshold": 80,
-                        "action": "alert"
-                    },
-                    {
-                        "name": "memory_usage", 
-                        "threshold": 90,
-                        "action": "alert"
-                    },
-                    {
-                        "name": "disk_space",
-                        "threshold": 85,
-                        "action": "alert"
-                    }
+                    {"name": "cpu_usage", "threshold": 80, "action": "alert"},
+                    {"name": "memory_usage", "threshold": 90, "action": "alert"},
+                    {"name": "disk_space", "threshold": 85, "action": "alert"},
                 ],
                 "alert_channels": {
                     "email": ["ops@example.com"],
                     "slack": ["#alerts"],
-                    "pagerduty": {"service_key": "SERVICE_KEY"}
-                }
-            }
+                    "pagerduty": {"service_key": "SERVICE_KEY"},
+                },
+            },
         )
         assert monitoring_job.schedule == "*/15 * * * *"
         assert len(monitoring_job.job_data["monitors"]) == 3
@@ -613,15 +582,18 @@ class TestSchemaIntegration:
         toggle_update = SchedulerJobUpdate(enabled=False)
         assert toggle_update.enabled is False
         assert toggle_update.name is None
-        
+
         # Schedule change
         schedule_update = SchedulerJobUpdate(
             schedule="0 6 * * *",  # Change from 9 AM to 6 AM
-            job_data={"note": "Moved to earlier time for better performance"}
+            job_data={"note": "Moved to earlier time for better performance"},
         )
         assert schedule_update.schedule == "0 6 * * *"
-        assert schedule_update.job_data["note"] == "Moved to earlier time for better performance"
-        
+        assert (
+            schedule_update.job_data["note"]
+            == "Moved to earlier time for better performance"
+        )
+
         # Configuration update
         config_update = SchedulerJobUpdate(
             description="Updated with new configuration parameters",
@@ -629,19 +601,19 @@ class TestSchemaIntegration:
                 "performance_optimizations": {
                     "batch_size": 2000,  # Increased from 1000
                     "parallel_workers": 8,  # Increased from 4
-                    "memory_limit": "4GB"  # Added memory limit
+                    "memory_limit": "4GB",  # Added memory limit
                 },
                 "monitoring": {
                     "enabled": True,
                     "metrics": ["duration", "throughput", "error_rate"],
-                    "dashboard_url": "https://monitoring.example.com/job-123"
-                }
-            }
+                    "dashboard_url": "https://monitoring.example.com/job-123",
+                },
+            },
         )
         assert config_update.description == "Updated with new configuration parameters"
         assert config_update.job_data["performance_optimizations"]["batch_size"] == 2000
         assert config_update.job_data["monitoring"]["enabled"] is True
-        
+
         # Maintenance mode update
         maintenance_update = SchedulerJobUpdate(
             enabled=False,
@@ -649,8 +621,8 @@ class TestSchemaIntegration:
                 "maintenance_mode": True,
                 "maintenance_reason": "Database migration in progress",
                 "estimated_downtime": "2 hours",
-                "contact": "devops@example.com"
-            }
+                "contact": "devops@example.com",
+            },
         )
         assert maintenance_update.enabled is False
         assert maintenance_update.job_data["maintenance_mode"] is True
@@ -659,7 +631,7 @@ class TestSchemaIntegration:
     def test_scheduler_job_response_scenarios(self):
         """Test different scheduler job response scenarios."""
         now = datetime.now()
-        
+
         # Successful job with execution history
         successful_job = SchedulerJobResponse(
             id=1,
@@ -672,18 +644,18 @@ class TestSchemaIntegration:
                 "last_execution": {
                     "duration": 120,  # seconds
                     "records_processed": 1500,
-                    "success_rate": 1.0
-                }
+                    "success_rate": 1.0,
+                },
             },
             created_at=now,
             updated_at=now,
             last_run_at=datetime(2023, 12, 1, 12, 0, 0),
-            next_run_at=datetime(2023, 12, 2, 12, 0, 0)
+            next_run_at=datetime(2023, 12, 2, 12, 0, 0),
         )
         assert successful_job.id == 1
         assert successful_job.job_data["status"] == "completed"
         assert successful_job.job_data["last_execution"]["records_processed"] == 1500
-        
+
         # Failed job with error information
         failed_job = SchedulerJobResponse(
             id=2,
@@ -697,18 +669,18 @@ class TestSchemaIntegration:
                     "error": "Connection timeout to database",
                     "error_code": "DB_TIMEOUT",
                     "retry_count": 3,
-                    "next_retry_at": "2023-12-01T15:00:00Z"
-                }
+                    "next_retry_at": "2023-12-01T15:00:00Z",
+                },
             },
             created_at=now,
             updated_at=now,
             last_run_at=datetime(2023, 12, 1, 14, 0, 0),
-            next_run_at=datetime(2023, 12, 1, 15, 0, 0)  # Retry in 1 hour
+            next_run_at=datetime(2023, 12, 1, 15, 0, 0),  # Retry in 1 hour
         )
         assert failed_job.id == 2
         assert failed_job.job_data["status"] == "failed"
         assert failed_job.job_data["last_execution"]["error_code"] == "DB_TIMEOUT"
-        
+
         # Disabled job
         disabled_job = SchedulerJobResponse(
             id=3,
@@ -719,12 +691,12 @@ class TestSchemaIntegration:
             job_data={
                 "status": "disabled",
                 "disabled_reason": "Pending system upgrade",
-                "disabled_at": "2023-11-30T10:00:00Z"
+                "disabled_at": "2023-11-30T10:00:00Z",
             },
             created_at=now,
             updated_at=now,
             last_run_at=datetime(2023, 11, 30, 16, 0, 0),
-            next_run_at=None  # No next run since disabled
+            next_run_at=None,  # No next run since disabled
         )
         assert disabled_job.id == 3
         assert disabled_job.enabled is False

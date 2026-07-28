@@ -6,8 +6,9 @@ that endpoints properly enforce role-based permissions.
 """
 
 import pytest
-from src.utils.user_context import GroupContext
 from fastapi.testclient import TestClient
+
+from src.utils.user_context import GroupContext
 
 
 def create_group_context_with_role(role: str) -> GroupContext:
@@ -17,11 +18,13 @@ def create_group_context_with_role(role: str) -> GroupContext:
         group_email=f"{role}@example.com",
         email_domain="example.com",
         user_id=f"user-{role}-123",
-        user_role=role
+        user_role=role,
     )
 
 
-def get_forbidden_response_test(app, mock_group_context, endpoint, method, expected_message, json_data=None):
+def get_forbidden_response_test(
+    app, mock_group_context, endpoint, method, expected_message, json_data=None
+):
     """
     Test that a specific role is forbidden from accessing an endpoint.
 
@@ -80,46 +83,109 @@ class PermissionTestGenerator:
     """Generate permission tests for common CRUD operations."""
 
     @staticmethod
-    def test_admin_only_create(app, forbidden_context, endpoint, create_data, error_message="Only admins can create"):
+    def test_admin_only_create(
+        app,
+        forbidden_context,
+        endpoint,
+        create_data,
+        error_message="Only admins can create",
+    ):
         """Test that only admins can create resources."""
         return get_forbidden_response_test(
-            app, forbidden_context, endpoint, "post", error_message,
-            json_data=create_data.model_dump() if hasattr(create_data, 'model_dump') else create_data
+            app,
+            forbidden_context,
+            endpoint,
+            "post",
+            error_message,
+            json_data=(
+                create_data.model_dump()
+                if hasattr(create_data, "model_dump")
+                else create_data
+            ),
         )
 
     @staticmethod
-    def test_admin_only_update(app, forbidden_context, endpoint, update_data, error_message="Only admins can update"):
+    def test_admin_only_update(
+        app,
+        forbidden_context,
+        endpoint,
+        update_data,
+        error_message="Only admins can update",
+    ):
         """Test that only admins can update resources."""
         return get_forbidden_response_test(
-            app, forbidden_context, endpoint, "put", error_message,
-            json_data=update_data.model_dump() if hasattr(update_data, 'model_dump') else update_data
+            app,
+            forbidden_context,
+            endpoint,
+            "put",
+            error_message,
+            json_data=(
+                update_data.model_dump()
+                if hasattr(update_data, "model_dump")
+                else update_data
+            ),
         )
 
     @staticmethod
-    def test_admin_only_delete(app, forbidden_context, endpoint, error_message="Only admins can delete"):
+    def test_admin_only_delete(
+        app, forbidden_context, endpoint, error_message="Only admins can delete"
+    ):
         """Test that only admins can delete resources."""
         return get_forbidden_response_test(
             app, forbidden_context, endpoint, "delete", error_message
         )
 
     @staticmethod
-    def test_admin_editor_only_create(app, forbidden_context, endpoint, create_data, error_message="Only admins and editors can create"):
+    def test_admin_editor_only_create(
+        app,
+        forbidden_context,
+        endpoint,
+        create_data,
+        error_message="Only admins and editors can create",
+    ):
         """Test that only admins and editors can create resources."""
         return get_forbidden_response_test(
-            app, forbidden_context, endpoint, "post", error_message,
-            json_data=create_data.model_dump() if hasattr(create_data, 'model_dump') else create_data
+            app,
+            forbidden_context,
+            endpoint,
+            "post",
+            error_message,
+            json_data=(
+                create_data.model_dump()
+                if hasattr(create_data, "model_dump")
+                else create_data
+            ),
         )
 
     @staticmethod
-    def test_admin_editor_only_update(app, forbidden_context, endpoint, update_data, error_message="Only admins and editors can update"):
+    def test_admin_editor_only_update(
+        app,
+        forbidden_context,
+        endpoint,
+        update_data,
+        error_message="Only admins and editors can update",
+    ):
         """Test that only admins and editors can update resources."""
         return get_forbidden_response_test(
-            app, forbidden_context, endpoint, "put", error_message,
-            json_data=update_data.model_dump() if hasattr(update_data, 'model_dump') else update_data
+            app,
+            forbidden_context,
+            endpoint,
+            "put",
+            error_message,
+            json_data=(
+                update_data.model_dump()
+                if hasattr(update_data, "model_dump")
+                else update_data
+            ),
         )
 
     @staticmethod
-    def test_admin_editor_only_delete(app, forbidden_context, endpoint, error_message="Only admins and editors can delete"):
+    def test_admin_editor_only_delete(
+        app,
+        forbidden_context,
+        endpoint,
+        error_message="Only admins and editors can delete",
+    ):
         """Test that only admins and editors can delete resources."""
         return get_forbidden_response_test(
             app, forbidden_context, endpoint, "delete", error_message

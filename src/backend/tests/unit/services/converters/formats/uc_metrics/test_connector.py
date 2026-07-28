@@ -4,8 +4,10 @@ Unit tests for converters/formats/uc_metrics/connector.py
 Comprehensive tests for DatabricksConnector class.
 """
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+
 from src.services.converters.formats.uc_metrics.connector import DatabricksConnector
 
 
@@ -69,7 +71,9 @@ class TestValidateConnection:
             assert connector.validate_connection() is False
 
     def test_returns_false_on_auth_error(self, connector):
-        with patch.object(connector.auth_service, "get_headers", side_effect=ValueError("no creds")):
+        with patch.object(
+            connector.auth_service, "get_headers", side_effect=ValueError("no creds")
+        ):
             assert connector.validate_connection() is False
 
 
@@ -86,7 +90,9 @@ class TestGetCatalogs:
     def test_returns_catalog_list(self, connector):
         mock_response = MagicMock()
         mock_response.raise_for_status = Mock()
-        mock_response.json.return_value = {"catalogs": [{"name": "main"}, {"name": "hive"}]}
+        mock_response.json.return_value = {
+            "catalogs": [{"name": "main"}, {"name": "hive"}]
+        }
         with patch("requests.get", return_value=mock_response):
             result = connector.get_catalogs()
         assert len(result) == 2
@@ -121,7 +127,9 @@ class TestGetSchemas:
     def test_returns_schema_list(self, connector):
         mock_response = MagicMock()
         mock_response.raise_for_status = Mock()
-        mock_response.json.return_value = {"schemas": [{"name": "default"}, {"name": "analytics"}]}
+        mock_response.json.return_value = {
+            "schemas": [{"name": "default"}, {"name": "analytics"}]
+        }
         with patch("requests.get", return_value=mock_response):
             result = connector.get_schemas("main")
         assert len(result) == 2

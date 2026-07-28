@@ -1,6 +1,7 @@
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from src.services.memory.backend_service import MemoryBackendService
 
@@ -62,11 +63,14 @@ async def test_delegations_and_error_paths(monkeypatch):
     # get_all patches repository class at import location
     # Patch where it's imported (inside the repository module)
     from src.repositories import memory_backend_repository as repo_mod
+
     class FakeRepo:
         def __init__(self, session):
             self.session = session
+
         async def get_all(self):
             return ["A", "B"]
+
     repo_mod.MemoryBackendRepository = FakeRepo
     assert await svc.get_all() == ["A", "B"]
 
@@ -77,7 +81,9 @@ async def test_delegations_and_error_paths(monkeypatch):
     tok, method = await svc._get_databricks_auth_token("u")
     assert tok == "tok" and method == "obo"
 
-    assert (await svc.create_databricks_index(SimpleNamespace(), "vs", "c", "s", "t"))["created"]
+    assert (await svc.create_databricks_index(SimpleNamespace(), "vs", "c", "s", "t"))[
+        "created"
+    ]
     assert (await svc.get_databricks_indexes(SimpleNamespace())) == ["i1"]
     assert await svc.delete_databricks_index("u", "i", "e") is True
     assert await svc.delete_databricks_endpoint("u", "e") is True
@@ -96,28 +102,43 @@ async def test_delegations_and_error_paths(monkeypatch):
     # workspace url from unified auth
     async def fake_auth():
         return SimpleNamespace(workspace_url="https://ws", auth_method="obo")
+
     from src.utils import databricks_auth as auth_mod
+
     auth_mod.get_auth_context = fake_auth
     info = await svc.get_workspace_url()
     assert info["workspace_url"] == "https://ws" and info["detected"] is True
 
     # Lakebase delegation methods
     mock_lakebase_svc = SimpleNamespace(
-        get_table_data=AsyncMock(return_value={"success": True, "documents": [{"id": "d1"}], "total": 1}),
-        get_entity_data=AsyncMock(return_value={"entities": [{"id": "e1"}], "relationships": []}),
+        get_table_data=AsyncMock(
+            return_value={"success": True, "documents": [{"id": "d1"}], "total": 1}
+        ),
+        get_entity_data=AsyncMock(
+            return_value={"entities": [{"id": "e1"}], "relationships": []}
+        ),
         test_connection=AsyncMock(return_value={"success": True}),
         initialize_tables=AsyncMock(return_value={"success": True}),
-        get_table_stats=AsyncMock(return_value={"short_term": {"exists": True, "row_count": 5}}),
+        get_table_stats=AsyncMock(
+            return_value={"short_term": {"exists": True, "row_count": 5}}
+        ),
     )
-    with patch.object(svc, '_get_lakebase_service', return_value=mock_lakebase_svc):
+    with patch.object(svc, "_get_lakebase_service", return_value=mock_lakebase_svc):
         # get_lakebase_table_data delegation
-        table_data = await svc.get_lakebase_table_data("crew_short_term_memory", limit=10, instance_name="inst1")
+        table_data = await svc.get_lakebase_table_data(
+            "crew_short_term_memory", limit=10, instance_name="inst1"
+        )
         assert table_data["success"] is True
         assert table_data["documents"][0]["id"] == "d1"
-        mock_lakebase_svc.get_table_data.assert_awaited_once_with(table_name="crew_short_term_memory", limit=10, group_id=None)
+        mock_lakebase_svc.get_table_data.assert_awaited_once_with(
+            table_name="crew_short_term_memory", limit=10, group_id=None
+        )
 
         # get_lakebase_entity_data delegation
-        entity_data = await svc.get_lakebase_entity_data(memory_table="crew_entity_memory", limit=100, instance_name="inst1")
+        entity_data = await svc.get_lakebase_entity_data(
+            memory_table="crew_entity_memory", limit=100, instance_name="inst1"
+        )
         assert entity_data["entities"][0]["id"] == "e1"
-        mock_lakebase_svc.get_entity_data.assert_awaited_once_with(memory_table="crew_entity_memory", limit=100, group_id=None)
-
+        mock_lakebase_svc.get_entity_data.assert_awaited_once_with(
+            memory_table="crew_entity_memory", limit=100, group_id=None
+        )

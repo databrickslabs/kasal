@@ -18,9 +18,9 @@ import hashlib
 from collections import OrderedDict
 from typing import Any, Dict
 
+from src.core.logger import LoggerManager
 from src.services.guardrails.base_guardrail import BaseGuardrail
 from src.services.guardrails.guardrail_model import DEFAULT_GUARDRAIL_MODEL
-from src.core.logger import LoggerManager
 
 logger = LoggerManager.get_instance().guardrails
 
@@ -42,7 +42,7 @@ def _extract_text(output: Any) -> str:
         return ""
     if isinstance(output, str):
         return output
-    if hasattr(output, "raw"):          # crewai.TaskOutput
+    if hasattr(output, "raw"):  # crewai.TaskOutput
         return output.raw or ""
     if isinstance(output, dict):
         return str(output.get("output", output.get("result", "")))
@@ -69,6 +69,7 @@ def _run_completion(model: str, messages, max_tokens: int = 8):
     # Context-preserving bridge: LLMManager.completion needs the group_id
     # ContextVar, which a bare ThreadPoolExecutor offload would drop.
     from src.services.tools.async_bridge import run_async_with_context
+
     return run_async_with_context(_call(), timeout=30)
 
 
@@ -93,7 +94,7 @@ class LLMInjectionGuardrail(BaseGuardrail):
         model: str = config.get("llm_model") or DEFAULT_GUARDRAIL_MODEL
         # Strip provider prefix — LLMManager adds it from DB config
         if model.startswith("databricks/"):
-            model = model[len("databricks/"):]
+            model = model[len("databricks/") :]
         self._model_name = model
         self._cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
         self._cache_max = int(config.get("cache_size", _DEFAULT_CACHE_SIZE))

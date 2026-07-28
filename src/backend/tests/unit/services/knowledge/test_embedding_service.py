@@ -2,10 +2,11 @@
 Comprehensive unit tests for services/knowledge_embedding_service.py
 """
 
-import pytest
 import asyncio
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 from src.services.knowledge.embedding_service import KnowledgeEmbeddingService
 
@@ -179,7 +180,9 @@ class TestGenerateDocumentSummary:
     @pytest.mark.asyncio
     async def test_fallback_on_error(self, service):
         # Patch _detect_content_type to raise
-        with patch.object(service, "_detect_content_type", side_effect=RuntimeError("boom")):
+        with patch.object(
+            service, "_detect_content_type", side_effect=RuntimeError("boom")
+        ):
             result = await service._generate_document_summary("content", "myfile.txt")
         assert "myfile.txt" in result
 
@@ -215,20 +218,26 @@ class TestChunkWithContext:
     @pytest.mark.asyncio
     async def test_multiple_chunks_for_long_content(self, service):
         content = "A" * 3000
-        chunks = await service._chunk_with_context(content, "file.txt", chunk_size=1000, overlap=100)
+        chunks = await service._chunk_with_context(
+            content, "file.txt", chunk_size=1000, overlap=100
+        )
         assert len(chunks) >= 2
 
     @pytest.mark.asyncio
     async def test_section_labels(self, service):
         # 4000 chars so we cover all section positions
         content = "X" * 4000
-        chunks = await service._chunk_with_context(content, "file.txt", chunk_size=1000, overlap=0)
+        chunks = await service._chunk_with_context(
+            content, "file.txt", chunk_size=1000, overlap=0
+        )
         sections = {c["section"] for c in chunks}
         assert len(sections) > 1
 
     @pytest.mark.asyncio
     async def test_error_returns_empty_list(self, service):
-        with patch.object(service, "_generate_document_summary", side_effect=RuntimeError("fail")):
+        with patch.object(
+            service, "_generate_document_summary", side_effect=RuntimeError("fail")
+        ):
             chunks = await service._chunk_with_context("content", "file.txt")
         assert chunks == []
 
@@ -245,7 +254,9 @@ class TestGetVectorStorage:
         mock_mbs = AsyncMock()
         mock_mbs.get_memory_backends.return_value = []
 
-        with patch("src.services.knowledge.embedding_service.KnowledgeEmbeddingService._get_vector_storage") as mock_gvs:
+        with patch(
+            "src.services.knowledge.embedding_service.KnowledgeEmbeddingService._get_vector_storage"
+        ) as mock_gvs:
             mock_gvs.return_value = None
             result = await service._get_vector_storage()
 
@@ -253,18 +264,30 @@ class TestGetVectorStorage:
 
     @pytest.mark.asyncio
     async def test_returns_none_on_import_error(self, service):
-        with patch.dict("sys.modules", {"src.services.memory.databricks_vector_storage": None}):
+        with patch.dict(
+            "sys.modules", {"src.services.memory.databricks_vector_storage": None}
+        ):
             result = await service._get_vector_storage()
         assert result is None
 
     @pytest.mark.asyncio
     async def test_returns_none_on_exception(self, service):
-        with patch("src.services.knowledge.embedding_service.KnowledgeEmbeddingService._get_vector_storage", new_callable=AsyncMock) as mock_gvs:
+        with patch(
+            "src.services.knowledge.embedding_service.KnowledgeEmbeddingService._get_vector_storage",
+            new_callable=AsyncMock,
+        ) as mock_gvs:
             mock_gvs.side_effect = Exception("unexpected")
             # Call the real method which will catch the exception
         # Use the real method but mock memory backend
         service._memory_backend_service = None
-        with patch("src.services.knowledge.embedding_service.MemoryBackendService" if False else "builtins.__import__", side_effect=ImportError):
+        with patch(
+            (
+                "src.services.knowledge.embedding_service.MemoryBackendService"
+                if False
+                else "builtins.__import__"
+            ),
+            side_effect=ImportError,
+        ):
             pass
         result = await service._get_vector_storage()
         assert result is None
@@ -301,7 +324,9 @@ class TestEmbedFile:
 
     @pytest.mark.asyncio
     async def test_returns_skipped_when_no_chunks(self, service):
-        with patch.object(service, "_chunk_with_context", new_callable=AsyncMock, return_value=[]):
+        with patch.object(
+            service, "_chunk_with_context", new_callable=AsyncMock, return_value=[]
+        ):
             result = await service.embed_file(
                 file_path="/data/file.txt",
                 file_content="",
@@ -315,12 +340,28 @@ class TestEmbedFile:
         # One chunk embeds, one comes back None: the None chunk is skipped but the
         # upload still succeeds for the embedded one.
         chunks = [
-            {"content": "c1", "raw_content": "r1", "section": "Intro", "document_summary": "s"},
-            {"content": "c2", "raw_content": "r2", "section": "Body", "document_summary": "s"},
+            {
+                "content": "c1",
+                "raw_content": "r1",
+                "section": "Intro",
+                "document_summary": "s",
+            },
+            {
+                "content": "c2",
+                "raw_content": "r2",
+                "section": "Body",
+                "document_summary": "s",
+            },
         ]
         bulk_mock = AsyncMock()
-        with patch.object(service, "_chunk_with_context", new_callable=AsyncMock, return_value=chunks):
-            with patch(_LLM_GET_EMBEDDINGS, new_callable=AsyncMock, return_value=[[0.1] * 1024, None]):
+        with patch.object(
+            service, "_chunk_with_context", new_callable=AsyncMock, return_value=chunks
+        ):
+            with patch(
+                _LLM_GET_EMBEDDINGS,
+                new_callable=AsyncMock,
+                return_value=[[0.1] * 1024, None],
+            ):
                 with patch(_DOC_EMBEDDING_REPO, return_value=self._repo(bulk_mock)):
                     result = await service.embed_file(
                         file_path="/data/file.txt",
@@ -336,10 +377,21 @@ class TestEmbedFile:
     async def test_returns_error_when_no_chunk_embedded(self, service):
         # All chunks parsed but none embedded (embedding model unavailable) must
         # report status "error", not a misleading "success".
-        chunks = [{"content": "c", "raw_content": "c", "section": "Intro", "document_summary": "s"}]
+        chunks = [
+            {
+                "content": "c",
+                "raw_content": "c",
+                "section": "Intro",
+                "document_summary": "s",
+            }
+        ]
         bulk_mock = AsyncMock()
-        with patch.object(service, "_chunk_with_context", new_callable=AsyncMock, return_value=chunks):
-            with patch(_LLM_GET_EMBEDDINGS, new_callable=AsyncMock, return_value=[None]):
+        with patch.object(
+            service, "_chunk_with_context", new_callable=AsyncMock, return_value=chunks
+        ):
+            with patch(
+                _LLM_GET_EMBEDDINGS, new_callable=AsyncMock, return_value=[None]
+            ):
                 with patch(_DOC_EMBEDDING_REPO, return_value=self._repo(bulk_mock)):
                     result = await service.embed_file(
                         file_path="/data/file.txt",
@@ -355,12 +407,28 @@ class TestEmbedFile:
     @pytest.mark.asyncio
     async def test_returns_success_with_embedded_chunks(self, service):
         chunks = [
-            {"content": "c1", "raw_content": "r1", "section": "Intro", "document_summary": "s"},
-            {"content": "c2", "raw_content": "r2", "section": "Early Content", "document_summary": "s"},
+            {
+                "content": "c1",
+                "raw_content": "r1",
+                "section": "Intro",
+                "document_summary": "s",
+            },
+            {
+                "content": "c2",
+                "raw_content": "r2",
+                "section": "Early Content",
+                "document_summary": "s",
+            },
         ]
         bulk_mock = AsyncMock()
-        with patch.object(service, "_chunk_with_context", new_callable=AsyncMock, return_value=chunks):
-            with patch(_LLM_GET_EMBEDDINGS, new_callable=AsyncMock, return_value=[[0.1] * 1024, [0.1] * 1024]):
+        with patch.object(
+            service, "_chunk_with_context", new_callable=AsyncMock, return_value=chunks
+        ):
+            with patch(
+                _LLM_GET_EMBEDDINGS,
+                new_callable=AsyncMock,
+                return_value=[[0.1] * 1024, [0.1] * 1024],
+            ):
                 with patch(_DOC_EMBEDDING_REPO, return_value=self._repo(bulk_mock)):
                     result = await service.embed_file(
                         file_path="/Volumes/c/s/v/grp-1/exec-1/file.txt",
@@ -379,19 +447,38 @@ class TestEmbedFile:
         stored_items = bulk_mock.await_args.args[0]
         assert len(stored_items) == 2
         assert all(it.group_id == "grp-1" for it in stored_items)
-        assert all(it.file_path == "/Volumes/c/s/v/grp-1/exec-1/file.txt" for it in stored_items)
+        assert all(
+            it.file_path == "/Volumes/c/s/v/grp-1/exec-1/file.txt"
+            for it in stored_items
+        )
         service.session.commit.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_bulk_store_failure_rolls_back_and_errors(self, service):
         chunks = [
-            {"content": "c1", "raw_content": "r1", "section": "Intro", "document_summary": "s"},
-            {"content": "c2", "raw_content": "r2", "section": "Early Content", "document_summary": "s"},
+            {
+                "content": "c1",
+                "raw_content": "r1",
+                "section": "Intro",
+                "document_summary": "s",
+            },
+            {
+                "content": "c2",
+                "raw_content": "r2",
+                "section": "Early Content",
+                "document_summary": "s",
+            },
         ]
         # The bulk insert fails -> rollback, and the top-level handler reports error.
         bulk_mock = AsyncMock(side_effect=RuntimeError("db down"))
-        with patch.object(service, "_chunk_with_context", new_callable=AsyncMock, return_value=chunks):
-            with patch(_LLM_GET_EMBEDDINGS, new_callable=AsyncMock, return_value=[[0.1] * 1024, [0.1] * 1024]):
+        with patch.object(
+            service, "_chunk_with_context", new_callable=AsyncMock, return_value=chunks
+        ):
+            with patch(
+                _LLM_GET_EMBEDDINGS,
+                new_callable=AsyncMock,
+                return_value=[[0.1] * 1024, [0.1] * 1024],
+            ):
                 with patch(_DOC_EMBEDDING_REPO, return_value=self._repo(bulk_mock)):
                     result = await service.embed_file(
                         file_path="/data/file.txt",
@@ -404,7 +491,12 @@ class TestEmbedFile:
 
     @pytest.mark.asyncio
     async def test_returns_error_on_top_level_exception(self, service):
-        with patch.object(service, "_chunk_with_context", new_callable=AsyncMock, side_effect=RuntimeError("top error")):
+        with patch.object(
+            service,
+            "_chunk_with_context",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("top error"),
+        ):
             result = await service.embed_file(
                 file_path="/data/file.txt",
                 file_content="hello",
@@ -415,9 +507,20 @@ class TestEmbedFile:
 
     @pytest.mark.asyncio
     async def test_no_agent_ids_succeeds(self, service):
-        chunks = [{"content": "c", "raw_content": "r", "section": "Intro", "document_summary": "s"}]
-        with patch.object(service, "_chunk_with_context", new_callable=AsyncMock, return_value=chunks):
-            with patch(_LLM_GET_EMBEDDINGS, new_callable=AsyncMock, return_value=[[0.1] * 1024]):
+        chunks = [
+            {
+                "content": "c",
+                "raw_content": "r",
+                "section": "Intro",
+                "document_summary": "s",
+            }
+        ]
+        with patch.object(
+            service, "_chunk_with_context", new_callable=AsyncMock, return_value=chunks
+        ):
+            with patch(
+                _LLM_GET_EMBEDDINGS, new_callable=AsyncMock, return_value=[[0.1] * 1024]
+            ):
                 with patch(_DOC_EMBEDDING_REPO, return_value=self._repo()):
                     result = await service.embed_file(
                         file_path="/data/file.txt",
@@ -429,7 +532,10 @@ class TestEmbedFile:
 
 
 # --- Legacy Vector-Search storage builder (_get_vector_storage internals) ---
-from src.schemas.memory_backend import DatabricksMemoryConfig, MemoryBackendType  # noqa: E402
+from src.schemas.memory_backend import (  # noqa: E402
+    DatabricksMemoryConfig,
+    MemoryBackendType,
+)
 
 _DVS = "src.services.memory.databricks_vector_storage.DatabricksVectorStorage"
 
@@ -463,20 +569,30 @@ class TestGetVectorStorageInternals:
             embedding_dimension=1024,
         )
         service._memory_backend_service = AsyncMock()
-        service._memory_backend_service.get_memory_backends = AsyncMock(return_value=[_databricks_backend(cfg)])
+        service._memory_backend_service.get_memory_backends = AsyncMock(
+            return_value=[_databricks_backend(cfg)]
+        )
         with patch(_DVS) as MockStore:
             result = await service._get_vector_storage(user_token="tok")
         assert result is MockStore.return_value
 
     @pytest.mark.asyncio
     async def test_returns_none_when_no_document_index(self, service):
-        cfg = DatabricksMemoryConfig(workspace_url="https://example.databricks.com", endpoint_name="ep", memory_index="cat.sch.mem")
+        cfg = DatabricksMemoryConfig(
+            workspace_url="https://example.databricks.com",
+            endpoint_name="ep",
+            memory_index="cat.sch.mem",
+        )
         service._memory_backend_service = AsyncMock()
-        service._memory_backend_service.get_memory_backends = AsyncMock(return_value=[_databricks_backend(cfg)])
+        service._memory_backend_service.get_memory_backends = AsyncMock(
+            return_value=[_databricks_backend(cfg)]
+        )
         assert await service._get_vector_storage() is None
 
     @pytest.mark.asyncio
     async def test_returns_none_when_databricks_config_missing(self, service):
         service._memory_backend_service = AsyncMock()
-        service._memory_backend_service.get_memory_backends = AsyncMock(return_value=[_databricks_backend(None)])
+        service._memory_backend_service.get_memory_backends = AsyncMock(
+            return_value=[_databricks_backend(None)]
+        )
         assert await service._get_vector_storage() is None

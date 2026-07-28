@@ -126,14 +126,17 @@ class HumanReviewGuardrail:
             f"[task_review] execution {self.execution_id}: task "
             f"'{self.task_name}' waiting for approval {approval_id}"
         )
-        notify_input_needed(self.execution_id, {
-            "job_id": self.execution_id,
-            "approval_id": approval_id,
-            "kind": "task_review",
-            "task_name": self.task_name,
-            "output_preview": raw[:_OUTPUT_PREVIEW_CHARS],
-            "message": f"Task '{self.task_name}' finished — review the output.",
-        })
+        notify_input_needed(
+            self.execution_id,
+            {
+                "job_id": self.execution_id,
+                "approval_id": approval_id,
+                "kind": "task_review",
+                "task_name": self.task_name,
+                "output_preview": raw[:_OUTPUT_PREVIEW_CHARS],
+                "message": f"Task '{self.task_name}' finished — review the output.",
+            },
+        )
 
         deadline = time.monotonic() + self.timeout_seconds
         while time.monotonic() < deadline:

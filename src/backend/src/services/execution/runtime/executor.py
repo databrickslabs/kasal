@@ -16,9 +16,6 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
-from src.core.llm.json_extraction import extract_json_dict
-from src.core.llm.transport.exceptions import ToolExecutionBlockedError
-
 from pydantic import BaseModel, Field
 
 from src.core.events.bus import event_bus
@@ -27,6 +24,8 @@ from src.core.events.types import (
     ToolUsageFinishedEvent,
     ToolUsageStartedEvent,
 )
+from src.core.llm.json_extraction import extract_json_dict
+from src.core.llm.transport.exceptions import ToolExecutionBlockedError
 from src.services.tools.base import BaseTool, sanitize_tool_name
 
 logger = logging.getLogger(__name__)
@@ -97,7 +96,9 @@ def unregister_tool_hooks(
         _TOOL_POST_HOOKS.remove(post)
 
 
-def wrap_tool(tool: BaseTool, agent: Any = None, task: Any = None) -> Callable[..., Any]:
+def wrap_tool(
+    tool: BaseTool, agent: Any = None, task: Any = None
+) -> Callable[..., Any]:
     """Wrap tool.run with engine tool-usage events (native context applies)."""
 
     def run(**kwargs: Any) -> Any:

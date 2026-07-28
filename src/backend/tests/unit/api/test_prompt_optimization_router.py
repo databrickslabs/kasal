@@ -7,23 +7,21 @@ and wraps results in response schemas. Handlers are invoked directly with a
 patched service, mirroring the other router unit tests.
 """
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-
 # NOTE: both `from src.api import prompt_optimization_router` and
 # `import src.api.prompt_optimization_router as m` yield the APIRouter object —
 # the package __init__ rebinds the module name to the router, and the `as m`
 # form resolves through that shadowed package attribute. importlib returns the
 # actual module from sys.modules.
 import importlib
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 router_module = importlib.import_module("src.api.prompt_optimization_router")
 from src.api.prompt_optimization_router import (
     add_eval_feedback,
     apply_run,
-    revert_run,
     assign_judge,
     cancel_run,
     create_judge,
@@ -32,6 +30,7 @@ from src.api.prompt_optimization_router import (
     list_crew_evals,
     list_judges,
     list_runs,
+    revert_run,
     router,
     start_crew_optimization,
     start_optimization,
@@ -70,9 +69,7 @@ RUN = {
 @pytest.fixture()
 def service():
     svc = MagicMock()
-    with patch.object(
-        router_module, "PromptOptimizationService", return_value=svc
-    ):
+    with patch.object(router_module, "PromptOptimizationService", return_value=svc):
         yield svc
 
 
@@ -342,8 +339,6 @@ class TestRunEndpoints:
 
     @pytest.mark.asyncio
     async def test_revert_run_error_becomes_404(self, service):
-        service.revert_run = AsyncMock(
-            side_effect=ValueError("has no before-image")
-        )
+        service.revert_run = AsyncMock(side_effect=ValueError("has no before-image"))
         with pytest.raises(NotFoundError, match="before-image"):
             await revert_run("abc123", _group(), MagicMock())

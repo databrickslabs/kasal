@@ -14,9 +14,8 @@ event bus re-entering / looping inside the server.)
 from typing import Any, Callable, Dict, List, Optional
 
 import mlflow
-from crewai import Agent
-
 from agent_server import cancel, progress, state_store
+from crewai import Agent
 
 # Injected once by agent.configure_conversation() — keeps this layer crew-agnostic.
 _CFG: Dict[str, Any] = {

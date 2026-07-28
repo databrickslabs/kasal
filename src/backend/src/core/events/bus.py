@@ -73,8 +73,8 @@ _emission_counter = itertools.count(1)
 # behavior as the ambient context above: asyncio tasks branch their own copy
 # (concurrent runs don't cross-link), and thread-pool work sees the emitter's
 # chain only when the caller copies context in (as the memory save pool does).
-_scope_stack: contextvars.ContextVar[tuple[tuple[str, str], ...]] = contextvars.ContextVar(
-    "kasal_engine_scope_stack", default=()
+_scope_stack: contextvars.ContextVar[tuple[tuple[str, str], ...]] = (
+    contextvars.ContextVar("kasal_engine_scope_stack", default=())
 )
 _last_event_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "kasal_engine_last_event_id", default=None
@@ -125,12 +125,16 @@ def _stamp_causality(event: BaseEvent) -> None:
         if match is None:
             if event.parent_event_id is None and stack:
                 event.parent_event_id = stack[-1][0]
-            logger.debug("causality: %s closed with no open %s scope", etype, expected_start)
+            logger.debug(
+                "causality: %s closed with no open %s scope", etype, expected_start
+            )
         else:
             for orphan_id, orphan_type in stack[match + 1 :]:
                 logger.debug(
                     "causality: unwinding unclosed %s scope (%s) at %s",
-                    orphan_type, orphan_id, etype,
+                    orphan_type,
+                    orphan_id,
+                    etype,
                 )
             if event.started_event_id is None:
                 event.started_event_id = stack[match][0]
@@ -148,8 +152,9 @@ def _stamp_causality(event: BaseEvent) -> None:
 
     _last_event_id.set(event.event_id)
 
-_ambient_context: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
-    "kasal_engine_event_context", default=None
+
+_ambient_context: contextvars.ContextVar[dict[str, Any] | None] = (
+    contextvars.ContextVar("kasal_engine_event_context", default=None)
 )
 
 
@@ -246,9 +251,14 @@ class EventsBus:
                     )
                     if task_name:
                         event.task_name = str(task_name)
-            own_agent = getattr(event, "agent", None) or getattr(event, "from_agent", None)
+            own_agent = getattr(event, "agent", None) or getattr(
+                event, "from_agent", None
+            )
             if own_agent is not None:
-                if event.agent_id is None and getattr(own_agent, "id", None) is not None:
+                if (
+                    event.agent_id is None
+                    and getattr(own_agent, "id", None) is not None
+                ):
                     event.agent_id = str(own_agent.id)
                 if event.agent_role is None and getattr(own_agent, "role", None):
                     event.agent_role = str(own_agent.role)
@@ -256,7 +266,10 @@ class EventsBus:
             if ambient:
                 event.execution_context = {**ambient, **event.execution_context}
                 for field in _ATTRIBUTION_FIELDS:
-                    if getattr(event, field, None) is None and ambient.get(field) is not None:
+                    if (
+                        getattr(event, field, None) is None
+                        and ambient.get(field) is not None
+                    ):
                         setattr(event, field, ambient[field])
         with self._lock:
             dispatch = [

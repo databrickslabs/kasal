@@ -12,12 +12,13 @@ This pattern can be used by:
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Set, Any, TypeVar, Generic
+from typing import Any, Dict, Generic, List, Set, TypeVar
+
 from ....base.models import KPI, KPIDefinition
 from ...translators.dependencies import DependencyResolver
 
 # Generic type for the output measure format
-TMeasure = TypeVar('TMeasure')
+TMeasure = TypeVar("TMeasure")
 
 
 class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
@@ -60,8 +61,10 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
         if cycles:
             cycle_descriptions = []
             for cycle in cycles:
-                cycle_descriptions.append(' -> '.join(cycle))
-            raise ValueError(f"Circular dependencies detected:\n" + '\n'.join(cycle_descriptions))
+                cycle_descriptions.append(" -> ".join(cycle))
+            raise ValueError(
+                f"Circular dependencies detected:\n" + "\n".join(cycle_descriptions)
+            )
 
         # Get measures in dependency order
         ordered_measures = self.dependency_resolver.get_dependency_order()
@@ -70,7 +73,7 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
         for measure_name in ordered_measures:
             kpi = self.dependency_resolver.measure_registry[measure_name]
 
-            if kpi.aggregation_type == 'CALCULATED':
+            if kpi.aggregation_type == "CALCULATED":
                 # For calculated measures, use calculated generation
                 measure = self._generate_calculated_measure(definition, kpi)
             else:
@@ -82,9 +85,7 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
         return measures
 
     def generate_measure_with_separate_dependencies(
-        self,
-        definition: KPIDefinition,
-        target_measure_name: str
+        self, definition: KPIDefinition, target_measure_name: str
     ) -> List[TMeasure]:
         """
         Generate a target measure along with all its dependencies as separate measures.
@@ -108,7 +109,9 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
             raise ValueError(f"Measure '{target_measure_name}' not found")
 
         # Get all dependencies for the target measure
-        all_dependencies = self.dependency_resolver.get_all_dependencies(target_measure_name)
+        all_dependencies = self.dependency_resolver.get_all_dependencies(
+            target_measure_name
+        )
         all_dependencies.add(target_measure_name)  # Include the target itself
 
         # Get them in dependency order
@@ -119,9 +122,11 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
         for measure_name in required_measures:
             kpi = self.dependency_resolver.measure_registry[measure_name]
 
-            if kpi.aggregation_type == 'CALCULATED':
+            if kpi.aggregation_type == "CALCULATED":
                 # For calculated measures, generate with references (not inline)
-                measure = self._generate_calculated_measure_with_references(definition, kpi)
+                measure = self._generate_calculated_measure_with_references(
+                    definition, kpi
+                )
             else:
                 # For leaf measures, use standard generation
                 measure = self._generate_leaf_measure(definition, kpi)
@@ -152,18 +157,21 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
             "dependency_graph": dict(self.dependency_resolver.dependency_graph),
             "dependency_order": self.dependency_resolver.get_dependency_order(),
             "circular_dependencies": self.dependency_resolver.detect_circular_dependencies(),
-            "measure_trees": {}
+            "measure_trees": {},
         }
 
         # Generate dependency trees for all measures
         for kpi in definition.kpis:
             if kpi.technical_name:
-                analysis["measure_trees"][kpi.technical_name] = \
+                analysis["measure_trees"][kpi.technical_name] = (
                     self.dependency_resolver.get_dependency_tree(kpi.technical_name)
+                )
 
         return analysis
 
-    def get_measure_complexity_report(self, definition: KPIDefinition) -> Dict[str, Any]:
+    def get_measure_complexity_report(
+        self, definition: KPIDefinition
+    ) -> Dict[str, Any]:
         """
         Generate a complexity report for all measures.
 
@@ -184,13 +192,15 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
                 "leaf_measures": 0,
                 "calculated_measures": 0,
                 "max_dependency_depth": 0,
-                "most_complex_measure": None
-            }
+                "most_complex_measure": None,
+            },
         }
 
         for kpi in definition.kpis:
             if kpi.technical_name:
-                dependencies = self.dependency_resolver.get_all_dependencies(kpi.technical_name)
+                dependencies = self.dependency_resolver.get_all_dependencies(
+                    kpi.technical_name
+                )
                 depth = self._calculate_dependency_depth(kpi.technical_name)
 
                 measure_info = {
@@ -198,11 +208,13 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
                     "description": kpi.description,
                     "type": kpi.aggregation_type or "SUM",
                     "direct_dependencies": len(
-                        self.dependency_resolver.dependency_graph.get(kpi.technical_name, [])
+                        self.dependency_resolver.dependency_graph.get(
+                            kpi.technical_name, []
+                        )
                     ),
                     "total_dependencies": len(dependencies),
                     "dependency_depth": depth,
-                    "is_leaf": len(dependencies) == 0
+                    "is_leaf": len(dependencies) == 0,
                 }
 
                 report["measures"][kpi.technical_name] = measure_info
@@ -219,7 +231,9 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
 
         return report
 
-    def _calculate_dependency_depth(self, measure_name: str, visited: Set[str] = None) -> int:
+    def _calculate_dependency_depth(
+        self, measure_name: str, visited: Set[str] = None
+    ) -> int:
         """
         Calculate the maximum depth of dependencies for a measure.
 
@@ -266,7 +280,9 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
         pass
 
     @abstractmethod
-    def _generate_calculated_measure(self, definition: KPIDefinition, kpi: KPI) -> TMeasure:
+    def _generate_calculated_measure(
+        self, definition: KPIDefinition, kpi: KPI
+    ) -> TMeasure:
         """
         Generate a calculated measure with dependencies inlined.
 
@@ -281,9 +297,7 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
 
     @abstractmethod
     def _generate_calculated_measure_with_references(
-        self,
-        definition: KPIDefinition,
-        kpi: KPI
+        self, definition: KPIDefinition, kpi: KPI
     ) -> TMeasure:
         """
         Generate a calculated measure that references other measures by name.

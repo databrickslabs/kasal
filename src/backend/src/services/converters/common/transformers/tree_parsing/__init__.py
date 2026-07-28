@@ -15,5 +15,5 @@ This module enables consistent dependency handling across:
 from .base_tree_generator import BaseTreeParsingGenerator
 
 __all__ = [
-    'BaseTreeParsingGenerator',
+    "BaseTreeParsingGenerator",
 ]

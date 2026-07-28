@@ -76,9 +76,7 @@ async def create_crew_from_conversation(
     """
     crew_service = CrewGenerationService(session)
 
-    logger.info(
-        f"Synthesizing crew from conversation for session {request.session_id}"
-    )
+    logger.info(f"Synthesizing crew from conversation for session {request.session_id}")
     result = await crew_service.synthesize_crew_from_conversation(
         session_id=request.session_id,
         group_context=group_context,

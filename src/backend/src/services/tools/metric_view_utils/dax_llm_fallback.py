@@ -4,6 +4,7 @@ Opt-in module: only invoked when `use_llm_fallback=True` in pipeline config.
 Uses direct HTTP to Databricks serving endpoints (same pattern as mquery/llm_converter.py).
 Fail-open: LLM errors never block measures — they stay untranslatable.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -30,11 +31,16 @@ _RUN_CACHE_MAX = 128
 # the target YAML — the LLM needs both to emit deployable, correct output.
 _SKILLS_DIR = os.path.join(os.path.dirname(__file__), "skills")
 _SKILL_FILES = (
-    ("dax", "SKILL.md"), ("dax", "PATTERNS.md"),
-    ("dax", "UNSUPPORTED.md"), ("dax", "EDGE_CASES.md"),
-    ("uc-metric-views", "SYNTAX.md"), ("uc-metric-views", "WINDOW.md"),
-    ("uc-metric-views", "LOD.md"), ("uc-metric-views", "JOINS.md"),
-    ("uc-metric-views", "COMPOSABILITY.md"), ("uc-metric-views", "MATERIALIZATION.md"),
+    ("dax", "SKILL.md"),
+    ("dax", "PATTERNS.md"),
+    ("dax", "UNSUPPORTED.md"),
+    ("dax", "EDGE_CASES.md"),
+    ("uc-metric-views", "SYNTAX.md"),
+    ("uc-metric-views", "WINDOW.md"),
+    ("uc-metric-views", "LOD.md"),
+    ("uc-metric-views", "JOINS.md"),
+    ("uc-metric-views", "COMPOSABILITY.md"),
+    ("uc-metric-views", "MATERIALIZATION.md"),
 )
 
 
@@ -54,7 +60,9 @@ def _load_skill_corpus() -> str:
         except FileNotFoundError:
             logger.warning("[DAX_LLM] skill file missing (skipped): %s/%s", group, name)
         except Exception as e:  # noqa: BLE001
-            logger.warning("[DAX_LLM] skill file unreadable (%s/%s): %s", group, name, e)
+            logger.warning(
+                "[DAX_LLM] skill file unreadable (%s/%s): %s", group, name, e
+            )
     return "\n\n".join(parts)
 
 
@@ -147,7 +155,9 @@ def _build_user_prompt(
     LLM emits real column/join names instead of guessing — while the corpus
     stays cacheable. Stable within a table, so cheap relative to the corpus.
     """
-    available_measures = ', '.join(sorted(base_names)[:50])  # cap at 50 for token efficiency
+    available_measures = ", ".join(
+        sorted(base_names)[:50]
+    )  # cap at 50 for token efficiency
     ctx_block = f"\n## Fact table context\n{table_context}\n" if table_context else ""
 
     return f"""Translate this DAX measure to Spark SQL for a UC Metric View.
@@ -173,21 +183,21 @@ def _parse_response(response_text: str) -> dict:
     try:
         # Strip markdown code blocks if present
         text = response_text.strip()
-        if text.startswith('```json'):
-            text = text.split('```json')[1].split('```')[0].strip()
-        elif text.startswith('```'):
-            text = text.split('```')[1].split('```')[0].strip()
+        if text.startswith("```json"):
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif text.startswith("```"):
+            text = text.split("```")[1].split("```")[0].strip()
         return json.loads(text)
     except json.JSONDecodeError:
-        return {'success': False, 'error': 'Failed to parse LLM response'}
+        return {"success": False, "error": "Failed to parse LLM response"}
 
 
 def _validate_sql(sql_expr: str) -> bool:
     """Check that the LLM output doesn't contain DAX-only constructs."""
     _DAX_ONLY = re.compile(
-        r'\b(SELECTEDVALUE|ISFILTERED|HASONEVALUE|CONTAINSSTRING|'
-        r'SWITCH\s*\(|ALLSELECTED|USERELATIONSHIP|EARLIER|'
-        r'FIRSTDATE|LASTDATE|VALUES\s*\(|SUMMARIZE\s*\()\b',
+        r"\b(SELECTEDVALUE|ISFILTERED|HASONEVALUE|CONTAINSSTRING|"
+        r"SWITCH\s*\(|ALLSELECTED|USERELATIONSHIP|EARLIER|"
+        r"FIRSTDATE|LASTDATE|VALUES\s*\(|SUMMARIZE\s*\()\b",
         re.IGNORECASE,
     )
     return not _DAX_ONLY.search(sql_expr)
@@ -229,7 +239,7 @@ async def _call_llm(
     so a transport hiccup never blocks translation (fail-open).
     """
     from src.services.llm.manager import LLMManager
-    from src.utils.telemetry import get_user_agent_header, KasalProduct
+    from src.utils.telemetry import KasalProduct, get_user_agent_header
 
     messages = [_system_message(system_prompt), {"role": "user", "content": prompt}]
     headers = get_user_agent_header(KasalProduct.POWERBI)
@@ -243,7 +253,9 @@ async def _call_llm(
         )
         return {"content": result.get("content"), "usage": result.get("usage", {})}
     except Exception as e:
-        logger.warning(f"[DAX_LLM] cache-aware call failed ({e}); falling back to plain completion")
+        logger.warning(
+            f"[DAX_LLM] cache-aware call failed ({e}); falling back to plain completion"
+        )
         try:
             content = await LLMManager.completion(
                 messages=[
@@ -266,7 +278,7 @@ async def translate_with_llm(
     table_key: str,
     base_names: set[str],
     original_to_snake: dict[str, str],
-    model: str = 'databricks-claude-sonnet-4-5',
+    model: str = "databricks-claude-sonnet-4-5",
     cache: OrderedDict | None = None,
     table_context: str = "",
 ) -> TranslationResult:
@@ -289,15 +301,15 @@ async def translate_with_llm(
     if cache_key in _cache:
         _cache.move_to_end(cache_key)
         cached = _cache[cache_key]
-        if cached.get('success'):
-            measure.sql_expr = cached['sql_expr']
+        if cached.get("success"):
+            measure.sql_expr = cached["sql_expr"]
             measure.is_translatable = True
-            measure.confidence = cached.get('confidence', 'medium')
-            measure.category = 'llm_translated'
-            measure.dax_class = cached.get('dax_class')
-            measure.skip_reason = ''
-        elif cached.get('dax_class'):
-            measure.dax_class = cached.get('dax_class')
+            measure.confidence = cached.get("confidence", "medium")
+            measure.category = "llm_translated"
+            measure.dax_class = cached.get("dax_class")
+            measure.skip_reason = ""
+        elif cached.get("dax_class"):
+            measure.dax_class = cached.get("dax_class")
         return measure
 
     # Build prompt
@@ -312,37 +324,41 @@ async def translate_with_llm(
     # Call LLM
     response = await _call_llm(user_prompt, _SYSTEM_PROMPT, model)
 
-    if not response.get('content'):
-        logger.warning(f"[DAX_LLM] No response for {measure.original_name}: {response.get('error')}")
+    if not response.get("content"):
+        logger.warning(
+            f"[DAX_LLM] No response for {measure.original_name}: {response.get('error')}"
+        )
         return measure
 
     # Parse response
-    parsed = _parse_response(response['content'])
+    parsed = _parse_response(response["content"])
 
     # Cache result (run-scoped)
     if len(_cache) >= _RUN_CACHE_MAX:
         _cache.popitem(last=False)
     _cache[cache_key] = parsed
 
-    if parsed.get('success') and parsed.get('sql_expr'):
-        sql_expr = parsed['sql_expr']
+    if parsed.get("success") and parsed.get("sql_expr"):
+        sql_expr = parsed["sql_expr"]
 
         # Validate: no DAX-only constructs in output
         if not _validate_sql(sql_expr):
-            logger.warning(f"[DAX_LLM] LLM output contains DAX constructs for {measure.original_name}")
+            logger.warning(
+                f"[DAX_LLM] LLM output contains DAX constructs for {measure.original_name}"
+            )
             return measure
 
         measure.sql_expr = sql_expr
         measure.is_translatable = True
-        measure.confidence = parsed.get('confidence', 'medium')
-        measure.category = 'llm_translated'
+        measure.confidence = parsed.get("confidence", "medium")
+        measure.category = "llm_translated"
         # dax_class = translation provenance/quality (7-cat); NOT emission routing.
-        measure.dax_class = parsed.get('dax_class')
-        measure.skip_reason = ''
+        measure.dax_class = parsed.get("dax_class")
+        measure.skip_reason = ""
 
-        usage = response.get('usage', {}) or {}
-        tokens = usage.get('total_tokens', 0)
-        cache_read = usage.get('cache_read_input_tokens', 0)
+        usage = response.get("usage", {}) or {}
+        tokens = usage.get("total_tokens", 0)
+        cache_read = usage.get("cache_read_input_tokens", 0)
         logger.info(
             f"[DAX_LLM] Translated {measure.original_name} → {sql_expr[:80]}... "
             f"(confidence={measure.confidence}, dax_class={measure.dax_class}, "
@@ -350,9 +366,13 @@ async def translate_with_llm(
         )
     else:
         # Even on non-success, record the classification for reporting/telemetry.
-        measure.dax_class = parsed.get('dax_class') or measure.dax_class
-        reason = parsed.get('error', parsed.get('explanation', 'LLM could not translate'))
-        logger.info(f"[DAX_LLM] Could not translate {measure.original_name} (dax_class={measure.dax_class}): {reason}")
+        measure.dax_class = parsed.get("dax_class") or measure.dax_class
+        reason = parsed.get(
+            "error", parsed.get("explanation", "LLM could not translate")
+        )
+        logger.info(
+            f"[DAX_LLM] Could not translate {measure.original_name} (dax_class={measure.dax_class}): {reason}"
+        )
 
     return measure
 
@@ -372,7 +392,7 @@ async def translate_batch_with_llm(
     table_key: str,
     base_names: set[str],
     original_to_snake: dict[str, str],
-    model: str = 'databricks-claude-sonnet-4-5',
+    model: str = "databricks-claude-sonnet-4-5",
     topo_priority: dict[str, int] | None = None,
     table_context: str = "",
 ) -> list[TranslationResult]:
@@ -411,15 +431,19 @@ async def translate_batch_with_llm(
     # stays a TODO — no worse than filtering it out here, and strictly better
     # for the salvageable ones.
     _ARTIFACT_KEYWORDS = (
-        'FORMAT', 'Color', 'ISBLANK+BLANK',
-        'DAX expression not available', 'ISFILTERED',
-        'BLANK() placeholder',
+        "FORMAT",
+        "Color",
+        "ISBLANK+BLANK",
+        "DAX expression not available",
+        "ISFILTERED",
+        "BLANK() placeholder",
     )
 
     candidates = [
-        m for m in measures
+        m
+        for m in measures
         if not any(kw in m.skip_reason for kw in _ARTIFACT_KEYWORDS)
-        and m.dax_expression.strip() not in ('', 'Not available')
+        and m.dax_expression.strip() not in ("", "Not available")
     ]
 
     if not candidates:
@@ -441,19 +465,26 @@ async def translate_batch_with_llm(
 
     translated_count = 0
     for start in range(0, len(candidates), _DAX_LLM_CONCURRENCY):
-        chunk = candidates[start:start + _DAX_LLM_CONCURRENCY]
+        chunk = candidates[start : start + _DAX_LLM_CONCURRENCY]
         # Snapshot the reference context so all measures in this chunk see the
         # same (already-translated) refs — matches deterministic behaviour and
         # avoids mutating shared dicts concurrently.
         snap_names = set(base_names)
         snap_map = dict(original_to_snake)
-        await asyncio.gather(*(
-            translate_with_llm(
-                m, table_key, snap_names, snap_map,
-                model=model, cache=run_cache, table_context=table_context,
+        await asyncio.gather(
+            *(
+                translate_with_llm(
+                    m,
+                    table_key,
+                    snap_names,
+                    snap_map,
+                    model=model,
+                    cache=run_cache,
+                    table_context=table_context,
+                )
+                for m in chunk
             )
-            for m in chunk
-        ))
+        )
         # Merge this chunk's successes into the shared context for later chunks.
         for m in chunk:
             if m.is_translatable:
@@ -461,5 +492,7 @@ async def translate_batch_with_llm(
                 base_names.add(m.measure_name)
                 original_to_snake[m.original_name] = m.measure_name
 
-    logger.info(f"[DAX_LLM] {translated_count}/{len(candidates)} measures translated via LLM for {table_key}")
+    logger.info(
+        f"[DAX_LLM] {translated_count}/{len(candidates)} measures translated via LLM for {table_key}"
+    )
     return measures

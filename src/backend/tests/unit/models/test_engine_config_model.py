@@ -4,9 +4,11 @@ Unit tests for engine_config model.
 Tests the functionality of the EngineConfig database model including
 field validation, relationships, and data integrity.
 """
-import pytest
+
 from datetime import datetime
 from unittest.mock import MagicMock
+
+import pytest
 
 from src.models.engine_config import EngineConfig
 
@@ -23,75 +25,91 @@ class TestEngineConfig:
         """Test EngineConfig model column structure."""
         # Act
         columns = EngineConfig.__table__.columns
-        
+
         # Assert - Check that all expected columns exist
         expected_columns = [
-            'id', 'engine_name', 'engine_type', 'config_key', 'config_value',
-            'enabled', 'description', 'created_at', 'updated_at'
+            "id",
+            "engine_name",
+            "engine_type",
+            "config_key",
+            "config_value",
+            "enabled",
+            "description",
+            "created_at",
+            "updated_at",
         ]
         for col_name in expected_columns:
-            assert col_name in columns, f"Column {col_name} should exist in EngineConfig model"
+            assert (
+                col_name in columns
+            ), f"Column {col_name} should exist in EngineConfig model"
 
     def test_engine_config_column_types_and_constraints(self):
         """Test that columns have correct data types and constraints."""
         # Act
         columns = EngineConfig.__table__.columns
-        
+
         # Assert
         # Primary key
-        assert columns['id'].primary_key is True
-        assert "INTEGER" in str(columns['id'].type)
-        
+        assert columns["id"].primary_key is True
+        assert "INTEGER" in str(columns["id"].type)
+
         # Required string fields
-        required_string_fields = ['engine_name', 'engine_type', 'config_key', 'config_value']
+        required_string_fields = [
+            "engine_name",
+            "engine_type",
+            "config_key",
+            "config_value",
+        ]
         for field in required_string_fields:
             assert columns[field].nullable is False
-            assert "VARCHAR" in str(columns[field].type) or "STRING" in str(columns[field].type)
-        
+            assert "VARCHAR" in str(columns[field].type) or "STRING" in str(
+                columns[field].type
+            )
+
         # Boolean field with default
-        assert "BOOLEAN" in str(columns['enabled'].type)
-        assert columns['enabled'].default.arg is True
-        
+        assert "BOOLEAN" in str(columns["enabled"].type)
+        assert columns["enabled"].default.arg is True
+
         # Optional text field
-        assert columns['description'].nullable is True
-        assert "TEXT" in str(columns['description'].type)
-        
+        assert columns["description"].nullable is True
+        assert "TEXT" in str(columns["description"].type)
+
         # DateTime fields
-        assert "DATETIME" in str(columns['created_at'].type)
-        assert "DATETIME" in str(columns['updated_at'].type)
+        assert "DATETIME" in str(columns["created_at"].type)
+        assert "DATETIME" in str(columns["updated_at"].type)
 
     def test_engine_config_default_values(self):
         """Test EngineConfig model default values."""
         # Act
         columns = EngineConfig.__table__.columns
-        
+
         # Assert
-        assert columns['enabled'].default.arg is True
-        assert columns['created_at'].default is not None
-        assert columns['updated_at'].default is not None
-        assert columns['updated_at'].onupdate is not None
+        assert columns["enabled"].default.arg is True
+        assert columns["created_at"].default is not None
+        assert columns["updated_at"].default is not None
+        assert columns["updated_at"].onupdate is not None
 
     def test_engine_config_unique_constraint(self):
         """Test EngineConfig unique constraint."""
         # Act
         table_args = EngineConfig.__table_args__
-        
+
         # Assert
         assert len(table_args) == 1
         constraint = table_args[0]
-        assert constraint.name == '_engine_config_uc'
-        assert 'engine_name' in [col.name for col in constraint.columns]
-        assert 'config_key' in [col.name for col in constraint.columns]
+        assert constraint.name == "_engine_config_uc"
+        assert "engine_name" in [col.name for col in constraint.columns]
+        assert "config_key" in [col.name for col in constraint.columns]
 
     def test_engine_config_timestamp_behavior(self):
         """Test timestamp behavior in EngineConfig."""
         # Act
         columns = EngineConfig.__table__.columns
-        
+
         # Assert
-        assert columns['created_at'].default is not None
-        assert columns['updated_at'].default is not None
-        assert columns['updated_at'].onupdate is not None
+        assert columns["created_at"].default is not None
+        assert columns["updated_at"].default is not None
+        assert columns["updated_at"].onupdate is not None
 
     def test_engine_config_model_documentation(self):
         """Test EngineConfig model documentation."""
@@ -107,9 +125,9 @@ class TestEngineConfig:
             "langchain",
             "custom_engine",
             "workflow_engine",
-            "ai_engine"
+            "ai_engine",
         ]
-        
+
         for engine_name in valid_engine_names:
             # Assert engine name format
             assert isinstance(engine_name, str)
@@ -123,9 +141,9 @@ class TestEngineConfig:
             "ai",
             "processing",
             "orchestration",
-            "execution"
+            "execution",
         ]
-        
+
         for engine_type in valid_engine_types:
             # Assert engine type format
             assert isinstance(engine_type, str)
@@ -140,9 +158,9 @@ class TestEngineConfig:
             "verbose_mode",
             "timeout_seconds",
             "parallel_execution",
-            "cache_enabled"
+            "cache_enabled",
         ]
-        
+
         for config_key in valid_config_keys:
             # Assert config key format
             assert isinstance(config_key, str)
@@ -153,15 +171,15 @@ class TestEngineConfig:
         # Test different config value types (stored as strings)
         config_values = [
             "true",  # Boolean as string
-            "false", # Boolean as string
-            "25",    # Integer as string
+            "false",  # Boolean as string
+            "25",  # Integer as string
             "3.14",  # Float as string
             '{"key": "value", "number": 42}',  # JSON as string
             "simple_string_value",
             "/path/to/file",
-            "http://example.com/api"
+            "http://example.com/api",
         ]
-        
+
         for config_value in config_values:
             # Assert config value format
             assert isinstance(config_value, str)
@@ -171,7 +189,7 @@ class TestEngineConfig:
         """Test enabled flag scenarios."""
         # Test enabled/disabled configurations
         enabled_states = [True, False]
-        
+
         for enabled in enabled_states:
             # Assert enabled flag
             assert isinstance(enabled, bool)
@@ -181,12 +199,12 @@ class TestEngineConfig:
         # Test different description formats
         descriptions = [
             None,  # No description
-            "",    # Empty description
+            "",  # Empty description
             "Simple configuration flag",
             "Complex configuration for workflow engine with multiple parameters and detailed explanation of usage.",
-            "Configuration for AI model settings:\n- Max iterations: 25\n- Timeout: 300s\n- Cache enabled: true"
+            "Configuration for AI model settings:\n- Max iterations: 25\n- Timeout: 300s\n- Cache enabled: true",
         ]
-        
+
         for description in descriptions:
             if description is not None:
                 # Assert description format
@@ -200,10 +218,10 @@ class TestEngineConfigEdgeCases:
         """Test EngineConfig with very long field values."""
         # Arrange
         long_engine_name = "very_long_engine_name_" * 10  # 220 characters
-        long_config_key = "very_long_config_key_" * 10   # 210 characters
-        long_config_value = "value_" * 100                # 600 characters
-        long_description = "Description " * 100           # 1200 characters
-        
+        long_config_key = "very_long_config_key_" * 10  # 210 characters
+        long_config_value = "value_" * 100  # 600 characters
+        long_description = "Description " * 100  # 1200 characters
+
         # Assert
         assert len(long_engine_name) == 220
         assert len(long_config_key) == 210
@@ -220,15 +238,15 @@ class TestEngineConfigEdgeCases:
                 "config_key": "max_iterations",
                 "config_value": "25",
                 "enabled": True,
-                "description": "Maximum number of iterations for agent execution"
+                "description": "Maximum number of iterations for agent execution",
             },
             {
                 "engine_name": "kasal",
-                "engine_type": "workflow", 
+                "engine_type": "workflow",
                 "config_key": "verbose_mode",
                 "config_value": "true",
                 "enabled": True,
-                "description": "Enable verbose logging for debugging"
+                "description": "Enable verbose logging for debugging",
             },
             {
                 "engine_name": "kasal",
@@ -236,10 +254,10 @@ class TestEngineConfigEdgeCases:
                 "config_key": "default_llm",
                 "config_value": "gpt-4",
                 "enabled": True,
-                "description": "Default LLM model for agents"
-            }
+                "description": "Default LLM model for agents",
+            },
         ]
-        
+
         for config in kasal_configs:
             # Assert configuration structure
             assert config["engine_name"] == "kasal"
@@ -254,19 +272,20 @@ class TestEngineConfigEdgeCases:
         json_configs = [
             {
                 "config_key": "llm_settings",
-                "config_value": '{"model": "gpt-4", "temperature": 0.7, "max_tokens": 1000}'
+                "config_value": '{"model": "gpt-4", "temperature": 0.7, "max_tokens": 1000}',
             },
             {
-                "config_key": "tool_config", 
-                "config_value": '{"enabled_tools": ["web_search", "calculator"], "timeout": 30}'
+                "config_key": "tool_config",
+                "config_value": '{"enabled_tools": ["web_search", "calculator"], "timeout": 30}',
             },
             {
                 "config_key": "execution_limits",
-                "config_value": '{"max_concurrent": 5, "timeout_minutes": 60, "retry_attempts": 3}'
-            }
+                "config_value": '{"max_concurrent": 5, "timeout_minutes": 60, "retry_attempts": 3}',
+            },
         ]
-        
+
         import json
+
         for config in json_configs:
             # Assert JSON validity
             parsed = json.loads(config["config_value"])
@@ -281,10 +300,10 @@ class TestEngineConfigEdgeCases:
                 "engine_type": "workflow",
                 "config_key": "debug_mode",
                 "config_value": "true",
-                "enabled": True
+                "enabled": True,
             }
         ]
-        
+
         # Production environment configs
         prod_configs = [
             {
@@ -292,10 +311,10 @@ class TestEngineConfigEdgeCases:
                 "engine_type": "workflow",
                 "config_key": "debug_mode",
                 "config_value": "false",
-                "enabled": True
+                "enabled": True,
             }
         ]
-        
+
         # Staging environment configs
         staging_configs = [
             {
@@ -303,12 +322,12 @@ class TestEngineConfigEdgeCases:
                 "engine_type": "workflow",
                 "config_key": "debug_mode",
                 "config_value": "true",
-                "enabled": False  # Disabled in staging
+                "enabled": False,  # Disabled in staging
             }
         ]
-        
+
         all_configs = dev_configs + prod_configs + staging_configs
-        
+
         for config in all_configs:
             # Assert environment-specific configuration
             assert "crewai_" in config["engine_name"]
@@ -324,24 +343,24 @@ class TestEngineConfigEdgeCases:
                 "engine_type": "feature",
                 "config_key": "new_ui_enabled",
                 "config_value": "true",
-                "enabled": True
+                "enabled": True,
             },
             {
                 "engine_name": "platform",
                 "engine_type": "feature",
                 "config_key": "beta_features",
                 "config_value": "false",
-                "enabled": True
+                "enabled": True,
             },
             {
                 "engine_name": "analytics",
                 "engine_type": "feature",
                 "config_key": "advanced_metrics",
                 "config_value": "true",
-                "enabled": False  # Feature disabled
-            }
+                "enabled": False,  # Feature disabled
+            },
         ]
-        
+
         for flag in feature_flags:
             # Assert feature flag structure
             assert flag["engine_type"] == "feature"
@@ -357,24 +376,24 @@ class TestEngineConfigEdgeCases:
                 "engine_type": "performance",
                 "config_key": "max_concurrent_agents",
                 "config_value": "10",
-                "description": "Maximum number of agents that can run concurrently"
+                "description": "Maximum number of agents that can run concurrently",
             },
             {
                 "engine_name": "kasal",
                 "engine_type": "performance",
                 "config_key": "memory_limit_mb",
                 "config_value": "2048",
-                "description": "Memory limit in megabytes for execution"
+                "description": "Memory limit in megabytes for execution",
             },
             {
                 "engine_name": "kasal",
                 "engine_type": "performance",
                 "config_key": "cache_ttl_seconds",
                 "config_value": "3600",
-                "description": "Cache time-to-live in seconds"
-            }
+                "description": "Cache time-to-live in seconds",
+            },
         ]
-        
+
         for config in performance_configs:
             # Assert performance configuration
             assert config["engine_type"] == "performance"
@@ -390,52 +409,58 @@ class TestEngineConfigEdgeCases:
                 "engine_type": "security",
                 "config_key": "require_auth",
                 "config_value": "true",
-                "description": "Require authentication for all operations"
+                "description": "Require authentication for all operations",
             },
             {
                 "engine_name": "platform",
                 "engine_type": "security",
                 "config_key": "session_timeout_minutes",
                 "config_value": "60",
-                "description": "Session timeout in minutes"
+                "description": "Session timeout in minutes",
             },
             {
                 "engine_name": "platform",
                 "engine_type": "security",
                 "config_key": "encryption_enabled",
                 "config_value": "true",
-                "description": "Enable encryption for sensitive data"
-            }
+                "description": "Enable encryption for sensitive data",
+            },
         ]
-        
+
         for config in security_configs:
             # Assert security configuration
             assert config["engine_type"] == "security"
-            assert config["config_key"] in ["require_auth", "session_timeout_minutes", "encryption_enabled"]
+            assert config["config_key"] in [
+                "require_auth",
+                "session_timeout_minutes",
+                "encryption_enabled",
+            ]
 
     def test_engine_config_data_integrity(self):
         """Test data integrity constraints."""
         # Act
         table = EngineConfig.__table__
-        
+
         # Assert primary key
         primary_keys = [col for col in table.columns if col.primary_key]
         assert len(primary_keys) == 1
-        assert primary_keys[0].name == 'id'
-        
+        assert primary_keys[0].name == "id"
+
         # Assert required fields
-        required_fields = ['engine_name', 'engine_type', 'config_key', 'config_value']
+        required_fields = ["engine_name", "engine_type", "config_key", "config_value"]
         for field_name in required_fields:
             field = table.columns[field_name]
             assert field.nullable is False
-        
+
         # Assert optional fields
-        optional_fields = ['description']
+        optional_fields = ["description"]
         for field_name in optional_fields:
             field = table.columns[field_name]
             assert field.nullable is True
-        
+
         # Assert unique constraint exists
         assert len(table.constraints) > 0
-        unique_constraints = [c for c in table.constraints if hasattr(c, 'columns') and len(c.columns) > 1]
+        unique_constraints = [
+            c for c in table.constraints if hasattr(c, "columns") and len(c.columns) > 1
+        ]
         assert len(unique_constraints) >= 1

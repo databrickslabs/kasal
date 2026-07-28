@@ -21,10 +21,20 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # Date table detection: canonical names (case-insensitive)
-_DATE_TABLE_NAMES = frozenset({
-    "date", "calendar", "dates", "dim_date", "dimdate", "date table", "calendar table",
-    "dim date", "dim calendar", "datetable",
-})
+_DATE_TABLE_NAMES = frozenset(
+    {
+        "date",
+        "calendar",
+        "dates",
+        "dim_date",
+        "dimdate",
+        "date table",
+        "calendar table",
+        "dim date",
+        "dim calendar",
+        "datetable",
+    }
+)
 
 # Date column detection: canonical column names in a date table (case-insensitive)
 _DATE_COLUMN_HINTS = frozenset({"date", "year", "month", "day", "quarter", "week"})
@@ -33,6 +43,7 @@ _DATE_COLUMN_HINTS = frozenset({"date", "year", "month", "day", "quarter", "week
 @dataclass
 class DaxSkeleton:
     """Result of DAX skeleton building."""
+
     skeleton: str = ""
     can_skip_llm: bool = False
     open_placeholders: List[str] = field(default_factory=list)
@@ -151,9 +162,7 @@ class DaxSkeletonBuilder:
         notes = []
 
         if rtype == "filtered_measure":
-            return self._build_filtered_skeleton(
-                resolution, group_cols, active_filters
-            )
+            return self._build_filtered_skeleton(resolution, group_cols, active_filters)
 
         if rtype == "model_measure" and flags.get("has_removefilters"):
             notes.append(
@@ -261,7 +270,9 @@ class DaxSkeletonBuilder:
             skeleton=skeleton,
             can_skip_llm=can_skip,
             open_placeholders=placeholders,
-            strategy_notes=[f"Filtered measure: [{base}] WHERE {filter_col} = \"{filter_val}\""],
+            strategy_notes=[
+                f'Filtered measure: [{base}] WHERE {filter_col} = "{filter_val}"'
+            ],
         )
 
     def _build_composite(
@@ -277,7 +288,9 @@ class DaxSkeletonBuilder:
         sibling_names = resolution.get("sibling_measures", [])
 
         placeholders = []
-        notes = [f"Composite measure aggregating {len(sibling_names)} filtered siblings"]
+        notes = [
+            f"Composite measure aggregating {len(sibling_names)} filtered siblings"
+        ]
 
         # Build VAR lines for each sibling
         var_lines = []
@@ -294,9 +307,7 @@ class DaxSkeletonBuilder:
             if sib_resolution and sib_resolution.get("filter_column"):
                 fc = sib_resolution["filter_column"]
                 fv = sib_resolution.get("filter_value", "")
-                var_lines.append(
-                    f'VAR {var_name} = CALCULATE([{base}], {fc} = "{fv}")'
-                )
+                var_lines.append(f'VAR {var_name} = CALCULATE([{base}], {fc} = "{fv}")')
             else:
                 var_lines.append(f"VAR {var_name} = [{sib_name}]")
             result_parts.append(var_name)
@@ -313,7 +324,7 @@ class DaxSkeletonBuilder:
             f"        {self._format_group_cols(group_cols, placeholders)}"
             f"{filter_lines}\n"
             f"    ),\n"
-            f'{vars_block}\n'
+            f"{vars_block}\n"
             f'    "Result", {result_expr}\n'
             f")"
         )
@@ -347,7 +358,7 @@ class DaxSkeletonBuilder:
                 measure_lines.append(
                     f'    "{label}", CALCULATE([{base}], {fc} = "{fv}")'
                 )
-                notes.append(f"[{label}] = [{base}] WHERE {fc}=\"{fv}\"")
+                notes.append(f'[{label}] = [{base}] WHERE {fc}="{fv}"')
             else:
                 measure_lines.append(f'    "{label}", [{m.get("name", "")}]')
 
@@ -476,7 +487,9 @@ class DaxSkeletonBuilder:
                             date_col = col_name
                             break
                 if date_col is None and cols:
-                    date_col = cols[0] if isinstance(cols[0], str) else cols[0].get("name", "")
+                    date_col = (
+                        cols[0] if isinstance(cols[0], str) else cols[0].get("name", "")
+                    )
                 if date_col:
                     return name, date_col
 
@@ -554,9 +567,7 @@ class DaxSkeletonBuilder:
         return "\n".join(lines)
 
     @staticmethod
-    def _format_group_cols(
-        group_cols: List[str], placeholders: List[str]
-    ) -> str:
+    def _format_group_cols(group_cols: List[str], placeholders: List[str]) -> str:
         """Format grouping columns for SUMMARIZECOLUMNS."""
         if not group_cols:
             placeholders.append("GROUPING_COLUMNS")
@@ -590,19 +601,15 @@ class DaxSkeletonBuilder:
 
             if isinstance(filter_value, list):
                 values = ", ".join(f'"{v}"' for v in filter_value)
-                lines.append(
-                    f'    TREATAS({{{values}}}, \'{table}\'[{col}])'
-                )
+                lines.append(f"    TREATAS({{{values}}}, '{table}'[{col}])")
             elif isinstance(filter_value, str):
                 val = filter_value.strip()
                 if val.upper() == "NOT NULL":
                     lines.append(
-                        f'    FILTER(ALL(\'{table}\'[{col}]), NOT ISBLANK(\'{table}\'[{col}]))'
+                        f"    FILTER(ALL('{table}'[{col}]), NOT ISBLANK('{table}'[{col}]))"
                     )
                 else:
-                    lines.append(
-                        f'    TREATAS({{"{val}"}}, \'{table}\'[{col}])'
-                    )
+                    lines.append(f"    TREATAS({{\"{val}\"}}, '{table}'[{col}])")
 
         if lines:
             return ",\n" + ",\n".join(lines)

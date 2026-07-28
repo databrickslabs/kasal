@@ -6,14 +6,16 @@ this version accepts plain Python arguments and returns structured dicts,
 making it usable directly from scripts, tests, and notebooks without a
 CrewAI context.
 """
+
 from __future__ import annotations
 
 import json
 import logging
-import yaml
 from typing import Any, Dict, Optional
 
-from .constants import STATUS_VALID, STATUS_INVALID, STATUS_EQUIVALENT, STATUS_REVIEW
+import yaml
+
+from .constants import STATUS_EQUIVALENT, STATUS_INVALID, STATUS_REVIEW, STATUS_VALID
 from .data_input_handler import DataInputHandler
 from .expression_validator import ExpressionValidator
 
@@ -170,7 +172,13 @@ class MetricExpressionValidatorPipeline:
                 column_mappings=column_mappings,
             )
             return validator.validate_ucmv()
-        except (OSError, ValueError, yaml.YAMLError, json.JSONDecodeError, RuntimeError) as exc:
+        except (
+            OSError,
+            ValueError,
+            yaml.YAMLError,
+            json.JSONDecodeError,
+            RuntimeError,
+        ) as exc:
             logger.error(
                 "[MetricExpressionValidatorPipeline] File-based validation failed "
                 "for yaml=%s, mapping=%s: %s",

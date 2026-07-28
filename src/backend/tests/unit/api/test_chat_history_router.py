@@ -4,28 +4,28 @@ Tests all endpoints using both direct async function calls and TestClient
 with dependency overrides. Validates group context requirements, pagination,
 and service delegation.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-from types import SimpleNamespace
-from datetime import datetime, timezone
 
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.chat_history_router import (
-    save_chat_message,
-    get_chat_session_messages,
-    get_user_chat_sessions,
-    get_group_chat_sessions,
-    delete_chat_session,
     create_new_chat_session,
-    router,
+    delete_chat_session,
     get_chat_history_service,
+    get_chat_session_messages,
+    get_group_chat_sessions,
+    get_user_chat_sessions,
+    router,
+    save_chat_message,
 )
 from src.core.exceptions import BadRequestError, NotFoundError
 from src.schemas.chat_history import SaveMessageRequest
 from src.utils.user_context import GroupContext
-
 from tests.unit.api.conftest import register_exception_handlers
 
 
@@ -71,6 +71,7 @@ def make_session_info(session_id="sess-1"):
 # ---------------------------------------------------------------------------
 # POST /chat-history/messages
 # ---------------------------------------------------------------------------
+
 
 class TestSaveChatMessage:
     """Tests for save_chat_message endpoint."""
@@ -190,6 +191,7 @@ class TestSaveChatMessage:
 # GET /chat-history/sessions/{session_id}/messages
 # ---------------------------------------------------------------------------
 
+
 class TestGetChatSessionMessages:
     """Tests for get_chat_session_messages endpoint."""
 
@@ -255,6 +257,7 @@ class TestGetChatSessionMessages:
 # GET /chat-history/users/sessions
 # ---------------------------------------------------------------------------
 
+
 class TestGetUserChatSessions:
     """Tests for get_user_chat_sessions endpoint."""
 
@@ -315,6 +318,7 @@ class TestGetUserChatSessions:
 # ---------------------------------------------------------------------------
 # GET /chat-history/sessions
 # ---------------------------------------------------------------------------
+
 
 class TestGetGroupChatSessions:
     """Tests for get_group_chat_sessions endpoint."""
@@ -392,6 +396,7 @@ class TestGetGroupChatSessions:
 # DELETE /chat-history/sessions/{session_id}
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteChatSession:
     """Tests for delete_chat_session endpoint."""
 
@@ -439,6 +444,7 @@ class TestDeleteChatSession:
 # POST /chat-history/sessions/new
 # ---------------------------------------------------------------------------
 
+
 class TestCreateNewChatSession:
     """Tests for create_new_chat_session endpoint."""
 
@@ -447,9 +453,7 @@ class TestCreateNewChatSession:
         svc = MagicMock()
         svc.generate_session_id = MagicMock(return_value="new-sess-123")
 
-        result = await create_new_chat_session(
-            service=svc, group_context=gc()
-        )
+        result = await create_new_chat_session(service=svc, group_context=gc())
 
         assert result["session_id"] == "new-sess-123"
         svc.generate_session_id.assert_called_once()
@@ -459,14 +463,13 @@ class TestCreateNewChatSession:
         svc = MagicMock()
 
         with pytest.raises(BadRequestError, match="No valid group context"):
-            await create_new_chat_session(
-                service=svc, group_context=gc(valid=False)
-            )
+            await create_new_chat_session(service=svc, group_context=gc(valid=False))
 
 
 # ---------------------------------------------------------------------------
 # TestClient integration tests
 # ---------------------------------------------------------------------------
+
 
 class TestChatHistoryIntegration:
     """Integration tests using TestClient with dependency overrides."""
@@ -583,21 +586,18 @@ class TestChatHistoryIntegration:
         assert data["per_page"] == 25
 
     def test_pagination_validation_negative_page(self, client):
-        response = client.get(
-            "/chat-history/sessions/sess-1/messages?page=-1"
-        )
+        response = client.get("/chat-history/sessions/sess-1/messages?page=-1")
         assert response.status_code == 422
 
     def test_pagination_validation_per_page_too_high(self, client):
-        response = client.get(
-            "/chat-history/sessions/sess-1/messages?per_page=200"
-        )
+        response = client.get("/chat-history/sessions/sess-1/messages?per_page=200")
         assert response.status_code == 422
 
 
 # ---------------------------------------------------------------------------
 # Router configuration
 # ---------------------------------------------------------------------------
+
 
 class TestRouterConfiguration:
     """Tests for router prefix and tags."""

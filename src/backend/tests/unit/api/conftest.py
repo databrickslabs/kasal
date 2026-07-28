@@ -14,12 +14,13 @@ Note on the Exception handler:
     middleware that wraps the app, catching any unhandled exceptions and
     returning a proper 500 JSON response.
 """
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse as StarletteJSONResponse
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from src.core.exceptions import KasalError
 
 
@@ -55,9 +56,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     """
 
     @app.exception_handler(KasalError)
-    async def kasal_error_handler(
-        request: Request, exc: KasalError
-    ) -> JSONResponse:
+    async def kasal_error_handler(request: Request, exc: KasalError) -> JSONResponse:
         return JSONResponse(
             status_code=exc.status_code,
             content={"detail": exc.detail},
@@ -65,9 +64,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(ValueError)
-    async def value_error_handler(
-        request: Request, exc: ValueError
-    ) -> JSONResponse:
+    async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(exc)})
 
     app.add_middleware(_GenericExceptionMiddleware)

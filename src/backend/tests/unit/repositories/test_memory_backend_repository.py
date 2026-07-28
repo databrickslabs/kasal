@@ -1,10 +1,11 @@
 """Unit tests for MemoryBackendRepository."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.repositories.memory_backend_repository import MemoryBackendRepository
+import pytest
+
 from src.models.memory_backend import MemoryBackend, MemoryBackendTypeEnum
+from src.repositories.memory_backend_repository import MemoryBackendRepository
 
 
 @pytest.fixture
@@ -110,7 +111,9 @@ class TestSetDefault:
         defaults_result.scalars.return_value.all.return_value = [existing]
 
         # Mock the new backend
-        new_backend = MagicMock(spec=MemoryBackend, group_id="group-1", is_default=False)
+        new_backend = MagicMock(
+            spec=MemoryBackend, group_id="group-1", is_default=False
+        )
 
         # Mock get() call for the target backend
         get_result = MagicMock()

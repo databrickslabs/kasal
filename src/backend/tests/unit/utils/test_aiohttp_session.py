@@ -1,6 +1,7 @@
 """Tests for the shared per-event-loop aiohttp session pool (PERF-012/020)."""
 
 import asyncio
+
 import pytest
 
 from src.utils import aiohttp_session as m
@@ -10,9 +11,11 @@ from src.utils import aiohttp_session as m
 def _clean_pool():
     m._SESSIONS.clear()
     yield
+
     # Close anything we created on this loop so aiohttp doesn't warn
     async def _cleanup():
         await m.close_shared_sessions()
+
     try:
         asyncio.get_event_loop_policy().new_event_loop()  # no-op guard
     except Exception:

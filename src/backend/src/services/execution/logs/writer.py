@@ -7,16 +7,16 @@ from the database, and managing the background log writer task.
 
 import asyncio
 import json
-from typing import Dict, Set, List, Any, Optional
 from datetime import datetime
 from queue import Empty
+from typing import Any, Dict, List, Optional, Set
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
 from src.models.execution_logs import ExecutionLog
-from src.schemas.execution_logs import LogMessage, ExecutionLogResponse
 from src.repositories.execution_logs_repository import ExecutionLogsRepository
+from src.schemas.execution_logs import ExecutionLogResponse, LogMessage
 from src.services.execution.logs.queue import enqueue_log, get_job_output_queue
 from src.utils.user_context import GroupContext
 
@@ -115,7 +115,9 @@ class ExecutionLogsService:
             List of execution log responses for the group
         """
         # First verify the execution belongs to the user's group
-        from src.repositories.execution_history_repository import ExecutionHistoryRepository
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
 
         # Get group IDs from context for filtering
         group_ids = group_context.group_ids if group_context and group_context.primary_group_id else None

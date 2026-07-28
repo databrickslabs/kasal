@@ -25,7 +25,7 @@ def _strip_provider_prefix(model: str) -> str:
     model must be the bare name. Strip only the leading ``databricks/`` provider
     prefix — never the ``databricks-`` name prefix of a model id."""
     if model.startswith("databricks/"):
-        return model[len("databricks/"):]
+        return model[len("databricks/") :]
     return model
 
 

@@ -5,15 +5,16 @@ This module provides a centralized service for retrieving, setting,
 and managing secrets in Databricks Secret Store.
 """
 
-import os
-import logging
-import aiohttp
 import base64
-from typing import List, Optional, Dict, Tuple, Any
+import logging
+import os
+from typing import Any, Dict, List, Optional, Tuple
+
+import aiohttp
 
 from src.core.base_service import BaseService
 from src.repositories.databricks_config_repository import DatabricksConfigRepository
-from src.utils.telemetry import get_user_agent_header, KasalProduct
+from src.utils.telemetry import KasalProduct, get_user_agent_header
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -42,37 +43,38 @@ class DatabricksSecretsService(BaseService):
         if self._databricks_service is None:
             # Import here to avoid circular imports at module level
             from src.services.databricks.workspace.service import DatabricksService
+
             self._databricks_service = DatabricksService(self.session)
         return self._databricks_service
-    
+
     def set_databricks_service(self, databricks_service):
         """
         Set the databricks_service to resolve circular dependency.
-        
+
         Args:
             databricks_service: DatabricksService instance
         """
         # This method is needed to prevent circular dependency issues
         # when DatabricksService and DatabricksSecretsService reference each other
-        if not hasattr(self, 'databricks_service') or self.databricks_service is None:
+        if not hasattr(self, "databricks_service") or self.databricks_service is None:
             self.databricks_service = databricks_service
-    
+
     def set_api_keys_service(self, api_keys_service):
         """
         Set the API keys service for accessing API keys.
-        
+
         Args:
             api_keys_service: ApiKeysService instance
         """
         self.api_keys_service = api_keys_service
-    
+
     async def validate_databricks_config(self) -> Tuple[str, str]:
         """
         Get Databricks configuration from database.
-        
+
         Returns:
             Tuple containing workspace URL and secret scope
-            
+
         Raises:
             ValueError: If Databricks is not configured properly
         """
@@ -80,21 +82,22 @@ class DatabricksSecretsService(BaseService):
         if self.databricks_service is None:
             # Import here to avoid circular imports
             from src.services.databricks.workspace.service import DatabricksService
+
             self.databricks_service = DatabricksService(self.session)
-            
+
         config = await self.databricks_service.get_databricks_config()
         if not config:
             raise ValueError("Databricks configuration not found")
-        
+
         # Check if Databricks is enabled
         if not config.is_enabled:
             raise ValueError("Databricks integration is disabled")
-        
+
         # Use a default workspace_url if not provided
         workspace_url = config.workspace_url or ""
-        
+
         return workspace_url, config.secret_scope
-    
+
     async def get_databricks_secrets(self, scope: str) -> List[Dict[str, str]]:
         """
         Get secret METADATA (names only) from Databricks for a specific scope.
@@ -117,31 +120,33 @@ class DatabricksSecretsService(BaseService):
             if self.databricks_service is None:
                 # Import here to avoid circular imports
                 from src.services.databricks.workspace.service import DatabricksService
+
                 self.databricks_service = DatabricksService(self.session)
-            
+
             # Get workspace URL and token
             config = await self.databricks_service.get_databricks_config()
             if not config or not config.is_enabled or not config.workspace_url:
                 logger.warning("Databricks not configured properly")
                 return []
-            
+
             # Use unified authentication
             from src.utils.databricks_auth import get_auth_context
+
             auth = await get_auth_context()
             if not auth:
                 logger.warning("Failed to get authentication context")
                 return []
             token = auth.token
-            
+
             # Make REST API call to list secrets in scope
             url = f"{config.workspace_url}/api/2.0/secrets/list"
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                **get_user_agent_header(KasalProduct.SECRET)
+                **get_user_agent_header(KasalProduct.SECRET),
             }
             data = {"scope": scope}
-            
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=data, headers=headers) as response:
                     if response.status == 200:
@@ -155,14 +160,17 @@ class DatabricksSecretsService(BaseService):
                         secrets_metadata = []
                         for secret in secrets:
                             secret_key = secret.get("key")
-                            secrets_metadata.append({
-                                "id": hash(f"{scope}:{secret_key}") % 10000,  # Some "unique" ID
-                                "name": secret_key,
-                                "value": "",  # Never expose the value over the API
-                                "description": "",  # Databricks doesn't store descriptions
-                                "scope": scope,
-                                "source": "databricks"
-                            })
+                            secrets_metadata.append(
+                                {
+                                    "id": hash(f"{scope}:{secret_key}")
+                                    % 10000,  # Some "unique" ID
+                                    "name": secret_key,
+                                    "value": "",  # Never expose the value over the API
+                                    "description": "",  # Databricks doesn't store descriptions
+                                    "scope": scope,
+                                    "source": "databricks",
+                                }
+                            )
 
                         return secrets_metadata
                     else:
@@ -172,15 +180,15 @@ class DatabricksSecretsService(BaseService):
         except Exception as e:
             logger.error(f"Error getting Databricks secrets: {str(e)}")
             return []
-    
+
     async def get_databricks_secret_value(self, scope: str, key: str) -> str:
         """
         Get the value of a specific secret from Databricks.
-        
+
         Args:
             scope: Secret scope in Databricks
             key: Secret key
-            
+
         Returns:
             Secret value if found, else empty string
         """
@@ -189,31 +197,33 @@ class DatabricksSecretsService(BaseService):
             if self.databricks_service is None:
                 # Import here to avoid circular imports
                 from src.services.databricks.workspace.service import DatabricksService
+
                 self.databricks_service = DatabricksService(self.session)
-            
+
             # Get workspace URL and token
             config = await self.databricks_service.get_databricks_config()
             if not config or not config.is_enabled or not config.workspace_url:
                 logger.warning("Databricks not configured properly")
                 return ""
-            
+
             # Use unified authentication
             from src.utils.databricks_auth import get_auth_context
+
             auth = await get_auth_context()
             if not auth:
                 logger.warning("Failed to get authentication context")
                 return ""
             token = auth.token
-            
+
             # Make REST API call to get secret value
             url = f"{config.workspace_url}/api/2.0/secrets/get"
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                **get_user_agent_header(KasalProduct.SECRET)
+                **get_user_agent_header(KasalProduct.SECRET),
             }
             data = {"scope": scope, "key": key}
-            
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=data, headers=headers) as response:
                     if response.status == 200:
@@ -221,27 +231,33 @@ class DatabricksSecretsService(BaseService):
                         # Handle base64 encoded values from Databricks
                         secret_value_encoded = result.get("value", "")
                         try:
-                            secret_value = base64.b64decode(secret_value_encoded).decode('utf-8')
+                            secret_value = base64.b64decode(
+                                secret_value_encoded
+                            ).decode("utf-8")
                             return secret_value
                         except:
                             return secret_value_encoded
                     else:
                         error_text = await response.text()
-                        logger.error(f"Error getting Databricks secret value: {error_text}")
+                        logger.error(
+                            f"Error getting Databricks secret value: {error_text}"
+                        )
                         return ""
         except Exception as e:
             logger.error(f"Error getting Databricks secret value: {str(e)}")
             return ""
-    
-    async def set_databricks_secret_value(self, scope: str, key: str, value: str) -> bool:
+
+    async def set_databricks_secret_value(
+        self, scope: str, key: str, value: str
+    ) -> bool:
         """
         Set the value of a specific secret in Databricks.
-        
+
         Args:
             scope: Secret scope in Databricks
             key: Secret key
             value: Secret value
-            
+
         Returns:
             True if successful, else False
         """
@@ -250,58 +266,60 @@ class DatabricksSecretsService(BaseService):
             if self.databricks_service is None:
                 # Import here to avoid circular imports
                 from src.services.databricks.workspace.service import DatabricksService
+
                 self.databricks_service = DatabricksService(self.session)
-            
+
             # Get workspace URL and token
             config = await self.databricks_service.get_databricks_config()
             if not config or not config.is_enabled or not config.workspace_url:
                 logger.warning("Databricks not configured properly")
                 return False
-            
+
             # Use unified authentication
             from src.utils.databricks_auth import get_auth_context
+
             auth = await get_auth_context()
             if not auth:
                 logger.warning("Failed to get authentication context")
                 return False
             token = auth.token
-            
+
             # Ensure the scope exists
-            await self.create_databricks_secret_scope(config.workspace_url, token, scope)
-            
+            await self.create_databricks_secret_scope(
+                config.workspace_url, token, scope
+            )
+
             # Make REST API call to set secret value
             url = f"{config.workspace_url}/api/2.0/secrets/put"
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                **get_user_agent_header(KasalProduct.SECRET)
+                **get_user_agent_header(KasalProduct.SECRET),
             }
-            data = {
-                "scope": scope,
-                "key": key,
-                "string_value": value
-            }
-            
+            data = {"scope": scope, "key": key, "string_value": value}
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=data, headers=headers) as response:
                     if response.status == 200:
                         return True
                     else:
                         error_text = await response.text()
-                        logger.error(f"Error setting Databricks secret value: {error_text}")
+                        logger.error(
+                            f"Error setting Databricks secret value: {error_text}"
+                        )
                         return False
         except Exception as e:
             logger.error(f"Error setting Databricks secret value: {str(e)}")
             return False
-    
+
     async def delete_databricks_secret(self, scope: str, key: str) -> bool:
         """
         Delete a specific secret from Databricks.
-        
+
         Args:
             scope: Secret scope in Databricks
             key: Secret key
-            
+
         Returns:
             True if successful, else False
         """
@@ -310,31 +328,33 @@ class DatabricksSecretsService(BaseService):
             if self.databricks_service is None:
                 # Import here to avoid circular imports
                 from src.services.databricks.workspace.service import DatabricksService
+
                 self.databricks_service = DatabricksService(self.session)
-            
+
             # Get workspace URL and token
             config = await self.databricks_service.get_databricks_config()
             if not config or not config.is_enabled or not config.workspace_url:
                 logger.warning("Databricks not configured properly")
                 return False
-            
+
             # Use unified authentication
             from src.utils.databricks_auth import get_auth_context
+
             auth = await get_auth_context()
             if not auth:
                 logger.warning("Failed to get authentication context")
                 return False
             token = auth.token
-            
+
             # Make REST API call to delete secret
             url = f"{config.workspace_url}/api/2.0/secrets/delete"
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                **get_user_agent_header(KasalProduct.SECRET)
+                **get_user_agent_header(KasalProduct.SECRET),
             }
             data = {"scope": scope, "key": key}
-            
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=data, headers=headers) as response:
                     if response.status == 200:
@@ -346,16 +366,18 @@ class DatabricksSecretsService(BaseService):
         except Exception as e:
             logger.error(f"Error deleting Databricks secret: {str(e)}")
             return False
-    
-    async def create_databricks_secret_scope(self, workspace_url: str, token: str, scope: str) -> bool:
+
+    async def create_databricks_secret_scope(
+        self, workspace_url: str, token: str, scope: str
+    ) -> bool:
         """
         Create a secret scope in Databricks.
-        
+
         Args:
             workspace_url: Databricks workspace URL
             token: Databricks access token
             scope: Secret scope name to create
-            
+
         Returns:
             True if successful, else False
         """
@@ -365,10 +387,10 @@ class DatabricksSecretsService(BaseService):
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
-                **get_user_agent_header(KasalProduct.SECRET)
+                **get_user_agent_header(KasalProduct.SECRET),
             }
             data = {"scope": scope, "initial_manage_principal": "users"}
-            
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=data, headers=headers) as response:
                     if response.status == 200:
@@ -376,28 +398,35 @@ class DatabricksSecretsService(BaseService):
                     elif response.status == 400:
                         # Check if error is because scope already exists
                         error_text = await response.text()
-                        if "already exists" in error_text or "RESOURCE_ALREADY_EXISTS" in error_text:
+                        if (
+                            "already exists" in error_text
+                            or "RESOURCE_ALREADY_EXISTS" in error_text
+                        ):
                             logger.info(f"Secret scope '{scope}' already exists")
                             return True
                         else:
-                            logger.error(f"Error creating Databricks secret scope: {error_text}")
+                            logger.error(
+                                f"Error creating Databricks secret scope: {error_text}"
+                            )
                             return False
                     else:
                         error_text = await response.text()
-                        logger.error(f"Error creating Databricks secret scope: {error_text}")
+                        logger.error(
+                            f"Error creating Databricks secret scope: {error_text}"
+                        )
                         return False
         except Exception as e:
             logger.error(f"Error creating Databricks secret scope: {str(e)}")
             return False
-            
+
     async def set_databricks_token(self, scope: str, token: str) -> bool:
         """
         Set Databricks token in the specified scope.
-        
+
         Args:
             scope: Secret scope in Databricks
             token: Databricks token value
-            
+
         Returns:
             True if successful, else False
         """
@@ -407,11 +436,11 @@ class DatabricksSecretsService(BaseService):
     async def setup_provider_api_key(cls, db: Any, key_name: str) -> bool:
         """
         Set up an API key for a provider from database.
-        
+
         Args:
             db: Database session
             key_name: Name of the API key to set up
-            
+
         Returns:
             True if successful, else False
         """
@@ -422,34 +451,48 @@ class DatabricksSecretsService(BaseService):
             # SECURITY: Get group_id (db parameter might be session or group_id depending on caller)
             # This is a class method so we need to infer group_id from context
             from src.utils.user_context import UserContext
+
             try:
                 group_context = UserContext.get_group_context()
-                group_id = group_context.primary_group_id if group_context and hasattr(group_context, 'primary_group_id') else None
+                group_id = (
+                    group_context.primary_group_id
+                    if group_context and hasattr(group_context, "primary_group_id")
+                    else None
+                )
             except Exception:
                 group_id = None
 
             # Try to get API key from API keys table
-            value = await ApiKeysService.get_api_key_value(db, key_name, group_id=group_id)
-            
+            value = await ApiKeysService.get_api_key_value(
+                db, key_name, group_id=group_id
+            )
+
             # If not found in API keys, try Databricks secrets
             if not value:
                 # Create an instance to use instance methods
                 service = cls(db)
-                
+
                 try:
                     # Since we're creating a new instance, databricks_service won't be set
                     # Import DatabricksService here to avoid circular imports
-                    from src.services.databricks.workspace.service import DatabricksService
+                    from src.services.databricks.workspace.service import (
+                        DatabricksService,
+                    )
+
                     service.databricks_service = DatabricksService(db)
-                    
+
                     # Get secret scope from config
                     workspace_url, scope = await service.validate_databricks_config()
                     if workspace_url and scope:
                         # Try to get from Databricks
-                        value = await service.get_databricks_secret_value(scope, key_name)
+                        value = await service.get_databricks_secret_value(
+                            scope, key_name
+                        )
                 except Exception as e:
-                    logger.warning(f"Could not get secret scope for key '{key_name}': {str(e)}")
-            
+                    logger.warning(
+                        f"Could not get secret scope for key '{key_name}': {str(e)}"
+                    )
+
             # Set environment variable if value found
             if value:
                 os.environ[key_name] = value
@@ -461,23 +504,23 @@ class DatabricksSecretsService(BaseService):
         except Exception as e:
             logger.error(f"Error setting up API key '{key_name}': {str(e)}")
             return False
-            
+
     @staticmethod
     def _setup_provider_api_key_sync(db: Any, key_name: str) -> bool:
         """
         Set up an API key for any provider from the database (synchronous).
-        
+
         Args:
             db: Database session
             key_name: Name of the API key
-            
+
         Returns:
             True if successful, False otherwise
         """
         try:
             # Import here to avoid circular imports
             from src.services.settings.api_keys import ApiKeysService
-            
+
             # Use the dedicated static method for synchronous API key setup
             return ApiKeysService.setup_provider_api_key_sync(db, key_name)
         except Exception as e:
@@ -487,7 +530,7 @@ class DatabricksSecretsService(BaseService):
     async def get_personal_access_token(self) -> str:
         """
         Get the Databricks personal access token from the repository.
-        
+
         Returns:
             str: The personal access token or empty string if not found
         """
@@ -495,21 +538,23 @@ class DatabricksSecretsService(BaseService):
             if not self.api_keys_service:
                 logger.error("API keys service not initialized")
                 return ""
-            
+
             # Use the service method to get the API key value
-            token = await self.api_keys_service.get_api_key_value("DATABRICKS_PERSONAL_ACCESS_TOKEN")
+            token = await self.api_keys_service.get_api_key_value(
+                "DATABRICKS_PERSONAL_ACCESS_TOKEN"
+            )
             return token or ""
         except Exception as e:
             logger.error(f"Error getting personal access token: {str(e)}")
             return ""
-    
+
     async def get_provider_api_key(self, provider: str) -> str:
         """
         Get the provider API key from the repository.
-        
+
         Args:
             provider: The provider name
-            
+
         Returns:
             str: The provider API key or empty string if not found
         """
@@ -517,20 +562,23 @@ class DatabricksSecretsService(BaseService):
             if not self.api_keys_service:
                 logger.error("API keys service not initialized")
                 return ""
-            
+
             # Use the service static method to get provider API key
             from src.services.settings.api_keys import ApiKeysService
+
             # SECURITY: Pass group_id for multi-tenant isolation
-            key = await ApiKeysService.get_provider_api_key(provider, group_id=self.group_id)
+            key = await ApiKeysService.get_provider_api_key(
+                provider, group_id=self.group_id
+            )
             return key or ""
         except Exception as e:
             logger.error(f"Error getting provider API key: {str(e)}")
             return ""
-    
+
     async def get_all_databricks_tokens(self) -> List[str]:
         """
         Get all available Databricks tokens from the repository.
-        
+
         Returns:
             List[str]: List of available tokens
         """
@@ -540,17 +588,17 @@ class DatabricksSecretsService(BaseService):
             token_keys = [
                 "DATABRICKS_TOKEN",
                 "DATABRICKS_API_KEY",
-                "DATABRICKS_PERSONAL_ACCESS_TOKEN"
+                "DATABRICKS_PERSONAL_ACCESS_TOKEN",
             ]
-            
+
             for key in token_keys:
                 if not self.api_keys_service:
                     continue
                 value = await self.api_keys_service.get_api_key_value(key)
                 if value:
                     tokens.append(value)
-            
+
             return tokens
         except Exception as e:
             logger.error(f"Error getting all Databricks tokens: {str(e)}")
-            return [] 
+            return []

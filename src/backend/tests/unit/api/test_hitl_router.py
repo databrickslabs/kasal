@@ -16,11 +16,27 @@ Tests cover:
 - User token passing for OBO authentication
 """
 
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from src.api.hitl_router import (
+    approve_gate,
+    create_webhook,
+    delete_webhook,
+    get_approval,
+    get_execution_hitl_status,
+    get_hitl_service,
+    get_hitl_webhook_service,
+    get_pending_approvals,
+    get_webhook,
+    list_webhooks,
+    reject_gate,
+    router,
+    update_webhook,
+)
 from src.core.exceptions import (
     ConflictError,
     ForbiddenError,
@@ -28,56 +44,40 @@ from src.core.exceptions import (
     KasalError,
     NotFoundError,
 )
-
-from src.api.hitl_router import (
-    router,
-    get_pending_approvals,
-    get_approval,
-    approve_gate,
-    reject_gate,
-    get_execution_hitl_status,
-    list_webhooks,
-    create_webhook,
-    get_webhook,
-    update_webhook,
-    delete_webhook,
-    get_hitl_service,
-    get_hitl_webhook_service,
-)
 from src.schemas.hitl import (
-    HITLApprovalResponse,
-    HITLApprovalListResponse,
-    HITLApproveRequest,
-    HITLRejectRequest,
-    HITLActionResponse,
     ExecutionHITLStatus,
+    HITLActionResponse,
+    HITLApprovalListResponse,
+    HITLApprovalResponse,
     HITLApprovalStatusEnum,
+    HITLApproveRequest,
     HITLRejectionActionEnum,
+    HITLRejectRequest,
     HITLWebhookCreate,
-    HITLWebhookUpdate,
-    HITLWebhookResponse,
-    HITLWebhookListResponse,
     HITLWebhookEventEnum,
+    HITLWebhookListResponse,
+    HITLWebhookResponse,
+    HITLWebhookUpdate,
 )
 from src.services.hitl.service import (
-    HITLService,
-    HITLServiceError,
-    HITLApprovalNotFoundError,
     HITLApprovalAlreadyProcessedError,
     HITLApprovalExpiredError,
+    HITLApprovalNotFoundError,
     HITLPermissionDeniedError,
+    HITLService,
+    HITLServiceError,
 )
 from src.services.hitl.webhook import (
+    HITLWebhookNotFoundError,
     HITLWebhookService,
     HITLWebhookServiceError,
-    HITLWebhookNotFoundError,
 )
 from src.utils.user_context import GroupContext
-
 
 # =============================================================================
 # Fixtures
 # =============================================================================
+
 
 @pytest.fixture
 def mock_group_context() -> GroupContext:
@@ -87,7 +87,7 @@ def mock_group_context() -> GroupContext:
         group_email="test@example.com",
         email_domain="example.com",
         user_role="admin",
-        access_token="test-obo-token-123"
+        access_token="test-obo-token-123",
     )
 
 
@@ -99,7 +99,7 @@ def mock_group_context_no_token() -> GroupContext:
         group_email="test@example.com",
         email_domain="example.com",
         user_role="admin",
-        access_token=None
+        access_token=None,
     )
 
 
@@ -230,6 +230,7 @@ def sample_webhook_list_response(
 # Router Configuration Tests
 # =============================================================================
 
+
 class TestRouterConfiguration:
     """Tests for router configuration."""
 
@@ -245,6 +246,7 @@ class TestRouterConfiguration:
 # =============================================================================
 # Dependency Provider Tests
 # =============================================================================
+
 
 class TestDependencyProviders:
     """Tests for dependency providers."""
@@ -270,6 +272,7 @@ class TestDependencyProviders:
 # GET /pending Tests
 # =============================================================================
 
+
 class TestGetPendingApprovals:
     """Tests for get_pending_approvals endpoint."""
 
@@ -281,7 +284,9 @@ class TestGetPendingApprovals:
         sample_approval_list_response: HITLApprovalListResponse,
     ):
         """Test successful retrieval of pending approvals."""
-        mock_hitl_service.get_pending_approvals.return_value = sample_approval_list_response
+        mock_hitl_service.get_pending_approvals.return_value = (
+            sample_approval_list_response
+        )
 
         result = await get_pending_approvals(
             service=mock_hitl_service,
@@ -333,7 +338,9 @@ class TestGetPendingApprovals:
         """Test pagination parameters are passed correctly."""
         sample_approval_list_response.limit = 10
         sample_approval_list_response.offset = 20
-        mock_hitl_service.get_pending_approvals.return_value = sample_approval_list_response
+        mock_hitl_service.get_pending_approvals.return_value = (
+            sample_approval_list_response
+        )
 
         result = await get_pending_approvals(
             service=mock_hitl_service,
@@ -377,6 +384,7 @@ class TestGetPendingApprovals:
 # GET /approvals/{approval_id} Tests
 # =============================================================================
 
+
 class TestGetApproval:
     """Tests for get_approval endpoint."""
 
@@ -410,7 +418,9 @@ class TestGetApproval:
         mock_approval.group_id = "test-group-123"
 
         mock_hitl_service.approval_repo = AsyncMock()
-        mock_hitl_service.approval_repo.get_by_id = AsyncMock(return_value=mock_approval)
+        mock_hitl_service.approval_repo.get_by_id = AsyncMock(
+            return_value=mock_approval
+        )
 
         result = await get_approval(
             approval_id=1,
@@ -436,6 +446,7 @@ class TestGetApproval:
         """view=ui strips the downstream-handoff arrays (measures_json/mquery_json/
         relationships_json) but keeps proposed_config + summary."""
         import json as _json
+
         now = datetime.now(timezone.utc)
         full = {
             "proposed_config": {"join_key_map": {"a": 1}},
@@ -447,30 +458,46 @@ class TestGetApproval:
         }
         mock_approval = MagicMock()
         for attr, val in dict(
-            id=1, execution_id="e", flow_id="f", gate_node_id="g", crew_sequence=1,
-            status="pending", gate_config={}, previous_crew_name="Config Gen",
-            previous_crew_output=_json.dumps(full), flow_state_snapshot={},
-            responded_by=None, responded_at=None, approval_comment=None,
-            rejection_reason=None, rejection_action=None,
-            expires_at=now + timedelta(hours=1), is_expired=False, created_at=now,
+            id=1,
+            execution_id="e",
+            flow_id="f",
+            gate_node_id="g",
+            crew_sequence=1,
+            status="pending",
+            gate_config={},
+            previous_crew_name="Config Gen",
+            previous_crew_output=_json.dumps(full),
+            flow_state_snapshot={},
+            responded_by=None,
+            responded_at=None,
+            approval_comment=None,
+            rejection_reason=None,
+            rejection_action=None,
+            expires_at=now + timedelta(hours=1),
+            is_expired=False,
+            created_at=now,
             group_id="test-group-123",
         ).items():
             setattr(mock_approval, attr, val)
 
         mock_hitl_service.approval_repo = AsyncMock()
-        mock_hitl_service.approval_repo.get_by_id = AsyncMock(return_value=mock_approval)
+        mock_hitl_service.approval_repo.get_by_id = AsyncMock(
+            return_value=mock_approval
+        )
 
         result = await get_approval(
-            approval_id=1, service=mock_hitl_service,
-            group_context=mock_group_context, view="ui",
+            approval_id=1,
+            service=mock_hitl_service,
+            group_context=mock_group_context,
+            view="ui",
         )
 
         projected = _json.loads(result.previous_crew_output)
-        assert "proposed_config" in projected      # kept
-        assert "summary" in projected              # kept
+        assert "proposed_config" in projected  # kept
+        assert "summary" in projected  # kept
         assert "measure_usage_ranking" in projected  # kept (usage counter)
-        assert "measures_json" not in projected    # stripped
-        assert "mquery_json" not in projected      # stripped
+        assert "measures_json" not in projected  # stripped
+        assert "mquery_json" not in projected  # stripped
         assert "relationships_json" not in projected  # stripped
         # has-flag stays true; size reflects the projected (smaller) output.
         assert result.has_previous_crew_output is True
@@ -485,25 +512,42 @@ class TestGetApproval:
         """A validator gate output (yaml/sql/stats) has none of the strip keys,
         so view=ui returns it unchanged."""
         import json as _json
+
         now = datetime.now(timezone.utc)
         validator_out = {"yaml": {"t": "..."}, "sql": {"t": "..."}, "stats": {}}
         mock_approval = MagicMock()
         for attr, val in dict(
-            id=2, execution_id="e", flow_id="f", gate_node_id="g", crew_sequence=2,
-            status="pending", gate_config={}, previous_crew_name="Validator",
-            previous_crew_output=_json.dumps(validator_out), flow_state_snapshot={},
-            responded_by=None, responded_at=None, approval_comment=None,
-            rejection_reason=None, rejection_action=None,
-            expires_at=now + timedelta(hours=1), is_expired=False, created_at=now,
+            id=2,
+            execution_id="e",
+            flow_id="f",
+            gate_node_id="g",
+            crew_sequence=2,
+            status="pending",
+            gate_config={},
+            previous_crew_name="Validator",
+            previous_crew_output=_json.dumps(validator_out),
+            flow_state_snapshot={},
+            responded_by=None,
+            responded_at=None,
+            approval_comment=None,
+            rejection_reason=None,
+            rejection_action=None,
+            expires_at=now + timedelta(hours=1),
+            is_expired=False,
+            created_at=now,
             group_id="test-group-123",
         ).items():
             setattr(mock_approval, attr, val)
         mock_hitl_service.approval_repo = AsyncMock()
-        mock_hitl_service.approval_repo.get_by_id = AsyncMock(return_value=mock_approval)
+        mock_hitl_service.approval_repo.get_by_id = AsyncMock(
+            return_value=mock_approval
+        )
 
         result = await get_approval(
-            approval_id=2, service=mock_hitl_service,
-            group_context=mock_group_context, view="ui",
+            approval_id=2,
+            service=mock_hitl_service,
+            group_context=mock_group_context,
+            view="ui",
         )
         assert _json.loads(result.previous_crew_output) == validator_out
 
@@ -553,6 +597,7 @@ class TestGetApproval:
 # =============================================================================
 # POST /approvals/{approval_id}/approve Tests
 # =============================================================================
+
 
 class TestApproveGate:
     """Tests for approve_gate endpoint."""
@@ -784,9 +829,7 @@ class TestApproveGate:
 
         # Create context with None email
         context = GroupContext(
-            group_ids=["test-group"],
-            group_email=None,
-            access_token="token"
+            group_ids=["test-group"], group_email=None, access_token="token"
         )
 
         await approve_gate(
@@ -803,6 +846,7 @@ class TestApproveGate:
 # =============================================================================
 # POST /approvals/{approval_id}/reject Tests
 # =============================================================================
+
 
 class TestRejectGate:
     """Tests for reject_gate endpoint."""
@@ -996,6 +1040,7 @@ class TestRejectGate:
 # GET /execution/{execution_id} Tests
 # =============================================================================
 
+
 class TestGetExecutionHITLStatus:
     """Tests for get_execution_hitl_status endpoint."""
 
@@ -1076,6 +1121,7 @@ class TestGetExecutionHITLStatus:
 # =============================================================================
 # Webhook Endpoint Tests
 # =============================================================================
+
 
 class TestListWebhooks:
     """Tests for list_webhooks endpoint."""
@@ -1460,6 +1506,7 @@ class TestDeleteWebhook:
 # =============================================================================
 # Integration-style Tests (testing endpoint functions directly)
 # =============================================================================
+
 
 class TestEndpointIntegration:
     """Integration-style tests for HITL router endpoints."""

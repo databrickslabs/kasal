@@ -5,12 +5,13 @@ Tests SQL aggregation building and filter processing for SQL query generation.
 """
 
 import pytest
+
 from src.services.converters.formats.sql.helpers.sql_aggregations import (
     SQLAggregationBuilder,
     SQLFilterProcessor,
     detect_and_build_sql_aggregation,
 )
-from src.services.converters.formats.sql.models import SQLDialect, SQLAggregationType
+from src.services.converters.formats.sql.models import SQLAggregationType, SQLDialect
 
 
 class TestSQLAggregationBuilder:
@@ -45,7 +46,9 @@ class TestSQLAggregationBuilder:
         assert SQLAggregationType.AVG in standard_builder.aggregation_templates
         assert SQLAggregationType.MIN in standard_builder.aggregation_templates
         assert SQLAggregationType.MAX in standard_builder.aggregation_templates
-        assert SQLAggregationType.COUNT_DISTINCT in standard_builder.aggregation_templates
+        assert (
+            SQLAggregationType.COUNT_DISTINCT in standard_builder.aggregation_templates
+        )
         assert SQLAggregationType.WEIGHTED_AVG in standard_builder.aggregation_templates
 
     # ========== Identifier Quoting Tests ==========
@@ -65,20 +68,14 @@ class TestSQLAggregationBuilder:
     def test_build_sum_standard(self, standard_builder):
         """Test building SUM aggregation with STANDARD dialect"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.SUM,
-            "amount",
-            "Sales",
-            {}
+            SQLAggregationType.SUM, "amount", "Sales", {}
         )
         assert result == 'SUM("Sales"."amount")'
 
     def test_build_sum_databricks(self, databricks_builder):
         """Test building SUM aggregation with DATABRICKS dialect"""
         result = databricks_builder.build_aggregation(
-            SQLAggregationType.SUM,
-            "revenue",
-            "FactSales",
-            {}
+            SQLAggregationType.SUM, "revenue", "FactSales", {}
         )
         assert result == "SUM(`FactSales`.`revenue`)"
 
@@ -88,7 +85,7 @@ class TestSQLAggregationBuilder:
             SQLAggregationType.SUM,
             "CASE WHEN status = 'active' THEN 1 ELSE 0 END",
             "Orders",
-            {}
+            {},
         )
         assert result == "SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END)"
 
@@ -97,30 +94,21 @@ class TestSQLAggregationBuilder:
     def test_build_count_standard(self, standard_builder):
         """Test building COUNT aggregation"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.COUNT,
-            "order_id",
-            "Orders",
-            {}
+            SQLAggregationType.COUNT, "order_id", "Orders", {}
         )
         assert result == 'COUNT("Orders"."order_id")'
 
     def test_build_count_star(self, standard_builder):
         """Test building COUNT(*) aggregation"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.COUNT,
-            "*",
-            "Customers",
-            {}
+            SQLAggregationType.COUNT, "*", "Customers", {}
         )
         assert result == "COUNT(*)"
 
     def test_build_count_keyword(self, standard_builder):
         """Test building COUNT with COUNT keyword in column name"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.COUNT,
-            "COUNT",
-            "Table",
-            {}
+            SQLAggregationType.COUNT, "COUNT", "Table", {}
         )
         assert result == "COUNT(*)"
 
@@ -129,20 +117,14 @@ class TestSQLAggregationBuilder:
     def test_build_count_distinct_standard(self, standard_builder):
         """Test building COUNT DISTINCT aggregation"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.COUNT_DISTINCT,
-            "customer_id",
-            "Sales",
-            {}
+            SQLAggregationType.COUNT_DISTINCT, "customer_id", "Sales", {}
         )
         assert result == 'COUNT(DISTINCT "Sales"."customer_id")'
 
     def test_build_count_distinct_databricks(self, databricks_builder):
         """Test building COUNT DISTINCT with DATABRICKS dialect"""
         result = databricks_builder.build_aggregation(
-            SQLAggregationType.COUNT_DISTINCT,
-            "product_id",
-            "Transactions",
-            {}
+            SQLAggregationType.COUNT_DISTINCT, "product_id", "Transactions", {}
         )
         assert result == "COUNT(DISTINCT `Transactions`.`product_id`)"
 
@@ -151,10 +133,7 @@ class TestSQLAggregationBuilder:
     def test_build_avg_standard(self, standard_builder):
         """Test building AVG aggregation"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.AVG,
-            "price",
-            "Products",
-            {}
+            SQLAggregationType.AVG, "price", "Products", {}
         )
         assert result == 'AVG("Products"."price")'
 
@@ -163,20 +142,14 @@ class TestSQLAggregationBuilder:
     def test_build_min_standard(self, standard_builder):
         """Test building MIN aggregation"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.MIN,
-            "date",
-            "Events",
-            {}
+            SQLAggregationType.MIN, "date", "Events", {}
         )
         assert result == 'MIN("Events"."date")'
 
     def test_build_max_standard(self, standard_builder):
         """Test building MAX aggregation"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.MAX,
-            "value",
-            "Metrics",
-            {}
+            SQLAggregationType.MAX, "value", "Metrics", {}
         )
         assert result == 'MAX("Metrics"."value")'
 
@@ -185,57 +158,42 @@ class TestSQLAggregationBuilder:
     def test_build_stddev_standard(self, standard_builder):
         """Test building STDDEV aggregation"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.STDDEV,
-            "score",
-            "TestResults",
-            {}
+            SQLAggregationType.STDDEV, "score", "TestResults", {}
         )
         assert result == 'STDDEV_POP("TestResults"."score")'
 
     def test_build_variance_statistical(self, standard_builder):
         """Test building statistical VARIANCE aggregation"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.VARIANCE,
-            "amount",
-            "Sales",
-            {}
+            SQLAggregationType.VARIANCE, "amount", "Sales", {}
         )
         assert result == 'VAR_POP("Sales"."amount")'
 
     def test_build_variance_business(self, standard_builder):
         """Test building business VARIANCE (actual vs target)"""
-        kbi_def = {'target_column': 'budget'}
+        kbi_def = {"target_column": "budget"}
         result = standard_builder.build_aggregation(
-            SQLAggregationType.VARIANCE,
-            "actual",
-            "Finance",
-            kbi_def
+            SQLAggregationType.VARIANCE, "actual", "Finance", kbi_def
         )
         assert 'SUM("Finance"."actual")' in result
         assert 'SUM("Finance"."budget")' in result
-        assert '-' in result
+        assert "-" in result
 
     # ========== MEDIAN and PERCENTILE Tests ==========
 
     def test_build_median_standard(self, standard_builder):
         """Test building MEDIAN aggregation"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.MEDIAN,
-            "income",
-            "Demographics",
-            {}
+            SQLAggregationType.MEDIAN, "income", "Demographics", {}
         )
         assert "PERCENTILE_CONT(0.5)" in result
         assert 'ORDER BY "Demographics"."income"' in result
 
     def test_build_percentile_standard(self, standard_builder):
         """Test building PERCENTILE aggregation"""
-        kbi_def = {'percentile': 0.95}
+        kbi_def = {"percentile": 0.95}
         result = standard_builder.build_aggregation(
-            SQLAggregationType.PERCENTILE,
-            "response_time",
-            "Requests",
-            kbi_def
+            SQLAggregationType.PERCENTILE, "response_time", "Requests", kbi_def
         )
         assert "PERCENTILE_CONT(0.95)" in result
         assert 'ORDER BY "Requests"."response_time"' in result
@@ -243,10 +201,7 @@ class TestSQLAggregationBuilder:
     def test_build_percentile_default(self, standard_builder):
         """Test building PERCENTILE with default value"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.PERCENTILE,
-            "value",
-            "Data",
-            {}
+            SQLAggregationType.PERCENTILE, "value", "Data", {}
         )
         assert "PERCENTILE_CONT(0.5)" in result
 
@@ -254,12 +209,9 @@ class TestSQLAggregationBuilder:
 
     def test_build_weighted_avg_with_weight(self, standard_builder):
         """Test building weighted average with weight column"""
-        kbi_def = {'weight_column': 'quantity'}
+        kbi_def = {"weight_column": "quantity"}
         result = standard_builder.build_aggregation(
-            SQLAggregationType.WEIGHTED_AVG,
-            "price",
-            "Sales",
-            kbi_def
+            SQLAggregationType.WEIGHTED_AVG, "price", "Sales", kbi_def
         )
         assert 'SUM("Sales"."price" * "Sales"."quantity")' in result
         assert 'SUM("Sales"."quantity")' in result
@@ -268,10 +220,7 @@ class TestSQLAggregationBuilder:
     def test_build_weighted_avg_no_weight(self, standard_builder):
         """Test building weighted average without weight column (fallback to AVG)"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.WEIGHTED_AVG,
-            "value",
-            "Data",
-            {}
+            SQLAggregationType.WEIGHTED_AVG, "value", "Data", {}
         )
         assert result == 'AVG("Data"."value")'
 
@@ -280,10 +229,7 @@ class TestSQLAggregationBuilder:
     def test_build_ratio_with_division(self, standard_builder):
         """Test building ratio with division operator in column name"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.RATIO,
-            "revenue/cost",
-            "Finance",
-            {}
+            SQLAggregationType.RATIO, "revenue/cost", "Finance", {}
         )
         assert 'SUM("Finance"."revenue")' in result
         assert 'SUM("Finance"."cost")' in result
@@ -291,12 +237,9 @@ class TestSQLAggregationBuilder:
 
     def test_build_ratio_with_base_column(self, standard_builder):
         """Test building ratio with base_column parameter"""
-        kbi_def = {'base_column': 'total'}
+        kbi_def = {"base_column": "total"}
         result = standard_builder.build_aggregation(
-            SQLAggregationType.RATIO,
-            "partial",
-            "Metrics",
-            kbi_def
+            SQLAggregationType.RATIO, "partial", "Metrics", kbi_def
         )
         assert 'SUM("Metrics"."partial")' in result
         assert 'SUM("Metrics"."total")' in result
@@ -305,10 +248,7 @@ class TestSQLAggregationBuilder:
     def test_build_ratio_fallback(self, standard_builder):
         """Test building ratio without division or base_column (fallback to SUM)"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.RATIO,
-            "amount",
-            "Sales",
-            {}
+            SQLAggregationType.RATIO, "amount", "Sales", {}
         )
         assert result == 'SUM("Sales"."amount")'
 
@@ -316,12 +256,9 @@ class TestSQLAggregationBuilder:
 
     def test_build_running_sum(self, standard_builder):
         """Test building RUNNING_SUM with window function"""
-        kbi_def = {'order_column': 'date'}
+        kbi_def = {"order_column": "date"}
         result = standard_builder.build_aggregation(
-            SQLAggregationType.RUNNING_SUM,
-            "amount",
-            "Transactions",
-            kbi_def
+            SQLAggregationType.RUNNING_SUM, "amount", "Transactions", kbi_def
         )
         assert "SUM" in result
         assert "OVER" in result
@@ -330,12 +267,9 @@ class TestSQLAggregationBuilder:
 
     def test_build_row_number(self, standard_builder):
         """Test building ROW_NUMBER window function"""
-        kbi_def = {'order_column': 'score'}
+        kbi_def = {"order_column": "score"}
         result = standard_builder.build_aggregation(
-            SQLAggregationType.ROW_NUMBER,
-            "id",
-            "Rankings",
-            kbi_def
+            SQLAggregationType.ROW_NUMBER, "id", "Rankings", kbi_def
         )
         assert "ROW_NUMBER()" in result
         assert "OVER" in result
@@ -343,15 +277,9 @@ class TestSQLAggregationBuilder:
 
     def test_build_row_number_with_partition(self, standard_builder):
         """Test building ROW_NUMBER with partition by"""
-        kbi_def = {
-            'order_column': 'date',
-            'partition_columns': ['region', 'product']
-        }
+        kbi_def = {"order_column": "date", "partition_columns": ["region", "product"]}
         result = standard_builder.build_aggregation(
-            SQLAggregationType.ROW_NUMBER,
-            "id",
-            "Sales",
-            kbi_def
+            SQLAggregationType.ROW_NUMBER, "id", "Sales", kbi_def
         )
         assert "PARTITION BY" in result
         assert '"region"' in result
@@ -360,24 +288,18 @@ class TestSQLAggregationBuilder:
 
     def test_build_rank(self, standard_builder):
         """Test building RANK window function"""
-        kbi_def = {'order_column': 'amount'}
+        kbi_def = {"order_column": "amount"}
         result = standard_builder.build_aggregation(
-            SQLAggregationType.RANK,
-            "value",
-            "Metrics",
-            kbi_def
+            SQLAggregationType.RANK, "value", "Metrics", kbi_def
         )
         assert "RANK()" in result
         assert "OVER" in result
 
     def test_build_dense_rank(self, standard_builder):
         """Test building DENSE_RANK window function"""
-        kbi_def = {'order_column': 'score'}
+        kbi_def = {"order_column": "score"}
         result = standard_builder.build_aggregation(
-            SQLAggregationType.DENSE_RANK,
-            "id",
-            "Leaderboard",
-            kbi_def
+            SQLAggregationType.DENSE_RANK, "id", "Leaderboard", kbi_def
         )
         assert "DENSE_RANK()" in result
         assert "OVER" in result
@@ -387,10 +309,7 @@ class TestSQLAggregationBuilder:
     def test_build_coalesce_default(self, standard_builder):
         """Test building COALESCE with default value"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.COALESCE,
-            "optional_value",
-            "Data",
-            {}
+            SQLAggregationType.COALESCE, "optional_value", "Data", {}
         )
         assert "COALESCE" in result
         assert '"Data"."optional_value"' in result
@@ -398,12 +317,9 @@ class TestSQLAggregationBuilder:
 
     def test_build_coalesce_custom_default(self, standard_builder):
         """Test building COALESCE with custom default value"""
-        kbi_def = {'default_value': 100}
+        kbi_def = {"default_value": 100}
         result = standard_builder.build_aggregation(
-            SQLAggregationType.COALESCE,
-            "value",
-            "Metrics",
-            kbi_def
+            SQLAggregationType.COALESCE, "value", "Metrics", kbi_def
         )
         assert "COALESCE" in result
         assert "100" in result
@@ -415,9 +331,7 @@ class TestSQLAggregationBuilder:
         base_agg = "SUM(`Sales`.`amount`)"
         conditions = ["status = 'active'", "region = 'US'"]
         result = databricks_builder.build_conditional_aggregation(
-            base_agg,
-            conditions,
-            "Sales"
+            base_agg, conditions, "Sales"
         )
         assert "FILTER" in result
         assert "WHERE" in result
@@ -429,9 +343,7 @@ class TestSQLAggregationBuilder:
         base_agg = 'SUM("Sales"."amount")'
         conditions = ["status = 'active'"]
         result = standard_builder.build_conditional_aggregation(
-            base_agg,
-            conditions,
-            "Sales"
+            base_agg, conditions, "Sales"
         )
         assert "CASE WHEN" in result
         assert "status = 'active'" in result
@@ -440,63 +352,41 @@ class TestSQLAggregationBuilder:
     def test_build_conditional_aggregation_no_conditions(self, standard_builder):
         """Test building conditional aggregation without conditions"""
         base_agg = 'SUM("Sales"."amount")'
-        result = standard_builder.build_conditional_aggregation(
-            base_agg,
-            [],
-            "Sales"
-        )
+        result = standard_builder.build_conditional_aggregation(base_agg, [], "Sales")
         assert result == base_agg
 
     # ========== Exception Handling Tests ==========
 
     def test_build_exception_handling_null_to_zero(self, standard_builder):
         """Test exception handling: null to zero"""
-        exceptions = [{'type': 'null_to_zero'}]
-        result = standard_builder.build_exception_handling(
-            "AVG(value)",
-            exceptions
-        )
+        exceptions = [{"type": "null_to_zero"}]
+        result = standard_builder.build_exception_handling("AVG(value)", exceptions)
         assert "COALESCE" in result
         assert "AVG(value)" in result
         assert "0" in result
 
     def test_build_exception_handling_negative_to_zero(self, standard_builder):
         """Test exception handling: negative to zero"""
-        exceptions = [{'type': 'negative_to_zero'}]
-        result = standard_builder.build_exception_handling(
-            "profit",
-            exceptions
-        )
+        exceptions = [{"type": "negative_to_zero"}]
+        result = standard_builder.build_exception_handling("profit", exceptions)
         assert "GREATEST(0, profit)" == result
 
     def test_build_exception_handling_threshold_min(self, standard_builder):
         """Test exception handling: minimum threshold"""
-        exceptions = [{'type': 'threshold', 'value': 100, 'comparison': 'min'}]
-        result = standard_builder.build_exception_handling(
-            "value",
-            exceptions
-        )
+        exceptions = [{"type": "threshold", "value": 100, "comparison": "min"}]
+        result = standard_builder.build_exception_handling("value", exceptions)
         assert "GREATEST(100, value)" == result
 
     def test_build_exception_handling_threshold_max(self, standard_builder):
         """Test exception handling: maximum threshold"""
-        exceptions = [{'type': 'threshold', 'value': 1000, 'comparison': 'max'}]
-        result = standard_builder.build_exception_handling(
-            "value",
-            exceptions
-        )
+        exceptions = [{"type": "threshold", "value": 1000, "comparison": "max"}]
+        result = standard_builder.build_exception_handling("value", exceptions)
         assert "LEAST(1000, value)" == result
 
     def test_build_exception_handling_multiple(self, standard_builder):
         """Test exception handling: multiple exceptions"""
-        exceptions = [
-            {'type': 'null_to_zero'},
-            {'type': 'negative_to_zero'}
-        ]
-        result = standard_builder.build_exception_handling(
-            "amount",
-            exceptions
-        )
+        exceptions = [{"type": "null_to_zero"}, {"type": "negative_to_zero"}]
+        result = standard_builder.build_exception_handling("amount", exceptions)
         assert "COALESCE" in result
         assert "GREATEST" in result
 
@@ -511,10 +401,7 @@ class TestSQLAggregationBuilder:
     def test_build_aggregation_none_kbi_definition(self, standard_builder):
         """Test building aggregation with None kbi_definition"""
         result = standard_builder.build_aggregation(
-            SQLAggregationType.SUM,
-            "amount",
-            "Sales",
-            None
+            SQLAggregationType.SUM, "amount", "Sales", None
         )
         assert result == 'SUM("Sales"."amount")'
 
@@ -556,9 +443,9 @@ class TestDetectAndBuildSqlAggregation:
     def test_detect_and_build_simple_sum(self):
         """Test detect and build for simple SUM aggregation"""
         kbi_def = {
-            'formula': 'amount',
-            'source_table': 'Sales',
-            'aggregation_type': 'SUM'
+            "formula": "amount",
+            "source_table": "Sales",
+            "aggregation_type": "SUM",
         }
         result = detect_and_build_sql_aggregation(kbi_def)
         assert "SUM" in result
@@ -568,21 +455,23 @@ class TestDetectAndBuildSqlAggregation:
     def test_detect_and_build_with_dialect(self):
         """Test detect and build with specific dialect"""
         kbi_def = {
-            'formula': 'revenue',
-            'source_table': 'Finance',
-            'aggregation_type': 'SUM',
-            'dialect': SQLDialect.DATABRICKS
+            "formula": "revenue",
+            "source_table": "Finance",
+            "aggregation_type": "SUM",
+            "dialect": SQLDialect.DATABRICKS,
         }
-        result = detect_and_build_sql_aggregation(kbi_def, dialect=SQLDialect.DATABRICKS)
+        result = detect_and_build_sql_aggregation(
+            kbi_def, dialect=SQLDialect.DATABRICKS
+        )
         assert "SUM" in result
         assert "`" in result  # Databricks uses backticks
 
     def test_detect_and_build_count_distinct(self):
         """Test detect and build for COUNT DISTINCT"""
         kbi_def = {
-            'formula': 'customer_id',
-            'source_table': 'Orders',
-            'aggregation_type': 'DISTINCTCOUNT'  # Uses DAX naming
+            "formula": "customer_id",
+            "source_table": "Orders",
+            "aggregation_type": "DISTINCTCOUNT",  # Uses DAX naming
         }
         result = detect_and_build_sql_aggregation(kbi_def)
         assert "COUNT(DISTINCT" in result
@@ -590,10 +479,10 @@ class TestDetectAndBuildSqlAggregation:
     def test_detect_and_build_weighted_avg(self):
         """Test detect and build for weighted average"""
         kbi_def = {
-            'formula': 'price',
-            'source_table': 'Sales',
-            'aggregation_type': 'WEIGHTED_AVERAGE',  # Uses DAX naming
-            'weight_column': 'quantity'
+            "formula": "price",
+            "source_table": "Sales",
+            "aggregation_type": "WEIGHTED_AVERAGE",  # Uses DAX naming
+            "weight_column": "quantity",
         }
         result = detect_and_build_sql_aggregation(kbi_def)
         assert "SUM" in result

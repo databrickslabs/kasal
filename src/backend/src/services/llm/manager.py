@@ -25,9 +25,9 @@ import contextvars
 import functools
 import logging
 import os
-from contextlib import nullcontext
-from typing import Dict, Any, List, Optional, Union, Tuple
 import time
+from contextlib import nullcontext
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import litellm
 from litellm import CustomLogger
@@ -60,15 +60,15 @@ async def _run_llm_blocking(func, /, *args, **kwargs):
     return await loop.run_in_executor(_LLM_EXECUTOR, call)
 
 
-from src.utils.databricks_url_utils import DatabricksURLUtils
-from src.services.settings.models import ModelConfigService
-from src.services.settings.api_keys import ApiKeysService
-
 # Endpoint-specific LLM subclasses. This import no longer carries side effects:
 # the module used to apply two litellm monkey patches at import time, both of
 # which the engine bypasses (it speaks to endpoints with the OpenAI SDK).
 from src.services.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
 from src.services.llm.handlers.vllm import VLLMFunctionCallingLLM
+from src.services.settings.api_keys import ApiKeysService
+from src.services.settings.models import ModelConfigService
+from src.utils.databricks_url_utils import DatabricksURLUtils
+
 # The former crewai_memory_patch / crewai_instructor_patch side-effect
 # imports are gone: kasal_engine's analyze models are tolerant of
 # stringified-JSON metadata by design, and InternalInstructor accepts
@@ -112,21 +112,21 @@ try:
     # them through its openai client with an explicit api_base (Moonshot for
     # kimi, the self-hosted box for vllm). OpenAI itself takes no prefix.
     _PROVIDER_PREFIXES = {
-        'databricks': 'databricks/',
-        'vllm': 'openai/',
-        'airllm': 'openai/',
-        'kimi': 'openai/',
-        'openai': '',
-        'anthropic': 'anthropic/',
-        'gemini': 'gemini/',
-        'deepseek': 'deepseek/',
-        'ollama': 'ollama/',
+        "databricks": "databricks/",
+        "vllm": "openai/",
+        "airllm": "openai/",
+        "kimi": "openai/",
+        "openai": "",
+        "anthropic": "anthropic/",
+        "gemini": "gemini/",
+        "deepseek": "deepseek/",
+        "ollama": "ollama/",
     }
 
     registered_count = 0
     for model_name, config in MODEL_CONFIGS.items():
-        provider = config.get('provider')
-        context_window = config.get('context_window', 128000)
+        provider = config.get("provider")
+        context_window = config.get("context_window", 128000)
         # EVERY seeded model is registered, not just the Databricks/self-hosted
         # ones. An unregistered model falls back to DEFAULT_CONTEXT_WINDOW_SIZE
         # (8192 → 6963 after the 0.85 derate), so CrewAI's respect_context_window
@@ -135,21 +135,27 @@ try:
         # gemini-2.0-flash, deepseek-chat), which hid the gap; their replacements
         # — gpt-5.6, claude-5, gemini-3.x, deepseek-v4 — predate no table at all.
         if provider not in _PROVIDER_PREFIXES:
-            logger.debug(f"No litellm prefix known for provider {provider!r}; skipping {model_name}")
+            logger.debug(
+                f"No litellm prefix known for provider {provider!r}; skipping {model_name}"
+            )
             continue
         prefix = _PROVIDER_PREFIXES[provider]
         # Register the bare name too: an agent config may carry it unprefixed,
         # and the lookup is by exact key.
         keys = [f"{prefix}{model_name}", model_name] if prefix else [model_name]
         # Ollama ids are normalized hyphen→colon before the call.
-        if provider == 'ollama' and "-" in model_name:
+        if provider == "ollama" and "-" in model_name:
             keys.append(f"{prefix}{model_name.replace('-', ':')}")
         for key in keys:
             LLM_CONTEXT_WINDOW_SIZES[key] = context_window
         registered_count += 1
-        logger.debug(f"Registered {keys} with context_window={context_window} in CrewAI")
+        logger.debug(
+            f"Registered {keys} with context_window={context_window} in CrewAI"
+        )
 
-    logger.info(f"Registered {registered_count} models with CrewAI for context window management")
+    logger.info(
+        f"Registered {registered_count} models with CrewAI for context window management"
+    )
 except Exception as reg_err:
     logger.warning(f"Could not register Databricks models with CrewAI: {reg_err}")
 
@@ -166,11 +172,14 @@ except Exception as reg_err:
 # Importing it applies the extension; DatabricksRetryLLM matches against the same
 # list rather than a private copy.
 from src.core.llm import context_limits as _context_limits  # noqa: F401
+
 # Check if handlers already exist to avoid duplicates
 if not logger.handlers:
     file_handler = logging.FileHandler(log_file_path)
-    formatter = logging.Formatter('%(asctime)s - %(process)d - %(filename)s-%(funcName)s:%(lineno)d - %(levelname)s: %(message)s', 
-                                 datefmt='%Y-%m-%d %H:%M:%S')
+    formatter = logging.Formatter(
+        "%(asctime)s - %(process)d - %(filename)s-%(funcName)s:%(lineno)d - %(levelname)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
@@ -183,15 +192,23 @@ class LiteLLMFileLogger(CustomLogger):
 
     def log_success_event(self, kwargs, response_obj, start_time, end_time):
         model = kwargs.get("model", "unknown")
-        duration = (end_time - start_time).total_seconds() if hasattr(end_time - start_time, "total_seconds") else 0
+        duration = (
+            (end_time - start_time).total_seconds()
+            if hasattr(end_time - start_time, "total_seconds")
+            else 0
+        )
         usage = {}
         if hasattr(response_obj, "usage") and response_obj.usage:
             usage = {
                 "prompt_tokens": getattr(response_obj.usage, "prompt_tokens", 0),
-                "completion_tokens": getattr(response_obj.usage, "completion_tokens", 0),
+                "completion_tokens": getattr(
+                    response_obj.usage, "completion_tokens", 0
+                ),
                 "total_tokens": getattr(response_obj.usage, "total_tokens", 0),
             }
-        logger.info(f"LLM success: model={model}, duration={duration:.2f}s, usage={usage}")
+        logger.info(
+            f"LLM success: model={model}, duration={duration:.2f}s, usage={usage}"
+        )
 
     def log_failure_event(self, kwargs, response_obj, start_time, end_time):
         model = kwargs.get("model", "unknown")
@@ -318,7 +335,7 @@ litellm.failure_callback = [litellm_file_logger]
 logger.info(f"Configured LiteLLM to write logs to: {log_file_path}")
 
 # Export functions for external use
-__all__ = ['LLMManager', 'DatabricksRetryLLM']
+__all__ = ["LLMManager", "DatabricksRetryLLM"]
 
 
 def _is_http_400(exc: Exception) -> bool:
@@ -332,7 +349,9 @@ def _is_http_400(exc: Exception) -> bool:
         return True
     # Fallback: check string representation
     exc_str = str(exc)
-    if "400" in exc_str and ("bad request" in exc_str.lower() or "BadRequest" in exc_str):
+    if "400" in exc_str and (
+        "bad request" in exc_str.lower() or "BadRequest" in exc_str
+    ):
         return True
     return False
 
@@ -366,9 +385,10 @@ class LLMManager:
             ValueError: If group_id is not available and required=True
         """
         from src.utils.user_context import UserContext
+
         try:
             group_context = UserContext.get_group_context()
-            if group_context and hasattr(group_context, 'primary_group_id'):
+            if group_context and hasattr(group_context, "primary_group_id"):
                 group_id = group_context.primary_group_id
                 if group_id:
                     return group_id
@@ -377,8 +397,12 @@ class LLMManager:
 
         # If group_id is required, raise error
         if required:
-            logger.error("Cannot retrieve API keys: no group_id available (multi-tenant isolation required)")
-            raise ValueError("group_id is required for API key operations (multi-tenant isolation)")
+            logger.error(
+                "Cannot retrieve API keys: no group_id available (multi-tenant isolation required)"
+            )
+            raise ValueError(
+                "group_id is required for API key operations (multi-tenant isolation)"
+            )
 
         # Otherwise return None
         return None
@@ -432,7 +456,9 @@ class LLMManager:
         _resolved = (getattr(llm, "model", None) or model).rsplit("/", 1)[-1]
         if not isinstance(_resolved, str):  # defensive: mocked LLMs in tests
             _resolved = model
-        served_model = _resolved if _resolved == model else f"{_resolved} (for '{model}')"
+        served_model = (
+            _resolved if _resolved == model else f"{_resolved} (for '{model}')"
+        )
         if max_tokens is not None:
             # Responses-API models (the GPT-5/Codex family, whether served by
             # OpenAI or Databricks) reject max_output_tokens below 16 with
@@ -440,7 +466,9 @@ class LLMManager:
             # caps only ever mean "ping / one-word reply", so floor the value
             # centrally instead of teaching every caller the provider quirk.
             llm.max_tokens = max(16, max_tokens)
-        elif not getattr(llm, "max_tokens", None) and not getattr(llm, "max_completion_tokens", None):
+        elif not getattr(llm, "max_tokens", None) and not getattr(
+            llm, "max_completion_tokens", None
+        ):
             llm.max_tokens = 4000
         if extra_headers:
             # Pass extra_headers to the underlying litellm call via LLM extra_headers param
@@ -456,6 +484,7 @@ class LLMManager:
         span_cm: Any = nullcontext()
         try:
             import mlflow as _mlflow
+
             if (
                 hasattr(_mlflow, "get_current_active_span")
                 and hasattr(_mlflow, "start_span")
@@ -480,14 +509,20 @@ class LLMManager:
             if _span is not None and hasattr(_span, "set_inputs"):
                 try:
                     _span.set_inputs(
-                        {"model": model, "messages": messages, "temperature": temperature}
+                        {
+                            "model": model,
+                            "messages": messages,
+                            "temperature": temperature,
+                        }
                     )
                 except Exception:
                     pass
             try:
                 result = await _run_llm_blocking(llm.call, messages)
                 duration = time.time() - start_time
-                logger.info(f"LLM completion: model={served_model}, duration={duration:.2f}s, response_length={len(result) if result else 0}")
+                logger.info(
+                    f"LLM completion: model={served_model}, duration={duration:.2f}s, response_length={len(result) if result else 0}"
+                )
                 _set_span_outputs(_span, result)
                 return (result, _resolved) if with_served_model else result
             except Exception as e:
@@ -509,9 +544,13 @@ class LLMManager:
                             _set_span_outputs(_span, result)
                             return (result, _resolved) if with_served_model else result
                         except Exception as retry_err:
-                            logger.error(f"LLM completion user-only fallback also failed: {retry_err}")
+                            logger.error(
+                                f"LLM completion user-only fallback also failed: {retry_err}"
+                            )
                             raise retry_err
-                logger.error(f"LLM completion failed: model={served_model}, duration={duration:.2f}s, error={e}")
+                logger.error(
+                    f"LLM completion failed: model={served_model}, duration={duration:.2f}s, error={e}"
+                )
                 raise
 
     @staticmethod
@@ -594,7 +633,9 @@ class LLMManager:
         except Exception:  # noqa: BLE001
             usage = {}
 
-        cache_read = usage.get("cache_read_input_tokens") or usage.get("cache_read_tokens") or 0
+        cache_read = (
+            usage.get("cache_read_input_tokens") or usage.get("cache_read_tokens") or 0
+        )
         logger.info(
             f"LLM completion_with_usage: model={model}, duration={duration:.2f}s, "
             f"response_length={len(content)}, cache_read_input_tokens={cache_read}"
@@ -602,7 +643,9 @@ class LLMManager:
         return {"content": content, "usage": usage}
 
     @staticmethod
-    async def configure_kasal_llm(model_name: str, group_id: str, temperature: Optional[float] = None) -> LLM:
+    async def configure_kasal_llm(
+        model_name: str, group_id: str, temperature: Optional[float] = None
+    ) -> LLM:
         """
         Create and configure a CrewAI LLM instance with the correct provider prefix.
 
@@ -620,7 +663,9 @@ class LLMManager:
         """
         # SECURITY: Validate group_id is provided
         if not group_id:
-            raise ValueError("group_id is REQUIRED for configure_kasal_llm (multi-tenant isolation)")
+            raise ValueError(
+                "group_id is REQUIRED for configure_kasal_llm (multi-tenant isolation)"
+            )
 
         # Get model configuration using ModelConfigService
         from src.db.session import request_scoped_session
@@ -628,11 +673,11 @@ class LLMManager:
         async with request_scoped_session() as session:
             model_config_service = ModelConfigService(session, group_id=group_id)
             model_config_dict = await model_config_service.get_model_config(model_name)
-        
+
         # Check if model configuration was found
         if not model_config_dict:
             raise ValueError(f"Model {model_name} not found in the database")
-        
+
         # Extract provider and model name
         provider = model_config_dict["provider"]
         model_name_value = model_config_dict["name"]
@@ -645,29 +690,37 @@ class LLMManager:
             logger.info(
                 "Configuring CrewAI LLM with provider: %s, model: %s "
                 "(substituted for requested '%s')",
-                provider, model_name_value, model_name,
+                provider,
+                model_name_value,
+                model_name,
             )
         else:
             logger.info(
                 f"Configuring CrewAI LLM with provider: {provider}, model: {model_name_value}"
             )
-        
+
         # Get API key for the provider using ApiKeysService
         api_key = None
         api_base = None
-        
+
         # Set the correct provider prefix based on provider
         # Note: group_id is already passed as parameter to this function
         if provider == ModelProvider.DEEPSEEK:
-            api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
+            api_key = await ApiKeysService.get_provider_api_key(
+                provider, group_id=group_id
+            )
             api_base = os.getenv("DEEPSEEK_ENDPOINT", "https://api.deepseek.com")
             prefixed_model = f"deepseek/{model_name_value}"
         elif provider == ModelProvider.OPENAI:
-            api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
+            api_key = await ApiKeysService.get_provider_api_key(
+                provider, group_id=group_id
+            )
             # OpenAI doesn't need a prefix
             prefixed_model = model_name_value
         elif provider == ModelProvider.ANTHROPIC:
-            api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
+            api_key = await ApiKeysService.get_provider_api_key(
+                provider, group_id=group_id
+            )
             prefixed_model = f"anthropic/{model_name_value}"
         elif provider == ModelProvider.OLLAMA:
             api_base = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
@@ -692,8 +745,12 @@ class LLMManager:
                     api_key = auth.token
                     # Routes to /serving-endpoints or /ai-gateway/mlflow/v1 based on the
                     # AI Gateway toggle; LiteLLM appends /chat/completions either way.
-                    api_base = DatabricksURLUtils.construct_llm_base_url(auth.workspace_url)
-                    logger.info(f"Using Databricks {auth.auth_method} authentication for CrewAI LLM")
+                    api_base = DatabricksURLUtils.construct_llm_base_url(
+                        auth.workspace_url
+                    )
+                    logger.info(
+                        f"Using Databricks {auth.auth_method} authentication for CrewAI LLM"
+                    )
                 else:
                     # FAIL CLOSED: no usable Databricks credential resolved for the
                     # SELECTED workspace (OBO -> PAT -> SPN all unavailable for this
@@ -709,13 +766,21 @@ class LLMManager:
 
             except ImportError:
                 # SECURITY: databricks_auth module is required - no fallback allowed
-                logger.error("Unified Databricks auth module not available for CrewAI LLM")
-                raise ImportError("databricks_auth module is required for Databricks authentication")
-            
+                logger.error(
+                    "Unified Databricks auth module not available for CrewAI LLM"
+                )
+                raise ImportError(
+                    "databricks_auth module is required for Databricks authentication"
+                )
+
             prefixed_model = f"databricks/{model_name_value}"
-            is_gpt5 = "gpt-5" in model_name_value.lower() or "gpt5" in model_name_value.lower()
+            is_gpt5 = (
+                "gpt-5" in model_name_value.lower()
+                or "gpt5" in model_name_value.lower()
+            )
             # Newer frontier models (GPT-5, Claude Opus 4.7+) reject `temperature`.
             from src.utils.model_config import model_rejects_temperature
+
             rejects_temperature = model_rejects_temperature(model_name_value)
 
             # Ensure the model string explicitly includes the provider for CrewAI compatibility
@@ -737,14 +802,20 @@ class LLMManager:
             #   - presence_penalty / frequency_penalty / logit_bias: never set by
             #     kasal, and the engine only forwards params that are not None.
             if is_gpt5:
-                logger.info(f"Databricks GPT-5 model: {model_name_value} — 300s timeout set")
+                logger.info(
+                    f"Databricks GPT-5 model: {model_name_value} — 300s timeout set"
+                )
             elif rejects_temperature:
-                logger.info(f"Databricks model {model_name_value} rejects temperature — omitting it")
+                logger.info(
+                    f"Databricks model {model_name_value} rejects temperature — omitting it"
+                )
 
             # Add temperature only for models that accept it.
             if temperature is not None and not rejects_temperature:
                 llm_params["temperature"] = temperature
-                logger.info(f"Setting temperature to {temperature} for model {prefixed_model}")
+                logger.info(
+                    f"Setting temperature to {temperature} for model {prefixed_model}"
+                )
 
             # Add API key and base URL if available
             if api_key:
@@ -754,21 +825,33 @@ class LLMManager:
 
             # Add User-Agent header for Databricks API attribution
             # Using extra_headers instead of user_agent param (which Databricks rejects in body)
-            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            from src.utils.telemetry import KasalProduct, get_user_agent_header
+
             llm_params["extra_headers"] = get_user_agent_header(KasalProduct.AGENT)
 
             # Add max_output_tokens if defined in model config
-            if "max_output_tokens" in model_config_dict and model_config_dict["max_output_tokens"]:
+            if (
+                "max_output_tokens" in model_config_dict
+                and model_config_dict["max_output_tokens"]
+            ):
                 if is_gpt5:
                     # GPT-5 requires max_completion_tokens (litellm Databricks transformer
                     # rewrites it to max_tokens which GPT-5 rejects — litellm#13719)
-                    llm_params["max_completion_tokens"] = model_config_dict["max_output_tokens"]
-                    logger.info(f"Setting max_completion_tokens to {model_config_dict['max_output_tokens']} for Databricks GPT-5 model {prefixed_model}")
+                    llm_params["max_completion_tokens"] = model_config_dict[
+                        "max_output_tokens"
+                    ]
+                    logger.info(
+                        f"Setting max_completion_tokens to {model_config_dict['max_output_tokens']} for Databricks GPT-5 model {prefixed_model}"
+                    )
                 else:
                     llm_params["max_tokens"] = model_config_dict["max_output_tokens"]
-                    logger.info(f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}")
+                    logger.info(
+                        f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}"
+                    )
 
-            logger.info(f"Creating CrewAI LLM with model: {prefixed_model}, has_api_key: {bool(api_key)}, api_base: {api_base}")
+            logger.info(
+                f"Creating CrewAI LLM with model: {prefixed_model}, has_api_key: {bool(api_key)}, api_base: {api_base}"
+            )
 
             # gpt-5-3-codex ONLY supports the Responses API on Databricks.
             # DatabricksResponsesLLM extends OpenAICompletion with:
@@ -776,28 +859,40 @@ class LLMManager:
             #  - stop-word suppression (GPT-5 reasoning rejects 'stop')
             #  - diagnostic logging for tool-calling debugging
             if "gpt-5-3-codex" in model_name_value.lower():
-                from src.services.llm.handlers.databricks_responses_llm import DatabricksResponsesLLM
+                from src.services.llm.handlers.databricks_responses_llm import (
+                    DatabricksResponsesLLM,
+                )
+
                 # The Responses API is served under a DIFFERENT base path than chat:
                 # /ai-gateway/openai/v1 (gateway) or /serving-endpoints (otherwise).
                 # `api_base` here is the CHAT base (/ai-gateway/mlflow/v1 when the
                 # gateway is on), which has no /responses route — using it yields a
                 # 404 "Supervisor API is not enabled". Build the Responses base instead.
-                responses_workspace = DatabricksURLUtils.extract_workspace_from_endpoint(api_base)
-                responses_base_url = DatabricksURLUtils.construct_responses_base_url(responses_workspace)
-                logger.info(f"Using DatabricksResponsesLLM for Responses API model: {model_name_value} (base_url={responses_base_url})")
+                responses_workspace = (
+                    DatabricksURLUtils.extract_workspace_from_endpoint(api_base)
+                )
+                responses_base_url = DatabricksURLUtils.construct_responses_base_url(
+                    responses_workspace
+                )
+                logger.info(
+                    f"Using DatabricksResponsesLLM for Responses API model: {model_name_value} (base_url={responses_base_url})"
+                )
                 return DatabricksResponsesLLM(
                     model=model_name_value,
                     api_key=api_key,
                     base_url=responses_base_url,
                     timeout=300,
-                    max_tokens=llm_params.get("max_completion_tokens") or llm_params.get("max_tokens"),
+                    max_tokens=llm_params.get("max_completion_tokens")
+                    or llm_params.get("max_tokens"),
                 )
 
             # Use DatabricksRetryLLM for all other Databricks models (GPT-OSS, Llama, Claude, etc.)
             # Provides retry logic for empty responses, rate limits, and message sanitization.
             # Databricks-specific message sanitization (empty content, Llama format,
             # Gemini system-prompt merge and $ref resolution) happens inside call().
-            logger.info(f"Using DatabricksRetryLLM wrapper for Databricks model: {model_name_value}")
+            logger.info(
+                f"Using DatabricksRetryLLM wrapper for Databricks model: {model_name_value}"
+            )
             return DatabricksRetryLLM(**llm_params)
         elif provider == ModelProvider.VLLM:
             # Self-hosted vLLM server — OpenAI-compatible endpoint
@@ -813,7 +908,9 @@ class LLMManager:
             # Kimi (Moonshot AI) — OpenAI-compatible endpoint. litellm 1.74.x has no
             # native "moonshot" provider, so route via the openai/ prefix with an
             # explicit api_base, exactly like the self-hosted vLLM path.
-            api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
+            api_key = await ApiKeysService.get_provider_api_key(
+                provider, group_id=group_id
+            )
             if not api_key:
                 raise ValueError(
                     f"No Kimi API key found for workspace '{group_id}'. "
@@ -825,7 +922,9 @@ class LLMManager:
             # be here was inert once the engine stopped reading litellm's registry)
         elif provider == ModelProvider.GEMINI:
             # SECURITY: Use group_id parameter for multi-tenant isolation
-            api_key = await ApiKeysService.get_provider_api_key(provider, group_id=group_id)
+            api_key = await ApiKeysService.get_provider_api_key(
+                provider, group_id=group_id
+            )
             # SECURITY: do NOT write the per-tenant key into the shared process
             # os.environ — it persists across requests and would leak to other
             # tenants and to spawned subprocesses (cross-tenant credential bleed).
@@ -839,8 +938,12 @@ class LLMManager:
         else:
             # Default fallback for other providers
             logger.warning(f"Using default model name format for provider: {provider}")
-            prefixed_model = f"{provider.lower()}/{model_name_value}" if provider else model_name_value
-        
+            prefixed_model = (
+                f"{provider.lower()}/{model_name_value}"
+                if provider
+                else model_name_value
+            )
+
         # Configure LLM parameters (for all providers except Databricks which returns early)
         # 300s across the board: reasoning models can take 2-4 minutes on a complex
         # prompt, and no provider here is served by an endpoint that caps lower.
@@ -870,11 +973,14 @@ class LLMManager:
         from src.utils.model_config import model_rejects_temperature
 
         rejects_temperature = (
-            model_rejects_temperature(model_name_value) or provider == ModelProvider.KIMI
+            model_rejects_temperature(model_name_value)
+            or provider == ModelProvider.KIMI
         )
         if temperature is not None and not rejects_temperature:
             llm_params["temperature"] = temperature
-            logger.info(f"Setting temperature to {temperature} for model {prefixed_model}")
+            logger.info(
+                f"Setting temperature to {temperature} for model {prefixed_model}"
+            )
         elif temperature is not None:
             logger.info(
                 f"Model {model_name_value} rejects `temperature` — omitting it "
@@ -894,16 +1000,25 @@ class LLMManager:
             llm_params["api_base"] = api_base
 
         # Add max_output_tokens if defined in model config
-        if "max_output_tokens" in model_config_dict and model_config_dict["max_output_tokens"]:
+        if (
+            "max_output_tokens" in model_config_dict
+            and model_config_dict["max_output_tokens"]
+        ):
             # GPT-5 and newer OpenAI reasoning models take max_completion_tokens
             # instead of max_tokens (the engine sends whichever is set, preferring
             # max_completion_tokens).
             if provider == ModelProvider.OPENAI and "gpt-5" in model_name_value.lower():
-                llm_params["max_completion_tokens"] = model_config_dict["max_output_tokens"]
-                logger.info(f"Setting max_completion_tokens to {model_config_dict['max_output_tokens']} for GPT-5 model {prefixed_model}")
+                llm_params["max_completion_tokens"] = model_config_dict[
+                    "max_output_tokens"
+                ]
+                logger.info(
+                    f"Setting max_completion_tokens to {model_config_dict['max_output_tokens']} for GPT-5 model {prefixed_model}"
+                )
             else:
                 llm_params["max_tokens"] = model_config_dict["max_output_tokens"]
-                logger.info(f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}")
+                logger.info(
+                    f"Setting max_tokens to {model_config_dict['max_output_tokens']} for model {prefixed_model}"
+                )
 
         logger.info(f"Creating LLM with model: {prefixed_model}")
 
@@ -912,7 +1027,10 @@ class LLMManager:
         # function-calling itself needs no help from us — the engine reports every
         # model as tool-capable. VLLM_SUPPORTS_TOOLS=false opts out of the forced
         # opening turn (e.g. an mlx_lm.server without a tool parser).
-        if provider == ModelProvider.VLLM and os.getenv("VLLM_SUPPORTS_TOOLS", "true").lower() == "true":
+        if (
+            provider == ModelProvider.VLLM
+            and os.getenv("VLLM_SUPPORTS_TOOLS", "true").lower() == "true"
+        ):
             return VLLMFunctionCallingLLM(**llm_params)
 
         return LLM(**llm_params)
@@ -927,12 +1045,15 @@ class LLMManager:
         """
         # CRITICAL: Get group_id from UserContext FIRST for multi-tenant isolation
         from src.utils.user_context import UserContext
+
         group_ctx = UserContext.get_group_context()
         group_id = getattr(group_ctx, "primary_group_id", None) if group_ctx else None
 
         if not group_id:
             logger.error("No group_id found in UserContext for LLM creation")
-            raise ValueError("group_id is REQUIRED for get_llm (multi-tenant isolation)")
+            raise ValueError(
+                "group_id is REQUIRED for get_llm (multi-tenant isolation)"
+            )
 
         return await LLMManager.configure_kasal_llm(model_name, group_id, temperature)
 
@@ -946,8 +1067,10 @@ class LLMManager:
         ``configure_kasal_llm`` with the same auth/endpoint. gpt-5-3-codex is
         excluded because it needs the Responses API (different base path).
         """
-        from src.services.llm.handlers.model_fallback import candidates_from_model_configs
         from src.db.session import request_scoped_session
+        from src.services.llm.handlers.model_fallback import (
+            candidates_from_model_configs,
+        )
         from src.services.settings.models import ModelConfigService
 
         try:

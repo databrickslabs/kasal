@@ -5,9 +5,10 @@ This module defines the request and response schemas for the dispatcher service
 that determines user intent from natural language input.
 """
 
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, Literal, Dict, Any, List
 from enum import Enum
+from typing import Any, Dict, List, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class IntentType(str, Enum):
@@ -78,7 +79,8 @@ class DispatcherRequest(BaseModel):
         description="True/None = workspace-wide memory recall, False = restrict to this session",
     )
     disable_memory: bool = Field(
-        False, description="When true, run the generated crew with memory fully disabled"
+        False,
+        description="When true, run the generated crew with memory fully disabled",
     )
     mcp_servers: Optional[List[str]] = Field(
         default_factory=list,

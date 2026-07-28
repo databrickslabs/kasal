@@ -112,15 +112,17 @@ class RateLimitMiddleware:
         body = json.dumps(
             {"detail": "Rate limit exceeded. Please slow down and try again shortly."}
         ).encode()
-        await send({
-            "type": "http.response.start",
-            "status": 429,
-            "headers": [
-                (b"content-type", b"application/json"),
-                (b"retry-after", b"60"),
-                (b"content-length", str(len(body)).encode()),
-            ],
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 429,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"retry-after", b"60"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            }
+        )
         await send({"type": "http.response.body", "body": body})
 
     async def __call__(self, scope, receive, send):

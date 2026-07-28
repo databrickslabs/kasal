@@ -1,11 +1,12 @@
 """Unit tests for ModelConfigRepository."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.repositories.model_config_repository import ModelConfigRepository
+import pytest
+
 from src.models.model_config import ModelConfig
+from src.repositories.model_config_repository import ModelConfigRepository
 
 
 @pytest.fixture
@@ -159,7 +160,9 @@ class TestToggleEnabledInGroup:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_toggle_in_group_returns_false_when_not_found(self, repo, mock_session):
+    async def test_toggle_in_group_returns_false_when_not_found(
+        self, repo, mock_session
+    ):
         mock_result = MagicMock()
         mock_result.scalars.return_value.first.return_value = None
         mock_session.execute.return_value = mock_result
@@ -226,7 +229,9 @@ class TestUpsertModel:
         mock_result.scalars.return_value.first.return_value = existing
         mock_session.execute.return_value = mock_result
 
-        result = await repo.upsert_model("gpt-4", {"name": "GPT-4 Updated", "provider": "openai"})
+        result = await repo.upsert_model(
+            "gpt-4", {"name": "GPT-4 Updated", "provider": "openai"}
+        )
 
         assert result == existing
         assert existing.name == "GPT-4 Updated"
@@ -237,11 +242,14 @@ class TestUpsertModel:
         mock_result.scalars.return_value.first.return_value = None
         mock_session.execute.return_value = mock_result
 
-        result = await repo.upsert_model("new-model", {
-            "name": "New Model",
-            "provider": "openai",
-            "temperature": 0.7,
-        })
+        result = await repo.upsert_model(
+            "new-model",
+            {
+                "name": "New Model",
+                "provider": "openai",
+                "temperature": 0.7,
+            },
+        )
 
         assert result is not None
         mock_session.add.assert_called_once()

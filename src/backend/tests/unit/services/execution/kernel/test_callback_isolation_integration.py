@@ -8,8 +8,10 @@ NOTE: The execution_callback module now only creates execution logs via
 enqueue_log().  Trace creation is handled by the event bus handlers
 and the OTel pipeline.
 """
+
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from src.services.execution.kernel.execution_callback import create_execution_callbacks
 
@@ -35,8 +37,12 @@ class TestCallbackIsolationIntegration:
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
-            step_1, task_1 = create_execution_callbacks(job_id_1, config, mock_group_context)
-            step_2, task_2 = create_execution_callbacks(job_id_2, config, mock_group_context)
+            step_1, task_1 = create_execution_callbacks(
+                job_id_1, config, mock_group_context
+            )
+            step_2, task_2 = create_execution_callbacks(
+                job_id_2, config, mock_group_context
+            )
 
             # Verify callbacks are different instances
             assert step_1 is not step_2

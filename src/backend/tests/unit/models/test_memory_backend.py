@@ -3,17 +3,19 @@ Comprehensive unit tests for MemoryBackend model and related utilities.
 
 Tests SQLAlchemy model attributes, enum values, utility functions, and methods.
 """
-import pytest
+
 from datetime import datetime
-from unittest.mock import patch, Mock
+from unittest.mock import Mock, patch
 from uuid import UUID
 
+import pytest
+
+from src.db.base import Base
 from src.models.memory_backend import (
     MemoryBackend,
     MemoryBackendTypeEnum,
-    generate_uuid
+    generate_uuid,
 )
-from src.db.base import Base
 
 
 class TestGenerateUuid:
@@ -22,13 +24,13 @@ class TestGenerateUuid:
     def test_generate_uuid_returns_string(self):
         """Test generate_uuid returns a string."""
         result = generate_uuid()
-        
+
         assert isinstance(result, str)
 
     def test_generate_uuid_is_valid_uuid(self):
         """Test generate_uuid returns a valid UUID string."""
         result = generate_uuid()
-        
+
         # Should be able to parse as UUID
         uuid_obj = UUID(result)
         assert str(uuid_obj) == result
@@ -37,15 +39,15 @@ class TestGenerateUuid:
         """Test generate_uuid returns unique values."""
         uuid1 = generate_uuid()
         uuid2 = generate_uuid()
-        
+
         assert uuid1 != uuid2
 
     def test_generate_uuid_format(self):
         """Test generate_uuid returns properly formatted UUID."""
         result = generate_uuid()
-        
+
         # UUID format: 8-4-4-4-12 characters
-        parts = result.split('-')
+        parts = result.split("-")
         assert len(parts) == 5
         assert len(parts[0]) == 8
         assert len(parts[1]) == 4
@@ -100,9 +102,19 @@ class TestMemoryBackend:
         # Updated for app-modes: enable_short_term/long_term/entity/relationship_retrieval
         # were removed; cognitive_config was added.
         expected_columns = [
-            'id', 'group_id', 'name', 'description', 'backend_type',
-            'databricks_config', 'lakebase_config', 'cognitive_config',
-            'custom_config', 'is_active', 'is_default', 'created_at', 'updated_at'
+            "id",
+            "group_id",
+            "name",
+            "description",
+            "backend_type",
+            "databricks_config",
+            "lakebase_config",
+            "cognitive_config",
+            "custom_config",
+            "is_active",
+            "is_default",
+            "created_at",
+            "updated_at",
         ]
 
         actual_columns = list(MemoryBackend.__table__.columns.keys())
@@ -112,58 +124,58 @@ class TestMemoryBackend:
 
     def test_memory_backend_primary_key(self):
         """Test MemoryBackend primary key."""
-        id_column = MemoryBackend.__table__.columns['id']
-        
+        id_column = MemoryBackend.__table__.columns["id"]
+
         assert id_column.primary_key is True
 
     def test_memory_backend_id_default(self):
         """Test MemoryBackend id column has generate_uuid default."""
-        id_column = MemoryBackend.__table__.columns['id']
-        
+        id_column = MemoryBackend.__table__.columns["id"]
+
         assert id_column.default is not None
 
     def test_memory_backend_group_id_indexed(self):
         """Test MemoryBackend group_id is indexed."""
-        group_id_column = MemoryBackend.__table__.columns['group_id']
-        
+        group_id_column = MemoryBackend.__table__.columns["group_id"]
+
         assert group_id_column.index is True
         assert group_id_column.nullable is False
 
     def test_memory_backend_nullable_constraints(self):
         """Test MemoryBackend nullable constraints."""
         columns = MemoryBackend.__table__.columns
-        
+
         # Required fields
-        assert columns['group_id'].nullable is False
-        assert columns['name'].nullable is False
-        assert columns['backend_type'].nullable is False
-        
+        assert columns["group_id"].nullable is False
+        assert columns["name"].nullable is False
+        assert columns["backend_type"].nullable is False
+
         # Optional fields
-        assert columns['description'].nullable is True
-        assert columns['databricks_config'].nullable is True
-        assert columns['custom_config'].nullable is True
+        assert columns["description"].nullable is True
+        assert columns["databricks_config"].nullable is True
+        assert columns["custom_config"].nullable is True
 
     def test_memory_backend_default_values(self):
         """Test MemoryBackend column default values."""
         columns = MemoryBackend.__table__.columns
 
         # Updated for app-modes: enable_* fields removed, only is_active/is_default remain
-        assert columns['is_active'].default.arg is True
-        assert columns['is_default'].default.arg is False
+        assert columns["is_active"].default.arg is True
+        assert columns["is_default"].default.arg is False
 
     def test_memory_backend_backend_type_enum_default(self):
         """Test MemoryBackend backend_type has enum default."""
-        backend_type_column = MemoryBackend.__table__.columns['backend_type']
-        
+        backend_type_column = MemoryBackend.__table__.columns["backend_type"]
+
         assert backend_type_column.default.arg == MemoryBackendTypeEnum.DEFAULT
 
     def test_memory_backend_datetime_defaults(self):
         """Test MemoryBackend datetime columns have defaults."""
         columns = MemoryBackend.__table__.columns
-        
-        created_at = columns['created_at']
-        updated_at = columns['updated_at']
-        
+
+        created_at = columns["created_at"]
+        updated_at = columns["updated_at"]
+
         assert created_at.default is not None
         assert updated_at.default is not None
         assert updated_at.onupdate is not None
@@ -252,9 +264,9 @@ class TestMemoryBackend:
         backend.group_id = "test-group"
         backend.name = "Test Backend"
         backend.backend_type = None
-        
+
         result = backend.to_dict()
-        
+
         assert result["backend_type"] is None
 
     def test_memory_backend_to_config_dict_default(self):

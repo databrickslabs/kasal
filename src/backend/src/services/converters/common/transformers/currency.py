@@ -4,7 +4,8 @@ Generates SQL/DAX code for currency conversion based on KPI configuration.
 Supports both fixed and dynamic currency sources.
 """
 
-from typing import Optional, Tuple, List
+from typing import List, Optional, Tuple
+
 from ...base.models import KPI
 
 
@@ -23,13 +24,26 @@ class CurrencyConverter:
 
     # Standard currency conversion presets
     SUPPORTED_CURRENCIES = {
-        "USD", "EUR", "GBP", "JPY", "CNY", "INR", "AUD", "CAD", "CHF", "SEK", "NOK", "DKK"
+        "USD",
+        "EUR",
+        "GBP",
+        "JPY",
+        "CNY",
+        "INR",
+        "AUD",
+        "CAD",
+        "CHF",
+        "SEK",
+        "NOK",
+        "DKK",
     }
 
     def __init__(self):
         self.exchange_rate_table = "ExchangeRates"  # Default exchange rate table name
 
-    def get_kbi_currency_recursive(self, kbi: KPI, kpi_lookup: Optional[dict] = None) -> Tuple[Optional[str], Optional[str]]:
+    def get_kbi_currency_recursive(
+        self, kbi: KPI, kpi_lookup: Optional[dict] = None
+    ) -> Tuple[Optional[str], Optional[str]]:
         """
         Get source currency for given KPI by checking all dependencies.
 
@@ -60,12 +74,15 @@ class CurrencyConverter:
         if kpi_lookup and kbi.formula:
             # Extract KBI references from formula (pattern: [KBI_NAME])
             import re
-            kbi_refs = re.findall(r'\[([^\]]+)\]', kbi.formula)
+
+            kbi_refs = re.findall(r"\[([^\]]+)\]", kbi.formula)
 
             for kbi_name in kbi_refs:
                 if kbi_name in kpi_lookup:
                     child_kbi = kpi_lookup[kbi_name]
-                    currency_type, currency_value = self.get_kbi_currency_recursive(child_kbi, kpi_lookup)
+                    currency_type, currency_value = self.get_kbi_currency_recursive(
+                        child_kbi, kpi_lookup
+                    )
                     if currency_type:
                         return currency_type, currency_value
 
@@ -78,7 +95,7 @@ class CurrencyConverter:
         target_currency: str,
         currency_type: str = "fixed",
         currency_column: Optional[str] = None,
-        exchange_rate_table: Optional[str] = None
+        exchange_rate_table: Optional[str] = None,
     ) -> str:
         """
         Generate SQL code for currency conversion.
@@ -127,7 +144,7 @@ class CurrencyConverter:
         target_currency: str,
         currency_type: str = "fixed",
         currency_column: Optional[str] = None,
-        exchange_rate_table: Optional[str] = None
+        exchange_rate_table: Optional[str] = None,
     ) -> str:
         """
         Generate DAX code for currency conversion.
@@ -189,9 +206,7 @@ class CurrencyConverter:
         return has_source and has_target
 
     def get_required_joins(
-        self,
-        kbis: List[KPI],
-        exchange_rate_table: Optional[str] = None
+        self, kbis: List[KPI], exchange_rate_table: Optional[str] = None
     ) -> List[str]:
         """
         Get required JOIN clauses for dynamic currency conversion.

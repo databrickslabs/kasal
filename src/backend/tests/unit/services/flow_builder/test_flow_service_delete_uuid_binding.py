@@ -13,19 +13,20 @@ These use a real in-memory SQLite engine (StaticPool so every session shares
 one connection) rather than mocks, because the bug only manifests when SQLAlchemy
 actually binds the value to the SQLite driver — a mocked session cannot catch it.
 """
+
 import uuid
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from sqlalchemy import text
 
-from src.db.base import Base
 import src.models  # noqa: F401  registers all ORM models on Base.metadata
-from src.models.flow import Flow
+from src.db.base import Base
 from src.models.execution_history import ExecutionHistory
+from src.models.flow import Flow
 from src.services.flow_builder.flow_service import FlowService
 
 
@@ -54,10 +55,15 @@ async def test_force_delete_flow_with_uuid_object(session_factory):
     flow_id = uuid.uuid4()
     async with session_factory() as s:
         s.add(Flow(id=flow_id, name="todelete", group_id="g1"))
-        s.add(ExecutionHistory(
-            job_id="job-1", flow_id=flow_id, execution_type="flow",
-            status="COMPLETED", run_name="r1",
-        ))
+        s.add(
+            ExecutionHistory(
+                job_id="job-1",
+                flow_id=flow_id,
+                execution_type="flow",
+                status="COMPLETED",
+                run_name="r1",
+            )
+        )
         await s.commit()
 
     async with session_factory() as s:
@@ -67,7 +73,9 @@ async def test_force_delete_flow_with_uuid_object(session_factory):
 
     async with session_factory() as s:
         flows = (await s.execute(text("SELECT COUNT(*) FROM flows"))).scalar()
-        execs = (await s.execute(text("SELECT COUNT(*) FROM executionhistory"))).scalar()
+        execs = (
+            await s.execute(text("SELECT COUNT(*) FROM executionhistory"))
+        ).scalar()
         assert flows == 0
         assert execs == 0
 
@@ -82,9 +90,12 @@ async def test_force_delete_flow_with_group_check_uuid_object(session_factory):
 
     async with session_factory() as s:
         svc = FlowService(session=s)
-        assert await svc.force_delete_flow_with_executions_with_group_check(
-            flow_id, _Ctx(group_ids=["g1"])
-        ) is True
+        assert (
+            await svc.force_delete_flow_with_executions_with_group_check(
+                flow_id, _Ctx(group_ids=["g1"])
+            )
+            is True
+        )
         await s.commit()
 
     async with session_factory() as s:

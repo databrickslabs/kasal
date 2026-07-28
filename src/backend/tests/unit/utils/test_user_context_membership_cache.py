@@ -7,9 +7,10 @@ on the hot path. These tests pin the short-TTL cache that makes repeat polls
 free, and the invalidation that keeps it correct when membership changes.
 """
 
-import pytest
-from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 import src.utils.user_context as uc
 from src.utils.user_context import GroupContext, clear_membership_cache

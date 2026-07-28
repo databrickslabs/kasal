@@ -1,9 +1,10 @@
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.execution.naming import ExecutionNameService as Svc
+import pytest
+
 from src.schemas.execution import ExecutionNameGenerationRequest
+from src.services.execution.naming import ExecutionNameService as Svc
 
 
 @pytest.mark.asyncio
@@ -20,19 +21,24 @@ async def test_generate_execution_name_success(monkeypatch):
         @classmethod
         def create(cls, session):
             return cls()
+
         async def create_log(self, **kwargs):
             return True
 
     # Stub LLMManager (now uses LLMManager.completion which returns a string directly)
     class FakeLLMManager:
         @staticmethod
-        async def completion(messages, model, temperature=0.7, max_tokens=4000, extra_headers=None):
+        async def completion(
+            messages, model, temperature=0.7, max_tokens=4000, extra_headers=None
+        ):
             return "My Nice Name"
 
     monkeypatch.setattr(module, "LLMManager", FakeLLMManager, raising=True)
 
     svc = Svc(log_service=FakeLogService(), template_service=FakeTemplateService())
-    req = ExecutionNameGenerationRequest(model="gpt-test", agents_yaml={}, tasks_yaml={})
+    req = ExecutionNameGenerationRequest(
+        model="gpt-test", agents_yaml={}, tasks_yaml={}
+    )
     out = await svc.generate_execution_name(req)
     assert out.name == "My Nice Name"
 
@@ -49,18 +55,23 @@ async def test_generate_execution_name_fallback_on_exception(monkeypatch):
         @classmethod
         def create(cls, session):
             return cls()
+
         async def create_log(self, **kwargs):
             return True
 
     class FakeLLMManager:
         @staticmethod
-        async def completion(messages, model, temperature=0.7, max_tokens=4000, extra_headers=None):
+        async def completion(
+            messages, model, temperature=0.7, max_tokens=4000, extra_headers=None
+        ):
             raise RuntimeError("boom")
 
     monkeypatch.setattr(module, "LLMManager", FakeLLMManager, raising=True)
 
     svc = Svc(log_service=FakeLogService(), template_service=FakeTemplateService())
-    req = ExecutionNameGenerationRequest(model="gpt-test", agents_yaml={}, tasks_yaml={})
+    req = ExecutionNameGenerationRequest(
+        model="gpt-test", agents_yaml={}, tasks_yaml={}
+    )
     out = await svc.generate_execution_name(req)
     assert out.name.startswith("Execution-")
 
@@ -103,14 +114,16 @@ async def test_prompt_contains_only_roles_and_task_names(monkeypatch):
     names only — NOT the full agents/tasks config (backstories, goals,
     tool_configs), which cost ~1.5-2.5k prompt tokens for a 2-4 word name
     on every execution start."""
-    from src.services.execution.naming import ExecutionNameService
     from src.schemas.execution import ExecutionNameGenerationRequest
+    from src.services.execution.naming import ExecutionNameService
 
     captured = {}
 
     class StubLLM:
         @staticmethod
-        async def completion(messages, model, temperature=0.7, max_tokens=4000, extra_headers=None):
+        async def completion(
+            messages, model, temperature=0.7, max_tokens=4000, extra_headers=None
+        ):
             captured["messages"] = messages
             return "Zip Code Analysis"
 
@@ -118,9 +131,13 @@ async def test_prompt_contains_only_roles_and_task_names(monkeypatch):
 
     service = ExecutionNameService.__new__(ExecutionNameService)
     service.template_service = type(
-        "TS", (), {"get_template_content": staticmethod(
-            _async_return("Generate a concise name. Only return the name.")
-        )}
+        "TS",
+        (),
+        {
+            "get_template_content": staticmethod(
+                _async_return("Generate a concise name. Only return the name.")
+            )
+        },
     )()
     service._log_llm_interaction = _async_noop
 
@@ -128,8 +145,12 @@ async def test_prompt_contains_only_roles_and_task_names(monkeypatch):
     req = ExecutionNameGenerationRequest(
         model="gpt-test",
         agents_yaml={
-            "agent_1": {"role": "Postal Code Analyst", "backstory": secret_backstory,
-                        "goal": "g" * 500, "tool_configs": {"k": "v" * 200}},
+            "agent_1": {
+                "role": "Postal Code Analyst",
+                "backstory": secret_backstory,
+                "goal": "g" * 500,
+                "tool_configs": {"k": "v" * 200},
+            },
         },
         tasks_yaml={
             "task_1": {"name": "Analyze Zip Codes", "description": "d" * 800},
@@ -150,6 +171,7 @@ async def test_prompt_contains_only_roles_and_task_names(monkeypatch):
 def _async_return(value):
     async def _inner(*args, **kwargs):
         return value
+
     return _inner
 
 
@@ -165,6 +187,7 @@ async def _async_noop(*args, **kwargs):
 # (ExecutionService(session=None)). Previously the name service crashed on a
 # None session ("'NoneType' has no attribute 'execute'/'add'"); now it opens its
 # OWN request_scoped_session() per DB call, like the rest of that stack.
+
 
 def _fake_session_cm():
     """Async-context-manager DB session with awaitable commit/rollback."""
@@ -189,8 +212,12 @@ async def test_get_name_template_opens_standalone_session_when_none():
     fake_template = MagicMock()
     fake_template.get_template_content = AsyncMock(return_value="TEMPLATE BODY")
 
-    with patch("src.db.session.request_scoped_session", return_value=_fake_session_cm()), \
-         patch("src.services.catalog.templates.TemplateService", return_value=fake_template):
+    with (
+        patch("src.db.session.request_scoped_session", return_value=_fake_session_cm()),
+        patch(
+            "src.services.catalog.templates.TemplateService", return_value=fake_template
+        ),
+    ):
         out = await svc._get_name_template()
 
     assert out == "TEMPLATE BODY"
@@ -206,11 +233,19 @@ async def test_log_llm_interaction_standalone_commits_when_no_session():
     fake_log = MagicMock()
     fake_log.create_log = AsyncMock()
 
-    with patch("src.db.session.request_scoped_session", return_value=session), \
-         patch.object(Svc, "_log_llm_interaction", Svc._log_llm_interaction), \
-         patch("src.services.execution.logs.llm_log_service.LLMLogService.create", return_value=fake_log):
+    with (
+        patch("src.db.session.request_scoped_session", return_value=session),
+        patch.object(Svc, "_log_llm_interaction", Svc._log_llm_interaction),
+        patch(
+            "src.services.execution.logs.llm_log_service.LLMLogService.create",
+            return_value=fake_log,
+        ),
+    ):
         await svc._log_llm_interaction(
-            endpoint="generate-execution-name", prompt="p", response="Name", model="m",
+            endpoint="generate-execution-name",
+            prompt="p",
+            response="Name",
+            model="m",
         )
 
     fake_log.create_log.assert_awaited_once()
@@ -225,11 +260,19 @@ async def test_log_llm_interaction_standalone_swallows_errors():
     fake_log = MagicMock()
     fake_log.create_log = AsyncMock(side_effect=RuntimeError("db down"))
 
-    with patch("src.db.session.request_scoped_session", return_value=session), \
-         patch("src.services.execution.logs.llm_log_service.LLMLogService.create", return_value=fake_log):
+    with (
+        patch("src.db.session.request_scoped_session", return_value=session),
+        patch(
+            "src.services.execution.logs.llm_log_service.LLMLogService.create",
+            return_value=fake_log,
+        ),
+    ):
         # Must not raise.
         await svc._log_llm_interaction(
-            endpoint="generate-execution-name", prompt="p", response="Name", model="m",
+            endpoint="generate-execution-name",
+            prompt="p",
+            response="Name",
+            model="m",
         )
 
 
@@ -249,16 +292,27 @@ async def test_generate_execution_name_none_session_end_to_end(monkeypatch):
 
     class FakeLLMManager:
         @staticmethod
-        async def completion(messages, model, temperature=0.7, max_tokens=4000, extra_headers=None):
+        async def completion(
+            messages, model, temperature=0.7, max_tokens=4000, extra_headers=None
+        ):
             return "Cool Run"
 
     monkeypatch.setattr(module, "LLMManager", FakeLLMManager, raising=True)
 
-    req = ExecutionNameGenerationRequest(model="m", agents_yaml={"a": {"role": "R"}}, tasks_yaml={"t": {"name": "T"}})
+    req = ExecutionNameGenerationRequest(
+        model="m", agents_yaml={"a": {"role": "R"}}, tasks_yaml={"t": {"name": "T"}}
+    )
 
-    with patch("src.db.session.request_scoped_session", return_value=_fake_session_cm()), \
-         patch("src.services.catalog.templates.TemplateService", return_value=fake_template), \
-         patch("src.services.execution.logs.llm_log_service.LLMLogService.create", return_value=fake_log):
+    with (
+        patch("src.db.session.request_scoped_session", return_value=_fake_session_cm()),
+        patch(
+            "src.services.catalog.templates.TemplateService", return_value=fake_template
+        ),
+        patch(
+            "src.services.execution.logs.llm_log_service.LLMLogService.create",
+            return_value=fake_log,
+        ),
+    ):
         out = await svc.generate_execution_name(req)
 
     assert out.name == "Cool Run"

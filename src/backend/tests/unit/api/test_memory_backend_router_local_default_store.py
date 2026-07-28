@@ -6,22 +6,24 @@ focusing on happy-path, permission checks, error branches, and edge cases.
 """
 
 import contextlib
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from src.api.memory_backend import configs_router, records_router
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.schemas.memory_backend import (
     DatabricksMemoryConfig,
     MemoryBackendConfig,
     MemoryBackendCreate,
-    MemoryBackendUpdate,
     MemoryBackendType,
+    MemoryBackendUpdate,
 )
-from src.core.exceptions import ForbiddenError, NotFoundError, BadRequestError
-
 
 # ---------------------------------------------------------------------------
 # Minimal group context helpers
 # ---------------------------------------------------------------------------
+
 
 class AdminCtx:
     user_role = "admin"
@@ -38,6 +40,7 @@ class RegularCtx:
 # ---------------------------------------------------------------------------
 # is_workspace_admin helper used by the router
 # ---------------------------------------------------------------------------
+
 
 def _admin_ctx():
     return AdminCtx()
@@ -70,10 +73,12 @@ def _patch_admin(is_admin: bool):
 # test_lakebase_connection
 # ---------------------------------------------------------------------------
 
+
 class TestTestLakbaseConnection:
     @pytest.mark.asyncio
     async def test_success_with_instance_name(self):
         from src.api.memory_backend.lakebase_router import test_lakebase_connection
+
         svc = AsyncMock()
         svc.test_lakebase_connection = AsyncMock(return_value={"success": True})
 
@@ -83,11 +88,14 @@ class TestTestLakbaseConnection:
             request={"instance_name": "kasal-lakebase"},
         )
         assert result["success"] is True
-        svc.test_lakebase_connection.assert_awaited_once_with(instance_name="kasal-lakebase")
+        svc.test_lakebase_connection.assert_awaited_once_with(
+            instance_name="kasal-lakebase"
+        )
 
     @pytest.mark.asyncio
     async def test_success_without_request(self):
         from src.api.memory_backend.lakebase_router import test_lakebase_connection
+
         svc = AsyncMock()
         svc.test_lakebase_connection = AsyncMock(return_value={"success": True})
 
@@ -102,8 +110,11 @@ class TestTestLakbaseConnection:
     @pytest.mark.asyncio
     async def test_exception_returns_failure(self):
         from src.api.memory_backend.lakebase_router import test_lakebase_connection
+
         svc = AsyncMock()
-        svc.test_lakebase_connection = AsyncMock(side_effect=Exception("connection refused"))
+        svc.test_lakebase_connection = AsyncMock(
+            side_effect=Exception("connection refused")
+        )
 
         result = await test_lakebase_connection(
             group_context=_admin_ctx(),
@@ -118,10 +129,12 @@ class TestTestLakbaseConnection:
 # initialize_lakebase_tables
 # ---------------------------------------------------------------------------
 
+
 class TestInitializeLakebaseTables:
     @pytest.mark.asyncio
     async def test_raises_403_for_non_admin(self):
         from src.api.memory_backend.lakebase_router import initialize_lakebase_tables
+
         svc = AsyncMock()
 
         with _patch_admin(False):
@@ -137,6 +150,7 @@ class TestInitializeLakebaseTables:
         # Updated for app-modes: initialize_lakebase_tables now uses memory_table
         # instead of short_term_table/long_term_table/entity_table
         from src.api.memory_backend.lakebase_router import initialize_lakebase_tables
+
         svc = AsyncMock()
         svc.initialize_lakebase_tables = AsyncMock(return_value={"success": True})
 
@@ -157,6 +171,7 @@ class TestInitializeLakebaseTables:
     async def test_calls_service_with_custom_values(self):
         # Updated for app-modes: uses memory_table instead of per-type tables
         from src.api.memory_backend.lakebase_router import initialize_lakebase_tables
+
         svc = AsyncMock()
         svc.initialize_lakebase_tables = AsyncMock(return_value={"success": True})
 
@@ -181,10 +196,12 @@ class TestInitializeLakebaseTables:
 # get_lakebase_table_stats
 # ---------------------------------------------------------------------------
 
+
 class TestGetLakbaseTableStats:
     @pytest.mark.asyncio
     async def test_returns_stats(self):
         from src.api.memory_backend.lakebase_router import get_lakebase_table_stats
+
         svc = AsyncMock()
         svc.get_lakebase_table_stats = AsyncMock(return_value={"tables": {"st": 10}})
 
@@ -194,11 +211,14 @@ class TestGetLakbaseTableStats:
             instance_name=None,
         )
         assert result["tables"]["st"] == 10
-        svc.get_lakebase_table_stats.assert_awaited_once_with(instance_name=None, group_id="g1")
+        svc.get_lakebase_table_stats.assert_awaited_once_with(
+            instance_name=None, group_id="g1"
+        )
 
     @pytest.mark.asyncio
     async def test_passes_instance_name(self):
         from src.api.memory_backend.lakebase_router import get_lakebase_table_stats
+
         svc = AsyncMock()
         svc.get_lakebase_table_stats = AsyncMock(return_value={})
 
@@ -207,17 +227,21 @@ class TestGetLakbaseTableStats:
             service=svc,
             instance_name="kasal-lb",
         )
-        svc.get_lakebase_table_stats.assert_awaited_once_with(instance_name="kasal-lb", group_id="g1")
+        svc.get_lakebase_table_stats.assert_awaited_once_with(
+            instance_name="kasal-lb", group_id="g1"
+        )
 
 
 # ---------------------------------------------------------------------------
 # create_memory_config
 # ---------------------------------------------------------------------------
 
+
 class TestCreateMemoryConfig:
     @pytest.mark.asyncio
     async def test_raises_403_for_non_admin(self):
         from src.api.memory_backend.configs_router import create_memory_config
+
         svc = AsyncMock()
         config = MagicMock(spec=MemoryBackendCreate)
 
@@ -241,7 +265,9 @@ class TestCreateMemoryConfig:
         config = MagicMock(spec=MemoryBackendCreate)
 
         with _patch_admin(True):
-            with patch("src.api.memory_backend.configs_router.MemoryBackendResponse") as mock_resp:
+            with patch(
+                "src.api.memory_backend.configs_router.MemoryBackendResponse"
+            ) as mock_resp:
                 mock_resp.model_validate.return_value = {"id": "1"}
                 result = await create_memory_config(
                     config=config,
@@ -255,15 +281,19 @@ class TestCreateMemoryConfig:
 # get_memory_configs
 # ---------------------------------------------------------------------------
 
+
 class TestGetMemoryConfigs:
     @pytest.mark.asyncio
     async def test_returns_list(self):
         from src.api.memory_backend.configs_router import get_memory_configs
+
         mock_backends = [MagicMock(), MagicMock()]
         svc = AsyncMock()
         svc.get_memory_backends = AsyncMock(return_value=mock_backends)
 
-        with patch("src.api.memory_backend.configs_router.MemoryBackendResponse") as mock_resp:
+        with patch(
+            "src.api.memory_backend.configs_router.MemoryBackendResponse"
+        ) as mock_resp:
             mock_resp.model_validate.side_effect = lambda b: b
             result = await get_memory_configs(
                 request=MagicMock(),
@@ -278,10 +308,12 @@ class TestGetMemoryConfigs:
 # get_default_memory_config
 # ---------------------------------------------------------------------------
 
+
 class TestGetDefaultMemoryConfig:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_default(self):
         from src.api.memory_backend.configs_router import get_default_memory_config
+
         svc = AsyncMock()
         svc.get_default_memory_backend = AsyncMock(return_value=None)
 
@@ -294,11 +326,14 @@ class TestGetDefaultMemoryConfig:
     @pytest.mark.asyncio
     async def test_returns_config_when_found(self):
         from src.api.memory_backend.configs_router import get_default_memory_config
+
         mock_backend = MagicMock()
         svc = AsyncMock()
         svc.get_default_memory_backend = AsyncMock(return_value=mock_backend)
 
-        with patch("src.api.memory_backend.configs_router.MemoryBackendResponse") as mock_resp:
+        with patch(
+            "src.api.memory_backend.configs_router.MemoryBackendResponse"
+        ) as mock_resp:
             mock_resp.model_validate.return_value = {"id": "default"}
             result = await get_default_memory_config(
                 group_context=_admin_ctx(),
@@ -311,10 +346,12 @@ class TestGetDefaultMemoryConfig:
 # get_memory_config_by_id
 # ---------------------------------------------------------------------------
 
+
 class TestGetMemoryConfigById:
     @pytest.mark.asyncio
     async def test_raises_404_when_not_found(self):
         from src.api.memory_backend.configs_router import get_memory_config_by_id
+
         svc = AsyncMock()
         svc.get_memory_backend = AsyncMock(return_value=None)
 
@@ -328,11 +365,14 @@ class TestGetMemoryConfigById:
     @pytest.mark.asyncio
     async def test_returns_backend_when_found(self):
         from src.api.memory_backend.configs_router import get_memory_config_by_id
+
         mock_backend = MagicMock()
         svc = AsyncMock()
         svc.get_memory_backend = AsyncMock(return_value=mock_backend)
 
-        with patch("src.api.memory_backend.configs_router.MemoryBackendResponse") as mock_resp:
+        with patch(
+            "src.api.memory_backend.configs_router.MemoryBackendResponse"
+        ) as mock_resp:
             mock_resp.model_validate.return_value = {"id": "b1"}
             result = await get_memory_config_by_id(
                 backend_id="b1",
@@ -346,10 +386,12 @@ class TestGetMemoryConfigById:
 # update_memory_config
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateMemoryConfig:
     @pytest.mark.asyncio
     async def test_raises_403_for_non_admin(self):
         from src.api.memory_backend.configs_router import update_memory_config
+
         svc = AsyncMock()
 
         with _patch_admin(False):
@@ -364,6 +406,7 @@ class TestUpdateMemoryConfig:
     @pytest.mark.asyncio
     async def test_raises_404_when_not_found(self):
         from src.api.memory_backend.configs_router import update_memory_config
+
         svc = AsyncMock()
         svc.update_memory_backend = AsyncMock(return_value=None)
 
@@ -379,12 +422,15 @@ class TestUpdateMemoryConfig:
     @pytest.mark.asyncio
     async def test_returns_updated_backend(self):
         from src.api.memory_backend.configs_router import update_memory_config
+
         mock_backend = MagicMock()
         svc = AsyncMock()
         svc.update_memory_backend = AsyncMock(return_value=mock_backend)
 
         with _patch_admin(True):
-            with patch("src.api.memory_backend.configs_router.MemoryBackendResponse") as mock_resp:
+            with patch(
+                "src.api.memory_backend.configs_router.MemoryBackendResponse"
+            ) as mock_resp:
                 mock_resp.model_validate.return_value = {"id": "b1"}
                 result = await update_memory_config(
                     backend_id="b1",
@@ -399,10 +445,12 @@ class TestUpdateMemoryConfig:
 # delete_memory_config
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteMemoryConfig:
     @pytest.mark.asyncio
     async def test_raises_403_for_non_admin(self):
         from src.api.memory_backend.configs_router import delete_memory_config
+
         svc = AsyncMock()
 
         with _patch_admin(False):
@@ -416,6 +464,7 @@ class TestDeleteMemoryConfig:
     @pytest.mark.asyncio
     async def test_raises_404_when_not_found(self):
         from src.api.memory_backend.configs_router import delete_memory_config
+
         svc = AsyncMock()
         svc.delete_memory_backend = AsyncMock(return_value=False)
 
@@ -430,6 +479,7 @@ class TestDeleteMemoryConfig:
     @pytest.mark.asyncio
     async def test_returns_success_when_deleted(self):
         from src.api.memory_backend.configs_router import delete_memory_config
+
         svc = AsyncMock()
         svc.delete_memory_backend = AsyncMock(return_value=True)
 
@@ -446,10 +496,12 @@ class TestDeleteMemoryConfig:
 # get_memory_stats
 # ---------------------------------------------------------------------------
 
+
 class TestGetMemoryStats:
     @pytest.mark.asyncio
     async def test_returns_stats(self):
         from src.api.memory_backend.records_router import get_memory_stats
+
         svc = AsyncMock()
         svc.get_memory_stats = AsyncMock(return_value={"total": 42})
 
@@ -466,6 +518,7 @@ class TestGetMemoryStats:
 # validate_memory_config — additional branch coverage
 # ---------------------------------------------------------------------------
 
+
 class TestValidateMemoryConfigAdditional:
     @pytest.mark.asyncio
     async def test_non_databricks_type_is_valid(self):
@@ -477,24 +530,32 @@ class TestValidateMemoryConfigAdditional:
         svc = AsyncMock()
         ctx = AdminCtx()
 
-        result = await validate_memory_config(config=cfg, service=svc, group_context=ctx)
+        result = await validate_memory_config(
+            config=cfg, service=svc, group_context=ctx
+        )
         assert result["valid"] is True
         assert result["errors"] == []
 
     @pytest.mark.asyncio
     async def test_databricks_config_missing_raises_error(self):
         from src.api.memory_backend.configs_router import validate_memory_config
+
         cfg = MemoryBackendConfig(backend_type=MemoryBackendType.DATABRICKS)
         svc = AsyncMock()
 
-        result = await validate_memory_config(config=cfg, service=svc, group_context=AdminCtx())
+        result = await validate_memory_config(
+            config=cfg, service=svc, group_context=AdminCtx()
+        )
         assert result["valid"] is False
-        assert any("Databricks configuration" in e or "required" in e for e in result["errors"])
+        assert any(
+            "Databricks configuration" in e or "required" in e for e in result["errors"]
+        )
 
     @pytest.mark.asyncio
     async def test_databricks_missing_endpoint_errors(self):
         # Updated for app-modes: use memory_index instead of short_term_index
         from src.api.memory_backend.configs_router import validate_memory_config
+
         cfg = MemoryBackendConfig(
             backend_type=MemoryBackendType.DATABRICKS,
             databricks_config=DatabricksMemoryConfig(
@@ -504,13 +565,16 @@ class TestValidateMemoryConfigAdditional:
             ),
         )
         svc = AsyncMock()
-        result = await validate_memory_config(config=cfg, service=svc, group_context=AdminCtx())
+        result = await validate_memory_config(
+            config=cfg, service=svc, group_context=AdminCtx()
+        )
         assert result["valid"] is False
 
 
 # ---------------------------------------------------------------------------
 # clear_crew_memory
 # ---------------------------------------------------------------------------
+
 
 class TestClearCrewMemory:
     @pytest.mark.asyncio
@@ -538,10 +602,12 @@ class TestClearCrewMemory:
 # save_lakebase_config
 # ---------------------------------------------------------------------------
 
+
 class TestSaveLakbaseConfig:
     @pytest.mark.asyncio
     async def test_raises_403_for_non_admin(self):
         from src.api.memory_backend.lakebase_router import save_lakebase_config
+
         svc = AsyncMock()
 
         with _patch_admin(False):
@@ -554,9 +620,10 @@ class TestSaveLakbaseConfig:
 
     @pytest.mark.asyncio
     async def test_creates_new_config(self):
+        from uuid import uuid4
+
         from src.api.memory_backend.lakebase_router import save_lakebase_config
         from src.models.memory_backend import MemoryBackend
-        from uuid import uuid4
 
         mock_backend = MagicMock(spec=MemoryBackend)
         mock_backend.id = uuid4()
@@ -580,10 +647,12 @@ class TestSaveLakbaseConfig:
 # save_default_config
 # ---------------------------------------------------------------------------
 
+
 class TestSaveDefaultConfig:
     @pytest.mark.asyncio
     async def test_raises_403_for_non_admin(self):
         from src.api.memory_backend.configs_router import save_default_config
+
         svc = AsyncMock()
 
         with _patch_admin(False):
@@ -598,10 +667,11 @@ class TestSaveDefaultConfig:
     async def test_creates_active_default_config_with_cognitive_tuning(self):
         """Local save must persist an ACTIVE DEFAULT config carrying the
         cognitive tuning, so crew execution loads it (the whole fix)."""
+        from uuid import uuid4
+
         from src.api.memory_backend.configs_router import save_default_config
         from src.models.memory_backend import MemoryBackend
         from src.schemas.memory_backend import MemoryBackendType
-        from uuid import uuid4
 
         mock_backend = MagicMock(spec=MemoryBackend)
         mock_backend.id = uuid4()
@@ -629,16 +699,19 @@ class TestSaveDefaultConfig:
         created = svc.create_memory_backend.await_args.args[1]
         assert created.backend_type == MemoryBackendType.DEFAULT
         assert created.cognitive_config is not None
-        assert created.cognitive_config.memory_llm_model == "databricks-claude-haiku-4-5"
+        assert (
+            created.cognitive_config.memory_llm_model == "databricks-claude-haiku-4-5"
+        )
         assert created.cognitive_config.query_analysis_threshold == 99977
         assert created.cognitive_config.exploration_budget == 0
         svc.set_default_backend.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_creates_config_without_cognitive_tuning(self):
+        from uuid import uuid4
+
         from src.api.memory_backend.configs_router import save_default_config
         from src.models.memory_backend import MemoryBackend
-        from uuid import uuid4
 
         mock_backend = MagicMock(spec=MemoryBackend)
         mock_backend.id = uuid4()
@@ -663,14 +736,18 @@ class TestSaveDefaultConfig:
 # _browse_default_records / _delete_default_records (local LanceDB store)
 # ---------------------------------------------------------------------------
 
+
 class TestLocalDefaultStoreReadDelete:
     def test_browse_returns_empty_when_store_missing(self, tmp_path):
         from src.api.memory_backend.record_browsers import _browse_default_records
+
         with patch(
             "src.api.memory_backend.record_browsers.local_memory_store_dir",
             return_value=tmp_path / "nope",
         ):
-            result = _browse_default_records(group_id="g", scope=None, limit=10, offset=0)
+            result = _browse_default_records(
+                group_id="g", scope=None, limit=10, offset=0
+            )
         # Returns (records, total) so the client can paginate.
         assert result == ([], 0)
 
@@ -689,21 +766,27 @@ class TestLocalDefaultStoreReadDelete:
         runtime actually writes through, and requires the memory.db to exist.
         """
         from src.api.memory_backend.record_browsers import _browse_default_records
+
         store = tmp_path / "kasal_default_g"
         store.mkdir()
-        (store / "memory.db").touch()          # the real store file must exist
+        (store / "memory.db").touch()  # the real store file must exist
         storage = MagicMock()
         storage.list_records.return_value = ["rec"]
         storage.count.return_value = 412
 
-        with patch(
-            "src.api.memory_backend.record_browsers.local_memory_store_dir", return_value=store
-        ), patch(
-            "src.services.memory.local_storage_backend.LocalMemoryStorage",
-            return_value=storage,
-        ), patch(
-            "src.api.memory_backend.record_browsers._memory_record_to_dict",
-            return_value={"created_at": "2026-01-01", "metadata": {}},
+        with (
+            patch(
+                "src.api.memory_backend.record_browsers.local_memory_store_dir",
+                return_value=store,
+            ),
+            patch(
+                "src.services.memory.local_storage_backend.LocalMemoryStorage",
+                return_value=storage,
+            ),
+            patch(
+                "src.api.memory_backend.record_browsers._memory_record_to_dict",
+                return_value={"created_at": "2026-01-01", "metadata": {}},
+            ),
         ):
             records, total = _browse_default_records(
                 group_id="g", scope="/g/sess1", limit=10, offset=0
@@ -719,28 +802,37 @@ class TestLocalDefaultStoreReadDelete:
     def test_browse_returns_nothing_when_the_db_file_is_absent(self, tmp_path):
         """A store directory left over from the LanceDB era has no memory.db."""
         from src.api.memory_backend.record_browsers import _browse_default_records
+
         store = tmp_path / "kasal_default_g"
-        (store / "memory" / "memories.lance").mkdir(parents=True)   # legacy leftover
+        (store / "memory" / "memories.lance").mkdir(parents=True)  # legacy leftover
         with patch(
-            "src.api.memory_backend.record_browsers.local_memory_store_dir", return_value=store
+            "src.api.memory_backend.record_browsers.local_memory_store_dir",
+            return_value=store,
         ):
-            assert _browse_default_records(group_id="g", scope=None, limit=10, offset=0) == ([], 0)
+            assert _browse_default_records(
+                group_id="g", scope=None, limit=10, offset=0
+            ) == ([], 0)
 
     def test_scoped_delete_uses_the_real_store(self, tmp_path):
         """The scoped delete had the same defect as browse: it reported 0 while
         removing nothing."""
         from src.api.memory_backend.record_browsers import _delete_default_records
+
         store = tmp_path / "kasal_default_g"
         store.mkdir()
         (store / "memory.db").touch()
         storage = MagicMock()
         storage.delete.return_value = 7
 
-        with patch(
-            "src.api.memory_backend.record_browsers.local_memory_store_dir", return_value=store
-        ), patch(
-            "src.services.memory.local_storage_backend.LocalMemoryStorage",
-            return_value=storage,
+        with (
+            patch(
+                "src.api.memory_backend.record_browsers.local_memory_store_dir",
+                return_value=store,
+            ),
+            patch(
+                "src.services.memory.local_storage_backend.LocalMemoryStorage",
+                return_value=storage,
+            ),
         ):
             deleted = _delete_default_records(group_id="g", scope="/g/sess1")
 
@@ -749,6 +841,7 @@ class TestLocalDefaultStoreReadDelete:
 
     def test_delete_returns_zero_when_store_missing(self, tmp_path):
         from src.api.memory_backend.record_browsers import _delete_default_records
+
         with patch(
             "src.api.memory_backend.record_browsers.local_memory_store_dir",
             return_value=tmp_path / "nope",
@@ -759,6 +852,7 @@ class TestLocalDefaultStoreReadDelete:
 # ---------------------------------------------------------------------------
 # switch_to_disabled_mode
 # ---------------------------------------------------------------------------
+
 
 class TestSwitchToDisabledMode:
     @pytest.mark.asyncio

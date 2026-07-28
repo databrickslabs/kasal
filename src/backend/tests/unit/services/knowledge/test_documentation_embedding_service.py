@@ -10,17 +10,18 @@ Tests the functionality of the documentation embedding service including:
 - Search by source, title, and recent embeddings
 - Error handling and fallback paths
 """
+
 import asyncio
 import os
 import uuid
-import pytest
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
-from src.services.knowledge.documentation_embedding import DocumentationEmbeddingService
+import pytest
+
 from src.schemas.memory_backend import MemoryBackendType
-
+from src.services.knowledge.documentation_embedding import DocumentationEmbeddingService
 
 # ---------------------------------------------------------------------------
 # Patch path constants
@@ -39,14 +40,19 @@ _EMBEDDING_QUEUE = f"{_SVC}.embedding_queue"
 # Local imports inside methods - must patch at SOURCE modules
 _DOC_EMBEDDING_REPO_CLS = "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository"
 _ASYNC_SESSION_FACTORY = "src.db.session.request_scoped_session"
-_DATABRICKS_INDEX_SERVICE = "src.services.databricks.vector_search.index.DatabricksIndexService"
-_DATABRICKS_VECTOR_STORAGE = "src.services.memory.databricks_vector_storage.DatabricksVectorStorage"
+_DATABRICKS_INDEX_SERVICE = (
+    "src.services.databricks.vector_search.index.DatabricksIndexService"
+)
+_DATABRICKS_VECTOR_STORAGE = (
+    "src.services.memory.databricks_vector_storage.DatabricksVectorStorage"
+)
 _DATABRICKS_VECTOR_INDEX_REPO = "src.repositories.databricks_vector_index_repository.DatabricksVectorIndexRepository"
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_service(session=None) -> DocumentationEmbeddingService:
     """Create a fresh service instance with an optional mock session."""
@@ -81,7 +87,8 @@ def _make_backend(
         is_active=is_active,
         backend_type=backend_type,
         created_at=created_at or datetime(2024, 6, 1),
-        databricks_config=databricks_config or {
+        databricks_config=databricks_config
+        or {
             "endpoint_name": "test-endpoint",
             "memory_index": "catalog.schema.crew_memory",
             "document_index": "catalog.schema.documents",
@@ -159,7 +166,9 @@ def _make_databricks_config_object(**overrides):
     return SimpleNamespace(**defaults)
 
 
-def _make_memory_config(databricks_config=None, backend_type=MemoryBackendType.DATABRICKS):
+def _make_memory_config(
+    databricks_config=None, backend_type=MemoryBackendType.DATABRICKS
+):
     """Create a SimpleNamespace mimicking MemoryBackendConfig."""
     return SimpleNamespace(
         backend_type=backend_type,
@@ -170,6 +179,7 @@ def _make_memory_config(databricks_config=None, backend_type=MemoryBackendType.D
 # ===================================================================
 # _check_databricks_config
 # ===================================================================
+
 
 class TestCheckDatabricksConfig:
     """Tests for _check_databricks_config method."""
@@ -284,8 +294,10 @@ class TestCheckDatabricksConfig:
         mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
         mock_ctx.__aexit__ = AsyncMock(return_value=False)
 
-        with patch(_ASYNC_SESSION_FACTORY, return_value=mock_ctx), \
-             patch(_MEMORY_BACKEND_REPO, return_value=mock_repo):
+        with (
+            patch(_ASYNC_SESSION_FACTORY, return_value=mock_ctx),
+            patch(_MEMORY_BACKEND_REPO, return_value=mock_repo),
+        ):
             result = await svc._check_databricks_config()
 
         assert result is True
@@ -309,6 +321,7 @@ class TestCheckDatabricksConfig:
 # ===================================================================
 # _get_databricks_storage
 # ===================================================================
+
 
 class TestGetDatabricksStorage:
     """Tests for _get_databricks_storage method."""
@@ -364,19 +377,23 @@ class TestGetDatabricksStorage:
     async def test_uses_document_index_from_object_config(self):
         """When config is an object with document_index, use it."""
         svc = _make_service()
-        db_config = _make_databricks_config_object(document_index="catalog.schema.my_docs")
+        db_config = _make_databricks_config_object(
+            document_index="catalog.schema.my_docs"
+        )
         svc._memory_config = _make_memory_config(databricks_config=db_config)
         svc._check_databricks_config = AsyncMock(return_value=True)
 
         mock_index_svc = MagicMock()
-        mock_index_svc.wait_for_index_ready = AsyncMock(return_value={
-            "ready": True, "attempts": 1, "elapsed_time": 2.0
-        })
+        mock_index_svc.wait_for_index_ready = AsyncMock(
+            return_value={"ready": True, "attempts": 1, "elapsed_time": 2.0}
+        )
         mock_storage_instance = MagicMock()
 
-        with patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc), \
-             patch(_DATABRICKS_VECTOR_STORAGE, return_value=mock_storage_instance), \
-             patch(_DATABRICKS_VECTOR_INDEX_REPO):
+        with (
+            patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc),
+            patch(_DATABRICKS_VECTOR_STORAGE, return_value=mock_storage_instance),
+            patch(_DATABRICKS_VECTOR_INDEX_REPO),
+        ):
             result = await svc._get_databricks_storage(user_token="test-token")
 
         assert result is mock_storage_instance
@@ -394,14 +411,16 @@ class TestGetDatabricksStorage:
         svc._check_databricks_config = AsyncMock(return_value=True)
 
         mock_index_svc = MagicMock()
-        mock_index_svc.wait_for_index_ready = AsyncMock(return_value={
-            "ready": True, "attempts": 1, "elapsed_time": 1.0
-        })
+        mock_index_svc.wait_for_index_ready = AsyncMock(
+            return_value={"ready": True, "attempts": 1, "elapsed_time": 1.0}
+        )
         mock_storage_cls = MagicMock()
 
-        with patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc), \
-             patch(_DATABRICKS_VECTOR_STORAGE, new=mock_storage_cls), \
-             patch(_DATABRICKS_VECTOR_INDEX_REPO):
+        with (
+            patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc),
+            patch(_DATABRICKS_VECTOR_STORAGE, new=mock_storage_cls),
+            patch(_DATABRICKS_VECTOR_INDEX_REPO),
+        ):
             result = await svc._get_databricks_storage()
 
         # The derived index should be "catalog.schema.documentation_embeddings"
@@ -430,14 +449,16 @@ class TestGetDatabricksStorage:
         svc._check_databricks_config = AsyncMock(return_value=True)
 
         mock_index_svc = MagicMock()
-        mock_index_svc.wait_for_index_ready = AsyncMock(return_value={
-            "ready": True, "attempts": 1, "elapsed_time": 0.5
-        })
+        mock_index_svc.wait_for_index_ready = AsyncMock(
+            return_value={"ready": True, "attempts": 1, "elapsed_time": 0.5}
+        )
         mock_storage_cls = MagicMock()
 
-        with patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc), \
-             patch(_DATABRICKS_VECTOR_STORAGE, new=mock_storage_cls), \
-             patch(_DATABRICKS_VECTOR_INDEX_REPO):
+        with (
+            patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc),
+            patch(_DATABRICKS_VECTOR_STORAGE, new=mock_storage_cls),
+            patch(_DATABRICKS_VECTOR_INDEX_REPO),
+        ):
             result = await svc._get_databricks_storage()
 
         call_kwargs = mock_storage_cls.call_args[1]
@@ -457,14 +478,16 @@ class TestGetDatabricksStorage:
         svc._check_databricks_config = AsyncMock(return_value=True)
 
         mock_index_svc = MagicMock()
-        mock_index_svc.wait_for_index_ready = AsyncMock(return_value={
-            "ready": True, "attempts": 1, "elapsed_time": 0.5
-        })
+        mock_index_svc.wait_for_index_ready = AsyncMock(
+            return_value={"ready": True, "attempts": 1, "elapsed_time": 0.5}
+        )
         mock_storage_cls = MagicMock()
 
-        with patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc), \
-             patch(_DATABRICKS_VECTOR_STORAGE, new=mock_storage_cls), \
-             patch(_DATABRICKS_VECTOR_INDEX_REPO):
+        with (
+            patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc),
+            patch(_DATABRICKS_VECTOR_STORAGE, new=mock_storage_cls),
+            patch(_DATABRICKS_VECTOR_INDEX_REPO),
+        ):
             await svc._get_databricks_storage()
 
         call_kwargs = mock_storage_cls.call_args[1]
@@ -478,12 +501,19 @@ class TestGetDatabricksStorage:
         svc._check_databricks_config = AsyncMock(return_value=True)
 
         mock_index_svc = MagicMock()
-        mock_index_svc.wait_for_index_ready = AsyncMock(return_value={
-            "ready": False, "message": "PROVISIONING", "attempts": 12, "elapsed_time": 60.0
-        })
+        mock_index_svc.wait_for_index_ready = AsyncMock(
+            return_value={
+                "ready": False,
+                "message": "PROVISIONING",
+                "attempts": 12,
+                "elapsed_time": 60.0,
+            }
+        )
 
-        with patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc), \
-             patch(_DATABRICKS_VECTOR_INDEX_REPO):
+        with (
+            patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc),
+            patch(_DATABRICKS_VECTOR_INDEX_REPO),
+        ):
             result = await svc._get_databricks_storage()
 
         assert result is None
@@ -495,8 +525,10 @@ class TestGetDatabricksStorage:
         svc._memory_config = _make_memory_config()
         svc._check_databricks_config = AsyncMock(return_value=True)
 
-        with patch(_DATABRICKS_INDEX_SERVICE, side_effect=RuntimeError("Init error")), \
-             patch(_DATABRICKS_VECTOR_INDEX_REPO):
+        with (
+            patch(_DATABRICKS_INDEX_SERVICE, side_effect=RuntimeError("Init error")),
+            patch(_DATABRICKS_VECTOR_INDEX_REPO),
+        ):
             result = await svc._get_databricks_storage()
 
         assert result is None
@@ -529,14 +561,16 @@ class TestGetDatabricksStorage:
         svc._check_databricks_config = AsyncMock(return_value=True)
 
         mock_index_svc = MagicMock()
-        mock_index_svc.wait_for_index_ready = AsyncMock(return_value={
-            "ready": True, "attempts": 1, "elapsed_time": 0.5
-        })
+        mock_index_svc.wait_for_index_ready = AsyncMock(
+            return_value={"ready": True, "attempts": 1, "elapsed_time": 0.5}
+        )
         mock_storage_cls = MagicMock()
 
-        with patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc), \
-             patch(_DATABRICKS_VECTOR_STORAGE, new=mock_storage_cls), \
-             patch(_DATABRICKS_VECTOR_INDEX_REPO):
+        with (
+            patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc),
+            patch(_DATABRICKS_VECTOR_STORAGE, new=mock_storage_cls),
+            patch(_DATABRICKS_VECTOR_INDEX_REPO),
+        ):
             await svc._get_databricks_storage()
 
         call_kwargs = mock_storage_cls.call_args[1]
@@ -562,14 +596,16 @@ class TestGetDatabricksStorage:
         svc._check_databricks_config = AsyncMock(return_value=True)
 
         mock_index_svc = MagicMock()
-        mock_index_svc.wait_for_index_ready = AsyncMock(return_value={
-            "ready": True, "attempts": 1, "elapsed_time": 0.5
-        })
+        mock_index_svc.wait_for_index_ready = AsyncMock(
+            return_value={"ready": True, "attempts": 1, "elapsed_time": 0.5}
+        )
         mock_storage_cls = MagicMock()
 
-        with patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc), \
-             patch(_DATABRICKS_VECTOR_STORAGE, new=mock_storage_cls), \
-             patch(_DATABRICKS_VECTOR_INDEX_REPO):
+        with (
+            patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc),
+            patch(_DATABRICKS_VECTOR_STORAGE, new=mock_storage_cls),
+            patch(_DATABRICKS_VECTOR_INDEX_REPO),
+        ):
             await svc._get_databricks_storage()
 
         call_kwargs = mock_storage_cls.call_args[1]
@@ -595,14 +631,16 @@ class TestGetDatabricksStorage:
         svc._check_databricks_config = AsyncMock(return_value=True)
 
         mock_index_svc = MagicMock()
-        mock_index_svc.wait_for_index_ready = AsyncMock(return_value={
-            "ready": True, "attempts": 1, "elapsed_time": 0.5
-        })
+        mock_index_svc.wait_for_index_ready = AsyncMock(
+            return_value={"ready": True, "attempts": 1, "elapsed_time": 0.5}
+        )
         mock_storage_cls = MagicMock()
 
-        with patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc), \
-             patch(_DATABRICKS_VECTOR_STORAGE, new=mock_storage_cls), \
-             patch(_DATABRICKS_VECTOR_INDEX_REPO):
+        with (
+            patch(_DATABRICKS_INDEX_SERVICE, return_value=mock_index_svc),
+            patch(_DATABRICKS_VECTOR_STORAGE, new=mock_storage_cls),
+            patch(_DATABRICKS_VECTOR_INDEX_REPO),
+        ):
             await svc._get_databricks_storage()
 
         call_kwargs = mock_storage_cls.call_args[1]
@@ -612,6 +650,7 @@ class TestGetDatabricksStorage:
 # ===================================================================
 # create_documentation_embedding
 # ===================================================================
+
 
 class TestCreateDocumentationEmbedding:
     """Tests for create_documentation_embedding method."""
@@ -625,8 +664,10 @@ class TestCreateDocumentationEmbedding:
         mock_queue = AsyncMock()
         doc_create = _make_doc_embedding_create()
 
-        with patch.dict(os.environ, {"DATABASE_TYPE": "sqlite"}), \
-             patch(_EMBEDDING_QUEUE, mock_queue):
+        with (
+            patch.dict(os.environ, {"DATABASE_TYPE": "sqlite"}),
+            patch(_EMBEDDING_QUEUE, mock_queue),
+        ):
             result = await svc.create_documentation_embedding(doc_create)
 
         mock_queue.add_embedding.assert_awaited_once()
@@ -644,8 +685,13 @@ class TestCreateDocumentationEmbedding:
 
         doc_create = _make_doc_embedding_create()
 
-        with patch.dict(os.environ, {"DATABASE_TYPE": "postgres", "POSTGRES_SERVER": "localhost"}), \
-             patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
+        with (
+            patch.dict(
+                os.environ,
+                {"DATABASE_TYPE": "postgres", "POSTGRES_SERVER": "localhost"},
+            ),
+            patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo),
+        ):
             result = await svc.create_documentation_embedding(doc_create)
 
         mock_repo.create.assert_awaited_once_with(doc_create)
@@ -665,9 +711,16 @@ class TestCreateDocumentationEmbedding:
 
         doc_create = _make_doc_embedding_create()
 
-        with patch.dict(os.environ, {"DATABASE_TYPE": "postgres", "POSTGRES_SERVER": "remote-host"}), \
-             patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
-            result = await svc.create_documentation_embedding(doc_create, user_token="token")
+        with (
+            patch.dict(
+                os.environ,
+                {"DATABASE_TYPE": "postgres", "POSTGRES_SERVER": "remote-host"},
+            ),
+            patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo),
+        ):
+            result = await svc.create_documentation_embedding(
+                doc_create, user_token="token"
+            )
 
         mock_repo.create.assert_awaited_once_with(doc_create)
         assert result is expected_model
@@ -679,7 +732,9 @@ class TestCreateDocumentationEmbedding:
 
         doc_create = _make_doc_embedding_create()
 
-        with patch.dict(os.environ, {"DATABASE_TYPE": "postgres", "POSTGRES_SERVER": "localhost"}):
+        with patch.dict(
+            os.environ, {"DATABASE_TYPE": "postgres", "POSTGRES_SERVER": "localhost"}
+        ):
             with pytest.raises(ValueError, match="Session is required"):
                 await svc.create_documentation_embedding(doc_create)
 
@@ -687,6 +742,7 @@ class TestCreateDocumentationEmbedding:
 # ===================================================================
 # get_documentation_embedding
 # ===================================================================
+
 
 class TestGetDocumentationEmbedding:
     """Tests for get_documentation_embedding method."""
@@ -734,6 +790,7 @@ class TestGetDocumentationEmbedding:
 # get_documentation_embeddings
 # ===================================================================
 
+
 class TestGetDocumentationEmbeddings:
     """Tests for get_documentation_embeddings (list) method."""
 
@@ -780,6 +837,7 @@ class TestGetDocumentationEmbeddings:
 # update_documentation_embedding
 # ===================================================================
 
+
 class TestUpdateDocumentationEmbedding:
     """Tests for update_documentation_embedding method."""
 
@@ -794,7 +852,9 @@ class TestUpdateDocumentationEmbedding:
         mock_repo.update = AsyncMock(return_value=updated_model)
 
         with patch(_DOC_EMBEDDING_REPO_CLS, return_value=mock_repo):
-            result = await svc.update_documentation_embedding(1, {"title": "Updated Title"})
+            result = await svc.update_documentation_embedding(
+                1, {"title": "Updated Title"}
+            )
 
         assert result.title == "Updated Title"
         mock_repo.update.assert_awaited_once_with(1, {"title": "Updated Title"})
@@ -825,6 +885,7 @@ class TestUpdateDocumentationEmbedding:
 # ===================================================================
 # delete_documentation_embedding
 # ===================================================================
+
 
 class TestDeleteDocumentationEmbedding:
     """Tests for delete_documentation_embedding method."""
@@ -869,6 +930,7 @@ class TestDeleteDocumentationEmbedding:
 # ===================================================================
 # search_similar_embeddings
 # ===================================================================
+
 
 class TestSearchSimilarEmbeddings:
     """Tests for search_similar_embeddings method."""
@@ -938,6 +1000,7 @@ class TestSearchSimilarEmbeddings:
 # search_by_source
 # ===================================================================
 
+
 class TestSearchBySource:
     """Tests for search_by_source method."""
 
@@ -970,6 +1033,7 @@ class TestSearchBySource:
 # search_by_title
 # ===================================================================
 
+
 class TestSearchByTitle:
     """Tests for search_by_title method."""
 
@@ -1001,6 +1065,7 @@ class TestSearchByTitle:
 # ===================================================================
 # get_recent_embeddings
 # ===================================================================
+
 
 class TestGetRecentEmbeddings:
     """Tests for get_recent_embeddings method."""
@@ -1047,6 +1112,7 @@ class TestGetRecentEmbeddings:
 # ===================================================================
 # Constructor / Initialization
 # ===================================================================
+
 
 class TestServiceInit:
     """Tests for __init__ and basic state."""

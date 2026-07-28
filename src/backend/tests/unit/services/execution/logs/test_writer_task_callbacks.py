@@ -8,10 +8,13 @@ to the event bus and the OTel pipeline.  The callbacks now
 only create execution logs via enqueue_log().
 """
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 
 from src.services.execution.logs.writer_task import LogWriterTask
+
+
 class TestLogWriterTaskEventFiltering:
     """Test cases for trace manager event filtering."""
 
@@ -64,7 +67,9 @@ class TestLogWriterTaskEventFiltering:
 
     def test_step_callback_creates_log(self):
         """Test that step callback creates execution log."""
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
@@ -82,7 +87,9 @@ class TestLogWriterTaskEventFiltering:
 
     def test_step_callback_with_various_output_types(self):
         """Test that step callback handles various output object types."""
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
@@ -105,7 +112,9 @@ class TestLogWriterTaskEventFiltering:
 
     def test_group_context_in_logs(self):
         """Test that group context is properly included in logs."""
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         mock_group_context = MagicMock()
         mock_group_context.primary_group_id = "group_123"
@@ -127,7 +136,9 @@ class TestLogWriterTaskEventFiltering:
 
     def test_log_isolation_by_job_id(self):
         """Test that logs are isolated by job ID."""
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
@@ -154,7 +165,9 @@ class TestCallbackCrewIntegration:
 
     def test_crew_callbacks_creation(self):
         """Test that crew callbacks are created correctly."""
-        from src.services.execution.kernel.execution_callback import create_crew_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_crew_callbacks,
+        )
 
         callbacks = create_crew_callbacks("test_job", {"model": "test"}, None)
 
@@ -167,7 +180,9 @@ class TestCallbackCrewIntegration:
 
     def test_crew_start_callback_creates_log(self):
         """Test crew start callback creates execution log."""
-        from src.services.execution.kernel.execution_callback import create_crew_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_crew_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
@@ -182,7 +197,9 @@ class TestCallbackCrewIntegration:
 
     def test_crew_complete_callback_creates_log(self):
         """Test crew completion callback creates execution log."""
-        from src.services.execution.kernel.execution_callback import create_crew_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_crew_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
@@ -197,7 +214,9 @@ class TestCallbackCrewIntegration:
 
     def test_crew_error_callback(self):
         """Test crew error callback functionality."""
-        from src.services.execution.kernel.execution_callback import create_crew_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_crew_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
@@ -217,7 +236,9 @@ class TestTaskCallback:
 
     def test_task_callback_creates_log(self):
         """Test task callback creates execution log."""
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
@@ -240,7 +261,9 @@ class TestConfigSanitization:
 
     def test_config_sanitization(self):
         """Test that sensitive config data is sanitized."""
-        from src.services.execution.kernel.execution_callback import log_crew_initialization
+        from src.services.execution.kernel.execution_callback import (
+            log_crew_initialization,
+        )
 
         config_with_secrets = {
             "model": "test-model",
@@ -264,7 +287,9 @@ class TestConfigSanitization:
 
     def test_empty_config_handling(self):
         """Test handling of empty or None config."""
-        from src.services.execution.kernel.execution_callback import log_crew_initialization
+        from src.services.execution.kernel.execution_callback import (
+            log_crew_initialization,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"

@@ -8,9 +8,10 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from .base import BaseTool, EnvVar
-from .web_fetch import _TextExtractor, _safe_fetch
+from .web_fetch import _safe_fetch, _TextExtractor
 
 logger = logging.getLogger(__name__)
+
 
 class FixedScrapeWebsiteToolSchema(BaseModel):
     """Input for ScrapeWebsiteTool with a preset website_url."""
@@ -71,7 +72,3 @@ class ScrapeWebsiteTool(BaseTool):
         text = "The following text is scraped website content:\n\n" + extractor.text()
         text = re.sub("[ \t]+", " ", text)
         return re.sub("\\s+\n\\s+", "\n", text)
-
-
-
-

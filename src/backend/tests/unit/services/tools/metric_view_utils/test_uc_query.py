@@ -4,8 +4,10 @@ Covers identifier safety, the SSRF allowlist, SELECT-DISTINCT SQL shaping, and t
 row-parsing of the statement API — all without hitting a real warehouse (httpx is
 patched).
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.tools.metric_view_utils import uc_query as U
 
@@ -43,20 +45,35 @@ class TestSelectDistinctSql:
     async def test_builds_sql_and_flattens_values(self):
         captured = {}
 
-        async def fake_run_query(sql, warehouse_id=None, host_override=None, _resolved=None):
+        async def fake_run_query(
+            sql, warehouse_id=None, host_override=None, _resolved=None
+        ):
             captured["sql"] = sql
-            return {"success": True, "columns": ["bic_cwc_type"],
-                    "rows": [["APET"], ["CAN"], ["PET"]]}
+            return {
+                "success": True,
+                "columns": ["bic_cwc_type"],
+                "rows": [["APET"], ["CAN"], ["PET"]],
+            }
 
         with patch.object(U, "run_query", side_effect=fake_run_query):
             res = await U.select_distinct(
-                "cat.sch.dim", "bic_cwc_type", flag_col="cwc_filter", flag_value=1,
-                _resolved=("https://x.cloud.databricks.com", "wh1", {}))
+                "cat.sch.dim",
+                "bic_cwc_type",
+                flag_col="cwc_filter",
+                flag_value=1,
+                _resolved=("https://x.cloud.databricks.com", "wh1", {}),
+            )
         assert res["values"] == ["APET", "CAN", "PET"]
-        assert "SELECT DISTINCT `bic_cwc_type` FROM `cat`.`sch`.`dim`" in captured["sql"]
+        assert (
+            "SELECT DISTINCT `bic_cwc_type` FROM `cat`.`sch`.`dim`" in captured["sql"]
+        )
         # flag column is back-quoted (identifier-validated), value int-coerced
-        assert "WHERE `bic_cwc_type` IS NOT NULL AND `cwc_filter` = 1" in captured["sql"]
-        assert "ORDER BY `bic_cwc_type`" in captured["sql"] and "LIMIT" in captured["sql"]
+        assert (
+            "WHERE `bic_cwc_type` IS NOT NULL AND `cwc_filter` = 1" in captured["sql"]
+        )
+        assert (
+            "ORDER BY `bic_cwc_type`" in captured["sql"] and "LIMIT" in captured["sql"]
+        )
 
     @pytest.mark.asyncio
     async def test_unsafe_table_returns_error_not_raises(self):
@@ -68,8 +85,11 @@ class TestSelectDistinctSql:
     async def test_unsafe_flag_col_rejected(self):
         """SEC #2: a malicious flag column name must be rejected, not interpolated."""
         res = await U.select_distinct(
-            "cat.sch.dim", "col", flag_col="x = 1 OR (SELECT 1)",
-            _resolved=("https://x.cloud.databricks.com", "w", {}))
+            "cat.sch.dim",
+            "col",
+            flag_col="x = 1 OR (SELECT 1)",
+            _resolved=("https://x.cloud.databricks.com", "w", {}),
+        )
         assert res["success"] is False
         assert "unsafe identifier" in res["error"]
 
@@ -77,21 +97,26 @@ class TestSelectDistinctSql:
     async def test_no_flag_col_omits_where(self):
         captured = {}
 
-        async def fake_run_query(sql, warehouse_id=None, host_override=None, _resolved=None):
+        async def fake_run_query(
+            sql, warehouse_id=None, host_override=None, _resolved=None
+        ):
             captured["sql"] = sql
             return {"success": True, "columns": ["c"], "rows": [["v"]]}
 
         with patch.object(U, "run_query", side_effect=fake_run_query):
-            await U.select_distinct("a.b.c", "col",
-                                    _resolved=("https://x.cloud.databricks.com", "w", {}))
+            await U.select_distinct(
+                "a.b.c", "col", _resolved=("https://x.cloud.databricks.com", "w", {})
+            )
         assert "WHERE" not in captured["sql"]
 
     @pytest.mark.asyncio
     async def test_query_failure_propagates_without_values(self):
-        with patch.object(U, "run_query",
-                          AsyncMock(return_value={"success": False, "error": "boom"})):
-            res = await U.select_distinct("a.b.c", "col",
-                                          _resolved=("https://x.cloud.databricks.com", "w", {}))
+        with patch.object(
+            U, "run_query", AsyncMock(return_value={"success": False, "error": "boom"})
+        ):
+            res = await U.select_distinct(
+                "a.b.c", "col", _resolved=("https://x.cloud.databricks.com", "w", {})
+            )
         assert res["success"] is False and "values" not in res
 
 
@@ -118,30 +143,40 @@ class TestRunQuery:
         cm.__aenter__ = AsyncMock(return_value=client)
         cm.__aexit__ = AsyncMock(return_value=False)
         with patch("httpx.AsyncClient", return_value=cm):
-            res = await U.run_query("SELECT 1",
-                                    _resolved=("https://x.cloud.databricks.com", "wh", {}))
-        assert res == {"success": True, "columns": ["c1", "c2"],
-                       "rows": [["a", "1"], ["b", "2"]]}
+            res = await U.run_query(
+                "SELECT 1", _resolved=("https://x.cloud.databricks.com", "wh", {})
+            )
+        assert res == {
+            "success": True,
+            "columns": ["c1", "c2"],
+            "rows": [["a", "1"], ["b", "2"]],
+        }
 
     @pytest.mark.asyncio
     async def test_failed_state_returns_error(self):
-        failed = {"statement_id": "s1",
-                  "status": {"state": "FAILED", "error": {"message": "bad sql"}}}
+        failed = {
+            "statement_id": "s1",
+            "status": {"state": "FAILED", "error": {"message": "bad sql"}},
+        }
         client = AsyncMock()
         client.post = AsyncMock(return_value=self._resp(failed))
         cm = MagicMock()
         cm.__aenter__ = AsyncMock(return_value=client)
         cm.__aexit__ = AsyncMock(return_value=False)
         with patch("httpx.AsyncClient", return_value=cm):
-            res = await U.run_query("SELECT bad",
-                                    _resolved=("https://x.cloud.databricks.com", "wh", {}))
+            res = await U.run_query(
+                "SELECT bad", _resolved=("https://x.cloud.databricks.com", "wh", {})
+            )
         assert res["success"] is False and res["error"] == "bad sql"
 
     @pytest.mark.asyncio
     async def test_resolve_failure_returns_error(self):
         # untrusted host during resolve → error dict, not an exception
-        with patch.object(U, "resolve_workspace_and_warehouse",
-                          AsyncMock(side_effect=U.UCQueryError("untrusted host: evil.com"))):
+        with patch.object(
+            U,
+            "resolve_workspace_and_warehouse",
+            AsyncMock(side_effect=U.UCQueryError("untrusted host: evil.com")),
+        ):
             res = await U.run_query("SELECT 1", warehouse_id="wh")
         assert res["success"] is False and "untrusted host" in res["error"]
 
@@ -149,10 +184,14 @@ class TestRunQuery:
 class TestResolveWarehouse:
     @pytest.mark.asyncio
     async def test_parses_id_from_endpoint_url(self):
-        with patch.object(U, "_auth_headers",
-                          AsyncMock(return_value=("https://x.cloud.databricks.com", {}))):
+        with patch.object(
+            U,
+            "_auth_headers",
+            AsyncMock(return_value=("https://x.cloud.databricks.com", {})),
+        ):
             ws, wid, _ = await U.resolve_workspace_and_warehouse(
-                "https://x.cloud.databricks.com/sql/1.0/warehouses/abc123")
+                "https://x.cloud.databricks.com/sql/1.0/warehouses/abc123"
+            )
         assert wid == "abc123"
 
     @pytest.mark.asyncio
@@ -160,16 +199,24 @@ class TestResolveWarehouse:
         client = AsyncMock()
         resp = MagicMock()
         resp.raise_for_status = MagicMock()
-        resp.json.return_value = {"warehouses": [
-            {"id": "stopped1", "state": "STOPPED"},
-            {"id": "run1", "state": "RUNNING"}]}
+        resp.json.return_value = {
+            "warehouses": [
+                {"id": "stopped1", "state": "STOPPED"},
+                {"id": "run1", "state": "RUNNING"},
+            ]
+        }
         client.get = AsyncMock(return_value=resp)
         cm = MagicMock()
         cm.__aenter__ = AsyncMock(return_value=client)
         cm.__aexit__ = AsyncMock(return_value=False)
-        with patch.object(U, "_auth_headers",
-                          AsyncMock(return_value=("https://x.cloud.databricks.com", {}))), \
-             patch("httpx.AsyncClient", return_value=cm):
+        with (
+            patch.object(
+                U,
+                "_auth_headers",
+                AsyncMock(return_value=("https://x.cloud.databricks.com", {})),
+            ),
+            patch("httpx.AsyncClient", return_value=cm),
+        ):
             ws, wid, _ = await U.resolve_workspace_and_warehouse()
         assert wid == "run1"
 
@@ -189,8 +236,13 @@ class TestObOTokenFromContext:
             m.get_headers = MagicMock(return_value={"Authorization": "Bearer y"})
             return m
 
-        with patch("src.utils.databricks_auth.get_auth_context", side_effect=fake_gac), \
-             patch("src.utils.user_context.UserContext.get_user_token", return_value="obo-xyz"):
+        with (
+            patch("src.utils.databricks_auth.get_auth_context", side_effect=fake_gac),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token",
+                return_value="obo-xyz",
+            ),
+        ):
             ws, headers = await U._auth_headers()
         assert captured["user_token"] == "obo-xyz"
         assert ws == "https://x.cloud.databricks.com"
@@ -208,8 +260,14 @@ class TestObOTokenFromContext:
 
         gc = MagicMock()
         gc.access_token = "grp-token"
-        with patch("src.utils.databricks_auth.get_auth_context", side_effect=fake_gac), \
-             patch("src.utils.user_context.UserContext.get_user_token", return_value=None), \
-             patch("src.utils.user_context.UserContext.get_group_context", return_value=gc):
+        with (
+            patch("src.utils.databricks_auth.get_auth_context", side_effect=fake_gac),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token", return_value=None
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context", return_value=gc
+            ),
+        ):
             await U._auth_headers()
         assert captured["user_token"] == "grp-token"

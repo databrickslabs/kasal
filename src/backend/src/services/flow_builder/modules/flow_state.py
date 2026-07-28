@@ -3,9 +3,10 @@ Flow state management module for CrewAI flow execution.
 
 This module handles state initialization, updates, and crew output parsing.
 """
-import logging
+
 import json
-from typing import Dict, Any, Optional
+import logging
+from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
 from src.utils.safe_eval import safe_eval
@@ -43,8 +44,7 @@ class FlowStateManager:
 
     @staticmethod
     def update_state(
-        current_state: Dict[str, Any],
-        updates: Dict[str, Any]
+        current_state: Dict[str, Any], updates: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Update flow state with new values.
@@ -80,6 +80,7 @@ class FlowStateManager:
         # SECURITY: Scan inter-crew output for injection patterns (log-only, non-blocking)
         try:
             from src.services.security.scanner_pipeline import security_scanner
+
             security_scanner.scan(crew_output, context="flow_state:parse_crew_output")
         except Exception as _sec_err:
             logger.debug("[SECURITY] Flow injection scan skipped: %s", _sec_err)
@@ -90,7 +91,9 @@ class FlowStateManager:
                 parsed = json.loads(crew_output)
                 if isinstance(parsed, dict):
                     state_updates = parsed
-                    logger.info(f"Parsed crew output as JSON dict with keys: {list(parsed.keys())}")
+                    logger.info(
+                        f"Parsed crew output as JSON dict with keys: {list(parsed.keys())}"
+                    )
                     return state_updates
             except json.JSONDecodeError:
                 pass
@@ -100,7 +103,7 @@ class FlowStateManager:
             import re
 
             # Find all JSON-like blocks
-            json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+            json_pattern = r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}"
             matches = re.finditer(json_pattern, crew_output)
 
             for match in matches:
@@ -109,12 +112,16 @@ class FlowStateManager:
                     parsed = json.loads(json_str)
                     if isinstance(parsed, dict):
                         state_updates.update(parsed)
-                        logger.info(f"Extracted JSON from crew output: {list(parsed.keys())}")
+                        logger.info(
+                            f"Extracted JSON from crew output: {list(parsed.keys())}"
+                        )
                 except json.JSONDecodeError:
                     continue
 
             if state_updates:
-                logger.info(f"Total state updates from crew output: {list(state_updates.keys())}")
+                logger.info(
+                    f"Total state updates from crew output: {list(state_updates.keys())}"
+                )
             else:
                 logger.debug("No JSON state updates found in crew output")
 
@@ -124,10 +131,7 @@ class FlowStateManager:
         return state_updates
 
     @staticmethod
-    def evaluate_condition(
-        state: Dict[str, Any],
-        condition: Optional[str]
-    ) -> bool:
+    def evaluate_condition(state: Dict[str, Any], condition: Optional[str]) -> bool:
         """
         Evaluate a condition expression against current state.
 
@@ -146,29 +150,29 @@ class FlowStateManager:
             # are handled natively by safe_eval; the helpers below are the only
             # callables permitted (see _CONDITION_CALLS).
             eval_context = {
-                'state': state,
-                'str': str,
-                'int': int,
-                'float': float,
-                'bool': bool,
-                'len': len,
+                "state": state,
+                "str": str,
+                "int": int,
+                "float": float,
+                "bool": bool,
+                "len": len,
             }
 
             # Evaluate the condition with a safe AST evaluator (no eval()).
-            result = safe_eval(condition, eval_context, allowed_call_names=_CONDITION_CALLS)
+            result = safe_eval(
+                condition, eval_context, allowed_call_names=_CONDITION_CALLS
+            )
             logger.info(f"Condition '{condition}' evaluated to: {result}")
             return bool(result)
 
         except Exception as e:
-            logger.error(f"Error evaluating condition '{condition}': {e}", exc_info=True)
+            logger.error(
+                f"Error evaluating condition '{condition}': {e}", exc_info=True
+            )
             return False
 
     @staticmethod
-    def get_state_value(
-        state: Dict[str, Any],
-        key: str,
-        default: Any = None
-    ) -> Any:
+    def get_state_value(state: Dict[str, Any], key: str, default: Any = None) -> Any:
         """
         Safely get a value from state with optional default.
 
@@ -183,11 +187,7 @@ class FlowStateManager:
         return state.get(key, default)
 
     @staticmethod
-    def set_state_value(
-        state: Dict[str, Any],
-        key: str,
-        value: Any
-    ) -> Dict[str, Any]:
+    def set_state_value(state: Dict[str, Any], key: str, value: Any) -> Dict[str, Any]:
         """
         Set a value in state.
 
@@ -205,9 +205,7 @@ class FlowStateManager:
 
     @staticmethod
     def merge_state(
-        state: Dict[str, Any],
-        merge_dict: Dict[str, Any],
-        prefix: Optional[str] = None
+        state: Dict[str, Any], merge_dict: Dict[str, Any], prefix: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Merge a dictionary into state, optionally with a key prefix.
@@ -226,7 +224,9 @@ class FlowStateManager:
         else:
             state.update(merge_dict)
 
-        logger.debug(f"Merged {len(merge_dict)} items into state{' with prefix: ' + prefix if prefix else ''}")
+        logger.debug(
+            f"Merged {len(merge_dict)} items into state{' with prefix: ' + prefix if prefix else ''}"
+        )
         return state
 
     @staticmethod
@@ -241,6 +241,7 @@ class FlowStateManager:
             Deep copy of state
         """
         import copy
+
         return copy.deepcopy(state)
 
     @staticmethod

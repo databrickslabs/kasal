@@ -5,10 +5,11 @@ Tests UC Metrics tree parsing generator for handling nested measure dependencies
 """
 
 import pytest
-from src.services.converters.formats.uc_metrics.helpers.uc_metrics_tree_parsing import (
-    UCMetricsTreeParsingGenerator
-)
+
 from src.services.converters.base.models import KPI, KPIDefinition
+from src.services.converters.formats.uc_metrics.helpers.uc_metrics_tree_parsing import (
+    UCMetricsTreeParsingGenerator,
+)
 
 
 class TestUCMetricsTreeParsingGenerator:
@@ -30,9 +31,9 @@ class TestUCMetricsTreeParsingGenerator:
                     description="Revenue",
                     technical_name="revenue",
                     formula="amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 )
-            ]
+            ],
         )
 
     @pytest.fixture
@@ -46,21 +47,21 @@ class TestUCMetricsTreeParsingGenerator:
                     description="Revenue",
                     technical_name="revenue",
                     formula="amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Cost",
                     technical_name="cost",
                     formula="cost_amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Profit",
                     technical_name="profit",
                     formula="[revenue] - [cost]",
-                    aggregation_type="CALCULATED"
-                )
-            ]
+                    aggregation_type="CALCULATED",
+                ),
+            ],
         )
 
     # ========== Initialization Tests ==========
@@ -76,12 +77,12 @@ class TestUCMetricsTreeParsingGenerator:
 
     def test_generator_has_aggregation_builder(self, generator):
         """Test generator has aggregation builder"""
-        assert hasattr(generator, 'aggregation_builder')
+        assert hasattr(generator, "aggregation_builder")
         assert generator.aggregation_builder is not None
 
     def test_generator_has_dependency_resolver(self, generator):
         """Test generator has dependency resolver"""
-        assert hasattr(generator, 'dependency_resolver')
+        assert hasattr(generator, "dependency_resolver")
         assert generator.dependency_resolver is not None
 
     # ========== Generate Leaf Measure Tests ==========
@@ -102,7 +103,7 @@ class TestUCMetricsTreeParsingGenerator:
             description="Row Count",
             technical_name="count",
             formula="*",
-            aggregation_type="COUNT"
+            aggregation_type="COUNT",
         )
         result = generator._generate_leaf_measure(simple_definition, kpi)
 
@@ -110,14 +111,16 @@ class TestUCMetricsTreeParsingGenerator:
         assert "COUNT(*)" in result["expr"]
         assert result["description"] == "Row Count"
 
-    def test_generate_leaf_measure_with_negative_sign(self, generator, simple_definition):
+    def test_generate_leaf_measure_with_negative_sign(
+        self, generator, simple_definition
+    ):
         """Test generating leaf measure with display_sign = -1"""
         kpi = KPI(
             description="Cost",
             technical_name="cost",
             formula="cost_amount",
             aggregation_type="SUM",
-            display_sign=-1
+            display_sign=-1,
         )
         result = generator._generate_leaf_measure(simple_definition, kpi)
 
@@ -132,20 +135,18 @@ class TestUCMetricsTreeParsingGenerator:
             technical_name="adjusted",
             formula="value",
             aggregation_type="SUM",
-            display_sign=2
+            display_sign=2,
         )
         result = generator._generate_leaf_measure(simple_definition, kpi)
 
         assert result["name"] == "adjusted"
         assert "2 *" in result["expr"]
 
-    def test_generate_leaf_measure_no_technical_name(self, generator, simple_definition):
+    def test_generate_leaf_measure_no_technical_name(
+        self, generator, simple_definition
+    ):
         """Test generating leaf measure without technical name"""
-        kpi = KPI(
-            description="Revenue",
-            formula="amount",
-            aggregation_type="SUM"
-        )
+        kpi = KPI(description="Revenue", formula="amount", aggregation_type="SUM")
         result = generator._generate_leaf_measure(simple_definition, kpi)
 
         assert result["name"] == "unnamed_measure"
@@ -157,7 +158,7 @@ class TestUCMetricsTreeParsingGenerator:
             description="",
             technical_name="test",
             formula="value",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
         result = generator._generate_leaf_measure(simple_definition, kpi)
 
@@ -169,7 +170,7 @@ class TestUCMetricsTreeParsingGenerator:
             description="Unique Customers",
             technical_name="unique_customers",
             formula="customer_id",
-            aggregation_type="DISTINCTCOUNT"
+            aggregation_type="DISTINCTCOUNT",
         )
         result = generator._generate_leaf_measure(simple_definition, kpi)
 
@@ -182,7 +183,7 @@ class TestUCMetricsTreeParsingGenerator:
             description="Average Price",
             technical_name="avg_price",
             formula="price",
-            aggregation_type="AVERAGE"
+            aggregation_type="AVERAGE",
         )
         result = generator._generate_leaf_measure(simple_definition, kpi)
 
@@ -191,13 +192,17 @@ class TestUCMetricsTreeParsingGenerator:
 
     # ========== Generate Calculated Measure Tests ==========
 
-    def test_generate_calculated_measure_simple(self, generator, definition_with_dependencies):
+    def test_generate_calculated_measure_simple(
+        self, generator, definition_with_dependencies
+    ):
         """Test generating calculated measure with dependencies"""
         # Build dependency graph first
         generator.dependency_resolver.register_measures(definition_with_dependencies)
 
         profit_kpi = definition_with_dependencies.kpis[2]
-        result = generator._generate_calculated_measure(definition_with_dependencies, profit_kpi)
+        result = generator._generate_calculated_measure(
+            definition_with_dependencies, profit_kpi
+        )
 
         assert result is not None
         assert result["name"] == "profit"
@@ -213,15 +218,15 @@ class TestUCMetricsTreeParsingGenerator:
                     description="Revenue",
                     technical_name="revenue",
                     formula="amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Profit",
                     technical_name="profit",
                     formula="[revenue] * 0.2",
-                    aggregation_type="CALCULATED"
-                )
-            ]
+                    aggregation_type="CALCULATED",
+                ),
+            ],
         )
 
         generator.dependency_resolver.register_measures(definition)
@@ -241,16 +246,16 @@ class TestUCMetricsTreeParsingGenerator:
                     description="Revenue",
                     technical_name="revenue",
                     formula="amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Loss",
                     technical_name="loss",
                     formula="[revenue] * -1",
                     aggregation_type="CALCULATED",
-                    display_sign=-1
-                )
-            ]
+                    display_sign=-1,
+                ),
+            ],
         )
 
         generator.dependency_resolver.register_measures(definition)
@@ -270,16 +275,16 @@ class TestUCMetricsTreeParsingGenerator:
                     description="Revenue",
                     technical_name="revenue",
                     formula="amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Doubled",
                     technical_name="doubled",
                     formula="[revenue]",
                     aggregation_type="CALCULATED",
-                    display_sign=2
-                )
-            ]
+                    display_sign=2,
+                ),
+            ],
         )
 
         generator.dependency_resolver.register_measures(definition)
@@ -291,7 +296,9 @@ class TestUCMetricsTreeParsingGenerator:
 
     def test_generate_calculated_measure_no_technical_name(self, generator):
         """Test generating calculated measure without technical name - skipped as not supported"""
-        pytest.skip("Calculated measures without technical_name cannot be resolved by dependency resolver")
+        pytest.skip(
+            "Calculated measures without technical_name cannot be resolved by dependency resolver"
+        )
 
     def test_generate_calculated_measure_no_description(self, generator):
         """Test generating calculated measure without description"""
@@ -303,15 +310,15 @@ class TestUCMetricsTreeParsingGenerator:
                     description="Revenue",
                     technical_name="revenue",
                     formula="amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="",
                     technical_name="calc",
                     formula="[revenue] * 2",
-                    aggregation_type="CALCULATED"
-                )
-            ]
+                    aggregation_type="CALCULATED",
+                ),
+            ],
         )
 
         generator.dependency_resolver.register_measures(definition)
@@ -330,15 +337,15 @@ class TestUCMetricsTreeParsingGenerator:
                     description="Value",
                     technical_name="value",
                     formula="amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Total",
                     technical_name="total",
                     formula="[value]",
-                    aggregation_type="SUM"
-                )
-            ]
+                    aggregation_type="SUM",
+                ),
+            ],
         )
 
         generator.dependency_resolver.register_measures(definition)
@@ -350,14 +357,15 @@ class TestUCMetricsTreeParsingGenerator:
 
     # ========== Generate Calculated Measure With References Tests ==========
 
-    def test_generate_calculated_measure_with_references_simple(self, generator, definition_with_dependencies):
+    def test_generate_calculated_measure_with_references_simple(
+        self, generator, definition_with_dependencies
+    ):
         """Test generating calculated measure with references"""
         generator.dependency_resolver.register_measures(definition_with_dependencies)
 
         profit_kpi = definition_with_dependencies.kpis[2]
         result = generator._generate_calculated_measure_with_references(
-            definition_with_dependencies,
-            profit_kpi
+            definition_with_dependencies, profit_kpi
         )
 
         assert result is not None
@@ -374,16 +382,16 @@ class TestUCMetricsTreeParsingGenerator:
                     description="Revenue",
                     technical_name="revenue",
                     formula="amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Negative Profit",
                     technical_name="negative_profit",
                     formula="[revenue] * 0.1",
                     aggregation_type="CALCULATED",
-                    display_sign=-1
-                )
-            ]
+                    display_sign=-1,
+                ),
+            ],
         )
 
         generator.dependency_resolver.register_measures(definition)
@@ -403,16 +411,16 @@ class TestUCMetricsTreeParsingGenerator:
                     description="Base",
                     technical_name="base",
                     formula="amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Multiplied",
                     technical_name="multiplied",
                     formula="[base]",
                     aggregation_type="CALCULATED",
-                    display_sign=3
-                )
-            ]
+                    display_sign=3,
+                ),
+            ],
         )
 
         generator.dependency_resolver.register_measures(definition)
@@ -422,7 +430,9 @@ class TestUCMetricsTreeParsingGenerator:
         assert result["name"] == "multiplied"
         assert "3 *" in result["expr"]
 
-    def test_generate_calculated_measure_with_references_no_technical_name(self, generator):
+    def test_generate_calculated_measure_with_references_no_technical_name(
+        self, generator
+    ):
         """Test generating measure with references without technical name"""
         definition = KPIDefinition(
             description="Test",
@@ -432,14 +442,14 @@ class TestUCMetricsTreeParsingGenerator:
                     description="Base",
                     technical_name="base",
                     formula="amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Calculated",
                     formula="[base] * 2",
-                    aggregation_type="CALCULATED"
-                )
-            ]
+                    aggregation_type="CALCULATED",
+                ),
+            ],
         )
 
         generator.dependency_resolver.register_measures(definition)
@@ -448,7 +458,9 @@ class TestUCMetricsTreeParsingGenerator:
 
         assert result["name"] == "unnamed_measure"
 
-    def test_generate_calculated_measure_with_references_no_description(self, generator):
+    def test_generate_calculated_measure_with_references_no_description(
+        self, generator
+    ):
         """Test generating measure with references without description"""
         definition = KPIDefinition(
             description="Test",
@@ -458,15 +470,15 @@ class TestUCMetricsTreeParsingGenerator:
                     description="Base",
                     technical_name="base",
                     formula="amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="",
                     technical_name="calc",
                     formula="[base] * 2",
-                    aggregation_type="CALCULATED"
-                )
-            ]
+                    aggregation_type="CALCULATED",
+                ),
+            ],
         )
 
         generator.dependency_resolver.register_measures(definition)
@@ -485,27 +497,27 @@ class TestUCMetricsTreeParsingGenerator:
                     description="Revenue",
                     technical_name="revenue",
                     formula="amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Cost",
                     technical_name="cost",
                     formula="cost_amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Tax",
                     technical_name="tax",
                     formula="tax_amount",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Net Profit",
                     technical_name="net_profit",
                     formula="[revenue] - [cost] - [tax]",
-                    aggregation_type="CALCULATED"
-                )
-            ]
+                    aggregation_type="CALCULATED",
+                ),
+            ],
         )
 
         generator.dependency_resolver.register_measures(definition)
@@ -514,7 +526,11 @@ class TestUCMetricsTreeParsingGenerator:
 
         assert result["name"] == "net_profit"
         # Should reference the measure names
-        assert "revenue" in result["expr"] or "cost" in result["expr"] or "tax" in result["expr"]
+        assert (
+            "revenue" in result["expr"]
+            or "cost" in result["expr"]
+            or "tax" in result["expr"]
+        )
 
     # ========== Integration Tests ==========
 
@@ -526,28 +542,37 @@ class TestUCMetricsTreeParsingGenerator:
         assert leaf is not None
         assert leaf["name"] == "revenue"
 
-    def test_full_workflow_with_dependencies(self, generator, definition_with_dependencies):
+    def test_full_workflow_with_dependencies(
+        self, generator, definition_with_dependencies
+    ):
         """Test full workflow with dependencies"""
         generator.dependency_resolver.register_measures(definition_with_dependencies)
 
         # Generate leaf measures
-        revenue = generator._generate_leaf_measure(definition_with_dependencies, definition_with_dependencies.kpis[0])
-        cost = generator._generate_leaf_measure(definition_with_dependencies, definition_with_dependencies.kpis[1])
+        revenue = generator._generate_leaf_measure(
+            definition_with_dependencies, definition_with_dependencies.kpis[0]
+        )
+        cost = generator._generate_leaf_measure(
+            definition_with_dependencies, definition_with_dependencies.kpis[1]
+        )
 
         # Generate calculated measure
-        profit = generator._generate_calculated_measure(definition_with_dependencies, definition_with_dependencies.kpis[2])
+        profit = generator._generate_calculated_measure(
+            definition_with_dependencies, definition_with_dependencies.kpis[2]
+        )
 
         assert revenue["name"] == "revenue"
         assert cost["name"] == "cost"
         assert profit["name"] == "profit"
 
-    def test_full_workflow_with_references(self, generator, definition_with_dependencies):
+    def test_full_workflow_with_references(
+        self, generator, definition_with_dependencies
+    ):
         """Test full workflow using references"""
         generator.dependency_resolver.register_measures(definition_with_dependencies)
 
         profit = generator._generate_calculated_measure_with_references(
-            definition_with_dependencies,
-            definition_with_dependencies.kpis[2]
+            definition_with_dependencies, definition_with_dependencies.kpis[2]
         )
 
         assert profit["name"] == "profit"

@@ -18,26 +18,31 @@ from typing import Any, Dict, List, Optional
 from src.core.exceptions import BadRequestError
 from src.repositories.log_repository import LLMLogRepository
 from src.repositories.model_config_repository import ModelConfigRepository
-from src.utils.prompt_utils import robust_json_parser
-from src.utils.user_context import GroupContext
+from src.services.prompt_optimization.config import TEMPLATE_TASKS
+from src.services.prompt_optimization.gepa import reflection
 from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
-    _judge_value_to_grade,
-    _checklist_grade,
-    _grade_judge_verdict,
-    _parse_grade_from_text,
-    _job_name_score,
-    _intent_format_score,
-    _json_keys_score,
-    _median_sample,
-    _to_float,
     _CATEGORICAL_GRADES,
     JUDGE_SPREAD_WARN,
     VALID_INTENTS,
+    _checklist_grade,
+    _grade_judge_verdict,
+    _intent_format_score,
+    _job_name_score,
+    _json_keys_score,
+    _judge_value_to_grade,
+    _median_sample,
+    _parse_grade_from_text,
+    _to_float,
 )
-from src.services.prompt_optimization.gepa.reflection import _GEPA_REFLECTION_STATE, _JUDGE_SYSTEM, _install_gepa_reflection_bridge, _make_reflection_fn, _sync_llm_completion
-from src.services.prompt_optimization.config import TEMPLATE_TASKS
-
-from src.services.prompt_optimization.gepa import reflection
+from src.services.prompt_optimization.gepa.reflection import (
+    _GEPA_REFLECTION_STATE,
+    _JUDGE_SYSTEM,
+    _install_gepa_reflection_bridge,
+    _make_reflection_fn,
+    _sync_llm_completion,
+)
+from src.utils.prompt_utils import robust_json_parser
+from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 

@@ -238,7 +238,9 @@ class CrewAppDeploymentService:
                 for key_name in ("DATABRICKS_API_KEY", "DATABRICKS_TOKEN"):
                     api_key = await api_service.find_by_name(key_name)
                     if api_key and api_key.encrypted_value:
-                        pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
+                        pat_token = EncryptionUtils.decrypt_value(
+                            api_key.encrypted_value
+                        )
                         found_gid = gid
                         break
             except Exception as exc:
@@ -288,9 +290,7 @@ class CrewAppDeploymentService:
         Non-fatal: returns [] if Lakebase is unavailable or the lookup fails, so
         the deploy screen can still offer "create new".
         """
-        client = await self._get_deploy_client(
-            group_context, "list Lakebase instances"
-        )
+        client = await self._get_deploy_client(group_context, "list Lakebase instances")
 
         def _list() -> List[Dict[str, Any]]:
             out: List[Dict[str, Any]] = []

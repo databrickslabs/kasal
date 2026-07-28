@@ -15,7 +15,7 @@ JSON traversal.
 
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, JSON, DateTime, Text, Index
+from sqlalchemy import JSON, Column, DateTime, Index, Integer, String, Text
 
 from src.db.base import Base
 
@@ -31,16 +31,24 @@ class PowerBIExtraction(Base):
     # Provenance / linkage
     execution_id = Column(String(100), nullable=True, index=True)  # crew/flow job id
     workspace_id = Column(String(100), nullable=True, index=True)  # PBI workspace
-    dataset_id = Column(String(100), nullable=True, index=True)    # PBI dataset
-    report_id = Column(String(100), nullable=True)                 # PBI report (if used)
+    dataset_id = Column(String(100), nullable=True, index=True)  # PBI dataset
+    report_id = Column(String(100), nullable=True)  # PBI report (if used)
 
     # Raw extracted artifacts (JSON — the full rows, not summaries)
-    relationships = Column(JSON, nullable=True)   # [{from_table, from_column, from_cardinality, to_*, is_active, id}]
-    measures = Column(JSON, nullable=True)        # [{measure_name, table_name, expression (DAX), description}]
-    admin_tables = Column(JSON, nullable=True)    # {table_name: {columns, mquery_expression, measures}}
-    report_definition = Column(JSON, nullable=True)  # report visual bindings (measure expressions)
-    proposed_config = Column(JSON, nullable=True)    # the derived pipeline_config
-    warnings = Column(JSON, nullable=True)           # list of extraction warnings
+    relationships = Column(
+        JSON, nullable=True
+    )  # [{from_table, from_column, from_cardinality, to_*, is_active, id}]
+    measures = Column(
+        JSON, nullable=True
+    )  # [{measure_name, table_name, expression (DAX), description}]
+    admin_tables = Column(
+        JSON, nullable=True
+    )  # {table_name: {columns, mquery_expression, measures}}
+    report_definition = Column(
+        JSON, nullable=True
+    )  # report visual bindings (measure expressions)
+    proposed_config = Column(JSON, nullable=True)  # the derived pipeline_config
+    warnings = Column(JSON, nullable=True)  # list of extraction warnings
 
     # Promoted scalar counts (queryable without JSON traversal)
     relationships_count = Column(Integer, nullable=True)

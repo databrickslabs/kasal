@@ -6,20 +6,20 @@ Coordinates between router and repository layers.
 """
 
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
 from src.repositories.agentbricks_repository import AgentBricksRepository
 from src.schemas.agentbricks import (
+    AgentBricksAuthConfig,
     AgentBricksEndpoint,
     AgentBricksEndpointsRequest,
     AgentBricksEndpointsResponse,
-    AgentBricksQueryRequest,
-    AgentBricksQueryResponse,
     AgentBricksExecutionRequest,
     AgentBricksExecutionResponse,
-    AgentBricksAuthConfig,
     AgentBricksMessage,
-    AgentBricksQueryStatus
+    AgentBricksQueryRequest,
+    AgentBricksQueryResponse,
+    AgentBricksQueryStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,8 +42,7 @@ class AgentBricksService:
         self.repository = AgentBricksRepository(auth_config)
 
     async def get_endpoints(
-        self,
-        request: Optional[AgentBricksEndpointsRequest] = None
+        self, request: Optional[AgentBricksEndpointsRequest] = None
     ) -> AgentBricksEndpointsResponse:
         """
         Get available AgentBricks endpoints with optional filtering.
@@ -78,9 +77,7 @@ class AgentBricksService:
             return AgentBricksEndpointsResponse(endpoints=[])
 
     async def search_endpoints(
-        self,
-        query: Optional[str] = None,
-        ready_only: bool = True
+        self, query: Optional[str] = None, ready_only: bool = True
     ) -> AgentBricksEndpointsResponse:
         """
         Search for AgentBricks endpoints by query.
@@ -95,8 +92,7 @@ class AgentBricksService:
         try:
             logger.info(f"Searching AgentBricks endpoints with query: {query}")
             request = AgentBricksEndpointsRequest(
-                search_query=query,
-                ready_only=ready_only
+                search_query=query, ready_only=ready_only
             )
             return await self.get_endpoints(request)
 
@@ -105,8 +101,7 @@ class AgentBricksService:
             return AgentBricksEndpointsResponse(endpoints=[])
 
     async def get_endpoint_by_name(
-        self,
-        endpoint_name: str
+        self, endpoint_name: str
     ) -> Optional[AgentBricksEndpoint]:
         """
         Get a specific AgentBricks endpoint by name.
@@ -123,7 +118,7 @@ class AgentBricksService:
             # Search for specific endpoint
             request = AgentBricksEndpointsRequest(
                 search_query=endpoint_name,
-                ready_only=False  # Include all states for specific lookup
+                ready_only=False,  # Include all states for specific lookup
             )
             response = await self.repository.get_endpoints(request)
 
@@ -145,7 +140,7 @@ class AgentBricksService:
         endpoint_name: str,
         messages: List[AgentBricksMessage],
         custom_inputs: Optional[dict] = None,
-        return_trace: bool = False
+        return_trace: bool = False,
     ) -> AgentBricksQueryResponse:
         """
         Query an AgentBricks endpoint with messages.
@@ -166,7 +161,7 @@ class AgentBricksService:
                 endpoint_name=endpoint_name,
                 messages=messages,
                 custom_inputs=custom_inputs,
-                return_trace=return_trace
+                return_trace=return_trace,
             )
 
             response = await self.repository.query_endpoint(request)
@@ -181,9 +176,7 @@ class AgentBricksService:
         except Exception as e:
             logger.error(f"Error querying endpoint: {e}")
             return AgentBricksQueryResponse(
-                response="",
-                status=AgentBricksQueryStatus.FAILED,
-                error=str(e)
+                response="", status=AgentBricksQueryStatus.FAILED, error=str(e)
             )
 
     async def execute_query(
@@ -192,7 +185,7 @@ class AgentBricksService:
         question: str,
         custom_inputs: Optional[dict] = None,
         return_trace: bool = False,
-        timeout: int = 120
+        timeout: int = 120,
     ) -> AgentBricksExecutionResponse:
         """
         Execute a simplified query to an AgentBricks endpoint.
@@ -215,7 +208,7 @@ class AgentBricksService:
                 question=question,
                 custom_inputs=custom_inputs,
                 return_trace=return_trace,
-                timeout=timeout
+                timeout=timeout,
             )
 
             response = await self.repository.execute_query(request)
@@ -232,13 +225,11 @@ class AgentBricksService:
             return AgentBricksExecutionResponse(
                 endpoint_name=endpoint_name,
                 status=AgentBricksQueryStatus.FAILED,
-                error=str(e)
+                error=str(e),
             )
 
     async def validate_endpoint_access(
-        self,
-        endpoint_name: str,
-        auth_config: Optional[AgentBricksAuthConfig] = None
+        self, endpoint_name: str, auth_config: Optional[AgentBricksAuthConfig] = None
     ) -> bool:
         """
         Validate that the current authentication has access to an endpoint.

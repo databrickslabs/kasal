@@ -1,21 +1,27 @@
-import pytest
 import os
-import httpx
 import warnings
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
-from src.services.databricks.workspace.service import DatabricksService
+import httpx
+import pytest
+
 from src.core.exceptions import KasalError
-from src.schemas.databricks_config import DatabricksConfigCreate, DatabricksConfigResponse
-
+from src.schemas.databricks_config import (
+    DatabricksConfigCreate,
+    DatabricksConfigResponse,
+)
+from src.services.databricks.workspace.service import DatabricksService
 
 # ---------------------------------------------------------------------------
 # Helper: build a DatabricksService with mocked internals
 # ---------------------------------------------------------------------------
 
+
 def _make_service(group_id=None):
     """Return a DatabricksService with mocked repository."""
-    with patch('src.services.databricks.workspace.service.DatabricksConfigRepository') as MockRepo:
+    with patch(
+        "src.services.databricks.workspace.service.DatabricksConfigRepository"
+    ) as MockRepo:
         MockRepo.return_value = AsyncMock()
         service = DatabricksService(session=MagicMock(), group_id=group_id)
         service.repository = AsyncMock()
@@ -88,13 +94,16 @@ def _make_config_input(enabled=True):
 # __init__ and properties (lines 39-40)
 # ===========================================================================
 
+
 class TestInit:
     """Tests for DatabricksService constructor and properties."""
 
     def test_init_sets_session_and_group_id(self):
         """Lines 28-32: init stores session, repository, group_id, and _secrets_service=None."""
         mock_session = MagicMock()
-        with patch('src.services.databricks.workspace.service.DatabricksConfigRepository') as MockRepo:
+        with patch(
+            "src.services.databricks.workspace.service.DatabricksConfigRepository"
+        ) as MockRepo:
             MockRepo.return_value = AsyncMock()
             service = DatabricksService(session=mock_session, group_id="grp-123")
 
@@ -104,7 +113,9 @@ class TestInit:
 
     def test_init_default_group_id_is_none(self):
         """group_id defaults to None when not provided."""
-        with patch('src.services.databricks.workspace.service.DatabricksConfigRepository') as MockRepo:
+        with patch(
+            "src.services.databricks.workspace.service.DatabricksConfigRepository"
+        ) as MockRepo:
             MockRepo.return_value = AsyncMock()
             service = DatabricksService(session=MagicMock())
 
@@ -116,7 +127,7 @@ class TestInit:
         mock_secrets = MagicMock()
 
         with patch(
-            'src.services.databricks.secrets.service.DatabricksSecretsService',
+            "src.services.databricks.secrets.service.DatabricksSecretsService",
             return_value=mock_secrets,
         ):
             result = service.secrets_service
@@ -137,6 +148,7 @@ class TestInit:
 # set_databricks_config (lines 54-112)
 # ===========================================================================
 
+
 class TestSetDatabricksConfig:
     """Tests for set_databricks_config method."""
 
@@ -148,7 +160,9 @@ class TestSetDatabricksConfig:
         new_config = _make_full_config_mock()
         service.repository.create_config = AsyncMock(return_value=new_config)
 
-        result = await service.set_databricks_config(config_in, created_by_email="user@example.com")
+        result = await service.set_databricks_config(
+            config_in, created_by_email="user@example.com"
+        )
 
         assert result["status"] == "success"
         assert "enabled" in result["message"]
@@ -212,7 +226,9 @@ class TestSetDatabricksConfig:
         config_in = _make_config_input(enabled=True)
 
         # Create a config object where hasattr returns False for optional fields
-        new_config = MagicMock(spec=["workspace_url", "warehouse_id", "catalog", "schema", "is_enabled"])
+        new_config = MagicMock(
+            spec=["workspace_url", "warehouse_id", "catalog", "schema", "is_enabled"]
+        )
         new_config.workspace_url = "https://example.com"
         new_config.warehouse_id = "wh1"
         new_config.catalog = "main"
@@ -242,7 +258,9 @@ class TestSetDatabricksConfig:
         """Lines 110-112: Generic exception wraps into KasalError."""
         service = _make_service()
         config_in = _make_config_input()
-        service.repository.create_config = AsyncMock(side_effect=RuntimeError("db failed"))
+        service.repository.create_config = AsyncMock(
+            side_effect=RuntimeError("db failed")
+        )
 
         with pytest.raises(KasalError, match="Error setting Databricks configuration"):
             await service.set_databricks_config(config_in)
@@ -251,6 +269,7 @@ class TestSetDatabricksConfig:
 # ===========================================================================
 # get_databricks_config (lines 114-155, missing: 125, 152)
 # ===========================================================================
+
 
 class TestGetDatabricksConfig:
     """Tests for get_databricks_config method."""
@@ -306,7 +325,9 @@ class TestGetDatabricksConfig:
     async def test_get_config_hasattr_defaults(self):
         """Config missing optional attrs falls back to defaults via hasattr."""
         service = _make_service()
-        mock_config = MagicMock(spec=["workspace_url", "warehouse_id", "catalog", "schema", "is_enabled"])
+        mock_config = MagicMock(
+            spec=["workspace_url", "warehouse_id", "catalog", "schema", "is_enabled"]
+        )
         mock_config.workspace_url = "https://example.com"
         mock_config.warehouse_id = "wh1"
         mock_config.catalog = "main"
@@ -325,6 +346,7 @@ class TestGetDatabricksConfig:
 # ===========================================================================
 # check_personal_token_required (lines 164-197)
 # ===========================================================================
+
 
 class TestCheckPersonalTokenRequired:
     """Tests for check_personal_token_required method."""
@@ -389,15 +411,20 @@ class TestCheckPersonalTokenRequired:
     async def test_exception_raises_kasal_error(self):
         """Lines 195-197: Exception wraps into KasalError."""
         service = _make_service()
-        service.repository.get_active_config = AsyncMock(side_effect=RuntimeError("boom"))
+        service.repository.get_active_config = AsyncMock(
+            side_effect=RuntimeError("boom")
+        )
 
-        with pytest.raises(KasalError, match="Error checking personal token requirement"):
+        with pytest.raises(
+            KasalError, match="Error checking personal token requirement"
+        ):
             await service.check_personal_token_required()
 
 
 # ===========================================================================
 # check_apps_configuration (lines 209-224)
 # ===========================================================================
+
 
 class TestCheckAppsConfiguration:
     """Tests for check_apps_configuration method."""
@@ -459,7 +486,9 @@ class TestCheckAppsConfiguration:
     async def test_exception_returns_false(self):
         """Lines 222-224: Exception returns (False, '') gracefully."""
         service = _make_service()
-        service.repository.get_active_config = AsyncMock(side_effect=RuntimeError("fail"))
+        service.repository.get_active_config = AsyncMock(
+            side_effect=RuntimeError("fail")
+        )
 
         result = await service.check_apps_configuration()
 
@@ -469,6 +498,7 @@ class TestCheckAppsConfiguration:
 # ===========================================================================
 # setup_endpoint static method (lines 242-272)
 # ===========================================================================
+
 
 class TestSetupEndpoint:
     """Tests for setup_endpoint static method."""
@@ -483,8 +513,12 @@ class TestSetupEndpoint:
             result = DatabricksService.setup_endpoint(mock_config)
 
         assert result is True
-        assert os.environ["DATABRICKS_API_BASE"] == "https://example.com/serving-endpoints"
-        assert os.environ["DATABRICKS_ENDPOINT"] == "https://example.com/serving-endpoints"
+        assert (
+            os.environ["DATABRICKS_API_BASE"] == "https://example.com/serving-endpoints"
+        )
+        assert (
+            os.environ["DATABRICKS_ENDPOINT"] == "https://example.com/serving-endpoints"
+        )
 
     def test_url_already_has_serving_endpoints(self):
         """Lines 259-262: URL ending with /serving-endpoints is preserved."""
@@ -496,7 +530,9 @@ class TestSetupEndpoint:
             result = DatabricksService.setup_endpoint(mock_config)
 
         assert result is True
-        assert os.environ["DATABRICKS_ENDPOINT"] == "https://example.com/serving-endpoints"
+        assert (
+            os.environ["DATABRICKS_ENDPOINT"] == "https://example.com/serving-endpoints"
+        )
 
     def test_no_config_returns_false(self):
         """Lines 267-269: None config returns False."""
@@ -549,7 +585,9 @@ class TestSetupEndpoint:
             warnings.simplefilter("always")
             DatabricksService.setup_endpoint(mock_config)
 
-        deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
+        deprecation_warnings = [
+            x for x in w if issubclass(x.category, DeprecationWarning)
+        ]
         assert len(deprecation_warnings) >= 1
         assert "deprecated" in str(deprecation_warnings[0].message).lower()
 
@@ -558,13 +596,16 @@ class TestSetupEndpoint:
 # from_session (line 296 -- with api_keys_service)
 # ===========================================================================
 
+
 class TestFromSession:
     """Tests for from_session class method."""
 
     def test_from_session_basic(self):
         """Lines 286-298: from_session without api_keys_service."""
         mock_session = MagicMock()
-        with patch('src.services.databricks.workspace.service.DatabricksConfigRepository') as MockRepo:
+        with patch(
+            "src.services.databricks.workspace.service.DatabricksConfigRepository"
+        ) as MockRepo:
             MockRepo.return_value = AsyncMock()
             service = DatabricksService.from_session(mock_session)
 
@@ -577,12 +618,19 @@ class TestFromSession:
         mock_api_keys = MagicMock()
         mock_secrets = MagicMock()
 
-        with patch('src.services.databricks.workspace.service.DatabricksConfigRepository') as MockRepo:
+        with patch(
+            "src.services.databricks.workspace.service.DatabricksConfigRepository"
+        ) as MockRepo:
             MockRepo.return_value = AsyncMock()
             with patch.object(
-                DatabricksService, 'secrets_service', new_callable=PropertyMock, return_value=mock_secrets
+                DatabricksService,
+                "secrets_service",
+                new_callable=PropertyMock,
+                return_value=mock_secrets,
             ):
-                service = DatabricksService.from_session(mock_session, api_keys_service=mock_api_keys)
+                service = DatabricksService.from_session(
+                    mock_session, api_keys_service=mock_api_keys
+                )
 
         mock_secrets.set_api_keys_service.assert_called_once_with(mock_api_keys)
 
@@ -590,6 +638,7 @@ class TestFromSession:
 # ===========================================================================
 # check_databricks_connection (lines 300-442)
 # ===========================================================================
+
 
 class TestCheckDatabricksConnection:
     """Tests for check_databricks_connection method."""
@@ -671,13 +720,21 @@ class TestCheckDatabricksConnection:
         mock_response.status_code = 200
         mock_client.get.return_value = mock_response
 
-        with patch('src.services.databricks.workspace.service.httpx.AsyncClient') as MockAsyncClient:
-            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        with patch(
+            "src.services.databricks.workspace.service.httpx.AsyncClient"
+        ) as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
             MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_auth:
+            with patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_auth:
                 mock_auth_ctx = MagicMock()
-                mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test"}
+                mock_auth_ctx.get_headers.return_value = {
+                    "Authorization": "Bearer test"
+                }
                 mock_auth.return_value = mock_auth_ctx
 
                 result = await service.check_databricks_connection()
@@ -696,13 +753,21 @@ class TestCheckDatabricksConnection:
         mock_response.status_code = 200
         mock_client.get.return_value = mock_response
 
-        with patch('src.services.databricks.workspace.service.httpx.AsyncClient') as MockAsyncClient:
-            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        with patch(
+            "src.services.databricks.workspace.service.httpx.AsyncClient"
+        ) as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
             MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_auth:
+            with patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_auth:
                 mock_auth_ctx = MagicMock()
-                mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test"}
+                mock_auth_ctx.get_headers.return_value = {
+                    "Authorization": "Bearer test"
+                }
                 mock_auth.return_value = mock_auth_ctx
 
                 result = await service.check_databricks_connection()
@@ -715,7 +780,9 @@ class TestCheckDatabricksConnection:
         """Lines 366-371: get_auth_context returns None."""
         service, _ = _make_service_and_config()
 
-        with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_auth:
+        with patch(
+            "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.return_value = None
 
             result = await service.check_databricks_connection()
@@ -729,7 +796,9 @@ class TestCheckDatabricksConnection:
         """Lines 375-381: get_auth_context raises exception."""
         service, _ = _make_service_and_config()
 
-        with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_auth:
+        with patch(
+            "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth.side_effect = RuntimeError("auth boom")
 
             result = await service.check_databricks_connection()
@@ -743,7 +812,9 @@ class TestCheckDatabricksConnection:
         """Lines 383-388: Auth context returns empty/None headers."""
         service, _ = _make_service_and_config()
 
-        with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_auth:
+        with patch(
+            "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+        ) as mock_auth:
             mock_auth_ctx = MagicMock()
             mock_auth_ctx.get_headers.return_value = {}
             mock_auth.return_value = mock_auth_ctx
@@ -764,13 +835,21 @@ class TestCheckDatabricksConnection:
         mock_response.status_code = 200
         mock_client.get.return_value = mock_response
 
-        with patch('src.services.databricks.workspace.service.httpx.AsyncClient') as MockAsyncClient:
-            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        with patch(
+            "src.services.databricks.workspace.service.httpx.AsyncClient"
+        ) as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
             MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_auth:
+            with patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_auth:
                 mock_auth_ctx = MagicMock()
-                mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+                mock_auth_ctx.get_headers.return_value = {
+                    "Authorization": "Bearer test-token"
+                }
                 mock_auth.return_value = mock_auth_ctx
 
                 result = await service.check_databricks_connection()
@@ -789,13 +868,21 @@ class TestCheckDatabricksConnection:
         mock_response.status_code = 401
         mock_client.get.return_value = mock_response
 
-        with patch('src.services.databricks.workspace.service.httpx.AsyncClient') as MockAsyncClient:
-            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        with patch(
+            "src.services.databricks.workspace.service.httpx.AsyncClient"
+        ) as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
             MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_auth:
+            with patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_auth:
                 mock_auth_ctx = MagicMock()
-                mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+                mock_auth_ctx.get_headers.return_value = {
+                    "Authorization": "Bearer test-token"
+                }
                 mock_auth.return_value = mock_auth_ctx
 
                 result = await service.check_databricks_connection()
@@ -814,13 +901,21 @@ class TestCheckDatabricksConnection:
         mock_response.status_code = 403
         mock_client.get.return_value = mock_response
 
-        with patch('src.services.databricks.workspace.service.httpx.AsyncClient') as MockAsyncClient:
-            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        with patch(
+            "src.services.databricks.workspace.service.httpx.AsyncClient"
+        ) as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
             MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_auth:
+            with patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_auth:
                 mock_auth_ctx = MagicMock()
-                mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+                mock_auth_ctx.get_headers.return_value = {
+                    "Authorization": "Bearer test-token"
+                }
                 mock_auth.return_value = mock_auth_ctx
 
                 result = await service.check_databricks_connection()
@@ -840,13 +935,21 @@ class TestCheckDatabricksConnection:
         mock_response.text = "Internal Server Error"
         mock_client.get.return_value = mock_response
 
-        with patch('src.services.databricks.workspace.service.httpx.AsyncClient') as MockAsyncClient:
-            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        with patch(
+            "src.services.databricks.workspace.service.httpx.AsyncClient"
+        ) as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
             MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_auth:
+            with patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_auth:
                 mock_auth_ctx = MagicMock()
-                mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+                mock_auth_ctx.get_headers.return_value = {
+                    "Authorization": "Bearer test-token"
+                }
                 mock_auth.return_value = mock_auth_ctx
 
                 result = await service.check_databricks_connection()
@@ -863,13 +966,21 @@ class TestCheckDatabricksConnection:
         mock_client = AsyncMock()
         mock_client.get.side_effect = httpx.ConnectError("fail")
 
-        with patch('src.services.databricks.workspace.service.httpx.AsyncClient') as MockAsyncClient:
-            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        with patch(
+            "src.services.databricks.workspace.service.httpx.AsyncClient"
+        ) as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
             MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_auth:
+            with patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_auth:
                 mock_auth_ctx = MagicMock()
-                mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+                mock_auth_ctx.get_headers.return_value = {
+                    "Authorization": "Bearer test-token"
+                }
                 mock_auth.return_value = mock_auth_ctx
 
                 result = await service.check_databricks_connection()
@@ -886,13 +997,21 @@ class TestCheckDatabricksConnection:
         mock_client = AsyncMock()
         mock_client.get.side_effect = httpx.TimeoutException("timeout")
 
-        with patch('src.services.databricks.workspace.service.httpx.AsyncClient') as MockAsyncClient:
-            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        with patch(
+            "src.services.databricks.workspace.service.httpx.AsyncClient"
+        ) as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
             MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_auth:
+            with patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_auth:
                 mock_auth_ctx = MagicMock()
-                mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+                mock_auth_ctx.get_headers.return_value = {
+                    "Authorization": "Bearer test-token"
+                }
                 mock_auth.return_value = mock_auth_ctx
 
                 result = await service.check_databricks_connection()
@@ -909,13 +1028,21 @@ class TestCheckDatabricksConnection:
         mock_client = AsyncMock()
         mock_client.get.side_effect = RuntimeError("unexpected failure")
 
-        with patch('src.services.databricks.workspace.service.httpx.AsyncClient') as MockAsyncClient:
-            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        with patch(
+            "src.services.databricks.workspace.service.httpx.AsyncClient"
+        ) as MockAsyncClient:
+            MockAsyncClient.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
             MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_auth:
+            with patch(
+                "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+            ) as mock_auth:
                 mock_auth_ctx = MagicMock()
-                mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test-token"}
+                mock_auth_ctx.get_headers.return_value = {
+                    "Authorization": "Bearer test-token"
+                }
                 mock_auth.return_value = mock_auth_ctx
 
                 result = await service.check_databricks_connection()
@@ -941,14 +1068,24 @@ class TestCheckDatabricksConnection:
         mock_response.status_code = 200
         mock_client.get.return_value = mock_response
 
-        with patch.dict(os.environ, {"DATABRICKS_HOST": "https://env-host.example.com"}):
-            with patch('src.services.databricks.workspace.service.httpx.AsyncClient') as MockAsyncClient:
-                MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        with patch.dict(
+            os.environ, {"DATABRICKS_HOST": "https://env-host.example.com"}
+        ):
+            with patch(
+                "src.services.databricks.workspace.service.httpx.AsyncClient"
+            ) as MockAsyncClient:
+                MockAsyncClient.return_value.__aenter__ = AsyncMock(
+                    return_value=mock_client
+                )
                 MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-                with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_auth:
+                with patch(
+                    "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+                ) as mock_auth:
                     mock_auth_ctx = MagicMock()
-                    mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer test"}
+                    mock_auth_ctx.get_headers.return_value = {
+                        "Authorization": "Bearer test"
+                    }
                     mock_auth.return_value = mock_auth_ctx
 
                     result = await service.check_databricks_connection()
@@ -967,7 +1104,9 @@ class TestSetAiGatewayEnabled:
         with patch.object(DatabricksService, "_apply_ai_gateway_env") as mock_env:
             ok = await service.set_ai_gateway_enabled(True)
         assert ok is True
-        service.repository.set_ai_gateway_enabled.assert_awaited_once_with(True, group_id="g1")
+        service.repository.set_ai_gateway_enabled.assert_awaited_once_with(
+            True, group_id="g1"
+        )
         mock_env.assert_called_once_with(True)
 
     @pytest.mark.asyncio
@@ -1007,11 +1146,13 @@ class TestSetAiGatewayEnabled:
 # _apply_ai_gateway_env static method
 # ===========================================================================
 
+
 class TestApplyAiGatewayEnv:
     """Tests for the _apply_ai_gateway_env staticmethod (env mirror + cache reset)."""
 
     def _env_var(self):
         from src.utils.databricks_url_utils import DatabricksURLUtils
+
         return DatabricksURLUtils.AI_GATEWAY_ENV_VAR
 
     def test_enabled_sets_env_true(self):
@@ -1047,7 +1188,9 @@ class TestApplyAiGatewayEnv:
         env_var = self._env_var()
         saved = os.environ.get(env_var)
         try:
-            with patch("src.utils.databricks_auth.reset_auth_config_cache") as mock_reset:
+            with patch(
+                "src.utils.databricks_auth.reset_auth_config_cache"
+            ) as mock_reset:
                 DatabricksService._apply_ai_gateway_env(True)
             mock_reset.assert_called_once_with()
         finally:

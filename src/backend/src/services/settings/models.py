@@ -11,17 +11,18 @@ invalidation on mutations. See src/core/cache.py for cache implementation.
 import asyncio
 import logging
 import os
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
-from src.core.exceptions import KasalError, NotFoundError, ForbiddenError
 
-from src.utils.model_config import get_model_config
-from src.core.logger import LoggerManager
-from src.core.cache import endpoint_health_cache, model_config_cache
-from src.services.settings.api_keys import ApiKeysService
-from src.repositories.model_config_repository import ModelConfigRepository
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.cache import endpoint_health_cache, model_config_cache
+from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
+from src.core.logger import LoggerManager
 from src.models.model_config import ModelConfig
+from src.repositories.model_config_repository import ModelConfigRepository
+from src.services.settings.api_keys import ApiKeysService
+from src.utils.model_config import get_model_config
 from src.utils.user_context import GroupContext
 
 logger = LoggerManager.get_instance().crew
@@ -37,7 +38,12 @@ def _databricks_configured() -> bool:
     """
     return any(
         os.getenv(v)
-        for v in ("DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_API_KEY", "DATABRICKS_CLIENT_ID")
+        for v in (
+            "DATABRICKS_HOST",
+            "DATABRICKS_TOKEN",
+            "DATABRICKS_API_KEY",
+            "DATABRICKS_CLIENT_ID",
+        )
     )
 
 
@@ -129,7 +135,6 @@ class ModelConfigService:
         # Will be validated when needed (e.g., in API key operations)
         self.group_id = group_id
 
-
     async def find_all(self) -> List[ModelConfig]:
         """
         Get all model configurations from the repository.
@@ -192,14 +197,18 @@ class ModelConfigService:
 
         # Invalidate cache - both default and group-specific if provided
         await model_config_cache.invalidate("__default__", "models")
-        await model_config_cache.invalidate("__default__", f"model:{model_dict.get('key', model_data.key)}")
+        await model_config_cache.invalidate(
+            "__default__", f"model:{model_dict.get('key', model_data.key)}"
+        )
         if group_id:
             await model_config_cache.invalidate(group_id, "models")
         logger.info(f"[CACHE INVALIDATE] Model config cache invalidated after create")
 
         return result
 
-    async def update_model_config(self, key: str, model_data, group_id: Optional[str] = None):
+    async def update_model_config(
+        self, key: str, model_data, group_id: Optional[str] = None
+    ):
         """
         Update an existing model configuration.
 
@@ -239,7 +248,9 @@ class ModelConfigService:
 
         return result
 
-    async def toggle_model_enabled(self, key: str, enabled: bool, group_id: Optional[str] = None) -> Optional[ModelConfig]:
+    async def toggle_model_enabled(
+        self, key: str, enabled: bool, group_id: Optional[str] = None
+    ) -> Optional[ModelConfig]:
         """
         Toggle the enabled status of a model configuration.
 
@@ -268,7 +279,9 @@ class ModelConfigService:
                 await model_config_cache.invalidate(group_id, "models")
             if result and result.group_id:
                 await model_config_cache.invalidate(result.group_id, "models")
-            logger.info(f"[CACHE INVALIDATE] Model config cache invalidated after toggle")
+            logger.info(
+                f"[CACHE INVALIDATE] Model config cache invalidated after toggle"
+            )
 
             return result
         except Exception as e:
@@ -277,7 +290,9 @@ class ModelConfigService:
             # Re-raise for controller layer to handle
             raise
 
-    async def delete_model_config(self, key: str, group_id: Optional[str] = None) -> bool:
+    async def delete_model_config(
+        self, key: str, group_id: Optional[str] = None
+    ) -> bool:
         """
         Delete a model configuration.
 
@@ -305,7 +320,9 @@ class ModelConfigService:
                 await model_config_cache.invalidate(group_id, "models")
             if model_group_id:
                 await model_config_cache.invalidate(model_group_id, "models")
-            logger.info(f"[CACHE INVALIDATE] Model config cache invalidated after delete")
+            logger.info(
+                f"[CACHE INVALIDATE] Model config cache invalidated after delete"
+            )
 
         return result
 
@@ -324,7 +341,9 @@ class ModelConfigService:
 
             # Invalidate entire cache (affects all groups)
             await model_config_cache.clear()
-            logger.info(f"[CACHE INVALIDATE] Model config cache cleared after enable_all")
+            logger.info(
+                f"[CACHE INVALIDATE] Model config cache cleared after enable_all"
+            )
 
             # Return all models
             return await self.find_all()
@@ -347,7 +366,9 @@ class ModelConfigService:
 
             # Invalidate entire cache (affects all groups)
             await model_config_cache.clear()
-            logger.info(f"[CACHE INVALIDATE] Model config cache cleared after disable_all")
+            logger.info(
+                f"[CACHE INVALIDATE] Model config cache cleared after disable_all"
+            )
 
             # Return all models
             return await self.find_all()
@@ -369,14 +390,18 @@ class ModelConfigService:
             HTTPException: If model configuration is not found
         """
         try:
-            normalized_key = model.rsplit('/', 1)[-1] if isinstance(model, str) else model
+            normalized_key = (
+                model.rsplit("/", 1)[-1] if isinstance(model, str) else model
+            )
 
             # Read-through TTL cache (PERF-005): this runs on EVERY LLM
             # completion, which previously meant a DB round trip per call.
             # find_by_key is global (not group-filtered), so the cache entry
             # lives under "__default__" and mutations invalidate it exactly.
             # API keys are never cached here — only the model row fields.
-            cached = await model_config_cache.get("__default__", f"model:{normalized_key}")
+            cached = await model_config_cache.get(
+                "__default__", f"model:{normalized_key}"
+            )
             if cached is not None:
                 config = dict(cached)
             else:
@@ -395,14 +420,18 @@ class ModelConfigService:
                         "context_window": model_config.context_window,
                         "max_output_tokens": model_config.max_output_tokens,
                         "extended_thinking": model_config.extended_thinking,
-                        "enabled": model_config.enabled
+                        "enabled": model_config.enabled,
                     }
                 else:
                     # Fall back to utility function with normalized key (best-effort; may be None without a sync DB session)
                     config = get_model_config(normalized_key)
                     if not config:
-                        raise ValueError(f"Model configuration not found for model: {model}")
-                await model_config_cache.set("__default__", f"model:{normalized_key}", dict(config))
+                        raise ValueError(
+                            f"Model configuration not found for model: {model}"
+                        )
+                await model_config_cache.set(
+                    "__default__", f"model:{normalized_key}", dict(config)
+                )
 
             # Get API key for the provider using class method
             provider = config["provider"].lower()
@@ -421,10 +450,13 @@ class ModelConfigService:
                         logger.warning(
                             "Databricks model '%s' requested but no Databricks workspace "
                             "is configured — falling back to local model '%s'",
-                            config.get("name"), local.get("name"),
+                            config.get("name"),
+                            local.get("name"),
                         )
                         return local
-                logger.info("Databricks provider - unified auth will handle authentication")
+                logger.info(
+                    "Databricks provider - unified auth will handle authentication"
+                )
                 # Don't add API key for Databricks - unified auth handles it
                 return config
 
@@ -439,14 +471,19 @@ class ModelConfigService:
                     f"SECURITY: group_id is REQUIRED for fetching API keys for provider '{provider}'. "
                     "All API key operations must be scoped to a group for multi-tenant isolation."
                 )
-            api_key = await ApiKeysService.get_provider_api_key(provider, group_id=self.group_id)
+            api_key = await ApiKeysService.get_provider_api_key(
+                provider, group_id=self.group_id
+            )
             if not api_key:
                 # Try to use unified auth for external providers if available
                 try:
                     from src.utils.databricks_auth import get_auth_context
+
                     auth = await get_auth_context()
                     if auth and auth.auth_method in ["obo", "service_principal"]:
-                        logger.warning(f"No API key found for provider {provider} - this may cause issues if the model requires external API access")
+                        logger.warning(
+                            f"No API key found for provider {provider} - this may cause issues if the model requires external API access"
+                        )
                         # Allow the request to proceed - the actual LLM call might fail, but that's better than failing here
                         return config
                 except ImportError:
@@ -459,9 +496,7 @@ class ModelConfigService:
 
         except Exception as e:
             logger.error(f"Error getting model configuration: {str(e)}")
-            raise KasalError(
-                detail=f"Failed to get model configuration: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to get model configuration: {str(e)}")
 
     @staticmethod
     def _as_config(m) -> Dict[str, Any]:
@@ -524,9 +559,7 @@ class ModelConfigService:
             logger.warning(f"Local-fallback lookup failed: {e}")
             return None
 
-        candidates = [
-            m for m in models if (m.provider or "").lower() != "databricks"
-        ]
+        candidates = [m for m in models if (m.provider or "").lower() != "databricks"]
 
         pinned_key = os.getenv("KASAL_FALLBACK_MODEL")
         if pinned_key:
@@ -558,7 +591,9 @@ class ModelConfigService:
 
     # Group-aware methods for multi-tenant support
 
-    async def find_all_for_group(self, group_context: GroupContext) -> List[ModelConfig]:
+    async def find_all_for_group(
+        self, group_context: GroupContext
+    ) -> List[ModelConfig]:
         """
         Get all model configurations for a specific group.
 
@@ -577,26 +612,31 @@ class ModelConfigService:
             List of model configurations for the group
         """
         # Determine cache key based on group context
-        cache_group_id = group_context.primary_group_id if group_context and group_context.group_ids else "__default__"
+        cache_group_id = (
+            group_context.primary_group_id
+            if group_context and group_context.group_ids
+            else "__default__"
+        )
 
         # =========================================================================
         # TTL CACHE: Check cache first
         # =========================================================================
         cached_models = await model_config_cache.get(cache_group_id, "models")
         if cached_models is not None:
-            logger.info(f"[CACHE HIT] Returning {len(cached_models)} cached models for group {cache_group_id}")
+            logger.info(
+                f"[CACHE HIT] Returning {len(cached_models)} cached models for group {cache_group_id}"
+            )
             return cached_models
 
         # Cache miss - fetch from database
-        logger.info(f"[CACHE MISS] Fetching models from database for group {cache_group_id}")
+        logger.info(
+            f"[CACHE MISS] Fetching models from database for group {cache_group_id}"
+        )
         all_models = await self.repository.find_all()
 
         # If no group context, show only default models
         if not group_context or not group_context.group_ids:
-            default_models = [
-                model for model in all_models
-                if model.group_id is None
-            ]
+            default_models = [model for model in all_models if model.group_id is None]
             # Cache and return
             await model_config_cache.set(cache_group_id, "models", default_models)
             return default_models
@@ -622,11 +662,15 @@ class ModelConfigService:
         # CACHE: Store result for future requests
         # =========================================================================
         await model_config_cache.set(cache_group_id, "models", result)
-        logger.info(f"[CACHE SET] Cached {len(result)} models for group {cache_group_id}")
+        logger.info(
+            f"[CACHE SET] Cached {len(result)} models for group {cache_group_id}"
+        )
 
         return result
 
-    async def find_enabled_models_for_group(self, group_context: GroupContext) -> List[ModelConfig]:
+    async def find_enabled_models_for_group(
+        self, group_context: GroupContext
+    ) -> List[ModelConfig]:
         """
         Get all enabled model configurations for a specific group.
 
@@ -650,7 +694,9 @@ class ModelConfigService:
         """Return all global (system-wide) model configurations (group_id is None)."""
         return await self.repository.find_all_global()
 
-    async def toggle_global_enabled(self, key: str, enabled: bool) -> Optional[ModelConfig]:
+    async def toggle_global_enabled(
+        self, key: str, enabled: bool
+    ) -> Optional[ModelConfig]:
         """Toggle enabled on the global model by key (does not create group override)."""
         updated = await self.repository.toggle_global_enabled(key, enabled)
         if not updated:
@@ -658,12 +704,15 @@ class ModelConfigService:
 
         # Invalidate entire cache since global models affect all groups
         await model_config_cache.clear()
-        logger.info(f"[CACHE INVALIDATE] Model config cache cleared after toggle_global")
+        logger.info(
+            f"[CACHE INVALIDATE] Model config cache cleared after toggle_global"
+        )
 
         return await self.repository.find_global_by_key(key)
 
-
-    async def toggle_model_enabled_with_group(self, key: str, enabled: bool, group_context: GroupContext) -> Optional[ModelConfig]:
+    async def toggle_model_enabled_with_group(
+        self, key: str, enabled: bool, group_context: GroupContext
+    ) -> Optional[ModelConfig]:
         """
         Toggle the enabled status of a model with group verification.
 
@@ -712,9 +761,7 @@ class ModelConfigService:
             # Must have a valid group context to toggle models
             if not group_context or not group_context.group_ids:
                 logger.warning(f"No group context provided for toggling model {key}")
-                raise ForbiddenError(
-                    detail="Group context required to toggle models"
-                )
+                raise ForbiddenError(detail="Group context required to toggle models")
 
             primary_group_id = group_context.primary_group_id
 
@@ -722,34 +769,59 @@ class ModelConfigService:
             async def _invalidate_cache():
                 await model_config_cache.invalidate(primary_group_id, "models")
                 await model_config_cache.invalidate("__default__", "models")
-                logger.info(f"[CACHE INVALIDATE] Model config cache invalidated for group {primary_group_id}")
+                logger.info(
+                    f"[CACHE INVALIDATE] Model config cache invalidated for group {primary_group_id}"
+                )
 
             # If it's a default model (group_id = null), create a group-specific copy
             if target_model.group_id is None:
                 # Check if a group-specific version already exists
                 existing_group_model = await self.repository.find_by_key_and_group(
-                    key,
-                    primary_group_id
+                    key, primary_group_id
                 )
 
                 if existing_group_model:
                     # Toggle the existing group-specific model in its group scope
-                    await self.repository.toggle_enabled_in_group(existing_group_model.key, primary_group_id, enabled)
+                    await self.repository.toggle_enabled_in_group(
+                        existing_group_model.key, primary_group_id, enabled
+                    )
                     await _invalidate_cache()
-                    return await self.repository.find_by_key_and_group(key, primary_group_id)
+                    return await self.repository.find_by_key_and_group(
+                        key, primary_group_id
+                    )
                 else:
                     # Create a new group-specific copy with toggled state
                     model_data = {
-                        'key': target_model.key,
-                        'name': target_model.name,
-                        'provider': target_model.provider if hasattr(target_model, 'provider') else None,
-                        'temperature': target_model.temperature if hasattr(target_model, 'temperature') else None,
-                        'context_window': target_model.context_window if hasattr(target_model, 'context_window') else None,
-                        'max_output_tokens': target_model.max_output_tokens if hasattr(target_model, 'max_output_tokens') else None,
-                        'extended_thinking': target_model.extended_thinking if hasattr(target_model, 'extended_thinking') else False,
-                        'enabled': enabled,  # Use the requested state
-                        'group_id': primary_group_id,
-                        'created_by_email': group_context.group_email
+                        "key": target_model.key,
+                        "name": target_model.name,
+                        "provider": (
+                            target_model.provider
+                            if hasattr(target_model, "provider")
+                            else None
+                        ),
+                        "temperature": (
+                            target_model.temperature
+                            if hasattr(target_model, "temperature")
+                            else None
+                        ),
+                        "context_window": (
+                            target_model.context_window
+                            if hasattr(target_model, "context_window")
+                            else None
+                        ),
+                        "max_output_tokens": (
+                            target_model.max_output_tokens
+                            if hasattr(target_model, "max_output_tokens")
+                            else None
+                        ),
+                        "extended_thinking": (
+                            target_model.extended_thinking
+                            if hasattr(target_model, "extended_thinking")
+                            else False
+                        ),
+                        "enabled": enabled,  # Use the requested state
+                        "group_id": primary_group_id,
+                        "created_by_email": group_context.group_email,
                     }
                     result = await self.repository.create(model_data)
                     await _invalidate_cache()
@@ -758,19 +830,19 @@ class ModelConfigService:
             # For group-specific models, check authorization
             if target_model.group_id not in group_context.group_ids:
                 logger.warning(f"Model with key {key} not authorized for group")
-                raise NotFoundError(
-                    detail=f"Model with key {key} not found"
-                )
+                raise NotFoundError(detail=f"Model with key {key} not found")
 
             # Toggle the group-specific model in its group scope
-            await self.repository.toggle_enabled_in_group(target_model.key, target_model.group_id, enabled)
+            await self.repository.toggle_enabled_in_group(
+                target_model.key, target_model.group_id, enabled
+            )
             await _invalidate_cache()
-            return await self.repository.find_by_key_and_group(key, target_model.group_id)
+            return await self.repository.find_by_key_and_group(
+                key, target_model.group_id
+            )
 
         except KasalError:
             raise
         except Exception as e:
             logger.error(f"Failed to toggle model: {str(e)}")
-            raise KasalError(
-                detail=f"Failed to toggle model: {str(e)}"
-            )
+            raise KasalError(detail=f"Failed to toggle model: {str(e)}")

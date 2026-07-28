@@ -13,18 +13,19 @@ Key changes in the new API:
 - MemoryBackendConfig no longer has enable_short_term/long_term/entity fields
 """
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.memory.backend_factory import (
-    MemoryBackendFactory,
-    DatabricksIndexValidationError,
-)
+import pytest
+
 from src.schemas.memory_backend import (
-    MemoryBackendConfig,
-    MemoryBackendType,
     DatabricksMemoryConfig,
     LakebaseMemoryConfig,
+    MemoryBackendConfig,
+    MemoryBackendType,
+)
+from src.services.memory.backend_factory import (
+    DatabricksIndexValidationError,
+    MemoryBackendFactory,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────

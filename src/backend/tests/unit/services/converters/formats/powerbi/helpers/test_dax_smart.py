@@ -5,8 +5,9 @@ Tests smart DAX generation that automatically chooses between standard and tree-
 """
 
 import pytest
+
+from src.services.converters.base.models import KPI, DAXMeasure, KPIDefinition
 from src.services.converters.formats.powerbi.helpers.dax_smart import SmartDAXGenerator
-from src.services.converters.base.models import KPI, KPIDefinition, DAXMeasure
 
 
 class TestSmartDAXGenerator:
@@ -29,16 +30,16 @@ class TestSmartDAXGenerator:
                     technical_name="total_revenue",
                     formula="revenue",
                     aggregation_type="SUM",
-                    source_table="Sales"
+                    source_table="Sales",
                 ),
                 KPI(
                     description="Order Count",
                     technical_name="order_count",
                     formula="order_id",
                     aggregation_type="COUNT",
-                    source_table="Sales"
-                )
-            ]
+                    source_table="Sales",
+                ),
+            ],
         )
 
     @pytest.fixture
@@ -53,22 +54,22 @@ class TestSmartDAXGenerator:
                     technical_name="revenue",
                     formula="amount",
                     aggregation_type="SUM",
-                    source_table="Sales"
+                    source_table="Sales",
                 ),
                 KPI(
                     description="Cost",
                     technical_name="cost",
                     formula="cost_amount",
                     aggregation_type="SUM",
-                    source_table="Sales"
+                    source_table="Sales",
                 ),
                 KPI(
                     description="Profit",
                     technical_name="profit",
                     formula="[revenue] - [cost]",
-                    aggregation_type="CALCULATED"
-                )
-            ]
+                    aggregation_type="CALCULATED",
+                ),
+            ],
         )
 
     @pytest.fixture
@@ -83,21 +84,21 @@ class TestSmartDAXGenerator:
                     technical_name="base_metric",
                     formula="value",
                     aggregation_type="SUM",
-                    source_table="Data"
+                    source_table="Data",
                 ),
                 KPI(
                     description="Derived Metric",
                     technical_name="derived_metric",
                     formula="[base_metric] * 2",
-                    aggregation_type="CALCULATED"
+                    aggregation_type="CALCULATED",
                 ),
                 KPI(
                     description="Complex Metric",
                     technical_name="complex_metric",
                     formula="[derived_metric] + [base_metric]",
-                    aggregation_type="CALCULATED"
-                )
-            ]
+                    aggregation_type="CALCULATED",
+                ),
+            ],
         )
 
     # ========== Initialization Tests ==========
@@ -106,13 +107,15 @@ class TestSmartDAXGenerator:
         """Test SmartDAXGenerator initializes with both generators"""
         assert generator.standard_generator is not None
         assert generator.tree_generator is not None
-        assert hasattr(generator.standard_generator, 'generate_dax_measure')
-        assert hasattr(generator.tree_generator, 'generate_measure_with_separate_dependencies')
+        assert hasattr(generator.standard_generator, "generate_dax_measure")
+        assert hasattr(
+            generator.tree_generator, "generate_measure_with_separate_dependencies"
+        )
 
     def test_generator_has_both_generators(self, generator):
         """Test generator has access to both standard and tree generators"""
-        assert generator.standard_generator.__class__.__name__ == 'DAXGenerator'
-        assert generator.tree_generator.__class__.__name__ == 'TreeParsingDAXGenerator'
+        assert generator.standard_generator.__class__.__name__ == "DAXGenerator"
+        assert generator.tree_generator.__class__.__name__ == "TreeParsingDAXGenerator"
 
     # ========== _has_dependencies Tests ==========
 
@@ -121,23 +124,23 @@ class TestSmartDAXGenerator:
         result = generator._has_dependencies(simple_definition)
         assert result is False
 
-    def test_has_dependencies_with_calculated(self, generator, definition_with_calculated):
+    def test_has_dependencies_with_calculated(
+        self, generator, definition_with_calculated
+    ):
         """Test dependency detection identifies CALCULATED aggregation"""
         result = generator._has_dependencies(definition_with_calculated)
         assert result is True
 
-    def test_has_dependencies_with_measure_refs(self, generator, definition_with_dependencies):
+    def test_has_dependencies_with_measure_refs(
+        self, generator, definition_with_dependencies
+    ):
         """Test dependency detection identifies measure references"""
         result = generator._has_dependencies(definition_with_dependencies)
         assert result is True
 
     def test_has_dependencies_empty_definition(self, generator):
         """Test dependency detection with empty definition"""
-        empty_def = KPIDefinition(
-            description="Empty",
-            technical_name="empty",
-            kpis=[]
-        )
+        empty_def = KPIDefinition(description="Empty", technical_name="empty", kpis=[])
         result = generator._has_dependencies(empty_def)
         assert result is False
 
@@ -153,7 +156,9 @@ class TestSmartDAXGenerator:
         assert result.name == "Total Revenue"
         assert "SUM(Sales[revenue])" in result.dax_formula
 
-    def test_generate_dax_measure_with_dependencies(self, generator, definition_with_calculated):
+    def test_generate_dax_measure_with_dependencies(
+        self, generator, definition_with_calculated
+    ):
         """Test single measure generation with dependencies"""
         profit_kpi = definition_with_calculated.kpis[2]  # profit measure
         result = generator.generate_dax_measure(definition_with_calculated, profit_kpi)
@@ -162,7 +167,9 @@ class TestSmartDAXGenerator:
         assert isinstance(result, DAXMeasure)
         assert result.name == "Profit"
 
-    def test_generate_dax_measure_orphan_with_simple_definition(self, generator, simple_definition):
+    def test_generate_dax_measure_orphan_with_simple_definition(
+        self, generator, simple_definition
+    ):
         """Test measure generation with orphan KPI (not in definition) uses standard generator"""
         # Create a KPI that's not in the definition but should generate with standard generator
         # Simple definition has no dependencies, so it uses standard generator
@@ -171,7 +178,7 @@ class TestSmartDAXGenerator:
             technical_name="orphan",
             formula="orphan_value",
             aggregation_type="SUM",
-            source_table="Data"
+            source_table="Data",
         )
 
         # Should work with simple_definition (no dependencies)
@@ -191,7 +198,9 @@ class TestSmartDAXGenerator:
         assert results[0].name == "Total Revenue"
         assert results[1].name == "Order Count"
 
-    def test_generate_all_measures_with_dependencies(self, generator, definition_with_calculated):
+    def test_generate_all_measures_with_dependencies(
+        self, generator, definition_with_calculated
+    ):
         """Test generating all measures with dependencies"""
         results = generator.generate_all_measures(definition_with_calculated)
 
@@ -200,21 +209,18 @@ class TestSmartDAXGenerator:
 
     def test_generate_all_measures_empty(self, generator):
         """Test generating all measures from empty definition"""
-        empty_def = KPIDefinition(
-            description="Empty",
-            technical_name="empty",
-            kpis=[]
-        )
+        empty_def = KPIDefinition(description="Empty", technical_name="empty", kpis=[])
         results = generator.generate_all_measures(empty_def)
         assert len(results) == 0
 
     # ========== generate_measures_with_dependencies Tests ==========
 
-    def test_generate_measures_with_dependencies(self, generator, definition_with_dependencies):
+    def test_generate_measures_with_dependencies(
+        self, generator, definition_with_dependencies
+    ):
         """Test generating measure with all its dependencies"""
         results = generator.generate_measures_with_dependencies(
-            definition_with_dependencies,
-            "complex_metric"
+            definition_with_dependencies, "complex_metric"
         )
 
         assert len(results) > 0
@@ -223,11 +229,12 @@ class TestSmartDAXGenerator:
         measure_names = [m.original_kbi.technical_name for m in results]
         assert "complex_metric" in measure_names
 
-    def test_generate_measures_with_dependencies_base_measure(self, generator, definition_with_dependencies):
+    def test_generate_measures_with_dependencies_base_measure(
+        self, generator, definition_with_dependencies
+    ):
         """Test generating base measure with dependencies"""
         results = generator.generate_measures_with_dependencies(
-            definition_with_dependencies,
-            "base_metric"
+            definition_with_dependencies, "base_metric"
         )
 
         assert len(results) >= 1
@@ -253,24 +260,30 @@ class TestSmartDAXGenerator:
                     technical_name="base",
                     formula="value",
                     aggregation_type="SUM",
-                    source_table="Data"
+                    source_table="Data",
                 ),
                 KPI(
                     description="Derived",
                     technical_name="derived",
                     formula="[base] * 2",
-                    aggregation_type="CALCULATED"
-                )
-            ]
+                    aggregation_type="CALCULATED",
+                ),
+            ],
         )
 
         strategy = generator.get_generation_strategy(simple_dep)
         assert strategy in ["SIMPLE_TREE_PARSING", "MODERATE_TREE_PARSING"]
 
-    def test_get_generation_strategy_moderate_tree(self, generator, definition_with_dependencies):
+    def test_get_generation_strategy_moderate_tree(
+        self, generator, definition_with_dependencies
+    ):
         """Test strategy recommendation for moderate complexity"""
         strategy = generator.get_generation_strategy(definition_with_dependencies)
-        assert strategy in ["SIMPLE_TREE_PARSING", "MODERATE_TREE_PARSING", "COMPLEX_TREE_PARSING"]
+        assert strategy in [
+            "SIMPLE_TREE_PARSING",
+            "MODERATE_TREE_PARSING",
+            "COMPLEX_TREE_PARSING",
+        ]
 
     def test_get_generation_strategy_complex_tree(self, generator):
         """Test strategy recommendation for complex dependencies"""
@@ -279,12 +292,38 @@ class TestSmartDAXGenerator:
             description="Complex",
             technical_name="complex",
             kpis=[
-                KPI(description="L0", technical_name="l0", formula="v", aggregation_type="SUM", source_table="D"),
-                KPI(description="L1", technical_name="l1", formula="[l0]*2", aggregation_type="CALCULATED"),
-                KPI(description="L2", technical_name="l2", formula="[l1]*2", aggregation_type="CALCULATED"),
-                KPI(description="L3", technical_name="l3", formula="[l2]*2", aggregation_type="CALCULATED"),
-                KPI(description="L4", technical_name="l4", formula="[l3]*2", aggregation_type="CALCULATED"),
-            ]
+                KPI(
+                    description="L0",
+                    technical_name="l0",
+                    formula="v",
+                    aggregation_type="SUM",
+                    source_table="D",
+                ),
+                KPI(
+                    description="L1",
+                    technical_name="l1",
+                    formula="[l0]*2",
+                    aggregation_type="CALCULATED",
+                ),
+                KPI(
+                    description="L2",
+                    technical_name="l2",
+                    formula="[l1]*2",
+                    aggregation_type="CALCULATED",
+                ),
+                KPI(
+                    description="L3",
+                    technical_name="l3",
+                    formula="[l2]*2",
+                    aggregation_type="CALCULATED",
+                ),
+                KPI(
+                    description="L4",
+                    technical_name="l4",
+                    formula="[l3]*2",
+                    aggregation_type="CALCULATED",
+                ),
+            ],
         )
 
         strategy = generator.get_generation_strategy(complex_def)
@@ -302,7 +341,9 @@ class TestSmartDAXGenerator:
         assert report["recommended_strategy"] == "STANDARD"
         assert report["has_dependencies"] is False
 
-    def test_get_analysis_report_with_dependencies(self, generator, definition_with_dependencies):
+    def test_get_analysis_report_with_dependencies(
+        self, generator, definition_with_dependencies
+    ):
         """Test analysis report includes complexity for dependencies"""
         report = generator.get_analysis_report(definition_with_dependencies)
 
@@ -323,7 +364,7 @@ class TestSmartDAXGenerator:
             "STANDARD",
             "SIMPLE_TREE_PARSING",
             "MODERATE_TREE_PARSING",
-            "COMPLEX_TREE_PARSING"
+            "COMPLEX_TREE_PARSING",
         ]
 
     # ========== Integration Tests ==========
@@ -350,7 +391,9 @@ class TestSmartDAXGenerator:
     def test_consistency_across_methods(self, generator, simple_definition):
         """Test consistency between single and all measure generation"""
         # Generate single measure
-        single = generator.generate_dax_measure(simple_definition, simple_definition.kpis[0])
+        single = generator.generate_dax_measure(
+            simple_definition, simple_definition.kpis[0]
+        )
 
         # Generate all measures
         all_measures = generator.generate_all_measures(simple_definition)
@@ -365,10 +408,27 @@ class TestSmartDAXGenerator:
             description="Mixed",
             technical_name="mixed",
             kpis=[
-                KPI(description="Simple", technical_name="simple", formula="val", aggregation_type="SUM", source_table="D"),
-                KPI(description="Calc", technical_name="calc", formula="[simple] * 2", aggregation_type="CALCULATED"),
-                KPI(description="Another", technical_name="another", formula="val2", aggregation_type="COUNT", source_table="D"),
-            ]
+                KPI(
+                    description="Simple",
+                    technical_name="simple",
+                    formula="val",
+                    aggregation_type="SUM",
+                    source_table="D",
+                ),
+                KPI(
+                    description="Calc",
+                    technical_name="calc",
+                    formula="[simple] * 2",
+                    aggregation_type="CALCULATED",
+                ),
+                KPI(
+                    description="Another",
+                    technical_name="another",
+                    formula="val2",
+                    aggregation_type="COUNT",
+                    source_table="D",
+                ),
+            ],
         )
 
         results = generator.generate_all_measures(mixed)
@@ -384,9 +444,9 @@ class TestSmartDAXGenerator:
                     description="Calculated",
                     technical_name="calc",
                     formula="1 + 1",
-                    aggregation_type="CALCULATED"
+                    aggregation_type="CALCULATED",
                 )
-            ]
+            ],
         )
 
         strategy = generator.get_generation_strategy(single_calc)

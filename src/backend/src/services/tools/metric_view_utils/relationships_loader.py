@@ -1,4 +1,5 @@
 """Relationships Loader — auto-build enrichment joins from PBI relationship JSON."""
+
 from __future__ import annotations
 
 import json
@@ -14,7 +15,7 @@ class RelationshipsLoader:
     - Simplified flat list of relationship dicts
     """
 
-    _SYSTEM_TABLE_PREFIXES = ('LocalDateTable', 'DateTableTemplate')
+    _SYSTEM_TABLE_PREFIXES = ("LocalDateTable", "DateTableTemplate")
 
     def __init__(self):
         self._inactive_rels: list[dict] = []
@@ -46,36 +47,44 @@ class RelationshipsLoader:
         enrichment: dict[str, list[dict]] = {}
 
         for rel in relationships:
-            from_tbl = rel.get('from_table', '')
-            to_tbl = rel.get('to_table', '')
-            if not rel.get('is_active', True):
-                self._inactive_rels.append({
-                    'from_table': from_tbl,
-                    'from_column': rel.get('from_column', ''),
-                    'to_table': to_tbl,
-                    'to_column': rel.get('to_column', ''),
-                })
+            from_tbl = rel.get("from_table", "")
+            to_tbl = rel.get("to_table", "")
+            if not rel.get("is_active", True):
+                self._inactive_rels.append(
+                    {
+                        "from_table": from_tbl,
+                        "from_column": rel.get("from_column", ""),
+                        "to_table": to_tbl,
+                        "to_column": rel.get("to_column", ""),
+                    }
+                )
                 continue  # still skip from active joins
-            if any(from_tbl.startswith(p) or to_tbl.startswith(p)
-                   for p in self._SYSTEM_TABLE_PREFIXES):
+            if any(
+                from_tbl.startswith(p) or to_tbl.startswith(p)
+                for p in self._SYSTEM_TABLE_PREFIXES
+            ):
                 continue
 
-            from_card = rel.get('from_cardinality', 'Many')
-            to_card = rel.get('to_cardinality', 'One')
+            from_card = rel.get("from_cardinality", "Many")
+            to_card = rel.get("to_cardinality", "One")
 
-            if from_card == 'Many' and to_card == 'Many':
-                self._skipped_m2n.append({
-                    'from_table': from_tbl,
-                    'from_column': rel.get('from_column', ''),
-                    'to_table': to_tbl,
-                    'to_column': rel.get('to_column', ''),
-                })
+            if from_card == "Many" and to_card == "Many":
+                self._skipped_m2n.append(
+                    {
+                        "from_table": from_tbl,
+                        "from_column": rel.get("from_column", ""),
+                        "to_table": to_tbl,
+                        "to_column": rel.get("to_column", ""),
+                    }
+                )
                 continue  # M:N — tracked for reporting
-            elif from_card == 'One' and to_card == 'Many':
+            elif from_card == "One" and to_card == "Many":
                 from_tbl, to_tbl = to_tbl, from_tbl
-                rel['from_column'], rel['to_column'] = (
-                    rel.get('to_column', ''), rel.get('from_column', ''))
-            elif from_card == 'One' and to_card == 'One':
+                rel["from_column"], rel["to_column"] = (
+                    rel.get("to_column", ""),
+                    rel.get("from_column", ""),
+                )
+            elif from_card == "One" and to_card == "One":
                 pass
 
             fact_key = from_tbl
@@ -89,25 +98,29 @@ class RelationshipsLoader:
                 continue
 
             fact_info = mquery_tables.get(fact_key)
-            fact_source = fact_info.source_table if fact_info else ''
-            if dim_info.source_table and fact_source and dim_info.source_table == fact_source:
+            fact_source = fact_info.source_table if fact_info else ""
+            if (
+                dim_info.source_table
+                and fact_source
+                and dim_info.source_table == fact_source
+            ):
                 continue
 
             alias = dim_key.lower()
-            if alias.startswith('c_dim_'):
+            if alias.startswith("c_dim_"):
                 alias = alias[2:]
 
-            from_col = rel.get('from_column', '')
-            to_col = rel.get('to_column', '')
+            from_col = rel.get("from_column", "")
+            to_col = rel.get("to_column", "")
             if not from_col or not to_col:
                 continue
 
             join_entry = {
-                'name': alias,
-                'source': dim_info.source_table,
-                'join_on': f'source.{from_col} = {alias}.{to_col}',
-                'dim_columns': list(dim_info.group_by_columns),
-                '_auto': True,
+                "name": alias,
+                "source": dim_info.source_table,
+                "join_on": f"source.{from_col} = {alias}.{to_col}",
+                "dim_columns": list(dim_info.group_by_columns),
+                "_auto": True,
             }
 
             enrichment.setdefault(fact_key, []).append(join_entry)
@@ -128,26 +141,26 @@ class RelationshipsLoader:
         if isinstance(raw, list):
             return raw
 
-        if isinstance(raw, dict) and 'results' in raw:
-            rows = (raw.get('results', [{}])[0]
-                       .get('tables', [{}])[0]
-                       .get('rows', []))
+        if isinstance(raw, dict) and "results" in raw:
+            rows = raw.get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
             result = []
             seen: set[int] = set()
             for row in rows:
-                rid = row.get('[ID]')
+                rid = row.get("[ID]")
                 if rid in seen:
                     continue
                 seen.add(rid)
-                result.append({
-                    'from_table': row.get('[FromTable]', ''),
-                    'from_column': row.get('[FromColumn]', ''),
-                    'from_cardinality': row.get('[FromCardinality]', 'Many'),
-                    'to_table': row.get('[ToTable]', ''),
-                    'to_column': row.get('[ToColumn]', ''),
-                    'to_cardinality': row.get('[ToCardinality]', 'One'),
-                    'is_active': row.get('[IsActive]', True),
-                })
+                result.append(
+                    {
+                        "from_table": row.get("[FromTable]", ""),
+                        "from_column": row.get("[FromColumn]", ""),
+                        "from_cardinality": row.get("[FromCardinality]", "Many"),
+                        "to_table": row.get("[ToTable]", ""),
+                        "to_column": row.get("[ToColumn]", ""),
+                        "to_cardinality": row.get("[ToCardinality]", "One"),
+                        "is_active": row.get("[IsActive]", True),
+                    }
+                )
             return result
 
         return []

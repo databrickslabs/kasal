@@ -17,7 +17,6 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 
 from src.services.execution.runtime.task import Task
 from src.services.execution.runtime.types import TaskOutput
-
 from src.services.otel_tracing.event_bridge import OTelEventBridge
 
 

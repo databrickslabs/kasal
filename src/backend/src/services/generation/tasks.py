@@ -1,24 +1,23 @@
 """
 Service for task generation operations.
 
-This module provides business logic for generating tasks 
+This module provides business logic for generating tasks
 using LLM models and prompt templates.
 """
 
 import logging
 import os
-from typing import Optional
 import re
 import traceback
-from typing import Any
+from typing import Any, Optional
 
+from src.repositories.log_repository import LLMLogRepository
+from src.schemas.task import TaskCreate
 from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationResponse
 from src.services.catalog.templates import TemplateService
-from src.utils.prompt_utils import robust_json_parser
-from src.repositories.log_repository import LLMLogRepository
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.llm.manager import LLMManager
-from src.schemas.task import TaskCreate
+from src.utils.prompt_utils import robust_json_parser
 from src.utils.user_context import GroupContext
 
 # Configure logging
@@ -27,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Default model for task generation (gpt-5.3-codex fallback; llama-4-maverick can
 # hit the Supervisor API beta gate on some workspaces)
 DEFAULT_TASK_MODEL = os.getenv("DEFAULT_TASK_MODEL", "databricks-gpt-5-3-codex")
+
 
 class TaskGenerationService:
     """Service for task generation operations."""
@@ -41,10 +41,17 @@ class TaskGenerationService:
         self.session = session
         # Initialize log service with repository using the same session
         self.log_service = LLMLogService(LLMLogRepository(session))
-    
-    async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str,
-                                  status: str = 'success', error_message: Optional[str] = None,
-                                  group_context: Optional[GroupContext] = None):
+
+    async def _log_llm_interaction(
+        self,
+        endpoint: str,
+        prompt: str,
+        response: str,
+        model: str,
+        status: str = "success",
+        error_message: Optional[str] = None,
+        group_context: Optional[GroupContext] = None,
+    ):
         """
         Log LLM interaction using the log service.
 
@@ -65,7 +72,7 @@ class TaskGenerationService:
                 model=model,
                 status=status,
                 error_message=error_message,
-                group_context=group_context
+                group_context=group_context,
             )
             logger.info(f"Logged {endpoint} interaction to database")
         except Exception as e:
@@ -99,7 +106,8 @@ class TaskGenerationService:
             {"role": "user", "content": user},
         ]
         try:
-            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            from src.utils.telemetry import KasalProduct, get_user_agent_header
+
             content = await LLMManager.completion(
                 messages=messages,
                 model=model,
@@ -111,7 +119,7 @@ class TaskGenerationService:
             if not criteria:
                 raise ValueError("Empty guardrail suggestion received from LLM")
             await self._log_llm_interaction(
-                endpoint='suggest-guardrail',
+                endpoint="suggest-guardrail",
                 prompt=f"System: {system}\nUser: {user}",
                 response=criteria,
                 model=model,
@@ -122,11 +130,11 @@ class TaskGenerationService:
             error_msg = f"Error suggesting guardrail: {str(e)}"
             logger.error(error_msg)
             await self._log_llm_interaction(
-                endpoint='suggest-guardrail',
+                endpoint="suggest-guardrail",
                 prompt=f"System: {system}\nUser: {user}",
                 response="",
                 model=model,
-                status='error',
+                status="error",
                 error_message=str(e),
                 group_context=group_context,
             )
@@ -136,11 +144,17 @@ class TaskGenerationService:
     # was removed with the crewai->kasal migration: it was never invoked and
     # the docs.crewai.com seeder that fed it is gone.
 
-    async def generate_task(self, request: TaskGenerationRequest, group_context: Optional[GroupContext] = None, fast_planning: bool = True) -> TaskGenerationResponse:
+    async def generate_task(
+        self,
+        request: TaskGenerationRequest,
+        group_context: Optional[GroupContext] = None,
+        fast_planning: bool = True,
+    ) -> TaskGenerationResponse:
         """Public entrypoint — wraps task generation in an MLflow root trace so
         it lands in the shared UC experiment (alongside dispatcher intent, crew
         generation, agent generation and crew execution)."""
         from contextlib import nullcontext
+
         from src.services.otel_tracing.mlflow_parent_setup import (
             configure_parent_mlflow_tracing,
             set_root_span_outputs,
@@ -151,6 +165,7 @@ class TaskGenerationService:
         )
         if mlflow_on:
             from src.services.mlflow.tracing import start_root_trace
+
             trace_ctx = start_root_trace(
                 "task_generation",
                 inputs={
@@ -169,7 +184,12 @@ class TaskGenerationService:
             set_root_span_outputs(root_span, result)
             return result
 
-    async def _generate_task_impl(self, request: TaskGenerationRequest, group_context: Optional[GroupContext] = None, fast_planning: bool = True) -> TaskGenerationResponse:
+    async def _generate_task_impl(
+        self,
+        request: TaskGenerationRequest,
+        group_context: Optional[GroupContext] = None,
+        fast_planning: bool = True,
+    ) -> TaskGenerationResponse:
         """
         Generate a task based on the provided prompt and context.
 
@@ -188,15 +208,19 @@ class TaskGenerationService:
         # Get model from request or fallback to environment variables
         model = request.model or os.getenv("TASK_MODEL", DEFAULT_TASK_MODEL)
         logger.info(f"Using model for task generation: {model}")
-        
+
         # Get composed prompt template from database (base + group/user overrides)
-        base_message = await TemplateService.get_effective_template_content("generate_task", group_context)
+        base_message = await TemplateService.get_effective_template_content(
+            "generate_task", group_context
+        )
 
         # Check if we have a prompt template
         if not base_message:
             logger.error("No prompt template found in database for generate_task")
-            raise ValueError("Required prompt template 'generate_task' not found in database")
-        
+            raise ValueError(
+                "Required prompt template 'generate_task' not found in database"
+            )
+
         logger.info("Using prompt template for generate_task from database")
 
         # NOTE: the generation template is format-neutral (content/structure only,
@@ -212,12 +236,14 @@ class TaskGenerationService:
             base_message += f"Role: {agent.role}\n"
             base_message += f"Goal: {agent.goal}\n"
             base_message += f"Backstory: {agent.backstory}\n"
-            base_message += "\nEnsure the task aligns with this agent's expertise and goals."
+            base_message += (
+                "\nEnsure the task aligns with this agent's expertise and goals."
+            )
 
         # Include available tools — the template already has the full Tool Catalog with
         # USE/DO NOT USE guidance. Here we just list which tools are enabled in this workspace.
         if request.available_tools:
-            tool_names = ", ".join(t['name'] for t in request.available_tools)
+            tool_names = ", ".join(t["name"] for t in request.available_tools)
             base_message += (
                 f"\n\nAvailable tools for this task (only assign from this list): {tool_names}"
                 "\n\nRefer to the TOOL CATALOG above for when to use each tool."
@@ -231,74 +257,75 @@ class TaskGenerationService:
         # (No documentation context injected)
 
         # Prepare messages for LLM
-        messages = [
-            {"role": "system", "content": base_message}
-        ]
+        messages = [{"role": "system", "content": base_message}]
 
         # Add the user's prompt
         messages.append({"role": "user", "content": request.text})
-        
+
         try:
             # Generate completion via unified LLMManager.completion()
-            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            from src.utils.telemetry import KasalProduct, get_user_agent_header
+
             content = await LLMManager.completion(
                 messages=messages,
                 model=model,
                 temperature=0.2 if fast_planning else 0.7,
                 max_tokens=1200 if fast_planning else 4000,
-                extra_headers=get_user_agent_header(KasalProduct.TASK_GENERATION)
+                extra_headers=get_user_agent_header(KasalProduct.TASK_GENERATION),
             )
-            
+
             if not content:
                 raise ValueError("Empty content received from LLM")
-                
+
             logger.info(f"Generated task setup: {content[:100]}...")
-            
+
             # Special handling for responses with embedded function calls or unusual JSON
             if "```json" in content or "```" in content:
                 logger.info("Found code block in response, extracting JSON...")
                 # Extract JSON from code block if present
-                code_block_pattern = re.compile(r'```(?:json)?\s*([\s\S]*?)\s*```')
+                code_block_pattern = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```")
                 matches = code_block_pattern.search(content)
                 if matches:
                     content = matches.group(1).strip()
                     logger.info("Extracted JSON from code block")
                 else:
                     # Handle truncated code blocks (opening ``` but no closing ```)
-                    truncated_pattern = re.compile(r'```(?:json)?\s*([\s\S]+)')
+                    truncated_pattern = re.compile(r"```(?:json)?\s*([\s\S]+)")
                     truncated_matches = truncated_pattern.search(content)
                     if truncated_matches:
                         content = truncated_matches.group(1).strip()
-                        logger.info("Extracted JSON from truncated code block (no closing ```)")
-                
+                        logger.info(
+                            "Extracted JSON from truncated code block (no closing ```)"
+                        )
+
             # Try to clean up some common JSON formatting issues before parsing
             content = content.strip()
             # Remove trailing commas which can cause parsing failures
-            content = re.sub(r',\s*([\]}])', r'\1', content)
-            
+            content = re.sub(r",\s*([\]}])", r"\1", content)
+
             # Log successful interaction
             await self._log_llm_interaction(
-                endpoint='generate-task',
+                endpoint="generate-task",
                 prompt=f"System: {base_message}\nUser: {request.text}",
                 response=content,
                 model=model,
-                group_context=group_context
+                group_context=group_context,
             )
-            
+
         except Exception as e:
             error_msg = f"Error generating completion: {str(e)}"
             logger.error(error_msg)
             await self._log_llm_interaction(
-                endpoint='generate-task',
+                endpoint="generate-task",
                 prompt=f"System: {base_message}\nUser: {request.text}",
                 response=str(e),
                 model=model,
-                status='error',
+                status="error",
                 error_message=error_msg,
-                group_context=group_context
+                group_context=group_context,
             )
             raise ValueError(error_msg)
-        
+
         # Directly try robust_json_parser which handles a variety of JSON issues
         try:
             setup = robust_json_parser(content)
@@ -307,31 +334,32 @@ class TaskGenerationService:
             error_msg = f"JSON parsing failed: {str(e)}"
             logger.error(f"{error_msg}, content: {content[:500]}")
             await self._log_llm_interaction(
-                endpoint='generate-task',
+                endpoint="generate-task",
                 prompt=f"System: {base_message}\nUser: {request.text}",
                 response=content,
                 model=model,
-                status='error',
+                status="error",
                 error_message=error_msg,
-                group_context=group_context
+                group_context=group_context,
             )
             raise ValueError(f"Could not parse response as JSON: {str(e)}")
-        
+
         # Validate required fields
-        required_fields = ['name', 'description', 'expected_output']
+        required_fields = ["name", "description", "expected_output"]
         for field in required_fields:
             if field not in setup:
                 raise ValueError(f"Missing required field: {field}")
-        
+
         # Set empty tools array if not present
         if "tools" not in setup:
             setup["tools"] = []
 
         # Filter tools to only those in the available set
         if request.available_tools and setup["tools"]:
-            allowed = {t['name'] for t in request.available_tools}
+            allowed = {t["name"] for t in request.available_tools}
             setup["tools"] = [
-                t for t in setup["tools"]
+                t
+                for t in setup["tools"]
                 if (t.get("name") if isinstance(t, dict) else str(t)) in allowed
             ]
 
@@ -352,41 +380,52 @@ class TaskGenerationService:
                 "dependencies": [],
                 "retry_delay": 0,
                 "allow_delegation": False,
-                "llm": model
+                "llm": model,
             }
         else:
             # Fix common type issues in advanced_config
             adv_config = setup["advanced_config"]
-            
+
             # Fix output_json if it's a boolean instead of dict/None
-            if "output_json" in adv_config and isinstance(adv_config["output_json"], bool):
+            if "output_json" in adv_config and isinstance(
+                adv_config["output_json"], bool
+            ):
                 adv_config["output_json"] = None
-            
+
             # Fix output_json if it's a string instead of dict/None (parse JSON string)
-            elif "output_json" in adv_config and isinstance(adv_config["output_json"], str):
+            elif "output_json" in adv_config and isinstance(
+                adv_config["output_json"], str
+            ):
                 try:
                     import json
+
                     adv_config["output_json"] = json.loads(adv_config["output_json"])
                     logger.info("Successfully parsed output_json string to dict")
                 except (json.JSONDecodeError, ValueError) as e:
-                    logger.warning(f"Failed to parse output_json string as JSON: {e}, setting to None")
+                    logger.warning(
+                        f"Failed to parse output_json string as JSON: {e}, setting to None"
+                    )
                     adv_config["output_json"] = None
-                
+
             # Fix output_pydantic if it's a boolean instead of string/None
-            if "output_pydantic" in adv_config and isinstance(adv_config["output_pydantic"], bool):
+            if "output_pydantic" in adv_config and isinstance(
+                adv_config["output_pydantic"], bool
+            ):
                 adv_config["output_pydantic"] = None
-                
+
             # Ensure context is a list
             if "context" in adv_config and not isinstance(adv_config["context"], list):
                 adv_config["context"] = []
-                
+
             # Ensure dependencies is a list
-            if "dependencies" in adv_config and not isinstance(adv_config["dependencies"], list):
+            if "dependencies" in adv_config and not isinstance(
+                adv_config["dependencies"], list
+            ):
                 adv_config["dependencies"] = []
-            
+
             # Ensure LLM field is set in advanced_config
             adv_config["llm"] = model
-            
+
             # Set defaults for missing fields
             adv_config.setdefault("async_execution", False)
             adv_config.setdefault("context", [])
@@ -402,11 +441,15 @@ class TaskGenerationService:
             adv_config.setdefault("dependencies", [])
             adv_config.setdefault("retry_delay", 0)
             adv_config.setdefault("allow_delegation", False)
-        
+
         # Add markdown instructions if enabled
         if setup.get("advanced_config", {}).get("markdown", False):
-            setup["description"] += "\n\nPlease format the output using Markdown syntax."
-            setup["expected_output"] += "\n\nThe output should be formatted using Markdown."
+            setup[
+                "description"
+            ] += "\n\nPlease format the output using Markdown syntax."
+            setup[
+                "expected_output"
+            ] += "\n\nThe output should be formatted using Markdown."
 
         # Create response object
         response = TaskGenerationResponse(
@@ -415,53 +458,65 @@ class TaskGenerationService:
             expected_output=setup["expected_output"],
             tools=setup.get("tools", []),
             advanced_config=setup.get("advanced_config", {}),
-            llm_guardrail=setup.get("llm_guardrail")
+            llm_guardrail=setup.get("llm_guardrail"),
         )
 
         return response
-    
-    async def generate_and_save_task(self, request: TaskGenerationRequest, group_context: GroupContext, fast_planning: bool = False) -> dict:
+
+    async def generate_and_save_task(
+        self,
+        request: TaskGenerationRequest,
+        group_context: GroupContext,
+        fast_planning: bool = False,
+    ) -> dict:
         """
         Generate a task using LLM.
 
         This method follows the exact same pattern as AgentGenerationService.generate_agent()
         - Only handles generation, no database saving
         - Database persistence should be handled by the calling layer (frontend)
-        
+
         Args:
             request: Task generation request
             group_context: Group context (for compatibility, not used in generation)
-            
+
         Returns:
             Dictionary containing the generation response (same format as agent generation)
         """
         # Generate the task using LLM (same as AgentGenerationService pattern)
-        generation_response = await self.generate_task(request, group_context, fast_planning)
-        
+        generation_response = await self.generate_task(
+            request, group_context, fast_planning
+        )
+
         # Return the task config (logging already performed in generate_task)
         return generation_response.model_dump()
-    
-    def convert_to_task_create(self, generation_response: TaskGenerationResponse) -> TaskCreate:
+
+    def convert_to_task_create(
+        self, generation_response: TaskGenerationResponse
+    ) -> TaskCreate:
         """
         Convert a TaskGenerationResponse to a TaskCreate schema.
-        
+
         This is a utility method that can be used by other services to convert
         generated task data into the format needed for database persistence.
-        
+
         Args:
             generation_response: Generated task data from LLM
-            
+
         Returns:
             TaskCreate schema ready for database persistence
         """
         import json
+
         from src.schemas.task import TaskConfig
-        
+
         # Convert output_json from dict to string if it exists
         output_json_str = None
         if generation_response.advanced_config.output_json:
-            output_json_str = json.dumps(generation_response.advanced_config.output_json)
-        
+            output_json_str = json.dumps(
+                generation_response.advanced_config.output_json
+            )
+
         # Create TaskConfig object from AdvancedConfig
         task_config = TaskConfig(
             output_json=output_json_str,
@@ -476,17 +531,17 @@ class TaskGenerationService:
             priority=generation_response.advanced_config.priority,
             error_handling=generation_response.advanced_config.error_handling,
             cache_response=generation_response.advanced_config.cache_response,
-            cache_ttl=generation_response.advanced_config.cache_ttl
+            cache_ttl=generation_response.advanced_config.cache_ttl,
         )
-        
+
         # Convert tools from List[Dict] to List[str]
         tool_names = []
         for tool in generation_response.tools:
-            if isinstance(tool, dict) and 'name' in tool:
-                tool_names.append(tool['name'])
+            if isinstance(tool, dict) and "name" in tool:
+                tool_names.append(tool["name"])
             elif isinstance(tool, str):
                 tool_names.append(tool)
-        
+
         return TaskCreate(
             name=generation_response.name,
             description=generation_response.description,
@@ -500,5 +555,5 @@ class TaskGenerationService:
             output_file=generation_response.advanced_config.output_file,
             markdown=generation_response.advanced_config.markdown,
             human_input=generation_response.advanced_config.human_input,
-            callback=generation_response.advanced_config.callback
-        ) 
+            callback=generation_response.advanced_config.callback,
+        )

@@ -1,5 +1,5 @@
-from typing import Optional
 import logging
+from typing import Optional
 
 from src.models.ui_config import UIConfig
 from src.repositories.ui_config_repository import UIConfigRepository
@@ -45,7 +45,9 @@ class UIConfigService:
         """Upsert this workspace's UI config."""
         existing = await self.repository.get_for_group(self.group_id)
         if existing is None:
-            existing = UIConfig(group_id=self.group_id, created_by_email=created_by_email)
+            existing = UIConfig(
+                group_id=self.group_id, created_by_email=created_by_email
+            )
             self.session.add(existing)
 
         existing.enabled = config_in.enabled
@@ -57,6 +59,8 @@ class UIConfigService:
         await self.session.refresh(existing)
         logger.info(
             "Updated UI config for group %s (enabled=%s, catalog=%s)",
-            self.group_id, existing.enabled, existing.catalog_type,
+            self.group_id,
+            existing.enabled,
+            existing.catalog_type,
         )
         return UIConfigResponse.model_validate(existing)

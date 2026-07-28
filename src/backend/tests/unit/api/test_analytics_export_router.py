@@ -11,21 +11,24 @@ Endpoints under test:
   GET /api/analytics-export/dashboards/{dashboard_id}/download
   GET /api/analytics-export/dashboards/{dashboard_id}/preview
 """
+
 import io
 import json
 import zipfile
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.schemas.analytics_export import ExportFile
+import pytest
 
+from src.schemas.analytics_export import ExportFile
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Test helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class FakeGroupCtx:
     """Minimal GroupContext stand-in."""
+
     def __init__(self):
         self.group_ids = ["grp-1"]
         self.group_email = "test@example.com"
@@ -37,18 +40,31 @@ def _make_request():
 
 def _make_genie_files(folder="supply_chain"):
     return [
-        ExportFile(path="config.yaml", content="apiVersion: genie/v1\nkind: GenieSpace\n"),
+        ExportFile(
+            path="config.yaml", content="apiVersion: genie/v1\nkind: GenieSpace\n"
+        ),
         ExportFile(path="tables.yaml", content="metric_views:\n- main.sc.orders_mv\n"),
-        ExportFile(path="instructions.yaml", content="text_instructions: Use fiscal periods.\n"),
-        ExportFile(path="questions.yaml", content="sample_questions:\n- What is revenue?\n"),
+        ExportFile(
+            path="instructions.yaml", content="text_instructions: Use fiscal periods.\n"
+        ),
+        ExportFile(
+            path="questions.yaml", content="sample_questions:\n- What is revenue?\n"
+        ),
     ]
 
 
 def _make_dashboard_files(folder="example_analytics"):
     return [
-        ExportFile(path="config.yaml", content="apiVersion: lakeview/v1\nkind: Dashboard\n"),
-        ExportFile(path="datasets.yaml", content="datasets:\n  - name: ds_1\n    query: SELECT 1\n"),
-        ExportFile(path="pages.yaml", content="pages:\n  - name: page_1\n    widgets: []\n"),
+        ExportFile(
+            path="config.yaml", content="apiVersion: lakeview/v1\nkind: Dashboard\n"
+        ),
+        ExportFile(
+            path="datasets.yaml",
+            content="datasets:\n  - name: ds_1\n    query: SELECT 1\n",
+        ),
+        ExportFile(
+            path="pages.yaml", content="pages:\n  - name: page_1\n    widgets: []\n"
+        ),
     ]
 
 
@@ -61,7 +77,9 @@ def _genie_export_result(space_id="sp123", name="Supply Chain", folder="supply_c
     }
 
 
-def _dashboard_export_result(dash_id="d123", name="Example Analytics", folder="example_analytics"):
+def _dashboard_export_result(
+    dash_id="d123", name="Example Analytics", folder="example_analytics"
+):
     return {
         "dashboard_id": dash_id,
         "dashboard_name": name,
@@ -92,11 +110,13 @@ def _patch_user_ctx():
 # Genie Space — download
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestDownloadGenieSpaceExport:
     @pytest.mark.asyncio
     async def test_returns_streaming_response(self):
-        from src.api.analytics_export_router import download_genie_space_export
         from fastapi.responses import StreamingResponse
+
+        from src.api.analytics_export_router import download_genie_space_export
 
         mock_svc = AsyncMock()
         mock_svc.export_genie_space = AsyncMock(return_value=_genie_export_result())
@@ -193,11 +213,13 @@ class TestDownloadGenieSpaceExport:
 # Genie Space — preview
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestPreviewGenieSpaceExport:
     @pytest.mark.asyncio
     async def test_returns_json_with_files(self):
-        from src.api.analytics_export_router import preview_genie_space_export
         from fastapi.responses import JSONResponse
+
+        from src.api.analytics_export_router import preview_genie_space_export
 
         mock_svc = AsyncMock()
         mock_svc.export_genie_space = AsyncMock(return_value=_genie_export_result())
@@ -255,13 +277,19 @@ class TestPreviewGenieSpaceExport:
 # Dashboard — list
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestListDashboards:
     @pytest.mark.asyncio
     async def test_returns_list_of_summaries(self):
         from src.api.analytics_export_router import list_dashboards
 
         raw = [
-            {"dashboard_id": "d1", "display_name": "Sales", "warehouse_id": "wh1", "lifecycle_state": "ACTIVE"},
+            {
+                "dashboard_id": "d1",
+                "display_name": "Sales",
+                "warehouse_id": "wh1",
+                "lifecycle_state": "ACTIVE",
+            },
             {"dashboard_id": "d2", "display_name": "Marketing", "warehouse_id": "wh2"},
         ]
 
@@ -336,11 +364,13 @@ class TestListDashboards:
 # Dashboard — download
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestDownloadDashboardExport:
     @pytest.mark.asyncio
     async def test_returns_streaming_response(self):
-        from src.api.analytics_export_router import download_dashboard_export
         from fastapi.responses import StreamingResponse
+
+        from src.api.analytics_export_router import download_dashboard_export
 
         mock_svc = AsyncMock()
         mock_svc.export_dashboard = AsyncMock(return_value=_dashboard_export_result())
@@ -385,6 +415,7 @@ class TestDownloadDashboardExport:
     async def test_zip_content_is_readable_yaml(self):
         """The YAML files inside the ZIP should parse without errors."""
         import yaml as _yaml
+
         from src.api.analytics_export_router import download_dashboard_export
 
         mock_svc = AsyncMock()
@@ -461,11 +492,13 @@ class TestDownloadDashboardExport:
 # Dashboard — preview
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestPreviewDashboardExport:
     @pytest.mark.asyncio
     async def test_returns_json_with_files(self):
-        from src.api.analytics_export_router import preview_dashboard_export
         from fastapi.responses import JSONResponse
+
+        from src.api.analytics_export_router import preview_dashboard_export
 
         mock_svc = AsyncMock()
         mock_svc.export_dashboard = AsyncMock(return_value=_dashboard_export_result())
@@ -535,5 +568,7 @@ class TestPreviewDashboardExport:
             )
 
         body = json.loads(response.body)
-        config_file = next(f for f in body["files"] if f["path"].endswith("config.yaml"))
+        config_file = next(
+            f for f in body["files"] if f["path"].endswith("config.yaml")
+        )
         assert "lakeview/v1" in config_file["content"]

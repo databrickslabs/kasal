@@ -2,13 +2,15 @@
 Databricks Notebook exporter for CrewAI crews.
 """
 
-from typing import Dict, Any, List, Optional
 import json
 import logging
+from typing import Any, Dict, List, Optional
+
 import aiofiles
+
 from .base_exporter import BaseExporter
-from .yaml_generator import YAMLGenerator
 from .code_generator import CodeGenerator, _parse_task_guardrail
+from .yaml_generator import YAMLGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +22,14 @@ logger = logging.getLogger(__name__)
 #: carry "DallETool", a class name that was never a Kasal title and so never
 #: matched anything. "Dall-E Tool" is kept for crews saved before that tool was
 #: replaced by "Image Generation Tool".
-_CREWAI_PROVIDED_TOOLS = frozenset({
-    "SerperDevTool",
-    "ScrapeWebsiteTool",
-    "Image Generation Tool",
-    "Dall-E Tool",  # legacy title, pre-rename crews
-})
+_CREWAI_PROVIDED_TOOLS = frozenset(
+    {
+        "SerperDevTool",
+        "ScrapeWebsiteTool",
+        "Image Generation Tool",
+        "Dall-E Tool",  # legacy title, pre-rename crews
+    }
+)
 
 
 class DatabricksNotebookExporter(BaseExporter):
@@ -36,7 +40,9 @@ class DatabricksNotebookExporter(BaseExporter):
         self.yaml_generator = YAMLGenerator()
         self.code_generator = CodeGenerator()
 
-    async def export(self, crew_data: Dict[str, Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    async def export(
+        self, crew_data: Dict[str, Any], options: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         Export crew as Databricks notebook
 
@@ -47,21 +53,23 @@ class DatabricksNotebookExporter(BaseExporter):
         Returns:
             Dictionary with notebook structure and metadata
         """
-        crew_name = crew_data.get('name', 'crew')
+        crew_name = crew_data.get("name", "crew")
         sanitized_name = self._sanitize_name(crew_name)
-        agents = crew_data.get('agents', [])
-        tasks = crew_data.get('tasks', [])
+        agents = crew_data.get("agents", [])
+        tasks = crew_data.get("tasks", [])
 
         # Extract options
-        include_custom_tools = options.get('include_custom_tools', True)
-        include_comments = options.get('include_comments', True)
-        include_tracing = options.get('include_tracing', True)  # MLflow autolog
-        include_evaluation = options.get('include_evaluation', True)
-        include_deployment = options.get('include_deployment', True)
-        model_override = options.get('model_override')
+        include_custom_tools = options.get("include_custom_tools", True)
+        include_comments = options.get("include_comments", True)
+        include_tracing = options.get("include_tracing", True)  # MLflow autolog
+        include_evaluation = options.get("include_evaluation", True)
+        include_deployment = options.get("include_deployment", True)
+        model_override = options.get("model_override")
 
         # Log options for debugging
-        logger.info(f"[Export Options] include_tracing={include_tracing}, include_evaluation={include_evaluation}, include_deployment={include_deployment}")
+        logger.info(
+            f"[Export Options] include_tracing={include_tracing}, include_evaluation={include_evaluation}, include_deployment={include_deployment}"
+        )
         logger.info(f"[Export Options] Raw options dict: {options}")
 
         # Get all tools used
@@ -71,14 +79,16 @@ class DatabricksNotebookExporter(BaseExporter):
         # MCP servers configured on the crew (auto-attached at runtime). When
         # present, the crew is built via create_crew(mcp_tools=...) and executed
         # inside an MCPServerAdapter context.
-        mcp_servers = crew_data.get('mcp_servers', []) or []
-        logger.info(f"[Export Debug] MCP servers found: {[s.get('name') for s in mcp_servers]}")
+        mcp_servers = crew_data.get("mcp_servers", []) or []
+        logger.info(
+            f"[Export Debug] MCP servers found: {[s.get('name') for s in mcp_servers]}"
+        )
 
         # Unity Catalog target for deployment — from the workspace's Databricks
         # configuration (Configuration > Workspace > Databricks), falling back to
         # main/agents when unset.
-        deploy_catalog = crew_data.get('databricks_catalog') or 'main'
-        deploy_schema = crew_data.get('databricks_schema') or 'agents'
+        deploy_catalog = crew_data.get("databricks_catalog") or "main"
+        deploy_schema = crew_data.get("databricks_schema") or "agents"
 
         # Crew-level execution settings (process, manager, memory) so exports match
         # Kasal's runtime instead of forcing sequential. NOTE: planning /
@@ -86,13 +96,15 @@ class DatabricksNotebookExporter(BaseExporter):
         # removed and reasoning is now the model's own native reasoning budget, so
         # there is no crew-level scaffold to export.
         crew_config = {
-            'process': crew_data.get('process') or 'sequential',
-            'manager_llm': crew_data.get('manager_llm'),
-            'memory': crew_data.get('memory', True),
+            "process": crew_data.get("process") or "sequential",
+            "manager_llm": crew_data.get("manager_llm"),
+            "memory": crew_data.get("memory", True),
         }
 
         # Determine if this is a deployment-only export
-        deployment_only = include_deployment and not include_evaluation and not include_tracing
+        deployment_only = (
+            include_deployment and not include_evaluation and not include_tracing
+        )
         logger.info(f"[Export Logic] Deployment-only mode: {deployment_only}")
 
         # Generate notebook cells
@@ -100,124 +112,142 @@ class DatabricksNotebookExporter(BaseExporter):
 
         # Always include title and basic setup
         # 1. Title cell (markdown)
-        cells.append(self._create_markdown_cell(
-            self._generate_title_markdown(crew_name, agents, tasks)
-        ))
+        cells.append(
+            self._create_markdown_cell(
+                self._generate_title_markdown(crew_name, agents, tasks)
+            )
+        )
 
         if deployment_only:
             # For deployment-only, include minimal cells but need crew definitions for deployment
             # 2. Setup instructions (markdown) - minimal
-            cells.append(self._create_markdown_cell(
-                "## Deployment Setup\n\n"
-                "This notebook contains the deployment code for your CrewAI agent."
-            ))
+            cells.append(
+                self._create_markdown_cell(
+                    "## Deployment Setup\n\n"
+                    "This notebook contains the deployment code for your CrewAI agent."
+                )
+            )
 
             # 3. Environment Configuration (for API keys like Perplexity)
-            cells.append(self._create_markdown_cell(
-                "## Environment Configuration\n\n"
-                "Configure API keys and environment variables needed by your crew."
-            ))
+            cells.append(
+                self._create_markdown_cell(
+                    "## Environment Configuration\n\n"
+                    "Configure API keys and environment variables needed by your crew."
+                )
+            )
 
-            cells.append(self._create_code_cell(
-                self._generate_env_config_code(tools)
-            ))
+            cells.append(self._create_code_cell(self._generate_env_config_code(tools)))
 
             # 4. Crew Definition Variables (needed by deployment code)
-            cells.append(self._create_markdown_cell(
-                "## Crew Definition\n\n"
-                "Define your crew configuration as YAML strings."
-            ))
+            cells.append(
+                self._create_markdown_cell(
+                    "## Crew Definition\n\n"
+                    "Define your crew configuration as YAML strings."
+                )
+            )
 
-            cells.append(self._create_code_cell(
-                self._generate_crew_yaml_vars(agents, tasks, model_override, include_comments)
-            ))
+            cells.append(
+                self._create_code_cell(
+                    self._generate_crew_yaml_vars(
+                        agents, tasks, model_override, include_comments
+                    )
+                )
+            )
 
             # 5. Deployment section
-            cells.append(self._create_markdown_cell(
-                "## Deploy to Model Serving Endpoint\n\n"
-                "Deploy your crew as a production endpoint for API access."
-            ))
+            cells.append(
+                self._create_markdown_cell(
+                    "## Deploy to Model Serving Endpoint\n\n"
+                    "Deploy your crew as a production endpoint for API access."
+                )
+            )
 
-            cells.append(self._create_code_cell(
-                await self._generate_deployment_code(sanitized_name, tools, agents, tasks, model_override, catalog=deploy_catalog, schema=deploy_schema, mcp_servers=mcp_servers, crew_config=crew_config)
-            ))
+            cells.append(
+                self._create_code_cell(
+                    await self._generate_deployment_code(
+                        sanitized_name,
+                        tools,
+                        agents,
+                        tasks,
+                        model_override,
+                        catalog=deploy_catalog,
+                        schema=deploy_schema,
+                        mcp_servers=mcp_servers,
+                        crew_config=crew_config,
+                    )
+                )
+            )
 
         else:
             # Full export with all cells
-            
+
             # 2. Setup instructions (markdown)
-            cells.append(self._create_markdown_cell(
-                self._generate_setup_instructions()
-            ))
+            cells.append(
+                self._create_markdown_cell(self._generate_setup_instructions())
+            )
 
             # 3. Install dependencies (code)
-            cells.append(self._create_code_cell(
-                self._generate_install_code(tools, has_mcp=bool(mcp_servers))
-            ))
+            cells.append(
+                self._create_code_cell(
+                    self._generate_install_code(tools, has_mcp=bool(mcp_servers))
+                )
+            )
 
             # 5. Import libraries (code)
-            cells.append(self._create_code_cell(
-                self._generate_imports_code(has_mcp=bool(mcp_servers))
-            ))
+            cells.append(
+                self._create_code_cell(
+                    self._generate_imports_code(has_mcp=bool(mcp_servers))
+                )
+            )
 
             # 5b. MLflow configuration (code) - only if tracing enabled
             if include_tracing:
-                cells.append(self._create_code_cell(
-                    self._generate_mlflow_config()
-                ))
+                cells.append(self._create_code_cell(self._generate_mlflow_config()))
 
             # 6. Environment configuration (code)
-            cells.append(self._create_code_cell(
-                self._generate_environment_config()
-            ))
+            cells.append(self._create_code_cell(self._generate_environment_config()))
 
             # 7. Agents configuration header (markdown)
-            cells.append(self._create_markdown_cell(
-                "## Agent Configuration"
-            ))
+            cells.append(self._create_markdown_cell("## Agent Configuration"))
 
             # 8. Agents YAML definition (code)
             agents_yaml = self.yaml_generator.generate_agents_yaml(
                 agents,
                 model_override=model_override,
-                include_comments=False  # Comments in markdown instead
+                include_comments=False,  # Comments in markdown instead
             )
-            cells.append(self._create_code_cell(
-                self._generate_agents_yaml_code(agents_yaml)
-            ))
+            cells.append(
+                self._create_code_cell(self._generate_agents_yaml_code(agents_yaml))
+            )
 
             # 9. Tasks configuration header (markdown)
-            cells.append(self._create_markdown_cell(
-                "## Task Configuration"
-            ))
+            cells.append(self._create_markdown_cell("## Task Configuration"))
 
             # 10. Tasks YAML definition (code)
             tasks_yaml = self.yaml_generator.generate_tasks_yaml(
-                tasks,
-                agents,
-                include_comments=False
+                tasks, agents, include_comments=False
             )
-            cells.append(self._create_code_cell(
-                self._generate_tasks_yaml_code(tasks_yaml)
-            ))
+            cells.append(
+                self._create_code_cell(self._generate_tasks_yaml_code(tasks_yaml))
+            )
 
             # 11. Custom tools (if any)
             if include_custom_tools:
                 logger.info(f"[Export Debug] All tools before filtering: {tools}")
                 custom_tools = [t for t in tools if t not in _CREWAI_PROVIDED_TOOLS]
-                logger.info(f"[Export Debug] Custom tools after filtering: {custom_tools}")
+                logger.info(
+                    f"[Export Debug] Custom tools after filtering: {custom_tools}"
+                )
                 if custom_tools:
-                    cells.append(self._create_markdown_cell(
-                        "## Custom Tools"
-                    ))
-                    cells.append(self._create_code_cell(
-                        await self._generate_custom_tools_placeholder(custom_tools)
-                    ))
+                    cells.append(self._create_markdown_cell("## Custom Tools"))
+                    cells.append(
+                        self._create_code_cell(
+                            await self._generate_custom_tools_placeholder(custom_tools)
+                        )
+                    )
 
             # 12. Crew definition header (markdown)
-            cells.append(self._create_markdown_cell(
-                "## Crew Definition"
-            ))
+            cells.append(self._create_markdown_cell("## Crew Definition"))
 
             # 13. Crew class implementation (code)
             crew_code = self.code_generator.generate_crew_code(
@@ -225,58 +255,80 @@ class DatabricksNotebookExporter(BaseExporter):
                 agents,
                 tasks,
                 tools,
-                process_type=crew_config['process'],
+                process_type=crew_config["process"],
                 include_comments=False,
                 for_notebook=True,
                 mcp_servers=mcp_servers,
-                crew_config=crew_config
+                crew_config=crew_config,
             )
             cells.append(self._create_code_cell(crew_code))
 
             # 14. Conversation layer instructions (markdown)
-            cells.append(self._create_markdown_cell(
-                "## Chat with the Crew (Conversational Layer)\n\n"
-                "Call `chat(\"your message\")` repeatedly. The layer keeps multi-turn "
-                "conversation state, asks a clarifying question when the request is "
-                "missing details, and runs the crew once there's enough information."
-            ))
+            cells.append(
+                self._create_markdown_cell(
+                    "## Chat with the Crew (Conversational Layer)\n\n"
+                    'Call `chat("your message")` repeatedly. The layer keeps multi-turn '
+                    "conversation state, asks a clarifying question when the request is "
+                    "missing details, and runs the crew once there's enough information."
+                )
+            )
 
             # 15. Conversational multi-turn execution layer (code)
             main_code = self.code_generator.generate_conversation_main_code(
                 sanitized_name,
-                sample_inputs={'topic': 'Artificial Intelligence trends in 2025'},
+                sample_inputs={"topic": "Artificial Intelligence trends in 2025"},
                 has_mcp=bool(mcp_servers),
             )
             cells.append(self._create_code_cell(main_code))
 
             # 16. MLflow tracking info (markdown) - only if tracing enabled
             if include_tracing:
-                cells.append(self._create_markdown_cell(
-                    "## MLflow Tracking\n\n"
-                    "Click the **Experiment** icon in the notebook toolbar to view tracked runs, metrics, and artifacts."
-                ))
+                cells.append(
+                    self._create_markdown_cell(
+                        "## MLflow Tracking\n\n"
+                        "Click the **Experiment** icon in the notebook toolbar to view tracked runs, metrics, and artifacts."
+                    )
+                )
 
             # 17. Evaluation section - only if evaluation enabled
             if include_evaluation:
-                cells.append(self._create_markdown_cell(
-                    "## Evaluation\n\n"
-                    "Evaluate your crew's performance using MLflow evaluation metrics."
-                ))
+                cells.append(
+                    self._create_markdown_cell(
+                        "## Evaluation\n\n"
+                        "Evaluate your crew's performance using MLflow evaluation metrics."
+                    )
+                )
 
-                cells.append(self._create_code_cell(
-                    self._generate_evaluation_code(sanitized_name)
-                ))
+                cells.append(
+                    self._create_code_cell(
+                        self._generate_evaluation_code(sanitized_name)
+                    )
+                )
 
             # 18. Deployment section - only if deployment enabled
             if include_deployment:
-                cells.append(self._create_markdown_cell(
-                    "## Deploy to Model Serving Endpoint\n\n"
-                    "Deploy your crew as a production endpoint for API access."
-                ))
+                cells.append(
+                    self._create_markdown_cell(
+                        "## Deploy to Model Serving Endpoint\n\n"
+                        "Deploy your crew as a production endpoint for API access."
+                    )
+                )
 
-                cells.append(self._create_code_cell(
-                    await self._generate_deployment_code(sanitized_name, tools, agents, tasks, model_override, catalog=deploy_catalog, schema=deploy_schema, mcp_servers=mcp_servers, crew_config=crew_config)
-                ))
+                cells.append(
+                    self._create_code_cell(
+                        await self._generate_deployment_code(
+                            sanitized_name,
+                            tools,
+                            agents,
+                            tasks,
+                            model_override,
+                            catalog=deploy_catalog,
+                            schema=deploy_schema,
+                            mcp_servers=mcp_servers,
+                            crew_config=crew_config,
+                        )
+                    )
+                )
 
         # Create notebook structure
         notebook = {
@@ -285,32 +337,27 @@ class DatabricksNotebookExporter(BaseExporter):
                 "kernelspec": {
                     "display_name": "Python 3",
                     "language": "python",
-                    "name": "python3"
+                    "name": "python3",
                 },
                 "language_info": {
-                    "codemirror_mode": {
-                        "name": "ipython",
-                        "version": 3
-                    },
+                    "codemirror_mode": {"name": "ipython", "version": 3},
                     "file_extension": ".py",
                     "mimetype": "text/x-python",
                     "name": "python",
                     "nbconvert_exporter": "python",
                     "pygments_lexer": "ipython3",
-                    "version": "3.9.0"
+                    "version": "3.9.0",
                 },
                 "application/vnd.databricks.v1+notebook": {
                     "notebookName": f"{crew_name}",
                     "dashboards": [],
                     "language": "python",
                     "widgets": {},
-                    "notebookMetadata": {
-                        "pythonIndentUnit": 4
-                    }
-                }
+                    "notebookMetadata": {"pythonIndentUnit": 4},
+                },
             },
             "nbformat": 4,
-            "nbformat_minor": 0
+            "nbformat_minor": 0,
         }
 
         # Validate generated code cells so we never ship a syntactically broken
@@ -321,20 +368,20 @@ class DatabricksNotebookExporter(BaseExporter):
         notebook_content = json.dumps(notebook, indent=2)
 
         return {
-            'crew_id': str(crew_data.get('id', '')),
-            'crew_name': crew_name,
-            'export_format': 'databricks_notebook',
-            'notebook': notebook,
-            'notebook_content': notebook_content,
-            'metadata': {
-                'agents_count': len(agents),
-                'tasks_count': len(tasks),
-                'tools_count': len(tools),
-                'cells_count': len(cells),
-                'sanitized_name': sanitized_name,
+            "crew_id": str(crew_data.get("id", "")),
+            "crew_name": crew_name,
+            "export_format": "databricks_notebook",
+            "notebook": notebook,
+            "notebook_content": notebook_content,
+            "metadata": {
+                "agents_count": len(agents),
+                "tasks_count": len(tasks),
+                "tools_count": len(tools),
+                "cells_count": len(cells),
+                "sanitized_name": sanitized_name,
             },
-            'generated_at': self._get_timestamp(),
-            'size_bytes': len(notebook_content)
+            "generated_at": self._get_timestamp(),
+            "size_bytes": len(notebook_content),
         }
 
     def _create_markdown_cell(self, content: str) -> Dict[str, Any]:
@@ -342,8 +389,10 @@ class DatabricksNotebookExporter(BaseExporter):
         # Split content into lines, preserving newlines for proper notebook format
         lines = content.splitlines(keepends=True)
         # If no lines have newlines, add them (except last line)
-        if lines and not any('\n' in line for line in lines):
-            lines = [line + '\n' for line in lines[:-1]] + ([lines[-1]] if lines else [])
+        if lines and not any("\n" in line for line in lines):
+            lines = [line + "\n" for line in lines[:-1]] + (
+                [lines[-1]] if lines else []
+            )
 
         return {
             "cell_type": "markdown",
@@ -352,10 +401,10 @@ class DatabricksNotebookExporter(BaseExporter):
                     "title": "",
                     "showTitle": False,
                     "inputWidgets": {},
-                    "nuid": ""
+                    "nuid": "",
                 }
             },
-            "source": lines if lines else [""]
+            "source": lines if lines else [""],
         }
 
     def _create_code_cell(self, content: str) -> Dict[str, Any]:
@@ -363,8 +412,10 @@ class DatabricksNotebookExporter(BaseExporter):
         # Split content into lines, preserving newlines for proper notebook format
         lines = content.splitlines(keepends=True)
         # If no lines have newlines, add them (except last line)
-        if lines and not any('\n' in line for line in lines):
-            lines = [line + '\n' for line in lines[:-1]] + ([lines[-1]] if lines else [])
+        if lines and not any("\n" in line for line in lines):
+            lines = [line + "\n" for line in lines[:-1]] + (
+                [lines[-1]] if lines else []
+            )
 
         return {
             "cell_type": "code",
@@ -374,11 +425,11 @@ class DatabricksNotebookExporter(BaseExporter):
                     "title": "",
                     "showTitle": False,
                     "inputWidgets": {},
-                    "nuid": ""
+                    "nuid": "",
                 }
             },
             "outputs": [],
-            "source": lines if lines else [""]
+            "source": lines if lines else [""],
         }
 
     def _validate_code_cells(self, cells: List[Dict[str, Any]], crew_name: str) -> None:
@@ -401,7 +452,8 @@ class DatabricksNotebookExporter(BaseExporter):
 
             # Drop notebook magics / shell escapes that aren't valid Python.
             python_lines = [
-                line for line in raw.splitlines()
+                line
+                for line in raw.splitlines()
                 if not line.lstrip().startswith(("%", "!"))
             ]
             python_src = "\n".join(python_lines)
@@ -417,14 +469,15 @@ class DatabricksNotebookExporter(BaseExporter):
                     "[Notebook Export] Generated code cell %d for crew '%s' has a "
                     "syntax error and would produce a broken notebook: %s "
                     "(line %s) | first line: %r",
-                    index, crew_name, exc.msg, exc.lineno, preview,
+                    index,
+                    crew_name,
+                    exc.msg,
+                    exc.lineno,
+                    preview,
                 )
 
     def _generate_title_markdown(
-        self,
-        crew_name: str,
-        agents: List[Dict[str, Any]],
-        tasks: List[Dict[str, Any]]
+        self, crew_name: str, agents: List[Dict[str, Any]], tasks: List[Dict[str, Any]]
     ) -> str:
         """Generate title markdown"""
         return f"""# {crew_name.replace('_', ' ').title()} - Databricks Notebook
@@ -459,42 +512,41 @@ This notebook contains a complete CrewAI agent setup exported from Kasal.
 3. Run all cells sequentially
 """
 
-
     def _generate_install_code(self, tools: List[str], has_mcp: bool = False) -> str:
         """Generate installation code"""
         code = '"""\n'
-        code += 'Install Required Packages\n'
+        code += "Install Required Packages\n"
         code += '"""\n\n'
 
-        code += '# Install LiteLLM (required by CrewAI)\n'
-        code += '%pip install litellm\n'
+        code += "# Install LiteLLM (required by CrewAI)\n"
+        code += "%pip install litellm\n"
 
-        code += '# Install MLflow with latest features\n'
-        code += '%pip install mlflow --upgrade --pre\n'
+        code += "# Install MLflow with latest features\n"
+        code += "%pip install mlflow --upgrade --pre\n"
 
-        code += '# Install Databricks LangChain integration\n'
-        code += '%pip install databricks-langchain\n'
+        code += "# Install Databricks LangChain integration\n"
+        code += "%pip install databricks-langchain\n"
 
-        code += '# Install Unity Catalog CrewAI integration\n'
-        code += '%pip install unitycatalog-crewai -U --quiet\n'
+        code += "# Install Unity Catalog CrewAI integration\n"
+        code += "%pip install unitycatalog-crewai -U --quiet\n"
 
-        code += '# Install CrewAI\n'
-        code += '%pip install crewai\n'
+        code += "# Install CrewAI\n"
+        code += "%pip install crewai\n"
 
-        code += '# Install nest_asyncio (run crews inside the notebook event loop)\n'
-        code += '%pip install nest_asyncio -q\n'
+        code += "# Install nest_asyncio (run crews inside the notebook event loop)\n"
+        code += "%pip install nest_asyncio -q\n"
 
         if has_mcp:
             # MCPServerAdapter needs the mcp extra; without it the adapter tries to
             # `uv add` at runtime (which fails / prompts in a notebook).
-            code += '# Install MCP support (required by MCPServerAdapter)\n'
+            code += "# Install MCP support (required by MCPServerAdapter)\n"
             code += '%pip install "crewai-tools[mcp]" mcp\n'
 
-        code += '# Install Databricks Agents (required by the deployment cell)\n'
-        code += '%pip install databricks-agents -q\n'
+        code += "# Install Databricks Agents (required by the deployment cell)\n"
+        code += "%pip install databricks-agents -q\n"
 
-        code += '# Restart Python kernel\n'
-        code += 'dbutils.library.restartPython()'
+        code += "# Restart Python kernel\n"
+        code += "dbutils.library.restartPython()"
 
         return code
 
@@ -584,37 +636,37 @@ print(f"   - PERPLEXITY_API_KEY: {'Set' if os.getenv('PERPLEXITY_API_KEY') else 
 
     def _generate_mlflow_config(self) -> str:
         """Generate MLflow configuration and autologging setup"""
-        return '''# Enable MLflow autologging for automatic experiment tracking
+        return """# Enable MLflow autologging for automatic experiment tracking
 mlflow.crewai.autolog()
-print("MLflow autologging enabled - all executions will be tracked")'''
+print("MLflow autologging enabled - all executions will be tracked")"""
 
     def _generate_agents_yaml_code(self, agents_yaml: str) -> str:
         """Generate agents YAML code"""
         # Escape backslashes and triple quotes in YAML content for proper Python string formatting
-        escaped_yaml = agents_yaml.replace('\\', '\\\\').replace('"""', r'\"\"\"')
+        escaped_yaml = agents_yaml.replace("\\", "\\\\").replace('"""', r"\"\"\"")
 
         code = '"""\nAgent Definitions (YAML Format)\n"""\n\n'
         code += f'agents_yaml = """{escaped_yaml}"""\n\n'
-        code += '# Parse YAML configuration\n'
-        code += 'agents_config = yaml.safe_load(agents_yaml)\n\n'
+        code += "# Parse YAML configuration\n"
+        code += "agents_config = yaml.safe_load(agents_yaml)\n\n"
         code += 'print("Agent configuration loaded:")\n'
-        code += 'for agent_name in agents_config.keys():\n'
-        code += '    print(f"   - {agent_name}: {agents_config[agent_name][\'role\'][:50]}...")'
+        code += "for agent_name in agents_config.keys():\n"
+        code += "    print(f\"   - {agent_name}: {agents_config[agent_name]['role'][:50]}...\")"
 
         return code
 
     def _generate_tasks_yaml_code(self, tasks_yaml: str) -> str:
         """Generate tasks YAML code"""
         # Escape backslashes and triple quotes in YAML content for proper Python string formatting
-        escaped_yaml = tasks_yaml.replace('\\', '\\\\').replace('"""', r'\"\"\"')
+        escaped_yaml = tasks_yaml.replace("\\", "\\\\").replace('"""', r"\"\"\"")
 
         code = '"""\nTask Definitions (YAML Format)\n"""\n\n'
         code += f'tasks_yaml = """{escaped_yaml}"""\n\n'
-        code += '# Parse YAML configuration\n'
-        code += 'tasks_config = yaml.safe_load(tasks_yaml)\n\n'
+        code += "# Parse YAML configuration\n"
+        code += "tasks_config = yaml.safe_load(tasks_yaml)\n\n"
         code += 'print("Task configuration loaded:")\n'
-        code += 'for task_name in tasks_config.keys():\n'
-        code += '    print(f"   - {task_name}: {tasks_config[task_name][\'description\'][:50]}...")'
+        code += "for task_name in tasks_config.keys():\n"
+        code += "    print(f\"   - {task_name}: {tasks_config[task_name]['description'][:50]}...\")"
 
         return code
 
@@ -625,21 +677,23 @@ print("MLflow autologging enabled - all executions will be tracked")'''
         # Check which custom tools need API keys
         custom_tools = [t for t in tools if t not in _CREWAI_PROVIDED_TOOLS]
 
-        if 'PerplexityTool' in custom_tools:
-            code += '# Perplexity API Key (required for PerplexityTool)\n'
-            code += '# Option 1: Set as environment variable in Databricks workspace secrets\n'
-            code += '# Option 2: Set directly here (not recommended for production)\n'
+        if "PerplexityTool" in custom_tools:
+            code += "# Perplexity API Key (required for PerplexityTool)\n"
+            code += "# Option 1: Set as environment variable in Databricks workspace secrets\n"
+            code += "# Option 2: Set directly here (not recommended for production)\n"
             code += 'if "PERPLEXITY_API_KEY" not in os.environ:\n'
-            code += '    # IMPORTANT: Replace with your actual API key or use Databricks secrets\n'
-            code += '    # Get your API key from: https://www.perplexity.ai/settings/api\n'
+            code += "    # IMPORTANT: Replace with your actual API key or use Databricks secrets\n"
+            code += (
+                "    # Get your API key from: https://www.perplexity.ai/settings/api\n"
+            )
             code += '    os.environ["PERPLEXITY_API_KEY"] = "pplx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # Replace this!\n'
             code += '    print("Using hardcoded Perplexity API key (not recommended for production)")\n'
-            code += '    print("   Consider using Databricks secrets: dbutils.secrets.get(scope=\'my-scope\', key=\'perplexity-api-key\')")\n'
-            code += 'else:\n'
+            code += "    print(\"   Consider using Databricks secrets: dbutils.secrets.get(scope='my-scope', key='perplexity-api-key')\")\n"
+            code += "else:\n"
             code += '    print("Perplexity API key loaded from environment")\n\n'
 
-        if 'GenieTool' in custom_tools:
-            code += '# Genie configuration (if needed)\n'
+        if "GenieTool" in custom_tools:
+            code += "# Genie configuration (if needed)\n"
             code += '# os.environ["GENIE_CONFIG"] = "your-config"\n\n'
 
         if not custom_tools:
@@ -647,24 +701,34 @@ print("MLflow autologging enabled - all executions will be tracked")'''
 
         return code
 
-    def _generate_crew_yaml_vars(self, agents: List[Dict], tasks: List[Dict], model_override: Optional[str], include_comments: bool) -> str:
+    def _generate_crew_yaml_vars(
+        self,
+        agents: List[Dict],
+        tasks: List[Dict],
+        model_override: Optional[str],
+        include_comments: bool,
+    ) -> str:
         """Generate crew definition as YAML variables"""
         # Use the existing YAMLGenerator instance
         yaml_gen = YAMLGenerator()
 
         # Generate YAML configurations
-        agents_yaml = yaml_gen.generate_agents_yaml(agents, model_override, include_comments=False)
+        agents_yaml = yaml_gen.generate_agents_yaml(
+            agents, model_override, include_comments=False
+        )
         tasks_yaml = yaml_gen.generate_tasks_yaml(tasks, agents, include_comments=False)
 
         # Escape for embedding in Python strings
-        escaped_agents_yaml = agents_yaml.replace('\\', '\\\\').replace('"""', r'\"\"\"')
-        escaped_tasks_yaml = tasks_yaml.replace('\\', '\\\\').replace('"""', r'\"\"\"')
+        escaped_agents_yaml = agents_yaml.replace("\\", "\\\\").replace(
+            '"""', r"\"\"\""
+        )
+        escaped_tasks_yaml = tasks_yaml.replace("\\", "\\\\").replace('"""', r"\"\"\"")
 
-        code = ''
+        code = ""
         if include_comments:
             code += '"""\nCrew Configuration (YAML Format)\n\nDefine agents and tasks as YAML strings.\n"""\n\nimport yaml\n\n'
         else:
-            code += 'import yaml\n\n'
+            code += "import yaml\n\n"
 
         code += f'# Agents configuration\nagents_yaml = """{escaped_agents_yaml}"""\n\n'
         code += f'# Tasks configuration\ntasks_yaml = """{escaped_tasks_yaml}"""\n\n'
@@ -707,21 +771,34 @@ print("MLflow autologging enabled - all executions will be tracked")'''
 
                 if tool_path.exists():
                     try:
-                        async with aiofiles.open(tool_path, 'r') as f:
+                        async with aiofiles.open(tool_path, "r") as f:
                             tool_code = await f.read()
-                            logger.info(f"[Tool Export] Successfully read {len(tool_code)} characters from {tool_file}")
-                            tools_code.append(f"# {tool_name} Implementation\n{tool_code}")
+                            logger.info(
+                                f"[Tool Export] Successfully read {len(tool_code)} characters from {tool_file}"
+                            )
+                            tools_code.append(
+                                f"# {tool_name} Implementation\n{tool_code}"
+                            )
                     except Exception as e:
-                        logger.error(f"[Tool Export] Could not read tool file {tool_file}: {e}", exc_info=True)
+                        logger.error(
+                            f"[Tool Export] Could not read tool file {tool_file}: {e}",
+                            exc_info=True,
+                        )
                 else:
                     logger.warning(f"[Tool Export] Tool file not found: {tool_path}")
             else:
-                logger.warning(f"[Tool Export] No file mapping found for tool: {tool_name}")
+                logger.warning(
+                    f"[Tool Export] No file mapping found for tool: {tool_name}"
+                )
 
-        logger.info(f"[Tool Export] Total tool implementations found: {len(tools_code)}")
+        logger.info(
+            f"[Tool Export] Total tool implementations found: {len(tools_code)}"
+        )
 
         if tools_code:
-            logger.info(f"[Tool Export] Including {len(tools_code)} tool implementation(s) in notebook")
+            logger.info(
+                f"[Tool Export] Including {len(tools_code)} tool implementation(s) in notebook"
+            )
             return f'''"""
 Custom Tool Implementations
 
@@ -732,7 +809,9 @@ The following custom tools are used in this crew: {', '.join(custom_tools)}
 
 print("Custom tools loaded: {', '.join(custom_tools)}")'''
         else:
-            logger.warning(f"[Tool Export] No tool implementations found, using placeholder")
+            logger.warning(
+                f"[Tool Export] No tool implementations found, using placeholder"
+            )
             # Fallback to placeholder if no tool implementations found
             return f'''"""
 Custom Tool Implementations
@@ -883,7 +962,7 @@ print("   Click the 'Experiment' icon in the notebook toolbar")'''
         catalog: str = "main",
         schema: str = "agents",
         mcp_servers: Optional[List[Dict[str, Any]]] = None,
-        crew_config: Optional[Dict[str, Any]] = None
+        crew_config: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Generate Databricks agent deployment code using MLflow 3.x ResponsesAgent with custom tools
 
@@ -902,30 +981,41 @@ print("   Click the 'Experiment' icon in the notebook toolbar")'''
         # Generate YAML configurations to embed directly in the deployment cell
         # This makes the deployment cell self-contained
         agents_yaml_content = self.yaml_generator.generate_agents_yaml(
-            agents,
-            model_override=model_override,
-            include_comments=False
+            agents, model_override=model_override, include_comments=False
         )
         tasks_yaml_content = self.yaml_generator.generate_tasks_yaml(
-            tasks,
-            agents,
-            include_comments=False
+            tasks, agents, include_comments=False
         )
 
         # Escape for embedding in Python single-quoted strings (more reliable in notebooks)
         # Replace backslashes first, then single quotes, then newlines
-        escaped_agents_yaml = agents_yaml_content.replace('\\', '\\\\').replace("'", "\\'").replace('\n', '\\n')
-        escaped_tasks_yaml = tasks_yaml_content.replace('\\', '\\\\').replace("'", "\\'").replace('\n', '\\n')
+        escaped_agents_yaml = (
+            agents_yaml_content.replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace("\n", "\\n")
+        )
+        escaped_tasks_yaml = (
+            tasks_yaml_content.replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace("\n", "\\n")
+        )
 
         # Now build the notebook cell code that uses the working approach with f-string and dictionaries
-        custom_tools_message = f'print(f"   Includes {len(custom_tools)} custom tool(s): {", ".join(custom_tools)}")' if has_custom_tools else ""
-        custom_tools_pip = '"requests",  # Required for custom tools' if has_custom_tools else ""
+        custom_tools_message = (
+            f'print(f"   Includes {len(custom_tools)} custom tool(s): {", ".join(custom_tools)}")'
+            if has_custom_tools
+            else ""
+        )
+        custom_tools_pip = (
+            '"requests",  # Required for custom tools' if has_custom_tools else ""
+        )
 
         # MCP wiring for the served wrapper. The deployed agent must connect to the
         # same MCP servers as the notebook, otherwise it has no tools. The block is
         # BRACE-FREE (dict()/string concat) because it is embedded inside the nested
         # agent_code f-string — any literal '{' would break f-string parsing.
         import re as _re_mcp
+
         mcp_setup_code = "        mcp_tools = []\n"
         mcp_tools_arg = ""
         mcp_pip = ""
@@ -933,63 +1023,105 @@ print("   Click the 'Experiment' icon in the notebook toolbar")'''
             mcp_pip = '\n                "crewai-tools[mcp]",\n                "mcp",'
             mcp_tools_arg = ",\n                tools=mcp_tools"
             block = []
-            block.append("        # Connect to MCP servers so the deployed agent has the same tools.")
+            block.append(
+                "        # Connect to MCP servers so the deployed agent has the same tools."
+            )
             block.append("        try:")
             block.append("            from crewai_tools import MCPServerAdapter")
-            block.append("            from databricks.sdk import WorkspaceClient as _MCPWC")
+            block.append(
+                "            from databricks.sdk import WorkspaceClient as _MCPWC"
+            )
             block.append("            _mcfg = _MCPWC().config")
             block.append("            _mcp_host = _mcfg.host.rstrip('/')")
             block.append("            _mcp_token = _mcfg.token")
             block.append("            if not _mcp_token:")
-            block.append("                _mma = (_mcfg.authenticate() or dict()).get('Authorization', '')")
-            block.append("                _mcp_token = _mma.split(' ', 1)[1] if _mma.startswith('Bearer ') else (os.environ.get('DATABRICKS_TOKEN') or '')")
+            block.append(
+                "                _mma = (_mcfg.authenticate() or dict()).get('Authorization', '')"
+            )
+            block.append(
+                "                _mcp_token = _mma.split(' ', 1)[1] if _mma.startswith('Bearer ') else (os.environ.get('DATABRICKS_TOKEN') or '')"
+            )
             block.append("            _mcp_params = []")
             for server in mcp_servers:
                 url = server.get("server_url") or ""
                 if "/api/2.0/mcp/" in url:
                     path = "/api/2.0/mcp/" + url.split("/api/2.0/mcp/", 1)[1]
                     block.append(
-                        "            _mcp_params.append(dict(url=_mcp_host + '" + path + "', "
+                        "            _mcp_params.append(dict(url=_mcp_host + '"
+                        + path
+                        + "', "
                         "transport='streamable-http', headers=dict(Authorization='Bearer ' + _mcp_token)))"
                     )
                 else:
-                    transport = "streamable-http" if server.get("server_type") == "streamable" else "sse"
-                    env_key = _re_mcp.sub(r"[^A-Z0-9]+", "_", server.get("name", "mcp").upper()).strip("_") + "_MCP_TOKEN"
+                    transport = (
+                        "streamable-http"
+                        if server.get("server_type") == "streamable"
+                        else "sse"
+                    )
+                    env_key = (
+                        _re_mcp.sub(
+                            r"[^A-Z0-9]+", "_", server.get("name", "mcp").upper()
+                        ).strip("_")
+                        + "_MCP_TOKEN"
+                    )
                     block.append(
-                        "            _mcp_params.append(dict(url='" + url + "', transport='" + transport + "', "
-                        "headers=dict(Authorization='Bearer ' + (os.environ.get('" + env_key + "') or ''))))"
+                        "            _mcp_params.append(dict(url='"
+                        + url
+                        + "', transport='"
+                        + transport
+                        + "', "
+                        "headers=dict(Authorization='Bearer ' + (os.environ.get('"
+                        + env_key
+                        + "') or ''))))"
                     )
             block.append("            if _mcp_params:")
-            block.append("                self._mcp_adapter = MCPServerAdapter(_mcp_params)")
+            block.append(
+                "                self._mcp_adapter = MCPServerAdapter(_mcp_params)"
+            )
             block.append("                mcp_tools = list(self._mcp_adapter.tools)")
-            block.append("                print('MCP tools loaded: ' + str(len(mcp_tools)))")
+            block.append(
+                "                print('MCP tools loaded: ' + str(len(mcp_tools)))"
+            )
             block.append("        except Exception as _mcp_err:")
             block.append("            print('MCP setup failed: ' + str(_mcp_err))")
             mcp_setup_code = "        mcp_tools = []\n" + "\n".join(block) + "\n"
 
         # Crew-level execution settings for the served crew (brace-free injections).
         crew_config = crew_config or {}
-        _proc = crew_config.get('process') or 'sequential'
-        deploy_process = 'Process.hierarchical' if _proc == 'hierarchical' else 'Process.sequential'
+        _proc = crew_config.get("process") or "sequential"
+        deploy_process = (
+            "Process.hierarchical" if _proc == "hierarchical" else "Process.sequential"
+        )
 
         # NOTE: no PlanningConfig / planning scaffold is emitted. Kasal removed the
         # prose planner (inert in the engine) and reasoning is now the model's own
         # native reasoning budget, so the served crew needs no extra setup.
 
         crew_extra_lines = []
-        if _proc == 'hierarchical' and crew_config.get('manager_llm'):
-            crew_extra_lines.append("            manager_llm=self._build_llm('" + str(crew_config['manager_llm']) + "'),")
-        crew_extra_lines.append("            memory=" + ("True" if crew_config.get('memory', True) else "False") + ",")
-        crew_extra_args = ("\n" + "\n".join(crew_extra_lines)) if crew_extra_lines else ""
+        if _proc == "hierarchical" and crew_config.get("manager_llm"):
+            crew_extra_lines.append(
+                "            manager_llm=self._build_llm('"
+                + str(crew_config["manager_llm"])
+                + "'),"
+            )
+        crew_extra_lines.append(
+            "            memory="
+            + ("True" if crew_config.get("memory", True) else "False")
+            + ","
+        )
+        crew_extra_args = (
+            ("\n" + "\n".join(crew_extra_lines)) if crew_extra_lines else ""
+        )
 
         # LLM guardrails keyed by the same task key the embedded YAML uses.
         import json as _json_gr
+
         _gr_map = {}
         for _t in tasks:
             _g = _parse_task_guardrail(_t)
-            if _g and _g[0] == 'llm':
-                _key = _t.get('name', 'task').lower().replace(' ', '_')
-                _gr_map[_key] = {'description': _g[1], 'llm_model': _g[2]}
+            if _g and _g[0] == "llm":
+                _key = _t.get("name", "task").lower().replace(" ", "_")
+                _gr_map[_key] = {"description": _g[1], "llm_model": _g[2]}
         llm_guardrails_repr = repr(_json_gr.dumps(_gr_map))
 
         # Use the working approach - generate agent code using f-string with properly doubled braces
@@ -1208,4 +1340,3 @@ try:
 except Exception as e:
     print(f"\\nDeployment failed: {{str(e)}}")
 '''
-

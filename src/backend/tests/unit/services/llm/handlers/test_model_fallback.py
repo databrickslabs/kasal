@@ -40,9 +40,19 @@ class TestKnownMissingEndpoints:
 
     def _models(self):
         return [
-            SimpleNamespace(key="databricks-claude-sonnet-4", provider="databricks", context_window=200000),
-            SimpleNamespace(key="databricks-gpt-5", provider="databricks", context_window=400000),
-            SimpleNamespace(key="databricks-claude-haiku-4-5", provider="databricks", context_window=200000),
+            SimpleNamespace(
+                key="databricks-claude-sonnet-4",
+                provider="databricks",
+                context_window=200000,
+            ),
+            SimpleNamespace(
+                key="databricks-gpt-5", provider="databricks", context_window=400000
+            ),
+            SimpleNamespace(
+                key="databricks-claude-haiku-4-5",
+                provider="databricks",
+                context_window=200000,
+            ),
         ]
 
     def test_mark_and_query(self):
@@ -54,20 +64,34 @@ class TestKnownMissingEndpoints:
 
     def test_candidates_exclude_known_missing(self):
         mark_endpoint_missing("databricks-gpt-5")
-        names = [c.name for c in candidates_from_model_configs(
-            self._models(), "databricks-claude-sonnet-4")]
+        names = [
+            c.name
+            for c in candidates_from_model_configs(
+                self._models(), "databricks-claude-sonnet-4"
+            )
+        ]
         assert "databricks-gpt-5" not in names
         assert "databricks-claude-haiku-4-5" in names
 
     def test_rate_limit_fallback_skips_missing_and_picks_deployed(self):
         # Before marking, the roomiest (gpt-5) would be chosen on rate_limit.
-        cands = candidates_from_model_configs(self._models(), "databricks-claude-sonnet-4")
-        assert select_fallback(cands, 200000, RATE_LIMIT, set(),
-                               "databricks-claude-sonnet-4").name == "databricks-gpt-5"
+        cands = candidates_from_model_configs(
+            self._models(), "databricks-claude-sonnet-4"
+        )
+        assert (
+            select_fallback(
+                cands, 200000, RATE_LIMIT, set(), "databricks-claude-sonnet-4"
+            ).name
+            == "databricks-gpt-5"
+        )
         # After a 404 on gpt-5, it's filtered → a deployed model is chosen instead.
         mark_endpoint_missing("databricks-gpt-5")
-        cands2 = candidates_from_model_configs(self._models(), "databricks-claude-sonnet-4")
-        pick = select_fallback(cands2, 200000, RATE_LIMIT, set(), "databricks-claude-sonnet-4")
+        cands2 = candidates_from_model_configs(
+            self._models(), "databricks-claude-sonnet-4"
+        )
+        pick = select_fallback(
+            cands2, 200000, RATE_LIMIT, set(), "databricks-claude-sonnet-4"
+        )
         assert pick is not None and pick.name != "databricks-gpt-5"
 
     def test_reset_clears_set(self):
@@ -78,16 +102,19 @@ class TestKnownMissingEndpoints:
 
 class NotFoundError(Exception):
     """Class-name match, like litellm.NotFoundError."""
+
     pass
 
 
 class TestEndpointMissing:
     """ENDPOINT_NOT_FOUND (404): the model isn't deployed here → try another."""
 
-    _MSG = ('litellm.NotFoundError: databricksException - '
-            '{"error_code":"ENDPOINT_NOT_FOUND","message":"The given endpoint does '
-            'not exist, please retry after checking the specified model and version '
-            'deployment exists."}')
+    _MSG = (
+        "litellm.NotFoundError: databricksException - "
+        '{"error_code":"ENDPOINT_NOT_FOUND","message":"The given endpoint does '
+        "not exist, please retry after checking the specified model and version "
+        'deployment exists."}'
+    )
 
     def test_classify_endpoint_not_found_message(self):
         assert classify_llm_error(_Err(self._MSG, status=404)) == ENDPOINT_MISSING
@@ -101,7 +128,9 @@ class TestEndpointMissing:
             ModelCandidate("databricks-claude-sonnet-4-5", 200_000),
         ]
         pick = select_fallback(
-            cands, current_window=200_000, reason=ENDPOINT_MISSING,
+            cands,
+            current_window=200_000,
+            reason=ENDPOINT_MISSING,
             tried={"databricks-gemini-2-5-flash"},
             current_model="databricks-gemini-2-5-flash",
         )
@@ -110,7 +139,11 @@ class TestEndpointMissing:
     def test_returns_none_when_all_tried(self):
         cands = [ModelCandidate("a", 100), ModelCandidate("b", 200)]
         pick = select_fallback(
-            cands, 200, ENDPOINT_MISSING, tried={"a", "b"}, current_model="a",
+            cands,
+            200,
+            ENDPOINT_MISSING,
+            tried={"a", "b"},
+            current_model="a",
         )
         assert pick is None
 

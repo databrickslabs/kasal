@@ -4,11 +4,13 @@ This test module validates that the application properly enforces group-based
 access control and prevents unauthorized access to other groups' data.
 """
 
-import pytest
 from unittest.mock import AsyncMock, Mock, patch
-from src.utils.user_context import GroupContext
-from src.core.dependencies import get_group_context
+
+import pytest
 from fastapi import HTTPException, Request
+
+from src.core.dependencies import get_group_context
+from src.utils.user_context import GroupContext
 
 
 class TestGroupAuthorizationSecurity:
@@ -33,14 +35,14 @@ class TestGroupAuthorizationSecurity:
             GroupContext,
             "_get_user_group_memberships_with_roles",
             new_callable=AsyncMock,
-            return_value=(mock_user, user_groups_with_roles)
+            return_value=(mock_user, user_groups_with_roles),
         ):
             # Attempt to access a different group - should raise ValueError
             with pytest.raises(ValueError) as exc_info:
                 await GroupContext.from_email(
                     email="regulatory@databricks.com",
                     access_token="valid_token",
-                    group_id="marketing_cfe676ee"  # Different group ID
+                    group_id="marketing_cfe676ee",  # Different group ID
                 )
 
             assert "Access denied" in str(exc_info.value)
@@ -65,13 +67,13 @@ class TestGroupAuthorizationSecurity:
             GroupContext,
             "_get_user_group_memberships_with_roles",
             new_callable=AsyncMock,
-            return_value=(mock_user, user_groups_with_roles)
+            return_value=(mock_user, user_groups_with_roles),
         ):
             # Access the correct group - should succeed
             context = await GroupContext.from_email(
                 email="regulatory@databricks.com",
                 access_token="valid_token",
-                group_id="marketing_abc123"
+                group_id="marketing_abc123",
             )
 
             assert context.primary_group_id == "marketing_abc123"
@@ -97,14 +99,14 @@ class TestGroupAuthorizationSecurity:
             GroupContext,
             "_get_user_group_memberships_with_roles",
             new_callable=AsyncMock,
-            return_value=(mock_user, user_groups_with_roles)
+            return_value=(mock_user, user_groups_with_roles),
         ):
             # Attempt to access another user's personal workspace
             with pytest.raises(ValueError) as exc_info:
                 await GroupContext.from_email(
                     email="alice@company.com",
                     access_token="valid_token",
-                    group_id="user_bob_company_com"  # Bob's personal workspace
+                    group_id="user_bob_company_com",  # Bob's personal workspace
                 )
 
             assert "Access denied" in str(exc_info.value)
@@ -129,13 +131,13 @@ class TestGroupAuthorizationSecurity:
             GroupContext,
             "_get_user_group_memberships_with_roles",
             new_callable=AsyncMock,
-            return_value=(mock_user, user_groups_with_roles)
+            return_value=(mock_user, user_groups_with_roles),
         ):
             # Access own personal workspace - should succeed
             context = await GroupContext.from_email(
                 email="alice@company.com",
                 access_token="valid_token",
-                group_id="user_alice_company_com"
+                group_id="user_alice_company_com",
             )
 
             assert context.primary_group_id == "user_alice_company_com"
@@ -165,7 +167,7 @@ class TestGroupAuthorizationSecurity:
             GroupContext,
             "_get_user_group_memberships_with_roles",
             new_callable=AsyncMock,
-            return_value=(mock_user, user_groups_with_roles)
+            return_value=(mock_user, user_groups_with_roles),
         ):
             # Attempt to get group context with unauthorized group_id
             with pytest.raises(HTTPException) as exc_info:
@@ -177,7 +179,7 @@ class TestGroupAuthorizationSecurity:
                     x_auth_request_user=None,
                     x_auth_request_access_token=None,
                     x_group_id="marketing_cfe676ee",  # Unauthorized group
-                    x_group_domain=None
+                    x_group_domain=None,
                 )
 
             # Verify it's a 403 Forbidden error
@@ -200,23 +202,20 @@ class TestGroupAuthorizationSecurity:
         mock_group2 = Mock()
         mock_group2.id = "sales_def456"
 
-        user_groups_with_roles = [
-            (mock_group1, "editor"),
-            (mock_group2, "admin")
-        ]
+        user_groups_with_roles = [(mock_group1, "editor"), (mock_group2, "admin")]
 
         with patch.object(
             GroupContext,
             "_get_user_group_memberships_with_roles",
             new_callable=AsyncMock,
-            return_value=(mock_user, user_groups_with_roles)
+            return_value=(mock_user, user_groups_with_roles),
         ):
             # Try to access a third group the user doesn't belong to
             with pytest.raises(ValueError) as exc_info:
                 await GroupContext.from_email(
                     email="user@company.com",
                     access_token="valid_token",
-                    group_id="finance_xyz789"  # Not in user's groups
+                    group_id="finance_xyz789",  # Not in user's groups
                 )
 
             assert "Access denied" in str(exc_info.value)
@@ -237,30 +236,31 @@ class TestGroupAuthorizationSecurity:
         mock_group2 = Mock()
         mock_group2.id = "sales_def456"
 
-        user_groups_with_roles = [
-            (mock_group1, "editor"),
-            (mock_group2, "admin")
-        ]
+        user_groups_with_roles = [(mock_group1, "editor"), (mock_group2, "admin")]
 
         with patch.object(
             GroupContext,
             "_get_user_group_memberships_with_roles",
             new_callable=AsyncMock,
-            return_value=(mock_user, user_groups_with_roles)
+            return_value=(mock_user, user_groups_with_roles),
         ):
             # No group_id provided - should use first group
             context = await GroupContext.from_email(
-                email="user@company.com",
-                access_token="valid_token",
-                group_id=None
+                email="user@company.com", access_token="valid_token", group_id=None
             )
 
             # Should default to first group
             assert context.primary_group_id == "marketing_abc123"
             assert context.user_role == "editor"
             # group_ids includes user's groups PLUS their personal workspace
-            personal_workspace_id = GroupContext.generate_individual_group_id("user@company.com")
-            expected_group_ids = {"marketing_abc123", "sales_def456", personal_workspace_id}
+            personal_workspace_id = GroupContext.generate_individual_group_id(
+                "user@company.com"
+            )
+            expected_group_ids = {
+                "marketing_abc123",
+                "sales_def456",
+                personal_workspace_id,
+            }
             assert set(context.group_ids) == expected_group_ids
 
 
@@ -286,14 +286,14 @@ class TestSecurityLogging:
             GroupContext,
             "_get_user_group_memberships_with_roles",
             new_callable=AsyncMock,
-            return_value=(mock_user, user_groups_with_roles)
+            return_value=(mock_user, user_groups_with_roles),
         ):
             # Attempt unauthorized access
             try:
                 await GroupContext.from_email(
                     email="attacker@company.com",
                     access_token="valid_token",
-                    group_id="victim_group_xyz"
+                    group_id="victim_group_xyz",
                 )
             except ValueError:
                 pass  # Expected

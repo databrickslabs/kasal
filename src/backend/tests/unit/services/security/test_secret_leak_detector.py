@@ -1,7 +1,8 @@
 """
 Unit tests for src.services.security.secret_leak_detector.
 """
-from src.services.security.secret_leak_detector import detect, redact, SecretLeakResult
+
+from src.services.security.secret_leak_detector import SecretLeakResult, detect, redact
 
 
 class TestSecretLeakDetectorCleanInputs:
@@ -65,7 +66,9 @@ class TestAWSAccessKey:
         assert "aws_access_key" in result.secret_types
 
     def test_lowercase_akia_not_detected(self):
-        result = detect("akia1234567890123456")  # lowercase — pattern requires uppercase
+        result = detect(
+            "akia1234567890123456"
+        )  # lowercase — pattern requires uppercase
         assert "aws_access_key" not in (result.secret_types or [])
 
 

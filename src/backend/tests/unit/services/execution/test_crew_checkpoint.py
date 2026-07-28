@@ -5,18 +5,19 @@ from unittest.mock import patch
 
 import pytest
 
-from src.services.execution.runtime.types import Process, TaskOutput
 from src.core.events.bus import EventsBus
 from src.core.events.types import CrewKickoffCompletedEvent, TaskCompletedEvent
-
 from src.services.execution.checkpoint import (
     CrewTaskCheckpointRecorder,
     build_resume_checkpoint,
 )
+from src.services.execution.runtime.types import Process, TaskOutput
 
 
 def make_task(description: str):
-    return SimpleNamespace(key=f"key-{description}", name=description, description=description)
+    return SimpleNamespace(
+        key=f"key-{description}", name=description, description=description
+    )
 
 
 def make_crew(n_tasks: int = 3):
@@ -28,7 +29,10 @@ def make_crew(n_tasks: int = 3):
 
 def make_output(raw: str = "the output", agent: str = "worker"):
     return TaskOutput(
-        description="task", raw=raw, agent=agent, summary="a summary",
+        description="task",
+        raw=raw,
+        agent=agent,
+        summary="a summary",
         json_dict={"k": "v"},
     )
 
@@ -113,7 +117,9 @@ class TestRecorderCrewCompleted:
             cleared.append(True)
 
         recorder._clear_checkpoint = fake_clear
-        event = CrewKickoffCompletedEvent(crew_name="other", output=None, total_tokens=0)
+        event = CrewKickoffCompletedEvent(
+            crew_name="other", output=None, total_tokens=0
+        )
         recorder._on_crew_completed(make_crew(2), event)
         assert cleared == []
 
@@ -131,7 +137,9 @@ class TestRecorderRegistration:
         recorder._persist_entry = fake_persist
         recorder.register(bus)
 
-        bus.emit(crew.tasks[0], TaskCompletedEvent(output=make_output(), task=crew.tasks[0]))
+        bus.emit(
+            crew.tasks[0], TaskCompletedEvent(output=make_output(), task=crew.tasks[0])
+        )
         assert [e["index"] for e in persisted] == [0]
 
 

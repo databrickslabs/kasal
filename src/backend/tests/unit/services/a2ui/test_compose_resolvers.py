@@ -238,7 +238,9 @@ def test_design_lint_flags_thin_single_bullet_slides():
 def test_design_lint_flags_dropped_attribution_only_when_answer_had_sources():
     """The attribution finding must not fire on decks composed from an answer
     that had nothing to cite — there would be no way for a retry to fix it."""
-    deck = _deck(*[_text_slide(i) for i in range(1, 5)], _diagram_slide(5), _diagram_slide(6))
+    deck = _deck(
+        *[_text_slide(i) for i in range(1, 5)], _diagram_slide(5), _diagram_slide(6)
+    )
     assert not any("cites sources" in f for f in presentation_design_lint(deck))
     findings = presentation_design_lint(deck, answer_has_sources=True)
     assert any("cites sources" in f for f in findings), findings

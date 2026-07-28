@@ -5,8 +5,10 @@ Comprehensive tests covering the simplified execution-scoped callbacks that
 handle execution log streaming only.  Trace creation is delegated to the
 event bus handlers and the OTel pipeline.
 """
-import pytest
+
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestCreateExecutionCallbacksExtended:
@@ -43,7 +45,9 @@ class TestCreateExecutionCallbacksExtended:
 
     def test_callbacks_accept_crew_parameter(self, mock_group_context, mock_crew):
         """Test that crew parameter is accepted for API compatibility."""
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         step_cb, task_cb = create_execution_callbacks(
             job_id="test_job",
@@ -56,7 +60,9 @@ class TestCreateExecutionCallbacksExtended:
 
     def test_callbacks_work_without_crew(self, mock_group_context):
         """Test that callbacks work without crew parameter."""
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         step_cb, task_cb = create_execution_callbacks(
             job_id="test_job",
@@ -68,7 +74,9 @@ class TestCreateExecutionCallbacksExtended:
 
     def test_callbacks_work_without_config(self, mock_group_context):
         """Test that callbacks work with None config."""
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         step_cb, task_cb = create_execution_callbacks(
             job_id="test_job",
@@ -83,7 +91,9 @@ class TestStepCallbackExtended:
     """Extended tests for step callback functionality."""
 
     def _create_step_callback(self, job_id="test_job", group_context=None):
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         step_cb, _ = create_execution_callbacks(
             job_id=job_id, config={}, group_context=group_context
@@ -202,7 +212,9 @@ class TestTaskCallbackExtended:
     """Extended tests for task callback functionality."""
 
     def _create_task_callback(self, job_id="test_job", group_context=None):
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         _, task_cb = create_execution_callbacks(
             job_id=job_id, config={}, group_context=group_context
@@ -341,7 +353,9 @@ class TestCrewCallbacksExtended:
 
     def test_create_crew_callbacks_returns_callbacks(self):
         """Test create_crew_callbacks returns callback functions."""
-        from src.services.execution.kernel.execution_callback import create_crew_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_crew_callbacks,
+        )
 
         callbacks = create_crew_callbacks(
             job_id="test_job",
@@ -354,7 +368,9 @@ class TestCrewCallbacksExtended:
 
     def test_log_crew_initialization_logs_config(self):
         """Test log_crew_initialization logs configuration."""
-        from src.services.execution.kernel.execution_callback import log_crew_initialization
+        from src.services.execution.kernel.execution_callback import (
+            log_crew_initialization,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
@@ -368,7 +384,9 @@ class TestCrewCallbacksExtended:
 
     def test_log_crew_initialization_sanitizes_config(self):
         """Test log_crew_initialization removes sensitive data."""
-        from src.services.execution.kernel.execution_callback import log_crew_initialization
+        from src.services.execution.kernel.execution_callback import (
+            log_crew_initialization,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
@@ -390,13 +408,14 @@ class TestCrewCallbacksExtended:
             assert "secret" not in content
             assert "hidden" not in content
 
-
     def test_on_crew_start_handles_exception_gracefully(self):
         """Test on_crew_start exception handler catches and logs errors.
 
         Covers lines 152-153: except Exception handler in on_crew_start.
         """
-        from src.services.execution.kernel.execution_callback import create_crew_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_crew_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
@@ -414,7 +433,9 @@ class TestCrewCallbacksExtended:
 
         Covers lines 173-174: except Exception handler in on_crew_complete.
         """
-        from src.services.execution.kernel.execution_callback import create_crew_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_crew_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
@@ -432,7 +453,9 @@ class TestCrewCallbacksExtended:
 
         Covers lines 193-194: except Exception handler in on_crew_error.
         """
-        from src.services.execution.kernel.execution_callback import create_crew_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_crew_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
@@ -451,7 +474,9 @@ class TestMultiAgentExecution:
 
     def test_sequential_step_callbacks_isolated(self):
         """Test that step callbacks from different jobs produce separate logs."""
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"
@@ -474,7 +499,9 @@ class TestMultiAgentExecution:
 
     def test_sequential_task_callbacks_isolated(self):
         """Test that task callbacks from different jobs produce separate logs."""
-        from src.services.execution.kernel.execution_callback import create_execution_callbacks
+        from src.services.execution.kernel.execution_callback import (
+            create_execution_callbacks,
+        )
 
         with patch(
             "src.services.execution.kernel.execution_callback.enqueue_log"

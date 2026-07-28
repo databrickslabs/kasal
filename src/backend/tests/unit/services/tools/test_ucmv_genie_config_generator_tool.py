@@ -1,14 +1,14 @@
 """Unit tests for UCMVGenieConfigGeneratorTool (Tool 93)."""
+
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.services.tools.ucmv_genie_config_generator_tool import (
-    UCMVGenieConfigGeneratorTool,
     UCMVGenieConfigGeneratorSchema,
+    UCMVGenieConfigGeneratorTool,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared test data
@@ -45,24 +45,28 @@ SAMPLE_YAML_WITH_JOINS = (
     "    on: fact_orders.customer_id = dim_customer.customer_id\n"
 )
 
-SAMPLE_UCMV_OUTPUT = json.dumps({
-    "yaml": {
-        "fact_sales": SAMPLE_YAML,
-        "fact_orders": SAMPLE_YAML_WITH_JOINS,
-    },
-    "sql": {
-        "fact_sales": "CREATE METRIC VIEW ...",
-        "fact_orders": "CREATE METRIC VIEW ...",
-    },
-})
+SAMPLE_UCMV_OUTPUT = json.dumps(
+    {
+        "yaml": {
+            "fact_sales": SAMPLE_YAML,
+            "fact_orders": SAMPLE_YAML_WITH_JOINS,
+        },
+        "sql": {
+            "fact_sales": "CREATE METRIC VIEW ...",
+            "fact_orders": "CREATE METRIC VIEW ...",
+        },
+    }
+)
 
-SAMPLE_UCMV_WITH_FILTER_TABLES = json.dumps({
-    "yaml": {
-        "fact_sales": SAMPLE_YAML,
-    },
-    "sql": {},
-    "deployment_results": {},
-})
+SAMPLE_UCMV_WITH_FILTER_TABLES = json.dumps(
+    {
+        "yaml": {
+            "fact_sales": SAMPLE_YAML,
+        },
+        "sql": {},
+        "deployment_results": {},
+    }
+)
 
 
 def _mock_auth(workspace_url="https://test.azuredatabricks.net"):
@@ -72,7 +76,9 @@ def _mock_auth(workspace_url="https://test.azuredatabricks.net"):
     return auth
 
 
-def _mock_llm_completion(content='{"text_instructions": "Test instructions", "sample_questions": "Q1\nQ2", "example_sqls_json": "[]"}'):
+def _mock_llm_completion(
+    content='{"text_instructions": "Test instructions", "sample_questions": "Q1\nQ2", "example_sqls_json": "[]"}',
+):
     """AsyncMock for LLMManager.completion (the tool's actual LLM seam)."""
     return AsyncMock(return_value=content)
 
@@ -80,6 +86,7 @@ def _mock_llm_completion(content='{"text_instructions": "Test instructions", "sa
 # ---------------------------------------------------------------------------
 # Schema tests
 # ---------------------------------------------------------------------------
+
 
 class TestUCMVGenieConfigGeneratorSchema:
     def test_all_fields_optional(self):
@@ -108,6 +115,7 @@ class TestUCMVGenieConfigGeneratorSchema:
 # ---------------------------------------------------------------------------
 # Tool initialization
 # ---------------------------------------------------------------------------
+
 
 class TestToolInit:
     def test_tool_name(self):
@@ -138,16 +146,21 @@ class TestToolInit:
 # Override path (skip LLM)
 # ---------------------------------------------------------------------------
 
+
 class TestGenieConfigOverride:
     def test_genie_config_override_skips_llm(self):
         """genie_config_override set → returns it directly, no LLM call."""
-        override = json.dumps({
-            "text_instructions": "Custom instructions",
-            "sample_questions": "Custom question",
-            "example_sqls_json": "[]",
-        })
+        override = json.dumps(
+            {
+                "text_instructions": "Custom instructions",
+                "sample_questions": "Custom question",
+                "example_sqls_json": "[]",
+            }
+        )
         tool = UCMVGenieConfigGeneratorTool()
-        with patch("src.services.llm.manager.LLMManager.completion", new_callable=AsyncMock) as mock_llm:
+        with patch(
+            "src.services.llm.manager.LLMManager.completion", new_callable=AsyncMock
+        ) as mock_llm:
             result = tool._run(
                 genie_config_override=override,
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
@@ -161,10 +174,14 @@ class TestGenieConfigOverride:
 
     def test_override_merges_connection_params(self):
         """Override without catalog → catalog from _default_config is merged in."""
-        override = json.dumps({
-            "text_instructions": "Some instructions",
-        })
-        tool = UCMVGenieConfigGeneratorTool(catalog="injected_cat", schema_name="injected_sch")
+        override = json.dumps(
+            {
+                "text_instructions": "Some instructions",
+            }
+        )
+        tool = UCMVGenieConfigGeneratorTool(
+            catalog="injected_cat", schema_name="injected_sch"
+        )
         result = tool._run(genie_config_override=override)
         data = json.loads(result)
         # catalog should be merged in from defaults
@@ -173,10 +190,12 @@ class TestGenieConfigOverride:
 
     def test_override_existing_keys_not_overwritten(self):
         """Override's own catalog should not be overwritten by defaults."""
-        override = json.dumps({
-            "text_instructions": "Some instructions",
-            "catalog": "my_own_catalog",
-        })
+        override = json.dumps(
+            {
+                "text_instructions": "Some instructions",
+                "catalog": "my_own_catalog",
+            }
+        )
         tool = UCMVGenieConfigGeneratorTool(catalog="default_catalog")
         result = tool._run(genie_config_override=override)
         data = json.loads(result)
@@ -187,6 +206,7 @@ class TestGenieConfigOverride:
 # ---------------------------------------------------------------------------
 # Error cases without override
 # ---------------------------------------------------------------------------
+
 
 class TestErrorCases:
     def test_no_ucmv_output_returns_error(self):
@@ -206,17 +226,26 @@ class TestErrorCases:
         """No injected ucmv_output but a prior UCMV run exists in the DB → uses it."""
         tool = UCMVGenieConfigGeneratorTool()
         db_ucmv = {"yaml": {"fact_sales": SAMPLE_YAML}, "sql": {}}
-        with patch(
-            "src.services.tools.metric_view_validator_tool"
-            ".MetricViewValidatorTool._fetch_latest_ucmv_from_db",
-            return_value=db_ucmv,
-        ), patch.object(tool, "_authenticate", return_value=_mock_auth()), \
-             patch("src.services.llm.manager.LLMManager.completion",
-                   _mock_llm_completion(json.dumps({
-                       "text_instructions": "Test instructions",
-                       "sample_questions": "Q1",
-                       "example_sqls": [],
-                   }))):
+        with (
+            patch(
+                "src.services.tools.metric_view_validator_tool"
+                ".MetricViewValidatorTool._fetch_latest_ucmv_from_db",
+                return_value=db_ucmv,
+            ),
+            patch.object(tool, "_authenticate", return_value=_mock_auth()),
+            patch(
+                "src.services.llm.manager.LLMManager.completion",
+                _mock_llm_completion(
+                    json.dumps(
+                        {
+                            "text_instructions": "Test instructions",
+                            "sample_questions": "Q1",
+                            "example_sqls": [],
+                        }
+                    )
+                ),
+            ),
+        ):
             result = tool._run(catalog="main", schema_name="metrics")
         data = json.loads(result)
         assert "error" not in data
@@ -234,6 +263,7 @@ class TestErrorCases:
 # ---------------------------------------------------------------------------
 # UCMV output parsing
 # ---------------------------------------------------------------------------
+
 
 class TestUcmvParsing:
     def test_extracts_yaml_specs_from_ucmv_output(self):
@@ -260,6 +290,7 @@ class TestUcmvParsing:
 # ---------------------------------------------------------------------------
 # YAML spec parsing
 # ---------------------------------------------------------------------------
+
 
 class TestParseYamlSpec:
     def test_parse_yaml_spec_extracts_measures(self):
@@ -295,19 +326,30 @@ class TestParseYamlSpec:
 # Join specs extraction
 # ---------------------------------------------------------------------------
 
+
 class TestJoinSpecsExtraction:
     def test_join_specs_extracted_from_yaml(self):
         """YAML with joins section → join_specs_json populated in output."""
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.services.llm.manager.LLMManager.completion", _mock_llm_completion()):
-            result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch(
+                "src.services.llm.manager.LLMManager.completion", _mock_llm_completion()
+            ),
+        ):
+            result = tool._run(
+                ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics"
+            )
 
         data = json.loads(result)
         join_specs_raw = data.get("join_specs_json", "[]")
-        join_specs = json.loads(join_specs_raw) if isinstance(join_specs_raw, str) else join_specs_raw
+        join_specs = (
+            json.loads(join_specs_raw)
+            if isinstance(join_specs_raw, str)
+            else join_specs_raw
+        )
         # fact_orders has a join to dim_customer
         assert len(join_specs) >= 1
         assert any("dim_customer" in str(j) for j in join_specs)
@@ -325,6 +367,7 @@ class TestJoinSpecsExtraction:
 # ---------------------------------------------------------------------------
 # Dimension table filtering
 # ---------------------------------------------------------------------------
+
 
 class TestDimTableFiltering:
     def test_dim_tables_filtering(self):
@@ -345,8 +388,12 @@ class TestDimTableFiltering:
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.services.llm.manager.LLMManager.completion", _mock_llm_completion()):
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch(
+                "src.services.llm.manager.LLMManager.completion", _mock_llm_completion()
+            ),
+        ):
             result = tool._run(ucmv_output=ucmv, catalog="main", schema_name="metrics")
 
         data = json.loads(result)
@@ -361,6 +408,7 @@ class TestDimTableFiltering:
 # LLM integration
 # ---------------------------------------------------------------------------
 
+
 class TestLLMIntegration:
     def test_llm_called_with_correct_model(self):
         """Mock LLMManager.completion, verify model used."""
@@ -369,11 +417,18 @@ class TestLLMIntegration:
         llm_content = '{"text_instructions": "Test", "sample_questions": "Q1\\nQ2", "example_sqls": [], "join_specs": []}'
 
         from unittest.mock import AsyncMock
+
         mock_completion = AsyncMock(return_value=llm_content)
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.services.llm.manager.LLMManager.completion", mock_completion) as mock_llm:
-            tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch(
+                "src.services.llm.manager.LLMManager.completion", mock_completion
+            ) as mock_llm,
+        ):
+            tool._run(
+                ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics"
+            )
 
         mock_llm.assert_called_once()
         call_kwargs = mock_llm.call_args
@@ -386,9 +441,17 @@ class TestLLMIntegration:
         auth = _mock_auth()
 
         from unittest.mock import AsyncMock
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.services.llm.manager.LLMManager.completion", AsyncMock(side_effect=RuntimeError("LLM unavailable"))):
-            result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
+
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch(
+                "src.services.llm.manager.LLMManager.completion",
+                AsyncMock(side_effect=RuntimeError("LLM unavailable")),
+            ),
+        ):
+            result = tool._run(
+                ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics"
+            )
 
         data = json.loads(result)
         # Should return valid JSON (no exception), even if LLM failed
@@ -403,9 +466,15 @@ class TestLLMIntegration:
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.services.llm.manager.LLMManager.completion", _mock_llm_completion()):
-            result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics")
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch(
+                "src.services.llm.manager.LLMManager.completion", _mock_llm_completion()
+            ),
+        ):
+            result = tool._run(
+                ucmv_output=SAMPLE_UCMV_OUTPUT, catalog="main", schema_name="metrics"
+            )
 
         data = json.loads(result)
         assert "ucmv_output" in data
@@ -416,8 +485,12 @@ class TestLLMIntegration:
         tool = UCMVGenieConfigGeneratorTool()
         auth = _mock_auth()
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch("src.services.llm.manager.LLMManager.completion", _mock_llm_completion()):
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch(
+                "src.services.llm.manager.LLMManager.completion", _mock_llm_completion()
+            ),
+        ):
             result = tool._run(
                 ucmv_output=SAMPLE_UCMV_OUTPUT,
                 catalog="mycat",

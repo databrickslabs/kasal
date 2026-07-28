@@ -11,6 +11,7 @@ from typing import Dict, List
 
 class ModelProvider(str, Enum):
     """Enum for LLM model providers."""
+
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     OLLAMA = "ollama"
@@ -38,7 +39,9 @@ def _supported_models() -> Dict[ModelProvider, List[str]]:
     # module scope risks an import cycle.
     from src.seeds.model_configs import DEFAULT_MODELS
 
-    grouped: Dict[ModelProvider, List[str]] = {provider: [] for provider in ModelProvider}
+    grouped: Dict[ModelProvider, List[str]] = {
+        provider: [] for provider in ModelProvider
+    }
     for key, config in DEFAULT_MODELS.items():
         try:
             provider = ModelProvider(config.get("provider"))

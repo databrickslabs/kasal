@@ -5,11 +5,12 @@ Tests structure expansion and time intelligence helpers.
 """
 
 import pytest
+
+from src.services.converters.base.models import KPI, KPIDefinition, Structure
 from src.services.converters.common.transformers.structures import (
     StructureExpander,
     TimeIntelligenceHelper,
 )
-from src.services.converters.base.models import KPI, Structure, KPIDefinition
 
 
 class TestStructureExpander:
@@ -27,18 +28,18 @@ class TestStructureExpander:
             "YTD": Structure(
                 description="Year to Date",
                 filter=["fiscyear = $year", "fiscper3 < $period"],
-                display_sign=1
+                display_sign=1,
             ),
             "PY": Structure(
                 description="Prior Year",
                 filter=["fiscyear = $year - 1"],
-                display_sign=1
+                display_sign=1,
             ),
             "ACT_FCST": Structure(
                 description="Actuals + Forecast",
                 formula="[ytd_actual] + [ytg_forecast]",
-                display_sign=1
-            )
+                display_sign=1,
+            ),
         }
 
     @pytest.fixture
@@ -48,20 +49,20 @@ class TestStructureExpander:
             KPI(
                 description="Total Sales",
                 technical_name="total_sales",
-                formula="SUM(sales.amount)"
+                formula="SUM(sales.amount)",
             ),
             KPI(
                 description="Total Cost",
                 technical_name="total_cost",
                 formula="SUM(cost.amount)",
-                apply_structures=["YTD", "PY"]  # Apply structures
+                apply_structures=["YTD", "PY"],  # Apply structures
             ),
             KPI(
                 description="Profit",
                 technical_name="profit",
                 formula="[total_sales] - [total_cost]",
-                apply_structures=["YTD"]
-            )
+                apply_structures=["YTD"],
+            ),
         ]
 
     # ========== Process Definition Tests ==========
@@ -71,7 +72,7 @@ class TestStructureExpander:
         definition = KPIDefinition(
             description="Test Definition",
             technical_name="test_def",
-            kpis=sample_kpis
+            kpis=sample_kpis,
             # No structures defined
         )
 
@@ -81,13 +82,15 @@ class TestStructureExpander:
         assert len(result.kpis) == 3  # No expansion
         assert result.kpis == sample_kpis
 
-    def test_process_definition_with_structures_no_application(self, expander, sample_structures):
+    def test_process_definition_with_structures_no_application(
+        self, expander, sample_structures
+    ):
         """Test definition with structures but no KPIs apply them"""
         kpis_no_structures = [
             KPI(
                 description="Simple KPI",
                 technical_name="simple",
-                formula="SUM(amount)"
+                formula="SUM(amount)",
                 # No apply_structures
             )
         ]
@@ -96,7 +99,7 @@ class TestStructureExpander:
             description="Test",
             technical_name="test",
             structures=sample_structures,
-            kpis=kpis_no_structures
+            kpis=kpis_no_structures,
         )
 
         result = expander.process_definition(definition)
@@ -104,14 +107,16 @@ class TestStructureExpander:
         assert len(result.kpis) == 1  # No expansion
         assert result.kpis[0].technical_name == "simple"
 
-    def test_process_definition_single_structure_application(self, expander, sample_structures):
+    def test_process_definition_single_structure_application(
+        self, expander, sample_structures
+    ):
         """Test KPI with single structure applied"""
         kpis = [
             KPI(
                 description="Sales",
                 technical_name="sales",
                 formula="SUM(sales.amount)",
-                apply_structures=["YTD"]
+                apply_structures=["YTD"],
             )
         ]
 
@@ -119,7 +124,7 @@ class TestStructureExpander:
             description="Test",
             technical_name="test",
             structures=sample_structures,
-            kpis=kpis
+            kpis=kpis,
         )
 
         result = expander.process_definition(definition)
@@ -127,16 +132,21 @@ class TestStructureExpander:
         # Should create 1 combined measure: sales_YTD
         assert len(result.kpis) == 1
         assert result.kpis[0].technical_name == "sales_YTD"
-        assert "Year to Date" in result.kpis[0].description or "YTD" in result.kpis[0].description
+        assert (
+            "Year to Date" in result.kpis[0].description
+            or "YTD" in result.kpis[0].description
+        )
 
-    def test_process_definition_multiple_structure_application(self, expander, sample_structures):
+    def test_process_definition_multiple_structure_application(
+        self, expander, sample_structures
+    ):
         """Test KPI with multiple structures applied"""
         kpis = [
             KPI(
                 description="Sales",
                 technical_name="sales",
                 formula="SUM(sales.amount)",
-                apply_structures=["YTD", "PY"]
+                apply_structures=["YTD", "PY"],
             )
         ]
 
@@ -144,7 +154,7 @@ class TestStructureExpander:
             description="Test",
             technical_name="test",
             structures=sample_structures,
-            kpis=kpis
+            kpis=kpis,
         )
 
         result = expander.process_definition(definition)
@@ -162,22 +172,22 @@ class TestStructureExpander:
             KPI(
                 description="Base Sales",
                 technical_name="base_sales",
-                formula="SUM(sales.amount)"
+                formula="SUM(sales.amount)",
                 # No structures
             ),
             KPI(
                 description="Regional Sales",
                 technical_name="regional_sales",
                 formula="SUM(sales.amount) WHERE region = 'West'",
-                apply_structures=["YTD", "PY"]
-            )
+                apply_structures=["YTD", "PY"],
+            ),
         ]
 
         definition = KPIDefinition(
             description="Test",
             technical_name="test",
             structures=sample_structures,
-            kpis=kpis
+            kpis=kpis,
         )
 
         result = expander.process_definition(definition)
@@ -197,7 +207,7 @@ class TestStructureExpander:
                 description="Sales",
                 technical_name="sales",
                 formula="SUM(sales.amount)",
-                apply_structures=["NONEXISTENT"]
+                apply_structures=["NONEXISTENT"],
             )
         ]
 
@@ -205,7 +215,7 @@ class TestStructureExpander:
             description="Test",
             technical_name="test",
             structures=sample_structures,
-            kpis=kpis
+            kpis=kpis,
         )
 
         result = expander.process_definition(definition)
@@ -225,9 +235,9 @@ class TestStructureExpander:
                     description="Sales",
                     technical_name="sales",
                     formula="SUM(amount)",
-                    apply_structures=["YTD"]
+                    apply_structures=["YTD"],
                 )
-            ]
+            ],
         )
 
         result = expander.process_definition(definition)
@@ -243,7 +253,7 @@ class TestStructureExpander:
             "CALC": Structure(
                 description="Calculated Structure",
                 formula="[base_measure] * 1.1",  # 10% increase
-                display_sign=1
+                display_sign=1,
             )
         }
 
@@ -252,15 +262,12 @@ class TestStructureExpander:
                 description="Revenue",
                 technical_name="revenue",
                 formula="SUM(revenue.amount)",
-                apply_structures=["CALC"]
+                apply_structures=["CALC"],
             )
         ]
 
         definition = KPIDefinition(
-            description="Test",
-            technical_name="test",
-            structures=structures,
-            kpis=kpis
+            description="Test", technical_name="test", structures=structures, kpis=kpis
         )
 
         result = expander.process_definition(definition)
@@ -272,7 +279,9 @@ class TestStructureExpander:
         assert combined_kpi.technical_name == "revenue_CALC"
         assert combined_kpi.aggregation_type == "CALCULATED"
 
-    def test_process_definition_structure_filters_applied(self, expander, sample_structures):
+    def test_process_definition_structure_filters_applied(
+        self, expander, sample_structures
+    ):
         """Test that structure filters are applied to combined measures"""
         kpis = [
             KPI(
@@ -280,7 +289,7 @@ class TestStructureExpander:
                 technical_name="sales",
                 formula="SUM(sales.amount)",
                 filter=["status = 'active'"],  # Base filters
-                apply_structures=["YTD"]  # YTD has filters
+                apply_structures=["YTD"],  # YTD has filters
             )
         ]
 
@@ -288,7 +297,7 @@ class TestStructureExpander:
             description="Test",
             technical_name="test",
             structures=sample_structures,
-            kpis=kpis
+            kpis=kpis,
         )
 
         result = expander.process_definition(definition)
@@ -391,7 +400,7 @@ class TestTimeIntelligenceHelper:
                 description="Revenue",
                 technical_name="revenue",
                 formula="SUM(revenue.amount)",
-                apply_structures=["YTD", "PY"]
+                apply_structures=["YTD", "PY"],
             )
         ]
 
@@ -399,7 +408,7 @@ class TestTimeIntelligenceHelper:
             description="Revenue Analysis",
             technical_name="revenue_analysis",
             structures=structures,
-            kpis=kpis
+            kpis=kpis,
         )
 
         result = expander.process_definition(definition)
@@ -431,12 +440,14 @@ class TestTimeIntelligenceHelper:
 # ── Additional coverage: get_structure_dependencies, validate_structures ──────
 # and _generate_technical_name / _resolve_structure_references ────────────────
 
+
 @pytest.fixture
 def expander():
     return StructureExpander()
 
 
 # ── _generate_technical_name via process_definition ───────────────────────────
+
 
 def test_process_definition_kpi_without_technical_name(expander):
     """_create_combined_measures generates technical_name from description when missing."""
@@ -464,6 +475,7 @@ def test_process_definition_kpi_without_technical_name(expander):
 
 
 # ── get_structure_dependencies ────────────────────────────────────────────────
+
 
 def test_get_structure_dependencies_no_formula_structures(expander):
     """Structures without formulas have empty dependency lists."""
@@ -521,6 +533,7 @@ def test_get_structure_dependencies_unknown_reference_not_included(expander):
 
 
 # ── validate_structures ───────────────────────────────────────────────────────
+
 
 def test_validate_structures_no_structures_returns_empty(expander):
     """validate_structures returns empty list when no structures defined."""
@@ -656,6 +669,7 @@ def test_validate_structures_no_circular_in_chain(expander):
 
 
 # ── _resolve_structure_references coverage ────────────────────────────────────
+
 
 def test_structure_formula_resolves_references(expander):
     """_resolve_structure_references combines base_kbi name with structure refs."""

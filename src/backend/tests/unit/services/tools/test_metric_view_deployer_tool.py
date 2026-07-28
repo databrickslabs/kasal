@@ -1,4 +1,5 @@
 """Tests for MetricViewDeployerTool."""
+
 import json
 from unittest.mock import MagicMock, patch
 
@@ -14,36 +15,36 @@ class TestMetricViewDeployerTool:
 
     def test_dry_run(self):
         tool = MetricViewDeployerTool()
-        yaml_specs = {'fact_test': 'name: test_view\nsource: cat.sch.tbl'}
-        sql_specs = {'fact_test': 'CREATE METRIC VIEW test_view AS SELECT * FROM tbl;'}
+        yaml_specs = {"fact_test": "name: test_view\nsource: cat.sch.tbl"}
+        sql_specs = {"fact_test": "CREATE METRIC VIEW test_view AS SELECT * FROM tbl;"}
         result = tool._run(
             yaml_specs_json=json.dumps(yaml_specs),
             sql_specs_json=json.dumps(sql_specs),
             dry_run=True,
         )
         data = json.loads(result)
-        assert data['summary']['dry_run'] is True
-        assert data['summary']['validated'] == 1
-        assert data['deployment_results']['fact_test']['status'] == 'validated'
+        assert data["summary"]["dry_run"] is True
+        assert data["summary"]["validated"] == 1
+        assert data["deployment_results"]["fact_test"]["status"] == "validated"
 
     def test_deploy_without_credentials(self):
         tool = MetricViewDeployerTool()
-        yaml_specs = {'fact_test': 'name: test'}
-        sql_specs = {'fact_test': 'CREATE METRIC VIEW x;'}
+        yaml_specs = {"fact_test": "name: test"}
+        sql_specs = {"fact_test": "CREATE METRIC VIEW x;"}
         result = tool._run(
             yaml_specs_json=json.dumps(yaml_specs),
             sql_specs_json=json.dumps(sql_specs),
             dry_run=False,
         )
         data = json.loads(result)
-        assert data['deployment_results']['fact_test']['status'] == 'error'
-        assert 'required' in data['deployment_results']['fact_test']['message']
+        assert data["deployment_results"]["fact_test"]["status"] == "error"
+        assert "required" in data["deployment_results"]["fact_test"]["message"]
 
     def test_empty_input(self):
         tool = MetricViewDeployerTool()
-        result = tool._run(yaml_specs_json='{}', sql_specs_json='{}', dry_run=True)
+        result = tool._run(yaml_specs_json="{}", sql_specs_json="{}", dry_run=True)
         data = json.loads(result)
-        assert 'error' in data  # empty specs now returns an explicit error
+        assert "error" in data  # empty specs now returns an explicit error
 
 
 # ---------------------------------------------------------------------------
@@ -61,17 +62,19 @@ SAMPLE_YAML = (
     "    expr: SUM(revenue)\n"
 )
 
-SAMPLE_UCMV_OUTPUT = json.dumps({
-    "yaml": {
-        "fact_sales": SAMPLE_YAML,
-        "fact_orders": "name: fact_orders_uc_metric_view\nsource: main.metrics.fact_orders\n",
-    },
-    "sql": {
-        "fact_sales": "CREATE METRIC VIEW main.metrics.fact_sales_uc_metric_view ...",
-        "fact_orders": "CREATE METRIC VIEW main.metrics.fact_orders_uc_metric_view ...",
-    },
-    "deployment_results": {},
-})
+SAMPLE_UCMV_OUTPUT = json.dumps(
+    {
+        "yaml": {
+            "fact_sales": SAMPLE_YAML,
+            "fact_orders": "name: fact_orders_uc_metric_view\nsource: main.metrics.fact_orders\n",
+        },
+        "sql": {
+            "fact_sales": "CREATE METRIC VIEW main.metrics.fact_sales_uc_metric_view ...",
+            "fact_orders": "CREATE METRIC VIEW main.metrics.fact_orders_uc_metric_view ...",
+        },
+        "deployment_results": {},
+    }
+)
 
 
 def _mock_auth(workspace_url="https://test.azuredatabricks.net"):
@@ -85,12 +88,18 @@ def _mock_exec_sql(success=True, state="SUCCEEDED"):
     """Build a mock _execute_sql_sync that returns a controlled result."""
     if success:
         return {"success": True, "state": state}
-    return {"success": False, "state": "FAILED", "error": "SQL execution failed", "http_status": 400}
+    return {
+        "success": False,
+        "state": "FAILED",
+        "error": "SQL execution failed",
+        "http_status": 400,
+    }
 
 
 # ---------------------------------------------------------------------------
 # Dry run tests
 # ---------------------------------------------------------------------------
+
 
 class TestDryRun:
     def test_dry_run_returns_validated_status(self):
@@ -135,6 +144,7 @@ class TestDryRun:
 # Priority: manual yaml_specs_json vs ucmv_output
 # ---------------------------------------------------------------------------
 
+
 class TestYamlSpecsPriority:
     def test_manual_yaml_specs_takes_priority_over_ucmv_output(self):
         """yaml_specs_json set AND ucmv_output set → yaml_specs_json wins."""
@@ -162,6 +172,7 @@ class TestYamlSpecsPriority:
 # ---------------------------------------------------------------------------
 # Error cases
 # ---------------------------------------------------------------------------
+
 
 class TestErrorCases:
     def test_empty_yaml_content_returns_error(self):
@@ -191,7 +202,9 @@ class TestErrorCases:
     def test_warehouse_id_required_for_deployment(self):
         """No warehouse_id → error status for each view."""
         tool = MetricViewDeployerTool()
-        result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, dry_run=False, warehouse_id=None)
+        result = tool._run(
+            ucmv_output=SAMPLE_UCMV_OUTPUT, dry_run=False, warehouse_id=None
+        )
         data = json.loads(result)
         for key in ("fact_sales", "fact_orders"):
             assert data["deployment_results"][key]["status"] == "error"
@@ -206,7 +219,9 @@ class TestErrorCases:
     def test_empty_yaml_specs_json_object_falls_through_to_ucmv(self):
         """yaml_specs_json='{}' is empty → falls through to ucmv_output."""
         tool = MetricViewDeployerTool()
-        result = tool._run(yaml_specs_json="{}", ucmv_output=SAMPLE_UCMV_OUTPUT, dry_run=True)
+        result = tool._run(
+            yaml_specs_json="{}", ucmv_output=SAMPLE_UCMV_OUTPUT, dry_run=True
+        )
         data = json.loads(result)
         # Should use ucmv_output since yaml_specs_json is empty
         assert "fact_sales" in data["deployment_results"]
@@ -216,12 +231,13 @@ class TestErrorCases:
 # Catalog remapping
 # ---------------------------------------------------------------------------
 
+
 class TestCatalogRemap:
     def test_catalog_remap_replaces_old_catalog(self):
         """catalog_remap replaces old catalog name strings in YAML content."""
-        yaml_with_old_cat = json.dumps({
-            "fact_pe002": "source: dc_datalake_prod_001.schema.fact_pe002\n"
-        })
+        yaml_with_old_cat = json.dumps(
+            {"fact_pe002": "source: dc_datalake_prod_001.schema.fact_pe002\n"}
+        )
         remap = json.dumps({"dc_datalake_prod_001": "david_test_metrics"})
         tool = MetricViewDeployerTool()
         result = tool._run(
@@ -235,12 +251,14 @@ class TestCatalogRemap:
         assert "dc_datalake_prod_001" not in data["yaml"]["fact_pe002"]
 
     def test_catalog_remap_multiple_replacements(self):
-        yaml_content = json.dumps({
-            "fact_x": "source: old_cat_1.s.t\nref: old_cat_2.s.t\n"
-        })
+        yaml_content = json.dumps(
+            {"fact_x": "source: old_cat_1.s.t\nref: old_cat_2.s.t\n"}
+        )
         remap = json.dumps({"old_cat_1": "new_cat_1", "old_cat_2": "new_cat_2"})
         tool = MetricViewDeployerTool()
-        result = tool._run(yaml_specs_json=yaml_content, catalog_remap=remap, dry_run=True)
+        result = tool._run(
+            yaml_specs_json=yaml_content, catalog_remap=remap, dry_run=True
+        )
         data = json.loads(result)
         assert "new_cat_1" in data["yaml"]["fact_x"]
         assert "new_cat_2" in data["yaml"]["fact_x"]
@@ -249,6 +267,7 @@ class TestCatalogRemap:
 # ---------------------------------------------------------------------------
 # DDL generation
 # ---------------------------------------------------------------------------
+
 
 class TestDdlGeneration:
     def test_yaml_to_ddl_generates_correct_sql(self):
@@ -291,6 +310,7 @@ class TestDdlGeneration:
 # Deployment path (with mocked auth + execute_sql)
 # ---------------------------------------------------------------------------
 
+
 class TestDeployment:
     def _make_auth_mock(self, workspace_url="https://test.azuredatabricks.net"):
         return _mock_auth(workspace_url)
@@ -300,18 +320,21 @@ class TestDeployment:
         tool = MetricViewDeployerTool()
         auth = self._make_auth_mock()
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch(
-                 "src.services.tools.metric_view_utils.yaml_emitter._check_dangerous_sql",
-                 return_value=True,
-             ), \
-             patch.object(
-                 tool, "_execute_sql_sync",
-                 side_effect=[
-                     {"success": True, "state": "SUCCEEDED"},  # schema
-                     {"success": True, "state": "SUCCEEDED"},  # DDL
-                 ]
-             ):
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch(
+                "src.services.tools.metric_view_utils.yaml_emitter._check_dangerous_sql",
+                return_value=True,
+            ),
+            patch.object(
+                tool,
+                "_execute_sql_sync",
+                side_effect=[
+                    {"success": True, "state": "SUCCEEDED"},  # schema
+                    {"success": True, "state": "SUCCEEDED"},  # DDL
+                ],
+            ),
+        ):
             result = tool._run(
                 yaml_specs_json=json.dumps({"fact_sales": SAMPLE_YAML}),
                 warehouse_id="wh-123",
@@ -326,14 +349,21 @@ class TestDeployment:
         tool = MetricViewDeployerTool()
         auth = self._make_auth_mock()
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch.object(
-                 tool, "_execute_sql_sync",
-                 side_effect=[
-                     {"success": True, "state": "SUCCEEDED"},  # schema creation succeeds
-                     {"success": False, "http_status": 404, "error": "Not Found"},  # DDL fails
-                 ]
-             ):
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch.object(
+                tool,
+                "_execute_sql_sync",
+                side_effect=[
+                    {"success": True, "state": "SUCCEEDED"},  # schema creation succeeds
+                    {
+                        "success": False,
+                        "http_status": 404,
+                        "error": "Not Found",
+                    },  # DDL fails
+                ],
+            ),
+        ):
             result = tool._run(
                 yaml_specs_json=json.dumps({"fact_sales": SAMPLE_YAML}),
                 warehouse_id="wh-123",
@@ -353,8 +383,10 @@ class TestDeployment:
             calls.append(sql)
             return {"success": True, "state": "SUCCEEDED"}
 
-        with patch.object(tool, "_authenticate", return_value=auth), \
-             patch.object(tool, "_execute_sql_sync", side_effect=mock_exec):
+        with (
+            patch.object(tool, "_authenticate", return_value=auth),
+            patch.object(tool, "_execute_sql_sync", side_effect=mock_exec),
+        ):
             tool._run(
                 yaml_specs_json=json.dumps({"fact_sales": SAMPLE_YAML}),
                 warehouse_id="wh-123",
@@ -398,6 +430,7 @@ class TestDeployment:
 # Summary stats
 # ---------------------------------------------------------------------------
 
+
 class TestSummaryStats:
     def test_summary_total_matches_input(self):
         tool = MetricViewDeployerTool()
@@ -407,7 +440,9 @@ class TestSummaryStats:
 
     def test_summary_errors_counted(self):
         tool = MetricViewDeployerTool()
-        result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT, dry_run=False, warehouse_id=None)
+        result = tool._run(
+            ucmv_output=SAMPLE_UCMV_OUTPUT, dry_run=False, warehouse_id=None
+        )
         data = json.loads(result)
         assert data["summary"]["errors"] == 2
         assert data["summary"]["deployed"] == 0

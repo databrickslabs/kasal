@@ -6,19 +6,20 @@ This module provides database operations for HITL approval and webhook models.
 
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import and_, delete, desc, func, or_
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import desc, func, and_, or_, delete
-from sqlalchemy.exc import SQLAlchemyError
 
+from src.models.execution_history import ExecutionHistory
 from src.models.hitl_approval import (
     HITLApproval,
-    HITLWebhook,
     HITLApprovalStatus,
-    HITLTimeoutAction
+    HITLTimeoutAction,
+    HITLWebhook,
 )
-from src.models.execution_history import ExecutionHistory
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +54,7 @@ class HITLApprovalRepository:
         old_job_ids = select(ExecutionHistory.job_id).where(
             ExecutionHistory.created_at < cutoff
         )
-        stmt = delete(HITLApproval).where(
-            HITLApproval.execution_id.in_(old_job_ids)
-        )
+        stmt = delete(HITLApproval).where(HITLApproval.execution_id.in_(old_job_ids))
         result = await self.session.execute(stmt)
         await self.session.flush()
         return result.rowcount
@@ -76,13 +75,13 @@ class HITLApprovalRepository:
         self.session.add(approval)
         await self.session.flush()
         await self.session.refresh(approval)
-        logger.info(f"Created HITL approval {approval.id} for execution {approval.execution_id}")
+        logger.info(
+            f"Created HITL approval {approval.id} for execution {approval.execution_id}"
+        )
         return approval
 
     async def get_by_id(
-        self,
-        approval_id: int,
-        group_id: Optional[str] = None
+        self, approval_id: int, group_id: Optional[str] = None
     ) -> Optional[HITLApproval]:
         """
         Get an HITL approval by ID.
@@ -106,9 +105,7 @@ class HITLApprovalRepository:
         return result.scalars().first()
 
     async def get_pending_for_execution(
-        self,
-        execution_id: str,
-        group_id: Optional[str] = None
+        self, execution_id: str, group_id: Optional[str] = None
     ) -> Optional[HITLApproval]:
         """
         Get pending HITL approval for an execution.
@@ -125,20 +122,19 @@ class HITLApprovalRepository:
 
         filters = [
             HITLApproval.execution_id == execution_id,
-            HITLApproval.status == HITLApprovalStatus.PENDING
+            HITLApproval.status == HITLApprovalStatus.PENDING,
         ]
         if group_id:
             filters.append(HITLApproval.group_id == group_id)
 
-        stmt = select(HITLApproval).where(*filters).order_by(desc(HITLApproval.created_at))
+        stmt = (
+            select(HITLApproval).where(*filters).order_by(desc(HITLApproval.created_at))
+        )
         result = await self.session.execute(stmt)
         return result.scalars().first()
 
     async def get_pending_for_group(
-        self,
-        group_id: str,
-        limit: int = 50,
-        offset: int = 0
+        self, group_id: str, limit: int = 50, offset: int = 0
     ) -> tuple[List[HITLApproval], int]:
         """
         Get all pending HITL approvals for a group.
@@ -156,7 +152,7 @@ class HITLApprovalRepository:
 
         filters = [
             HITLApproval.group_id == group_id,
-            HITLApproval.status == HITLApprovalStatus.PENDING
+            HITLApproval.status == HITLApprovalStatus.PENDING,
         ]
 
         # Get total count
@@ -178,9 +174,7 @@ class HITLApprovalRepository:
         return list(approvals), total_count
 
     async def get_all_for_execution(
-        self,
-        execution_id: str,
-        group_id: Optional[str] = None
+        self, execution_id: str, group_id: Optional[str] = None
     ) -> List[HITLApproval]:
         """
         Get all HITL approvals for an execution.
@@ -199,11 +193,7 @@ class HITLApprovalRepository:
         if group_id:
             filters.append(HITLApproval.group_id == group_id)
 
-        stmt = (
-            select(HITLApproval)
-            .where(*filters)
-            .order_by(HITLApproval.crew_sequence)
-        )
+        stmt = select(HITLApproval).where(*filters).order_by(HITLApproval.crew_sequence)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -214,7 +204,7 @@ class HITLApprovalRepository:
         responded_by: Optional[str] = None,
         approval_comment: Optional[str] = None,
         rejection_reason: Optional[str] = None,
-        rejection_action: Optional[str] = None
+        rejection_action: Optional[str] = None,
     ) -> bool:
         """
         Update the status of an HITL approval.
@@ -268,21 +258,16 @@ class HITLApprovalRepository:
             raise RuntimeError("HITLApprovalRepository requires a session")
 
         now = datetime.now(timezone.utc)
-        stmt = (
-            select(HITLApproval)
-            .where(
-                HITLApproval.status == HITLApprovalStatus.PENDING,
-                HITLApproval.expires_at.isnot(None),
-                HITLApproval.expires_at < now
-            )
+        stmt = select(HITLApproval).where(
+            HITLApproval.status == HITLApprovalStatus.PENDING,
+            HITLApproval.expires_at.isnot(None),
+            HITLApproval.expires_at < now,
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def mark_webhook_sent(
-        self,
-        approval_id: int,
-        response: Optional[Dict[str, Any]] = None
+        self, approval_id: int, response: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
         Mark webhook as sent for an approval.
@@ -326,6 +311,7 @@ class HITLApprovalRepository:
             raise RuntimeError("HITLApprovalRepository requires a session")
 
         from sqlalchemy import delete
+
         stmt = delete(HITLApproval).where(HITLApproval.execution_id == execution_id)
         result = await self.session.execute(stmt)
         await self.session.flush()
@@ -359,9 +345,7 @@ class HITLWebhookRepository:
         return webhook
 
     async def get_by_id(
-        self,
-        webhook_id: int,
-        group_id: Optional[str] = None
+        self, webhook_id: int, group_id: Optional[str] = None
     ) -> Optional[HITLWebhook]:
         """
         Get an HITL webhook by ID.
@@ -385,9 +369,7 @@ class HITLWebhookRepository:
         return result.scalars().first()
 
     async def get_for_group(
-        self,
-        group_id: str,
-        enabled_only: bool = True
+        self, group_id: str, enabled_only: bool = True
     ) -> List[HITLWebhook]:
         """
         Get all webhooks for a group.
@@ -411,10 +393,7 @@ class HITLWebhookRepository:
         return list(result.scalars().all())
 
     async def get_for_event(
-        self,
-        group_id: str,
-        event: str,
-        flow_id: Optional[str] = None
+        self, group_id: str, event: str, flow_id: Optional[str] = None
     ) -> List[HITLWebhook]:
         """
         Get webhooks that should be triggered for a specific event.
@@ -450,10 +429,7 @@ class HITLWebhookRepository:
         return matching_webhooks
 
     async def update(
-        self,
-        webhook_id: int,
-        updates: Dict[str, Any],
-        group_id: Optional[str] = None
+        self, webhook_id: int, updates: Dict[str, Any], group_id: Optional[str] = None
     ) -> bool:
         """
         Update an HITL webhook.
@@ -481,11 +457,7 @@ class HITLWebhookRepository:
         await self.session.flush()
         return True
 
-    async def delete(
-        self,
-        webhook_id: int,
-        group_id: Optional[str] = None
-    ) -> bool:
+    async def delete(self, webhook_id: int, group_id: Optional[str] = None) -> bool:
         """
         Delete an HITL webhook.
 

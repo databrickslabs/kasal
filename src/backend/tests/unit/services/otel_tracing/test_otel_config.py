@@ -10,10 +10,9 @@ All OTel SDK dependencies are mocked to keep tests fast and isolated.
 """
 
 import logging
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -23,6 +22,7 @@ import pytest
 def _reset_active_provider():
     """Force module-level _active_provider back to None between tests."""
     import src.services.otel_tracing.otel_config as mod
+
     mod._active_provider = None
 
 
@@ -38,48 +38,56 @@ class TestIsOtelTracingEnabled:
         """Default (no env var) should be enabled."""
         monkeypatch.delenv("KASAL_OTEL_TRACING", raising=False)
         from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
+
         assert is_otel_tracing_enabled() is True
 
     def test_returns_true_when_env_is_true(self, monkeypatch):
         """Explicit 'true' should be enabled."""
         monkeypatch.setenv("KASAL_OTEL_TRACING", "true")
         from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
+
         assert is_otel_tracing_enabled() is True
 
     def test_returns_true_when_env_is_TRUE_uppercase(self, monkeypatch):
         """Case-insensitive comparison: 'TRUE' should also be enabled."""
         monkeypatch.setenv("KASAL_OTEL_TRACING", "TRUE")
         from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
+
         assert is_otel_tracing_enabled() is True
 
     def test_returns_true_when_env_is_True_mixed(self, monkeypatch):
         """Case-insensitive comparison: 'True' should also be enabled."""
         monkeypatch.setenv("KASAL_OTEL_TRACING", "True")
         from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
+
         assert is_otel_tracing_enabled() is True
 
     def test_returns_false_when_env_is_false(self, monkeypatch):
         """'false' should disable tracing."""
         monkeypatch.setenv("KASAL_OTEL_TRACING", "false")
         from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
+
         assert is_otel_tracing_enabled() is False
 
     def test_returns_false_when_env_is_FALSE_uppercase(self, monkeypatch):
         """'FALSE' should disable tracing."""
         monkeypatch.setenv("KASAL_OTEL_TRACING", "FALSE")
         from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
+
         assert is_otel_tracing_enabled() is False
 
     def test_returns_false_when_env_is_zero(self, monkeypatch):
         """'0' is not 'true', should disable tracing."""
         monkeypatch.setenv("KASAL_OTEL_TRACING", "0")
         from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
+
         assert is_otel_tracing_enabled() is False
 
     def test_returns_false_when_env_is_empty_string(self, monkeypatch):
         """Empty string is not 'true', should disable tracing."""
         monkeypatch.setenv("KASAL_OTEL_TRACING", "")
         from src.services.otel_tracing.otel_config import is_otel_tracing_enabled
+
         assert is_otel_tracing_enabled() is False
 
 
@@ -105,18 +113,22 @@ class TestCreateKasalTracerProvider:
         mock_tp_cls.return_value = mock_provider
 
         from src.services.otel_tracing.otel_config import create_kasal_tracer_provider
+
         result = create_kasal_tracer_provider("job-abc", "my-service")
 
         assert result is mock_provider
 
     @patch("src.services.otel_tracing.otel_config.TracerProvider")
     @patch("src.services.otel_tracing.otel_config.Resource")
-    def test_resource_created_with_correct_attributes(self, mock_resource_cls, mock_tp_cls):
+    def test_resource_created_with_correct_attributes(
+        self, mock_resource_cls, mock_tp_cls
+    ):
         """Resource.create() must receive service.name and kasal.job_id."""
         mock_resource_cls.create.return_value = MagicMock()
         mock_tp_cls.return_value = MagicMock()
 
         from src.services.otel_tracing.otel_config import create_kasal_tracer_provider
+
         create_kasal_tracer_provider("job-xyz", "svc-name")
 
         call_kwargs = mock_resource_cls.create.call_args[0][0]
@@ -126,12 +138,15 @@ class TestCreateKasalTracerProvider:
 
     @patch("src.services.otel_tracing.otel_config.TracerProvider")
     @patch("src.services.otel_tracing.otel_config.Resource")
-    def test_default_service_name_is_kasal_crew_engine(self, mock_resource_cls, mock_tp_cls):
+    def test_default_service_name_is_kasal_crew_engine(
+        self, mock_resource_cls, mock_tp_cls
+    ):
         """Default service_name should be 'kasal-crew-engine'."""
         mock_resource_cls.create.return_value = MagicMock()
         mock_tp_cls.return_value = MagicMock()
 
         from src.services.otel_tracing.otel_config import create_kasal_tracer_provider
+
         create_kasal_tracer_provider("job-1")
 
         call_kwargs = mock_resource_cls.create.call_args[0][0]
@@ -160,6 +175,7 @@ class TestCreateKasalTracerProvider:
         mock_tp_cls.return_value = MagicMock()
 
         from src.services.otel_tracing.otel_config import create_kasal_tracer_provider
+
         create_kasal_tracer_provider("job-res")
 
         mock_tp_cls.assert_called_once_with(resource=fake_resource)
@@ -172,14 +188,19 @@ class TestCreateKasalTracerProvider:
         mock_tp_cls.return_value = MagicMock()
 
         from src.services.otel_tracing.otel_config import create_kasal_tracer_provider
-        with caplog.at_level(logging.INFO, logger="src.services.otel_tracing.otel_config"):
+
+        with caplog.at_level(
+            logging.INFO, logger="src.services.otel_tracing.otel_config"
+        ):
             create_kasal_tracer_provider("job-log-test")
 
         assert "job-log-test" in caplog.text
 
     @patch("src.services.otel_tracing.otel_config.TracerProvider")
     @patch("src.services.otel_tracing.otel_config.Resource")
-    def test_subsequent_call_overwrites_active_provider(self, mock_resource_cls, mock_tp_cls):
+    def test_subsequent_call_overwrites_active_provider(
+        self, mock_resource_cls, mock_tp_cls
+    ):
         """Calling twice should replace _active_provider with the newer instance."""
         first_provider = MagicMock(name="first")
         second_provider = MagicMock(name="second")
@@ -263,7 +284,9 @@ class TestShutdownProvider:
         mock_provider.shutdown.side_effect = Exception("bad shutdown")
         mod._active_provider = mock_provider
 
-        with caplog.at_level(logging.WARNING, logger="src.services.otel_tracing.otel_config"):
+        with caplog.at_level(
+            logging.WARNING, logger="src.services.otel_tracing.otel_config"
+        ):
             shutdown_provider()
 
         assert "bad shutdown" in caplog.text
@@ -275,7 +298,9 @@ class TestShutdownProvider:
 
         mod._active_provider = MagicMock()
 
-        with caplog.at_level(logging.INFO, logger="src.services.otel_tracing.otel_config"):
+        with caplog.at_level(
+            logging.INFO, logger="src.services.otel_tracing.otel_config"
+        ):
             shutdown_provider()
 
         assert "shutdown" in caplog.text.lower()

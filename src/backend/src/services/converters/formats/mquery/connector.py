@@ -12,27 +12,26 @@ Date: 2025
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 from src.services.converters.base.connectors import (
     BaseInboundConnector,
     ConnectorType,
-    InboundConnectorMetadata
+    InboundConnectorMetadata,
 )
 from src.services.converters.base.models import KPI, KPIDefinition
 
 from ..powerbi.authentication import AadService
-
-from .models import (
-    SemanticModel,
-    PowerBITable,
-    ConversionResult,
-    MQueryConversionConfig,
-    ExpressionType
-)
-from .scanner import PowerBIAdminScanner
-from .parser import MQueryParser, TableFromRowsConverter
 from .llm_converter import MQueryLLMConverter
+from .models import (
+    ConversionResult,
+    ExpressionType,
+    MQueryConversionConfig,
+    PowerBITable,
+    SemanticModel,
+)
+from .parser import MQueryParser, TableFromRowsConverter
+from .scanner import PowerBIAdminScanner
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +65,7 @@ class MQueryConnector(BaseInboundConnector):
     """
 
     def __init__(
-        self,
-        config: MQueryConversionConfig,
-        access_token: Optional[str] = None
+        self, config: MQueryConversionConfig, access_token: Optional[str] = None
     ):
         """
         Initialize the M-Query connector.
@@ -106,7 +103,9 @@ class MQueryConnector(BaseInboundConnector):
         logger.info("=" * 80)
         logger.info("[MQueryConnector] CONNECT - Starting authentication")
         logger.info("=" * 80)
-        logger.info(f"  Pre-obtained access_token: {'YES (skipping auth)' if self._access_token else 'NO (will authenticate)'}")
+        logger.info(
+            f"  Pre-obtained access_token: {'YES (skipping auth)' if self._access_token else 'NO (will authenticate)'}"
+        )
         logger.info(f"  config.auth_method: {self.config.auth_method}")
         logger.info(f"  config.tenant_id: {self.config.tenant_id}")
         logger.info(f"  config.client_id: {self.config.client_id}")
@@ -121,20 +120,23 @@ class MQueryConnector(BaseInboundConnector):
             username=self.config.username,
             password=self.config.password,
             auth_method=self.config.auth_method,
-            access_token=self._access_token
+            access_token=self._access_token,
         )
 
         # Get access token
         if not self._access_token:
-            logger.info("[MQueryConnector] No pre-obtained token, calling get_access_token()...")
+            logger.info(
+                "[MQueryConnector] No pre-obtained token, calling get_access_token()..."
+            )
             self._access_token = self._auth_service.get_access_token()
         else:
-            logger.info("[MQueryConnector] Using pre-obtained access_token, skipping authentication")
+            logger.info(
+                "[MQueryConnector] Using pre-obtained access_token, skipping authentication"
+            )
 
         # Initialize scanner with token
         self._scanner = PowerBIAdminScanner(
-            access_token=self._access_token,
-            config=self.config
+            access_token=self._access_token, config=self.config
         )
 
         # LLM converter authenticates internally via LLMManager — no
@@ -169,21 +171,21 @@ class MQueryConnector(BaseInboundConnector):
         for model in self._semantic_models:
             for table in model.tables:
                 for measure in table.measures:
-                    kpis.append(KPI(
-                        description=measure.description or measure.name,
-                        formula=measure.expression,
-                        filters=[],
-                        technical_name=f"{table.name}.{measure.name}",
-                        source_table=table.name
-                    ))
+                    kpis.append(
+                        KPI(
+                            description=measure.description or measure.name,
+                            formula=measure.expression,
+                            filters=[],
+                            technical_name=f"{table.name}.{measure.name}",
+                            source_table=table.name,
+                        )
+                    )
 
         return kpis
 
     def get_metadata(self) -> InboundConnectorMetadata:
         """Get connector metadata"""
-        table_count = sum(
-            len(model.tables) for model in self._semantic_models
-        )
+        table_count = sum(len(model.tables) for model in self._semantic_models)
         measure_count = sum(
             len(table.measures)
             for model in self._semantic_models
@@ -193,15 +195,19 @@ class MQueryConnector(BaseInboundConnector):
         return InboundConnectorMetadata(
             connector_type=ConnectorType.POWERBI,  # Using POWERBI since we're accessing PBI
             source_id=self.config.workspace_id,
-            source_name=self._semantic_models[0].workspace_name if self._semantic_models else None,
+            source_name=(
+                self._semantic_models[0].workspace_name
+                if self._semantic_models
+                else None
+            ),
             description="Power BI Admin API - M-Query Extractor",
             connected=self._connected,
             measure_count=measure_count,
             additional_info={
                 "model_count": len(self._semantic_models),
                 "table_count": table_count,
-                "dataset_id": self.config.dataset_id
-            }
+                "dataset_id": self.config.dataset_id,
+            },
         )
 
     @property
@@ -223,9 +229,7 @@ class MQueryConnector(BaseInboundConnector):
     # ========== M-Query Specific Methods ==========
 
     async def scan_workspace(
-        self,
-        workspace_id: Optional[str] = None,
-        dataset_id: Optional[str] = None
+        self, workspace_id: Optional[str] = None, dataset_id: Optional[str] = None
     ) -> List[SemanticModel]:
         """
         Scan a workspace and extract semantic models.
@@ -246,8 +250,7 @@ class MQueryConnector(BaseInboundConnector):
         logger.info(f"Scanning workspace {ws_id}...")
 
         self._semantic_models, self._raw_scan_data = await self._scanner.scan_workspace(
-            workspace_id=ws_id,
-            dataset_id=ds_id
+            workspace_id=ws_id, dataset_id=ds_id
         )
 
         # Parse M-Query expressions in all tables
@@ -259,9 +262,7 @@ class MQueryConnector(BaseInboundConnector):
         return self._semantic_models
 
     def get_tables_with_mquery(
-        self,
-        model: Optional[SemanticModel] = None,
-        include_hidden: bool = False
+        self, model: Optional[SemanticModel] = None, include_hidden: bool = False
     ) -> List[PowerBITable]:
         """
         Get tables that have M-Query source expressions.
@@ -273,20 +274,22 @@ class MQueryConnector(BaseInboundConnector):
         Returns:
             List of PowerBITable objects with M-Query expressions
         """
-        target_model = model or (self._semantic_models[0] if self._semantic_models else None)
+        target_model = model or (
+            self._semantic_models[0] if self._semantic_models else None
+        )
         if not target_model:
             return []
 
         return self._scanner.extract_tables_with_mquery(
             target_model,
-            include_hidden=include_hidden or self.config.include_hidden_tables
+            include_hidden=include_hidden or self.config.include_hidden_tables,
         )
 
     async def convert_table(
         self,
         table: PowerBITable,
         use_llm: bool = True,
-        include_calculated_columns: bool = True
+        include_calculated_columns: bool = True,
     ) -> List[ConversionResult]:
         """
         Convert a single table's M-Query expressions to SQL.
@@ -307,14 +310,14 @@ class MQueryConnector(BaseInboundConnector):
             target_catalog=self.config.target_catalog,
             target_schema=self.config.target_schema,
             use_llm=use_llm,
-            include_calculated_columns=include_calculated_columns
+            include_calculated_columns=include_calculated_columns,
         )
 
     async def convert_all_tables(
         self,
         model: Optional[SemanticModel] = None,
         use_llm: bool = True,
-        include_calculated_columns: bool = True
+        include_calculated_columns: bool = True,
     ) -> Dict[str, List[ConversionResult]]:
         """
         Convert all tables in a semantic model.
@@ -333,7 +336,7 @@ class MQueryConnector(BaseInboundConnector):
         # Initialize Table.FromRows converter
         from_rows_converter = TableFromRowsConverter(
             target_catalog=self.config.target_catalog or "main",
-            target_schema=self.config.target_schema or "default"
+            target_schema=self.config.target_schema or "default",
         )
 
         for table in tables:
@@ -345,7 +348,9 @@ class MQueryConnector(BaseInboundConnector):
 
             if has_static:
                 # Convert Table.FromRows using dedicated converter (no LLM needed)
-                logger.info(f"Converting static table '{table.name}' using TableFromRowsConverter")
+                logger.info(
+                    f"Converting static table '{table.name}' using TableFromRowsConverter"
+                )
 
                 # Get the expression
                 for expr in table.source_expressions:
@@ -356,7 +361,7 @@ class MQueryConnector(BaseInboundConnector):
                             columns_from_schema=[
                                 {"name": col.name, "dataType": col.data_type.value}
                                 for col in table.columns
-                            ]
+                            ],
                         )
 
                         if sql:
@@ -367,12 +372,16 @@ class MQueryConnector(BaseInboundConnector):
                                 success=True,
                                 original_expression=expr.raw_expression,
                                 create_view_sql=sql,
-                                notes="Converted from Table.FromRows (static data)"
+                                notes="Converted from Table.FromRows (static data)",
                             )
                             results[table.name] = [result]
-                            logger.info(f"Successfully converted static table '{table.name}'")
+                            logger.info(
+                                f"Successfully converted static table '{table.name}'"
+                            )
                         else:
-                            logger.warning(f"Failed to convert static table '{table.name}'")
+                            logger.warning(
+                                f"Failed to convert static table '{table.name}'"
+                            )
                         break  # Only process first Table.FromRows expression
                 continue
 
@@ -380,15 +389,14 @@ class MQueryConnector(BaseInboundConnector):
             table_results = await self.convert_table(
                 table,
                 use_llm=use_llm,
-                include_calculated_columns=include_calculated_columns
+                include_calculated_columns=include_calculated_columns,
             )
             results[table.name] = table_results
 
         return results
 
     def get_relationships(
-        self,
-        model: Optional[SemanticModel] = None
+        self, model: Optional[SemanticModel] = None
     ) -> List[Dict[str, Any]]:
         """
         Get relationships from a semantic model.
@@ -399,13 +407,15 @@ class MQueryConnector(BaseInboundConnector):
         Returns:
             List of relationship dicts with FK constraint info
         """
-        target_model = model or (self._semantic_models[0] if self._semantic_models else None)
+        target_model = model or (
+            self._semantic_models[0] if self._semantic_models else None
+        )
         if not target_model:
             return []
 
         relationships = []
-        catalog = self.config.target_catalog or 'catalog'
-        schema = self.config.target_schema or 'schema'
+        catalog = self.config.target_catalog or "catalog"
+        schema = self.config.target_schema or "schema"
 
         for rel in target_model.relationships:
             # Clean table names (remove spaces, special chars)
@@ -419,33 +429,34 @@ class MQueryConnector(BaseInboundConnector):
             if len(constraint_name) > 128:
                 constraint_name = constraint_name[:128]
 
-            relationships.append({
-                "name": rel.name,
-                "from_table": rel.from_table,
-                "from_column": rel.from_column,
-                "to_table": rel.to_table,
-                "to_column": rel.to_column,
-                "cardinality": rel.cardinality,
-                "cross_filtering": rel.cross_filtering_behavior,
-                "is_active": rel.is_active,
-                "uc_fk_sql": (
-                    f"-- Relationship: {rel.name}\n"
-                    f"-- Cardinality: {rel.cardinality}\n"
-                    f"-- Cross-filtering: {rel.cross_filtering_behavior}\n"
-                    f"-- Active: {rel.is_active}\n"
-                    f"ALTER TABLE {catalog}.{schema}.{from_table_clean}\n"
-                    f"ADD CONSTRAINT {constraint_name}\n"
-                    f"FOREIGN KEY ({rel.from_column})\n"
-                    f"REFERENCES {catalog}.{schema}.{to_table_clean}({rel.to_column})\n"
-                    f"NOT ENFORCED;"
-                )
-            })
+            relationships.append(
+                {
+                    "name": rel.name,
+                    "from_table": rel.from_table,
+                    "from_column": rel.from_column,
+                    "to_table": rel.to_table,
+                    "to_column": rel.to_column,
+                    "cardinality": rel.cardinality,
+                    "cross_filtering": rel.cross_filtering_behavior,
+                    "is_active": rel.is_active,
+                    "uc_fk_sql": (
+                        f"-- Relationship: {rel.name}\n"
+                        f"-- Cardinality: {rel.cardinality}\n"
+                        f"-- Cross-filtering: {rel.cross_filtering_behavior}\n"
+                        f"-- Active: {rel.is_active}\n"
+                        f"ALTER TABLE {catalog}.{schema}.{from_table_clean}\n"
+                        f"ADD CONSTRAINT {constraint_name}\n"
+                        f"FOREIGN KEY ({rel.from_column})\n"
+                        f"REFERENCES {catalog}.{schema}.{to_table_clean}({rel.to_column})\n"
+                        f"NOT ENFORCED;"
+                    ),
+                }
+            )
 
         return relationships
 
     def get_calculated_columns(
-        self,
-        model: Optional[SemanticModel] = None
+        self, model: Optional[SemanticModel] = None
     ) -> Dict[str, List[Dict[str, Any]]]:
         """
         Get calculated columns from all tables in a semantic model.
@@ -456,7 +467,9 @@ class MQueryConnector(BaseInboundConnector):
         Returns:
             Dict mapping table names to lists of calculated column info
         """
-        target_model = model or (self._semantic_models[0] if self._semantic_models else None)
+        target_model = model or (
+            self._semantic_models[0] if self._semantic_models else None
+        )
         if not target_model:
             return {}
 
@@ -469,7 +482,7 @@ class MQueryConnector(BaseInboundConnector):
                         "name": col.name,
                         "data_type": col.data_type.value,
                         "expression": col.expression,
-                        "is_hidden": col.is_hidden
+                        "is_hidden": col.is_hidden,
                     }
                     for col in calculated_cols
                 ]
@@ -502,11 +515,13 @@ class MQueryConnector(BaseInboundConnector):
                 calc_cols = [col for col in table.columns if col.is_calculated]
                 if calc_cols:
                     total_calculated_columns += len(calc_cols)
-                    tables_with_calculated_columns.append({
-                        "table": table.name,
-                        "calculated_column_count": len(calc_cols),
-                        "columns": [col.name for col in calc_cols]
-                    })
+                    tables_with_calculated_columns.append(
+                        {
+                            "table": table.name,
+                            "calculated_column_count": len(calc_cols),
+                            "columns": [col.name for col in calc_cols],
+                        }
+                    )
 
                 for expr in table.source_expressions:
                     expr_type = expr.expression_type.value
@@ -528,5 +543,5 @@ class MQueryConnector(BaseInboundConnector):
             "tables_by_type": tables_by_type,
             "relationships_count": sum(
                 len(m.relationships) for m in self._semantic_models
-            )
+            ),
         }

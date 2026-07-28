@@ -2,23 +2,24 @@
 Unit tests for AgentBricks service.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.databricks.agentbricks.service import AgentBricksService
+import pytest
+
 from src.schemas.agentbricks import (
+    AgentBricksAuthConfig,
     AgentBricksEndpoint,
     AgentBricksEndpointsRequest,
     AgentBricksEndpointsResponse,
-    AgentBricksQueryRequest,
-    AgentBricksQueryResponse,
+    AgentBricksEndpointState,
     AgentBricksExecutionRequest,
     AgentBricksExecutionResponse,
-    AgentBricksAuthConfig,
     AgentBricksMessage,
+    AgentBricksQueryRequest,
+    AgentBricksQueryResponse,
     AgentBricksQueryStatus,
-    AgentBricksEndpointState,
 )
+from src.services.databricks.agentbricks.service import AgentBricksService
 
 
 class TestAgentBricksServiceInit:
@@ -33,8 +34,7 @@ class TestAgentBricksServiceInit:
     def test_init_with_auth_config(self):
         """Test service initialization with auth config."""
         auth_config = AgentBricksAuthConfig(
-            use_obo=True,
-            host="https://workspace.databricks.com"
+            use_obo=True, host="https://workspace.databricks.com"
         )
         service = AgentBricksService(auth_config=auth_config)
         assert service.auth_config == auth_config
@@ -53,26 +53,23 @@ class TestGetEndpoints:
         """Create mock endpoints."""
         return [
             AgentBricksEndpoint(
-                id="ep-1",
-                name="agent-endpoint-1",
-                state=AgentBricksEndpointState.READY
+                id="ep-1", name="agent-endpoint-1", state=AgentBricksEndpointState.READY
             ),
             AgentBricksEndpoint(
-                id="ep-2",
-                name="agent-endpoint-2",
-                state=AgentBricksEndpointState.READY
-            )
+                id="ep-2", name="agent-endpoint-2", state=AgentBricksEndpointState.READY
+            ),
         ]
 
     @pytest.mark.asyncio
     async def test_get_endpoints_success(self, service, mock_endpoints):
         """Test successful endpoint retrieval."""
         mock_response = AgentBricksEndpointsResponse(
-            endpoints=mock_endpoints,
-            total_count=2
+            endpoints=mock_endpoints, total_count=2
         )
 
-        with patch.object(service.repository, 'get_endpoints', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service.repository, "get_endpoints", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = mock_response
 
             result = await service.get_endpoints()
@@ -84,17 +81,14 @@ class TestGetEndpoints:
     @pytest.mark.asyncio
     async def test_get_endpoints_with_request(self, service, mock_endpoints):
         """Test endpoint retrieval with request parameters."""
-        request = AgentBricksEndpointsRequest(
-            search_query="agent",
-            ready_only=True
-        )
+        request = AgentBricksEndpointsRequest(search_query="agent", ready_only=True)
         mock_response = AgentBricksEndpointsResponse(
-            endpoints=mock_endpoints,
-            total_count=2,
-            filtered=True
+            endpoints=mock_endpoints, total_count=2, filtered=True
         )
 
-        with patch.object(service.repository, 'get_endpoints', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service.repository, "get_endpoints", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = mock_response
 
             result = await service.get_endpoints(request)
@@ -107,7 +101,9 @@ class TestGetEndpoints:
         """Test that default request is created when none provided."""
         mock_response = AgentBricksEndpointsResponse(endpoints=[])
 
-        with patch.object(service.repository, 'get_endpoints', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service.repository, "get_endpoints", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = mock_response
 
             await service.get_endpoints(None)
@@ -119,7 +115,9 @@ class TestGetEndpoints:
     @pytest.mark.asyncio
     async def test_get_endpoints_error_handling(self, service):
         """Test error handling in get_endpoints."""
-        with patch.object(service.repository, 'get_endpoints', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service.repository, "get_endpoints", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.side_effect = Exception("Network error")
 
             result = await service.get_endpoints()
@@ -139,14 +137,12 @@ class TestSearchEndpoints:
     async def test_search_endpoints_with_query(self, service):
         """Test searching endpoints with a query."""
         mock_response = AgentBricksEndpointsResponse(
-            endpoints=[
-                AgentBricksEndpoint(id="ep-1", name="agent-search")
-            ],
+            endpoints=[AgentBricksEndpoint(id="ep-1", name="agent-search")],
             total_count=1,
-            filtered=True
+            filtered=True,
         )
 
-        with patch.object(service, 'get_endpoints', new_callable=AsyncMock) as mock_get:
+        with patch.object(service, "get_endpoints", new_callable=AsyncMock) as mock_get:
             mock_get.return_value = mock_response
 
             result = await service.search_endpoints(query="search")
@@ -162,7 +158,7 @@ class TestSearchEndpoints:
         """Test searching including non-ready endpoints."""
         mock_response = AgentBricksEndpointsResponse(endpoints=[])
 
-        with patch.object(service, 'get_endpoints', new_callable=AsyncMock) as mock_get:
+        with patch.object(service, "get_endpoints", new_callable=AsyncMock) as mock_get:
             mock_get.return_value = mock_response
 
             await service.search_endpoints(query="test", ready_only=False)
@@ -173,7 +169,7 @@ class TestSearchEndpoints:
     @pytest.mark.asyncio
     async def test_search_endpoints_error_handling(self, service):
         """Test error handling in search_endpoints."""
-        with patch.object(service, 'get_endpoints', new_callable=AsyncMock) as mock_get:
+        with patch.object(service, "get_endpoints", new_callable=AsyncMock) as mock_get:
             mock_get.side_effect = Exception("Search error")
 
             result = await service.search_endpoints(query="test")
@@ -192,15 +188,12 @@ class TestGetEndpointByName:
     @pytest.mark.asyncio
     async def test_get_endpoint_by_name_found(self, service):
         """Test finding endpoint by exact name."""
-        target_endpoint = AgentBricksEndpoint(
-            id="ep-1",
-            name="target-endpoint"
-        )
-        mock_response = AgentBricksEndpointsResponse(
-            endpoints=[target_endpoint]
-        )
+        target_endpoint = AgentBricksEndpoint(id="ep-1", name="target-endpoint")
+        mock_response = AgentBricksEndpointsResponse(endpoints=[target_endpoint])
 
-        with patch.object(service.repository, 'get_endpoints', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service.repository, "get_endpoints", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = mock_response
 
             result = await service.get_endpoint_by_name("target-endpoint")
@@ -213,7 +206,9 @@ class TestGetEndpointByName:
         """Test when endpoint is not found."""
         mock_response = AgentBricksEndpointsResponse(endpoints=[])
 
-        with patch.object(service.repository, 'get_endpoints', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service.repository, "get_endpoints", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = mock_response
 
             result = await service.get_endpoint_by_name("nonexistent")
@@ -225,11 +220,13 @@ class TestGetEndpointByName:
         """Test finding exact match when multiple results returned."""
         endpoints = [
             AgentBricksEndpoint(id="ep-1", name="agent-endpoint-1"),
-            AgentBricksEndpoint(id="ep-2", name="agent-endpoint-2")
+            AgentBricksEndpoint(id="ep-2", name="agent-endpoint-2"),
         ]
         mock_response = AgentBricksEndpointsResponse(endpoints=endpoints)
 
-        with patch.object(service.repository, 'get_endpoints', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service.repository, "get_endpoints", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = mock_response
 
             result = await service.get_endpoint_by_name("agent-endpoint-2")
@@ -240,7 +237,9 @@ class TestGetEndpointByName:
     @pytest.mark.asyncio
     async def test_get_endpoint_by_name_error_handling(self, service):
         """Test error handling in get_endpoint_by_name."""
-        with patch.object(service.repository, 'get_endpoints', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service.repository, "get_endpoints", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.side_effect = Exception("Error")
 
             result = await service.get_endpoint_by_name("test")
@@ -265,16 +264,16 @@ class TestQueryEndpoint:
     async def test_query_endpoint_success(self, service, sample_messages):
         """Test successful endpoint query."""
         mock_response = AgentBricksQueryResponse(
-            response="Hello! How can I help?",
-            status=AgentBricksQueryStatus.SUCCESS
+            response="Hello! How can I help?", status=AgentBricksQueryStatus.SUCCESS
         )
 
-        with patch.object(service.repository, 'query_endpoint', new_callable=AsyncMock) as mock_query:
+        with patch.object(
+            service.repository, "query_endpoint", new_callable=AsyncMock
+        ) as mock_query:
             mock_query.return_value = mock_response
 
             result = await service.query_endpoint(
-                endpoint_name="test-endpoint",
-                messages=sample_messages
+                endpoint_name="test-endpoint", messages=sample_messages
             )
 
             assert result.status == "SUCCESS"
@@ -286,17 +285,19 @@ class TestQueryEndpoint:
         mock_response = AgentBricksQueryResponse(
             response="Answer",
             status=AgentBricksQueryStatus.SUCCESS,
-            trace={"steps": []}
+            trace={"steps": []},
         )
 
-        with patch.object(service.repository, 'query_endpoint', new_callable=AsyncMock) as mock_query:
+        with patch.object(
+            service.repository, "query_endpoint", new_callable=AsyncMock
+        ) as mock_query:
             mock_query.return_value = mock_response
 
             result = await service.query_endpoint(
                 endpoint_name="test-endpoint",
                 messages=sample_messages,
                 custom_inputs={"context": "test"},
-                return_trace=True
+                return_trace=True,
             )
 
             assert result.trace is not None
@@ -311,15 +312,16 @@ class TestQueryEndpoint:
         mock_response = AgentBricksQueryResponse(
             response="",
             status=AgentBricksQueryStatus.FAILED,
-            error="Authentication failed"
+            error="Authentication failed",
         )
 
-        with patch.object(service.repository, 'query_endpoint', new_callable=AsyncMock) as mock_query:
+        with patch.object(
+            service.repository, "query_endpoint", new_callable=AsyncMock
+        ) as mock_query:
             mock_query.return_value = mock_response
 
             result = await service.query_endpoint(
-                endpoint_name="test-endpoint",
-                messages=sample_messages
+                endpoint_name="test-endpoint", messages=sample_messages
             )
 
             assert result.status == "FAILED"
@@ -328,12 +330,13 @@ class TestQueryEndpoint:
     @pytest.mark.asyncio
     async def test_query_endpoint_exception(self, service, sample_messages):
         """Test handling exceptions in query."""
-        with patch.object(service.repository, 'query_endpoint', new_callable=AsyncMock) as mock_query:
+        with patch.object(
+            service.repository, "query_endpoint", new_callable=AsyncMock
+        ) as mock_query:
             mock_query.side_effect = Exception("Connection error")
 
             result = await service.query_endpoint(
-                endpoint_name="test-endpoint",
-                messages=sample_messages
+                endpoint_name="test-endpoint", messages=sample_messages
             )
 
             assert result.status == "FAILED"
@@ -354,15 +357,16 @@ class TestExecuteQuery:
         mock_response = AgentBricksExecutionResponse(
             endpoint_name="test-endpoint",
             status=AgentBricksQueryStatus.SUCCESS,
-            result="Here is your answer"
+            result="Here is your answer",
         )
 
-        with patch.object(service.repository, 'execute_query', new_callable=AsyncMock) as mock_exec:
+        with patch.object(
+            service.repository, "execute_query", new_callable=AsyncMock
+        ) as mock_exec:
             mock_exec.return_value = mock_response
 
             result = await service.execute_query(
-                endpoint_name="test-endpoint",
-                question="What is the answer?"
+                endpoint_name="test-endpoint", question="What is the answer?"
             )
 
             assert result.status == "SUCCESS"
@@ -375,10 +379,12 @@ class TestExecuteQuery:
             endpoint_name="test-endpoint",
             status=AgentBricksQueryStatus.SUCCESS,
             result="Answer",
-            trace={"time": 1.5}
+            trace={"time": 1.5},
         )
 
-        with patch.object(service.repository, 'execute_query', new_callable=AsyncMock) as mock_exec:
+        with patch.object(
+            service.repository, "execute_query", new_callable=AsyncMock
+        ) as mock_exec:
             mock_exec.return_value = mock_response
 
             result = await service.execute_query(
@@ -386,7 +392,7 @@ class TestExecuteQuery:
                 question="Hello",
                 custom_inputs={"key": "value"},
                 return_trace=True,
-                timeout=60
+                timeout=60,
             )
 
             # Verify the request
@@ -401,15 +407,16 @@ class TestExecuteQuery:
         mock_response = AgentBricksExecutionResponse(
             endpoint_name="test-endpoint",
             status=AgentBricksQueryStatus.FAILED,
-            error="Endpoint not available"
+            error="Endpoint not available",
         )
 
-        with patch.object(service.repository, 'execute_query', new_callable=AsyncMock) as mock_exec:
+        with patch.object(
+            service.repository, "execute_query", new_callable=AsyncMock
+        ) as mock_exec:
             mock_exec.return_value = mock_response
 
             result = await service.execute_query(
-                endpoint_name="test-endpoint",
-                question="Hello"
+                endpoint_name="test-endpoint", question="Hello"
             )
 
             assert result.status == "FAILED"
@@ -418,12 +425,13 @@ class TestExecuteQuery:
     @pytest.mark.asyncio
     async def test_execute_query_exception(self, service):
         """Test handling exceptions in execute."""
-        with patch.object(service.repository, 'execute_query', new_callable=AsyncMock) as mock_exec:
+        with patch.object(
+            service.repository, "execute_query", new_callable=AsyncMock
+        ) as mock_exec:
             mock_exec.side_effect = Exception("Network error")
 
             result = await service.execute_query(
-                endpoint_name="test-endpoint",
-                question="Hello"
+                endpoint_name="test-endpoint", question="Hello"
             )
 
             assert result.status == "FAILED"
@@ -441,7 +449,9 @@ class TestValidateEndpointAccess:
     @pytest.mark.asyncio
     async def test_validate_access_success(self, service):
         """Test successful access validation."""
-        with patch.object(service, 'get_endpoint_by_name', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service, "get_endpoint_by_name", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = AgentBricksEndpoint(id="ep-1", name="test")
 
             result = await service.validate_endpoint_access("test")
@@ -451,7 +461,9 @@ class TestValidateEndpointAccess:
     @pytest.mark.asyncio
     async def test_validate_access_no_access(self, service):
         """Test when no access to endpoint."""
-        with patch.object(service, 'get_endpoint_by_name', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service, "get_endpoint_by_name", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = None
 
             result = await service.validate_endpoint_access("test")
@@ -463,7 +475,9 @@ class TestValidateEndpointAccess:
         """Test validation with custom auth config."""
         auth_config = AgentBricksAuthConfig(use_obo=False)
 
-        with patch.object(service, 'get_endpoint_by_name', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service, "get_endpoint_by_name", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = AgentBricksEndpoint(id="ep-1", name="test")
 
             result = await service.validate_endpoint_access("test", auth_config)
@@ -475,7 +489,9 @@ class TestValidateEndpointAccess:
     @pytest.mark.asyncio
     async def test_validate_access_error(self, service):
         """Test error handling in validation."""
-        with patch.object(service, 'get_endpoint_by_name', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service, "get_endpoint_by_name", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.side_effect = Exception("Error")
 
             result = await service.validate_endpoint_access("test")
@@ -495,12 +511,18 @@ class TestListReadyEndpoints:
     async def test_list_ready_endpoints(self, service):
         """Test listing ready endpoints."""
         endpoints = [
-            AgentBricksEndpoint(id="ep-1", name="ready-1", state=AgentBricksEndpointState.READY),
-            AgentBricksEndpoint(id="ep-2", name="ready-2", state=AgentBricksEndpointState.READY)
+            AgentBricksEndpoint(
+                id="ep-1", name="ready-1", state=AgentBricksEndpointState.READY
+            ),
+            AgentBricksEndpoint(
+                id="ep-2", name="ready-2", state=AgentBricksEndpointState.READY
+            ),
         ]
         mock_response = AgentBricksEndpointsResponse(endpoints=endpoints)
 
-        with patch.object(service.repository, 'get_endpoints', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service.repository, "get_endpoints", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = mock_response
 
             result = await service.list_ready_endpoints()
@@ -515,7 +537,9 @@ class TestListReadyEndpoints:
         """Test when no ready endpoints available."""
         mock_response = AgentBricksEndpointsResponse(endpoints=[])
 
-        with patch.object(service.repository, 'get_endpoints', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service.repository, "get_endpoints", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = mock_response
 
             result = await service.list_ready_endpoints()
@@ -525,7 +549,9 @@ class TestListReadyEndpoints:
     @pytest.mark.asyncio
     async def test_list_ready_endpoints_error(self, service):
         """Test error handling in list ready endpoints."""
-        with patch.object(service.repository, 'get_endpoints', new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            service.repository, "get_endpoints", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.side_effect = Exception("Error")
 
             result = await service.list_ready_endpoints()

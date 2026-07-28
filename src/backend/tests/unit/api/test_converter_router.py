@@ -4,27 +4,31 @@ Unit tests for Converter Router.
 Tests the functionality of converter API endpoints including
 history tracking, job management, and saved configuration endpoints.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-from datetime import datetime
-from fastapi.testclient import TestClient
-from fastapi import FastAPI
 
-from src.api.converter_router import router, get_converter_service
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from src.api.converter_router import get_converter_service, router
 from src.schemas.conversion import (
-    ConversionHistoryResponse,
     ConversionHistoryListResponse,
-    ConversionStatistics,
-    ConversionJobResponse,
+    ConversionHistoryResponse,
     ConversionJobListResponse,
-    SavedConfigurationResponse,
+    ConversionJobResponse,
+    ConversionStatistics,
     SavedConfigurationListResponse,
+    SavedConfigurationResponse,
 )
 
 
 # Mock responses
 class MockHistoryResponse:
-    def __init__(self, id=1, source_format="powerbi", target_format="dax", status="success"):
+    def __init__(
+        self, id=1, source_format="powerbi", target_format="dax", status="success"
+    ):
         self.id = id
         self.source_format = source_format
         self.target_format = target_format
@@ -48,7 +52,13 @@ class MockHistoryResponse:
 
 
 class MockJobResponse:
-    def __init__(self, id="job-123", status="pending", source_format="powerbi", target_format="dax"):
+    def __init__(
+        self,
+        id="job-123",
+        status="pending",
+        source_format="powerbi",
+        target_format="dax",
+    ):
         self.id = id
         self.status = status
         self.source_format = source_format
@@ -70,7 +80,9 @@ class MockJobResponse:
 
 
 class MockConfigResponse:
-    def __init__(self, id=1, name="My Config", source_format="powerbi", target_format="dax"):
+    def __init__(
+        self, id=1, name="My Config", source_format="powerbi", target_format="dax"
+    ):
         self.id = id
         self.name = name
         self.source_format = source_format
@@ -135,6 +147,7 @@ def client(app):
 
 # ===== Conversion History Endpoint Tests =====
 
+
 class TestConversionHistoryEndpoints:
     """Test cases for conversion history endpoints."""
 
@@ -148,8 +161,8 @@ class TestConversionHistoryEndpoints:
             json={
                 "source_format": "powerbi",
                 "target_format": "dax",
-                "status": "success"
-            }
+                "status": "success",
+            },
         )
 
         assert response.status_code == 201
@@ -171,9 +184,9 @@ class TestConversionHistoryEndpoints:
     def test_get_history_not_found(self, client, mock_converter_service):
         """Test history retrieval when not found."""
         from fastapi import HTTPException
+
         mock_converter_service.get_history.side_effect = HTTPException(
-            status_code=404,
-            detail="Conversion history 999 not found"
+            status_code=404, detail="Conversion history 999 not found"
         )
 
         response = client.get("/api/converters/history/999")
@@ -187,7 +200,7 @@ class TestConversionHistoryEndpoints:
 
         response = client.patch(
             "/api/converters/history/123",
-            json={"status": "failed", "error_message": "Conversion error"}
+            json={"status": "failed", "error_message": "Conversion error"},
         )
 
         assert response.status_code == 200
@@ -205,7 +218,7 @@ class TestConversionHistoryEndpoints:
             "history": [h.model_dump() for h in mock_list.history],
             "count": 2,
             "limit": 100,
-            "offset": 0
+            "offset": 0,
         }
         mock_converter_service.list_history.return_value = mock_list
 
@@ -227,7 +240,7 @@ class TestConversionHistoryEndpoints:
             "history": [h.model_dump() for h in mock_list.history],
             "count": 1,
             "limit": 100,
-            "offset": 0
+            "offset": 0,
         }
         mock_converter_service.list_history.return_value = mock_list
 
@@ -256,7 +269,7 @@ class TestConversionHistoryEndpoints:
             "success_rate": 85.0,
             "average_execution_time_ms": 1500.0,
             "popular_conversions": [],
-            "period_days": 30
+            "period_days": 30,
         }
         mock_converter_service.get_statistics.return_value = mock_stats
 
@@ -269,6 +282,7 @@ class TestConversionHistoryEndpoints:
 
 
 # ===== Conversion Job Endpoint Tests =====
+
 
 class TestConversionJobEndpoints:
     """Test cases for conversion job endpoints."""
@@ -283,8 +297,8 @@ class TestConversionJobEndpoints:
             json={
                 "source_format": "powerbi",
                 "target_format": "dax",
-                "configuration": {"option1": "value1"}
-            }
+                "configuration": {"option1": "value1"},
+            },
         )
 
         assert response.status_code == 201
@@ -305,9 +319,9 @@ class TestConversionJobEndpoints:
     def test_get_job_not_found(self, client, mock_converter_service):
         """Test job retrieval when not found."""
         from fastapi import HTTPException
+
         mock_converter_service.get_job.side_effect = HTTPException(
-            status_code=404,
-            detail="Conversion job nonexistent not found"
+            status_code=404, detail="Conversion job nonexistent not found"
         )
 
         response = client.get("/api/converters/jobs/nonexistent")
@@ -320,8 +334,7 @@ class TestConversionJobEndpoints:
         mock_converter_service.update_job.return_value = mock_response
 
         response = client.patch(
-            "/api/converters/jobs/job-123",
-            json={"status": "running"}
+            "/api/converters/jobs/job-123", json={"status": "running"}
         )
 
         assert response.status_code == 200
@@ -335,7 +348,7 @@ class TestConversionJobEndpoints:
 
         response = client.patch(
             "/api/converters/jobs/job-123/status",
-            json={"status": "running", "progress": 0.5}
+            json={"status": "running", "progress": 0.5},
         )
 
         assert response.status_code == 200
@@ -349,7 +362,7 @@ class TestConversionJobEndpoints:
         mock_list.count = 2
         mock_list.model_dump.return_value = {
             "jobs": [j.model_dump() for j in mock_list.jobs],
-            "count": 2
+            "count": 2,
         }
         mock_converter_service.list_jobs.return_value = mock_list
 
@@ -366,7 +379,7 @@ class TestConversionJobEndpoints:
         mock_list.count = 1
         mock_list.model_dump.return_value = {
             "jobs": [j.model_dump() for j in mock_list.jobs],
-            "count": 1
+            "count": 1,
         }
         mock_converter_service.list_jobs.return_value = mock_list
 
@@ -390,6 +403,7 @@ class TestConversionJobEndpoints:
 
 # ===== Saved Configuration Endpoint Tests =====
 
+
 class TestSavedConfigurationEndpoints:
     """Test cases for saved configuration endpoints."""
 
@@ -404,8 +418,8 @@ class TestSavedConfigurationEndpoints:
                 "name": "My Config",
                 "source_format": "powerbi",
                 "target_format": "dax",
-                "configuration": {"option1": "value1"}
-            }
+                "configuration": {"option1": "value1"},
+            },
         )
 
         assert response.status_code == 201
@@ -426,9 +440,9 @@ class TestSavedConfigurationEndpoints:
     def test_get_config_not_found(self, client, mock_converter_service):
         """Test configuration retrieval when not found."""
         from fastapi import HTTPException
+
         mock_converter_service.get_saved_config.side_effect = HTTPException(
-            status_code=404,
-            detail="Configuration 999 not found"
+            status_code=404, detail="Configuration 999 not found"
         )
 
         response = client.get("/api/converters/configs/999")
@@ -441,8 +455,7 @@ class TestSavedConfigurationEndpoints:
         mock_converter_service.update_saved_config.return_value = mock_response
 
         response = client.patch(
-            "/api/converters/configs/123",
-            json={"name": "Updated Config"}
+            "/api/converters/configs/123", json={"name": "Updated Config"}
         )
 
         assert response.status_code == 200
@@ -466,7 +479,7 @@ class TestSavedConfigurationEndpoints:
         mock_list.count = 2
         mock_list.model_dump.return_value = {
             "configurations": [c.model_dump() for c in mock_list.configurations],
-            "count": 2
+            "count": 2,
         }
         mock_converter_service.list_saved_configs.return_value = mock_list
 
@@ -483,7 +496,7 @@ class TestSavedConfigurationEndpoints:
         mock_list.count = 1
         mock_list.model_dump.return_value = {
             "configurations": [c.model_dump() for c in mock_list.configurations],
-            "count": 1
+            "count": 1,
         }
         mock_converter_service.list_saved_configs.return_value = mock_list
 
@@ -508,6 +521,7 @@ class TestSavedConfigurationEndpoints:
 
 
 # ===== Health Check Endpoint Test =====
+
 
 class TestHealthCheckEndpoint:
     """Test cases for health check endpoint."""

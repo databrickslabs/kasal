@@ -20,10 +20,9 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-from src.services.execution.runtime import Agent
-
 from src.core.logger import LoggerManager
 from src.services.execution.kernel.agent_security import inject_security_preamble
+from src.services.execution.runtime import Agent
 
 logger = LoggerManager.get_instance().crew
 
@@ -45,14 +44,19 @@ def redact_llm_repr(llm: Any) -> str:
 # MODEL's native reasoning budget on the agent's own LLM (see
 # _apply_reasoning_effort below), so there is nothing agent-shaped to pass through.
 _ADDITIONAL_AGENT_PARAMS = [
-    'max_iter', 'max_rpm', 'max_execution_time', 'code_execution_mode',
-    'max_context_window_size', 'max_tokens',
+    "max_iter",
+    "max_rpm",
+    "max_execution_time",
+    "code_execution_mode",
+    "max_context_window_size",
+    "max_tokens",
     # Date awareness settings (CrewAI 1.9+) — inject current date into agent context
-    'inject_date', 'date_format',
+    "inject_date",
+    "date_format",
 ]
 
 # Effort used when the reasoning toggle is on but no explicit level was chosen.
-DEFAULT_REASONING_EFFORT = 'low'
+DEFAULT_REASONING_EFFORT = "low"
 
 #: Seconds one agent may spend inside a single LLM call chain before the engine
 #: stops it (``src.core.llm.transport.completion._execution_budget``). 0 disables it.
@@ -86,11 +90,13 @@ def _apply_reasoning_effort(llm: Any, spec: Dict[str, Any], label: str = "") -> 
     """
     if llm is None or isinstance(llm, str):
         return
-    if not spec.get('reasoning'):
+    if not spec.get("reasoning"):
         return
     try:
         _apply_reasoning_effort_unsafe(llm, spec, label)
-    except Exception as e:  # noqa: BLE001 — a reasoning preference must never fail a run
+    except (
+        Exception
+    ) as e:  # noqa: BLE001 — a reasoning preference must never fail a run
         logger.debug(f"Could not apply reasoning effort for agent {label}: {e}")
 
 
@@ -101,8 +107,8 @@ def _apply_reasoning_effort_unsafe(llm: Any, spec: Dict[str, Any], label: str) -
         model_supports_reasoning_effort,
     )
 
-    rc = spec.get('reasoning_config') or {}
-    effort = (rc.get('reasoning_effort') or DEFAULT_REASONING_EFFORT)
+    rc = spec.get("reasoning_config") or {}
+    effort = rc.get("reasoning_effort") or DEFAULT_REASONING_EFFORT
     effort = str(effort).strip().lower()
     if effort not in VALID_REASONING_EFFORTS:
         logger.debug(
@@ -113,10 +119,10 @@ def _apply_reasoning_effort_unsafe(llm: Any, spec: Dict[str, Any], label: str) -
 
     # Prefer the RESOLVED provider model on the built LLM (e.g. 'databricks/gpt-5-2',
     # 'openai/gpt-5.2') and fall back to the spec's model key.
-    model_name = getattr(llm, 'model', None)
+    model_name = getattr(llm, "model", None)
     if not isinstance(model_name, str) or not model_name:
-        spec_llm = spec.get('llm')
-        model_name = spec_llm.get('model') if isinstance(spec_llm, dict) else spec_llm
+        spec_llm = spec.get("llm")
+        model_name = spec_llm.get("model") if isinstance(spec_llm, dict) else spec_llm
 
     if not model_supports_reasoning_effort(model_name):
         # INFO, not debug: the user explicitly asked for a reasoning budget and
@@ -159,37 +165,51 @@ async def build_agent_llm(
 
     llm = None
     try:
-        if 'llm' in spec:
-            if isinstance(spec['llm'], str):
-                model_name = spec['llm']
-                logger.info(f"Configuring agent {label} LLM using LLMManager for model: {model_name}")
+        if "llm" in spec:
+            if isinstance(spec["llm"], str):
+                model_name = spec["llm"]
+                logger.info(
+                    f"Configuring agent {label} LLM using LLMManager for model: {model_name}"
+                )
                 temperature = None
-                if spec.get('temperature') is not None:
+                if spec.get("temperature") is not None:
                     # Convert from 0-100 to 0.0-1.0 range
-                    temperature = spec['temperature'] / 100.0
-                    logger.info(f"Using temperature override {temperature} for agent {label}")
+                    temperature = spec["temperature"] / 100.0
+                    logger.info(
+                        f"Using temperature override {temperature} for agent {label}"
+                    )
                 if not group_id:
                     raise ValueError("group_id is REQUIRED for LLM configuration")
-                llm = await LLMManager.configure_kasal_llm(model_name, group_id, temperature)
-                logger.info(f"Successfully configured LLM for agent {label} using model: {model_name}")
-            elif isinstance(spec['llm'], dict):
-                llm_config = spec['llm']
-                model_name = llm_config.get('model', default_model)
+                llm = await LLMManager.configure_kasal_llm(
+                    model_name, group_id, temperature
+                )
+                logger.info(
+                    f"Successfully configured LLM for agent {label} using model: {model_name}"
+                )
+            elif isinstance(spec["llm"], dict):
+                llm_config = spec["llm"]
+                model_name = llm_config.get("model", default_model)
                 temperature = None
-                if spec.get('temperature') is not None:
-                    temperature = spec['temperature'] / 100.0
-                    logger.info(f"Using temperature override {temperature} for agent {label}")
+                if spec.get("temperature") is not None:
+                    temperature = spec["temperature"] / 100.0
+                    logger.info(
+                        f"Using temperature override {temperature} for agent {label}"
+                    )
                 if not group_id:
                     raise ValueError("group_id is REQUIRED for LLM configuration")
                 # LLMManager handles provider prefix, API key/base, DatabricksRetryLLM,
                 # GPT-5 params, temperature-rejection, and telemetry headers.
-                llm = await LLMManager.configure_kasal_llm(model_name, group_id, temperature)
+                llm = await LLMManager.configure_kasal_llm(
+                    model_name, group_id, temperature
+                )
                 # Apply any additional overrides from llm_config (e.g. top_p, stop, max_tokens)
-                skip_keys = {'model'}  # already handled by LLMManager
+                skip_keys = {"model"}  # already handled by LLMManager
                 for key, value in llm_config.items():
                     if key not in skip_keys and value is not None:
                         setattr(llm, key, value)
-                logger.info(f"Created LLM instance for agent {label} with model {model_name}")
+                logger.info(
+                    f"Created LLM instance for agent {label} with model {model_name}"
+                )
         else:
             # Use default model
             logger.info(f"No LLM specified for agent {label}, using default")
@@ -203,7 +223,7 @@ async def build_agent_llm(
     except Exception as e:
         # Fallback to simple string if configuration fails
         logger.error(f"Error configuring LLM: {e}")
-        llm = spec.get('llm', default_model)
+        llm = spec.get("llm", default_model)
         logger.warning(f"Using string model name as fallback for agent {label}: {llm}")
 
     # In an execution subprocess, opt the LLM into streamed completions so the
@@ -245,19 +265,19 @@ def build_agent_kwargs(
     ``inject_security_preamble`` so each path keeps its own log line.
     """
     agent_kwargs: Dict[str, Any] = {
-        'role': spec['role'],
-        'goal': spec['goal'],
-        'backstory': spec['backstory'],
-        'tools': tools or [],
-        'llm': llm,
-        'verbose': spec.get('verbose', True),
-        'allow_delegation': spec.get('allow_delegation', False),
-        'cache': spec.get('cache', False),
+        "role": spec["role"],
+        "goal": spec["goal"],
+        "backstory": spec["backstory"],
+        "tools": tools or [],
+        "llm": llm,
+        "verbose": spec.get("verbose", True),
+        "allow_delegation": spec.get("allow_delegation", False),
+        "cache": spec.get("cache", False),
         # SECURITY: Always force allow_code_execution to False for safety
-        'allow_code_execution': False,  # Hardcoded to False - ignoring spec
-        'max_retry_limit': spec.get('max_retry_limit', 3),
-        'use_system_prompt': True,
-        'respect_context_window': True,
+        "allow_code_execution": False,  # Hardcoded to False - ignoring spec
+        "max_retry_limit": spec.get("max_retry_limit", 3),
+        "use_system_prompt": True,
+        "respect_context_window": True,
     }
 
     # NOTE: 'memory' is deliberately NOT propagated to the CrewAI Agent. In
@@ -268,12 +288,17 @@ def build_agent_kwargs(
     for param in _ADDITIONAL_AGENT_PARAMS:
         if spec.get(param) is not None:
             agent_kwargs[param] = spec[param]
-            logger.info(f"Setting agent parameter '{param}' to {spec[param]} for agent {label}")
+            logger.info(
+                f"Setting agent parameter '{param}' to {spec[param]} for agent {label}"
+            )
 
     # Bound the wasted time when an agent cannot converge — see
     # DEFAULT_AGENT_MAX_EXECUTION_TIME. Only when the spec did not set one.
-    if 'max_execution_time' not in agent_kwargs and DEFAULT_AGENT_MAX_EXECUTION_TIME > 0:
-        agent_kwargs['max_execution_time'] = DEFAULT_AGENT_MAX_EXECUTION_TIME
+    if (
+        "max_execution_time" not in agent_kwargs
+        and DEFAULT_AGENT_MAX_EXECUTION_TIME > 0
+    ):
+        agent_kwargs["max_execution_time"] = DEFAULT_AGENT_MAX_EXECUTION_TIME
         logger.info(
             f"Applying default max_execution_time="
             f"{DEFAULT_AGENT_MAX_EXECUTION_TIME}s for agent {label}"
@@ -288,17 +313,17 @@ def build_agent_kwargs(
     # prompt_template / response_template — the old system_prompt / task_prompt /
     # format_prompt names are NOT Agent fields and were silently dropped by
     # Pydantic, so custom templates (and the security preamble) never reached the LLM.
-    if spec.get('system_template'):
-        agent_kwargs['system_template'] = spec['system_template']
-    if spec.get('prompt_template'):
-        agent_kwargs['prompt_template'] = spec['prompt_template']
-    if spec.get('response_template'):
-        agent_kwargs['response_template'] = spec['response_template']
+    if spec.get("system_template"):
+        agent_kwargs["system_template"] = spec["system_template"]
+    if spec.get("prompt_template"):
+        agent_kwargs["prompt_template"] = spec["prompt_template"]
+    if spec.get("response_template"):
+        agent_kwargs["response_template"] = spec["response_template"]
     # CrewAI only honors custom templates when BOTH system_template and
     # prompt_template are present — supply a passthrough user template when only
     # the system one was configured.
-    if agent_kwargs.get('system_template') and not agent_kwargs.get('prompt_template'):
-        agent_kwargs['prompt_template'] = "{{ .Prompt }}"
+    if agent_kwargs.get("system_template") and not agent_kwargs.get("prompt_template"):
+        agent_kwargs["prompt_template"] = "{{ .Prompt }}"
 
     return agent_kwargs
 

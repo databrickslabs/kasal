@@ -10,6 +10,7 @@ Two index kinds live in Databricks Vector Search:
 2. ``document`` — the separate knowledge-search feature (document embeddings,
    RAG over Kasal's uploaded documents). Unrelated to crew memory.
 """
+
 from typing import Any, Dict, List
 
 
@@ -25,40 +26,48 @@ class DatabricksIndexSchemas:
         # Core MemoryRecord fields
         "id": "string",
         "content": "string",
-        "scope": "string",                # Hierarchical path e.g. "/crew/123/research"
-        "categories": "string",           # JSON array of category tags
-        "importance": "float",            # 0.0 - 1.0, inferred by LLM or explicit
-        "source": "string",               # Provenance tag e.g. "agent:researcher"
-        "private": "boolean",             # Visibility flag for source-based filtering
-        "metadata": "string",             # JSON dict for arbitrary metadata
-
+        "scope": "string",  # Hierarchical path e.g. "/crew/123/research"
+        "categories": "string",  # JSON array of category tags
+        "importance": "float",  # 0.0 - 1.0, inferred by LLM or explicit
+        "source": "string",  # Provenance tag e.g. "agent:researcher"
+        "private": "boolean",  # Visibility flag for source-based filtering
+        "metadata": "string",  # JSON dict for arbitrary metadata
         # Temporal
         "created_at": "timestamp",
         "last_accessed": "timestamp",
-
         # Kasal tenant isolation (also duplicated into metadata for portability)
         "crew_id": "string",
         "agent_id": "string",
         "group_id": "string",
-        "session_id": "string",           # Maps to job_id for run-scoped queries
-
+        "session_id": "string",  # Maps to job_id for run-scoped queries
         # Provenance
-        "llm_model": "string",            # Model that generated/analyzed this memory
-        "tools_used": "string",           # JSON array of tool names
-
+        "llm_model": "string",  # Model that generated/analyzed this memory
+        "tools_used": "string",  # JSON array of tool names
         # Technical
         "embedding": "array<float>",
         "embedding_model": "string",
-        "version": "int",                 # Schema version for future migrations
+        "version": "int",  # Schema version for future migrations
     }
 
     UNIFIED_SEARCH_COLUMNS: List[str] = [
-        "id", "content", "scope", "categories", "importance",
-        "source", "private", "metadata",
-        "created_at", "last_accessed",
-        "crew_id", "agent_id", "group_id", "session_id",
-        "llm_model", "tools_used",
-        "embedding_model", "version",
+        "id",
+        "content",
+        "scope",
+        "categories",
+        "importance",
+        "source",
+        "private",
+        "metadata",
+        "created_at",
+        "last_accessed",
+        "crew_id",
+        "agent_id",
+        "group_id",
+        "session_id",
+        "llm_model",
+        "tools_used",
+        "embedding_model",
+        "version",
     ]
 
     # ------------------------------------------------------------------
@@ -70,32 +79,39 @@ class DatabricksIndexSchemas:
         "content": "string",
         "source": "string",
         "document_type": "string",
-
         "section": "string",
         "chunk_index": "int",
         "chunk_size": "int",
         "parent_document_id": "string",
         "document_summary": "string",
-
         "agent_ids": "string",
-
         "created_at": "string",
         "updated_at": "string",
-
         "doc_metadata": "string",
         "group_id": "string",
-
         "embedding": "array<float>",
         "embedding_model": "string",
         "version": "int",
     }
 
     DOCUMENT_SEARCH_COLUMNS: List[str] = [
-        "id", "title", "content", "source", "document_type",
-        "section", "chunk_index", "chunk_size", "parent_document_id",
+        "id",
+        "title",
+        "content",
+        "source",
+        "document_type",
+        "section",
+        "chunk_index",
+        "chunk_size",
+        "parent_document_id",
         # ``document_summary`` is stored but not queried back for backward compat.
-        "agent_ids", "created_at", "updated_at", "doc_metadata", "group_id",
-        "embedding_model", "version",
+        "agent_ids",
+        "created_at",
+        "updated_at",
+        "doc_metadata",
+        "group_id",
+        "embedding_model",
+        "version",
     ]
 
     # ------------------------------------------------------------------

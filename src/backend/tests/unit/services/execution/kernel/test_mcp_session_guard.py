@@ -3,8 +3,9 @@ session + MCPService when the config declares no MCP servers (the integration
 returns [] without touching the service — the session was pure waste,
 N_agents + N_tasks session opens per execution)."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 def _no_session_patch():
@@ -19,16 +20,26 @@ async def test_agent_helper_skips_session_without_mcp_servers():
     from src.services.agent_builder.agent_adapter import create_agent
 
     mock_llm = MagicMock()
-    with patch(
-        "src.services.execution.kernel.agent_builder.Agent", return_value=MagicMock()
-    ), patch(
-        "src.services.llm.manager.LLMManager.configure_kasal_llm",
-        new_callable=AsyncMock, return_value=mock_llm,
-    ), _no_session_patch():
+    with (
+        patch(
+            "src.services.execution.kernel.agent_builder.Agent",
+            return_value=MagicMock(),
+        ),
+        patch(
+            "src.services.llm.manager.LLMManager.configure_kasal_llm",
+            new_callable=AsyncMock,
+            return_value=mock_llm,
+        ),
+        _no_session_patch(),
+    ):
         agent = await create_agent(
             agent_key="a1",
-            agent_config={"role": "R", "goal": "G", "backstory": "B",
-                          "tool_configs": {}},  # no MCP servers
+            agent_config={
+                "role": "R",
+                "goal": "G",
+                "backstory": "B",
+                "tool_configs": {},
+            },  # no MCP servers
             config={"group_id": "g1"},
         )
     assert agent is not None
@@ -41,12 +52,17 @@ async def test_task_helper_skips_session_without_mcp_servers():
     mock_agent = MagicMock()
     mock_agent.role = "R"
 
-    with patch.object(task_adapter, "Task", return_value=MagicMock()), \
-         _no_session_patch():
+    with (
+        patch.object(task_adapter, "Task", return_value=MagicMock()),
+        _no_session_patch(),
+    ):
         task = await task_adapter.create_task(
             task_key="t1",
-            task_config={"description": "d", "expected_output": "o",
-                         "tool_configs": {}},
+            task_config={
+                "description": "d",
+                "expected_output": "o",
+                "tool_configs": {},
+            },
             agent=mock_agent,
             config={"group_id": "g1"},
         )

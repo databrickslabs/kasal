@@ -5,20 +5,22 @@ request_scoped_session, get_db edge cases, get_smart_engine, and dispose_engines
 """
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock, Mock, patch, PropertyMock
-from sqlalchemy.exc import OperationalError
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
+import pytest
+from sqlalchemy.exc import OperationalError
 
 # ---------------------------------------------------------------------------
 # _SwappableSessionFactory
 # ---------------------------------------------------------------------------
+
 
 class TestSwappableSessionFactory:
     """Tests for the _SwappableSessionFactory hot-swap wrapper."""
 
     def test_call_delegates_to_factory(self):
         from src.db.session import async_session_factory
+
         mock_inner = MagicMock()
         mock_inner.return_value = "session_obj"
         original = async_session_factory._factory
@@ -29,11 +31,13 @@ class TestSwappableSessionFactory:
 
     def test_is_lakebase_initially_false(self):
         from src.db.session import async_session_factory
+
         # It may already be swapped in some runs; just check property type
         assert isinstance(async_session_factory.is_lakebase, bool)
 
     def test_activate_lakebase_swaps_factory(self):
         from src.db.session import _SwappableSessionFactory
+
         mock_local = MagicMock()
         factory = _SwappableSessionFactory(mock_local)
 
@@ -43,7 +47,8 @@ class TestSwappableSessionFactory:
         assert factory.is_lakebase is True
 
     def test_deactivate_lakebase_reverts(self):
-        from src.db.session import _SwappableSessionFactory, _local_session_factory
+        from src.db.session import _local_session_factory, _SwappableSessionFactory
+
         mock_local = MagicMock()
         factory = _SwappableSessionFactory(mock_local)
 
@@ -55,6 +60,7 @@ class TestSwappableSessionFactory:
 
     def test_call_after_activate(self):
         from src.db.session import _SwappableSessionFactory
+
         original_factory = MagicMock(return_value="orig")
         factory = _SwappableSessionFactory(original_factory)
 
@@ -64,6 +70,7 @@ class TestSwappableSessionFactory:
 
     def test_call_after_deactivate(self):
         from src.db.session import _SwappableSessionFactory
+
         original_factory = MagicMock(return_value="orig")
         factory = _SwappableSessionFactory(original_factory)
 
@@ -78,6 +85,7 @@ class TestSwappableSessionFactory:
 # ---------------------------------------------------------------------------
 # retry_db_operation decorator
 # ---------------------------------------------------------------------------
+
 
 class TestRetryDbOperation:
     """Tests for the retry_db_operation decorator."""
@@ -195,6 +203,7 @@ class TestRetryDbOperation:
 # request_scoped_session
 # ---------------------------------------------------------------------------
 
+
 class TestRequestScopedSession:
     """Tests for request_scoped_session context manager."""
 
@@ -202,11 +211,13 @@ class TestRequestScopedSession:
     async def test_yields_new_session_when_no_request_session(self):
         """Outside request context, creates a standalone session."""
         from src.db.session import request_scoped_session
+
         mock_session = AsyncMock()
 
         class MockCtx:
             async def __aenter__(self):
                 return mock_session
+
             async def __aexit__(self, *args):
                 pass
 
@@ -218,7 +229,7 @@ class TestRequestScopedSession:
     @pytest.mark.asyncio
     async def test_reuses_existing_request_session(self):
         """Inside request context, returns the stored ContextVar session."""
-        from src.db.session import request_scoped_session, _request_session
+        from src.db.session import _request_session, request_scoped_session
 
         existing = AsyncMock()
         token = _request_session.set(existing)
@@ -239,9 +250,9 @@ class TestRequestScopedSession:
         inside LLMManager.configure_kasal_llm.
         """
         from src.db.session import (
-            request_scoped_session,
-            detach_request_session,
             _request_session,
+            detach_request_session,
+            request_scoped_session,
         )
 
         leaked_closed = AsyncMock()  # the inherited, now-closed request session
@@ -250,6 +261,7 @@ class TestRequestScopedSession:
         class MockCtx:
             async def __aenter__(self):
                 return fresh
+
             async def __aexit__(self, *args):
                 pass
 
@@ -274,11 +286,13 @@ class TestRequestScopedSession:
 # get_smart_engine
 # ---------------------------------------------------------------------------
 
+
 class TestGetSmartEngine:
     """Tests for get_smart_engine function."""
 
     def test_sqlite_always_returns_engine(self):
-        from src.db.session import get_smart_engine, engine
+        from src.db.session import engine, get_smart_engine
+
         with patch("src.db.session.settings") as mock_settings:
             mock_settings.DATABASE_URI = "sqlite:///test.db"
             result = get_smart_engine()
@@ -322,7 +336,7 @@ class TestGetSmartEngine:
             assert result is mock_null
 
     def test_postgres_exception_falls_back_to_default_engine(self):
-        from src.db.session import get_smart_engine, engine
+        from src.db.session import engine, get_smart_engine
 
         with patch("src.db.session.settings") as mock_settings:
             mock_settings.DATABASE_URI = "postgresql+asyncpg://u" ":p@h/db"
@@ -335,6 +349,7 @@ class TestGetSmartEngine:
 # dispose_engines
 # ---------------------------------------------------------------------------
 
+
 class TestDisposeEngines:
     """Tests for the dispose_engines coroutine."""
 
@@ -345,7 +360,9 @@ class TestDisposeEngines:
         mock_engine = AsyncMock()
 
         with patch("src.db.session.engine", mock_engine):
-            with patch("src.db.lakebase_session.dispose_lakebase_factory", new=AsyncMock()):
+            with patch(
+                "src.db.lakebase_session.dispose_lakebase_factory", new=AsyncMock()
+            ):
                 await dispose_engines()
 
         mock_engine.dispose.assert_awaited()
@@ -358,7 +375,9 @@ class TestDisposeEngines:
         mock_engine.dispose.side_effect = Exception("dispose error")
 
         with patch("src.db.session.engine", mock_engine):
-            with patch("src.db.lakebase_session.dispose_lakebase_factory", new=AsyncMock()):
+            with patch(
+                "src.db.lakebase_session.dispose_lakebase_factory", new=AsyncMock()
+            ):
                 # Should not raise
                 await dispose_engines()
 
@@ -366,7 +385,10 @@ class TestDisposeEngines:
     async def test_handles_lakebase_dispose_error(self):
         from src.db.session import dispose_engines
 
-        with patch("src.db.lakebase_session.dispose_lakebase_factory", new=AsyncMock(side_effect=Exception("lb error"))):
+        with patch(
+            "src.db.lakebase_session.dispose_lakebase_factory",
+            new=AsyncMock(side_effect=Exception("lb error")),
+        ):
             # Should not raise
             await dispose_engines()
 
@@ -375,11 +397,13 @@ class TestDisposeEngines:
 # set_main_event_loop
 # ---------------------------------------------------------------------------
 
+
 class TestSetMainEventLoop:
     """Tests for set_main_event_loop."""
 
     def test_captures_running_loop(self):
         from src.db.session import set_main_event_loop
+
         mock_loop = MagicMock()
 
         with patch("asyncio.get_running_loop", return_value=mock_loop):
@@ -388,6 +412,7 @@ class TestSetMainEventLoop:
 
     def test_handles_no_running_loop(self):
         from src.db.session import set_main_event_loop
+
         with patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
             # Should not raise
             set_main_event_loop()
@@ -396,6 +421,7 @@ class TestSetMainEventLoop:
 # ---------------------------------------------------------------------------
 # get_local_db
 # ---------------------------------------------------------------------------
+
 
 class TestGetLocalDb:
     """Tests for the get_local_db async generator."""
@@ -409,10 +435,13 @@ class TestGetLocalDb:
         class MockCtx:
             async def __aenter__(self):
                 return mock_session
+
             async def __aexit__(self, *args):
                 pass
 
-        with patch("src.db.session._local_session_factory", MagicMock(return_value=MockCtx())):
+        with patch(
+            "src.db.session._local_session_factory", MagicMock(return_value=MockCtx())
+        ):
             gen = get_local_db()
             session = await gen.__anext__()
             assert session is mock_session
@@ -431,10 +460,13 @@ class TestGetLocalDb:
         class MockCtx:
             async def __aenter__(self):
                 return mock_session
+
             async def __aexit__(self, *args):
                 pass
 
-        with patch("src.db.session._local_session_factory", MagicMock(return_value=MockCtx())):
+        with patch(
+            "src.db.session._local_session_factory", MagicMock(return_value=MockCtx())
+        ):
             gen = get_local_db()
             await gen.__anext__()
             with pytest.raises(Exception):

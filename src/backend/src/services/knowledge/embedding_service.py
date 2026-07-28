@@ -4,10 +4,12 @@ Knowledge Embedding Service
 Handles embedding of knowledge files into vector storage.
 Separated from DatabricksKnowledgeService for clean architecture.
 """
-import os
-from typing import Dict, Any, List, Optional
+
 import logging
+import os
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -79,14 +81,14 @@ class KnowledgeEmbeddingService:
             # (so the search tool can narrow to a crew's knowledge sources). The
             # raw file still lives in the Databricks Volume; only the vector is
             # stored here. This replaces the Databricks Vector Search index.
-            from src.services.llm.manager import LLMManager
-            from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
+            from src.models.documentation_embedding import KnowledgeEmbedding
             from src.repositories.documentation_embedding_repository import (
                 DocumentationEmbeddingRepository,
             )
-            from src.models.documentation_embedding import KnowledgeEmbedding
+            from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
+            from src.services.llm.manager import LLMManager
 
-            filename = file_path.split('/')[-1]
+            filename = file_path.split("/")[-1]
 
             # Embed ALL chunks in batches with a single auth resolution. Doing this
             # per-chunk previously re-opened a DB session + re-resolved the PAT for
@@ -95,58 +97,64 @@ class KnowledgeEmbeddingService:
             # the shared resolver (Databricks in prod, local Ollama in dev) — the
             # SAME resolver the search side uses, so query/stored vectors always
             # match (both 1024-dim).
-            from src.services.knowledge.embedder import resolve_knowledge_embedder_config
+            from src.services.knowledge.embedder import (
+                resolve_knowledge_embedder_config,
+            )
 
             embedder_config = await resolve_knowledge_embedder_config(
                 user_token=user_token, group_id=self.group_id
             )
-            chunk_texts = [c['content'] for c in chunks]
+            chunk_texts = [c["content"] for c in chunks]
             embeddings = await LLMManager.get_embeddings(
                 chunk_texts, embedder_config=embedder_config
             )
 
             creates: List[DocumentationEmbeddingCreate] = []
             for i, chunk_data in enumerate(chunks):
-                chunk_content = chunk_data['content']
-                raw_content = chunk_data.get('raw_content', chunk_content)
-                section = chunk_data.get('section', f'Section {i+1}')
-                document_summary = chunk_data.get('document_summary', '')
+                chunk_content = chunk_data["content"]
+                raw_content = chunk_data.get("raw_content", chunk_content)
+                section = chunk_data.get("section", f"Section {i+1}")
+                document_summary = chunk_data.get("document_summary", "")
 
                 embedding = embeddings[i] if i < len(embeddings) else None
                 if not embedding:
-                    logger.warning(f"[EMBEDDING] No embedding produced for chunk {i}; skipping")
+                    logger.warning(
+                        f"[EMBEDDING] No embedding produced for chunk {i}; skipping"
+                    )
                     continue
 
                 # Prepare metadata (kept in the doc_metadata JSON column)
                 metadata = {
-                    'source': file_path,
-                    'filename': filename,
-                    'execution_id': execution_id,
-                    'group_id': self.group_id,
-                    'agent_ids': agent_ids or [],
-                    'chunk_index': i,
-                    'total_chunks': len(chunks),
-                    'section': section,
-                    'parent_document_id': f"{self.group_id}:{execution_id}:{filename}",
-                    'document_summary': document_summary,
-                    'raw_content': raw_content,
-                    'file_path': file_path,
-                    'created_by': created_by,
-                    'created_at': datetime.utcnow().isoformat(),
-                    'type': 'knowledge_source',
-                    'content_type': self._detect_content_type(filename)
+                    "source": file_path,
+                    "filename": filename,
+                    "execution_id": execution_id,
+                    "group_id": self.group_id,
+                    "agent_ids": agent_ids or [],
+                    "chunk_index": i,
+                    "total_chunks": len(chunks),
+                    "section": section,
+                    "parent_document_id": f"{self.group_id}:{execution_id}:{filename}",
+                    "document_summary": document_summary,
+                    "raw_content": raw_content,
+                    "file_path": file_path,
+                    "created_by": created_by,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "type": "knowledge_source",
+                    "content_type": self._detect_content_type(filename),
                 }
 
-                creates.append(DocumentationEmbeddingCreate(
-                    source=file_path,
-                    title=f"{filename} ({section})",
-                    content=chunk_content,
-                    embedding=embedding,
-                    doc_metadata=metadata,
-                    group_id=self.group_id,
-                    file_path=file_path,
-                    created_by=created_by,
-                ))
+                creates.append(
+                    DocumentationEmbeddingCreate(
+                        source=file_path,
+                        title=f"{filename} ({section})",
+                        content=chunk_content,
+                        embedding=embedding,
+                        doc_metadata=metadata,
+                        group_id=self.group_id,
+                        file_path=file_path,
+                        created_by=created_by,
+                    )
+                )
 
             # Store all chunk rows in ONE bulk insert. When the active memory
             # backend is Lakebase, this writes to the Lakebase memory instance
@@ -155,8 +163,8 @@ class KnowledgeEmbeddingService:
             # session (never the SQLite per-row queue, whose separate session
             # deadlocks against this upload's open transaction).
             from src.services.knowledge.embedding_session import (
-                knowledge_embedding_session,
                 ensure_lakebase_doc_table,
+                knowledge_embedding_session,
             )
 
             embedded_chunks = len(creates)
@@ -164,7 +172,9 @@ class KnowledgeEmbeddingService:
                 async with knowledge_embedding_session(
                     self.session, self.group_id, user_token
                 ) as (store_session, is_lakebase):
-                    repository = DocumentationEmbeddingRepository(store_session, model=KnowledgeEmbedding)
+                    repository = DocumentationEmbeddingRepository(
+                        store_session, model=KnowledgeEmbedding
+                    )
                     try:
                         if is_lakebase:
                             # Self-heal the Lakebase table (add embedding/group_id/
@@ -181,12 +191,16 @@ class KnowledgeEmbeddingService:
                             f"(lakebase={is_lakebase}, group={self.group_id}, file={file_path})"
                         )
                     except Exception as store_error:
-                        logger.error(f"[EMBEDDING] Failed to store knowledge embeddings: {store_error}")
+                        logger.error(
+                            f"[EMBEDDING] Failed to store knowledge embeddings: {store_error}"
+                        )
                         if not is_lakebase:
                             await store_session.rollback()
                         raise
 
-            logger.info(f"[EMBEDDING] Successfully embedded {embedded_chunks}/{len(chunks)} chunks")
+            logger.info(
+                f"[EMBEDDING] Successfully embedded {embedded_chunks}/{len(chunks)} chunks"
+            )
 
             if embedded_chunks == 0:
                 # Every chunk was parsed but none embedded — the embedding model
@@ -216,15 +230,17 @@ class KnowledgeEmbeddingService:
                 "chunks_processed": len(chunks),
                 "chunks_embedded": embedded_chunks,
                 "index_name": "knowledge_embeddings (pgvector)",
-                "message": f"Successfully embedded {embedded_chunks} chunks from {file_path}"
+                "message": f"Successfully embedded {embedded_chunks} chunks from {file_path}",
             }
 
         except Exception as e:
-            logger.error(f"[EMBEDDING] Error embedding file {file_path}: {e}", exc_info=True)
+            logger.error(
+                f"[EMBEDDING] Error embedding file {file_path}: {e}", exc_info=True
+            )
             return {
                 "status": "error",
                 "error": str(e),
-                "message": f"Failed to embed file {file_path}"
+                "message": f"Failed to embed file {file_path}",
             }
 
     async def purge_expired(self, user_token: Optional[str] = None) -> int:
@@ -292,11 +308,7 @@ class KnowledgeEmbeddingService:
             return 0
 
     async def _chunk_with_context(
-        self,
-        content: str,
-        file_path: str,
-        chunk_size: int = 1000,
-        overlap: int = 200
+        self, content: str, file_path: str, chunk_size: int = 1000, overlap: int = 200
     ) -> List[Dict[str, Any]]:
         """
         Chunk content with context enrichment.
@@ -312,7 +324,7 @@ class KnowledgeEmbeddingService:
         """
         try:
             # Generate document summary first
-            filename = file_path.split('/')[-1]
+            filename = file_path.split("/")[-1]
             document_summary = await self._generate_document_summary(content, filename)
 
             # Split content into chunks
@@ -342,16 +354,18 @@ class KnowledgeEmbeddingService:
                     document_summary=document_summary,
                     filename=filename,
                     section=section,
-                    chunk_index=chunk_index
+                    chunk_index=chunk_index,
                 )
 
-                chunks.append({
-                    'content': contextual_content,
-                    'raw_content': chunk_text,
-                    'section': section,
-                    'document_summary': document_summary,
-                    'chunk_index': chunk_index
-                })
+                chunks.append(
+                    {
+                        "content": contextual_content,
+                        "raw_content": chunk_text,
+                        "section": section,
+                        "document_summary": document_summary,
+                        "chunk_index": chunk_index,
+                    }
+                )
 
                 chunk_index += 1
                 start = end - overlap if end < content_length else content_length
@@ -369,7 +383,7 @@ class KnowledgeEmbeddingService:
         document_summary: str,
         filename: str,
         section: str,
-        chunk_index: int
+        chunk_index: int,
     ) -> str:
         """
         Create a context-enriched chunk for better embedding.
@@ -425,22 +439,22 @@ class KnowledgeEmbeddingService:
         Returns:
             Content type string
         """
-        ext = filename.lower().split('.')[-1] if '.' in filename else 'unknown'
+        ext = filename.lower().split(".")[-1] if "." in filename else "unknown"
         content_types = {
-            'pdf': 'PDF Document',
-            'txt': 'Text Document',
-            'md': 'Markdown Document',
-            'doc': 'Word Document',
-            'docx': 'Word Document',
-            'csv': 'CSV Data',
-            'json': 'JSON Data',
-            'xml': 'XML Data',
-            'html': 'HTML Document',
-            'py': 'Python Code',
-            'js': 'JavaScript Code',
-            'ts': 'TypeScript Code'
+            "pdf": "PDF Document",
+            "txt": "Text Document",
+            "md": "Markdown Document",
+            "doc": "Word Document",
+            "docx": "Word Document",
+            "csv": "CSV Data",
+            "json": "JSON Data",
+            "xml": "XML Data",
+            "html": "HTML Document",
+            "py": "Python Code",
+            "js": "JavaScript Code",
+            "ts": "TypeScript Code",
         }
-        return content_types.get(ext, 'Document')
+        return content_types.get(ext, "Document")
 
     async def _get_vector_storage(self, user_token: Optional[str] = None):
         """
@@ -453,20 +467,29 @@ class KnowledgeEmbeddingService:
             DatabricksVectorStorage instance or None
         """
         try:
-            from src.services.memory.databricks_vector_storage import DatabricksVectorStorage
-            from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
+            from src.schemas.memory_backend import (
+                MemoryBackendConfig,
+                MemoryBackendType,
+            )
+            from src.services.memory.databricks_vector_storage import (
+                DatabricksVectorStorage,
+            )
 
             # Lazy initialization of memory backend service
             if self._memory_backend_service is None:
                 from src.services.memory.backend_service import MemoryBackendService
+
                 self._memory_backend_service = MemoryBackendService(self.session)
 
             # Get memory backends for this group
-            group_backends = await self._memory_backend_service.get_memory_backends(self.group_id)
+            group_backends = await self._memory_backend_service.get_memory_backends(
+                self.group_id
+            )
 
             # Filter active Databricks backends
             databricks_backends = [
-                b for b in group_backends
+                b
+                for b in group_backends
                 if b.is_active and b.backend_type == MemoryBackendType.DATABRICKS
             ]
 
@@ -493,30 +516,41 @@ class KnowledgeEmbeddingService:
 
             # Get document index
             document_index = None
-            if hasattr(db_config, 'document_index'):
+            if hasattr(db_config, "document_index"):
                 document_index = db_config.document_index
             elif isinstance(db_config, dict):
-                document_index = db_config.get('document_index')
+                document_index = db_config.get("document_index")
 
             if not document_index:
                 logger.warning("Document index not configured")
                 return None
 
             # Extract configuration
-            if hasattr(db_config, 'endpoint_name'):
-                endpoint_name = getattr(db_config, 'document_endpoint_name', None) or db_config.endpoint_name
+            if hasattr(db_config, "endpoint_name"):
+                endpoint_name = (
+                    getattr(db_config, "document_endpoint_name", None)
+                    or db_config.endpoint_name
+                )
                 workspace_url = db_config.workspace_url
                 embedding_dimension = db_config.embedding_dimension or 1024
                 personal_access_token = db_config.personal_access_token
                 service_principal_client_id = db_config.service_principal_client_id
-                service_principal_client_secret = db_config.service_principal_client_secret
+                service_principal_client_secret = (
+                    db_config.service_principal_client_secret
+                )
             elif isinstance(db_config, dict):
-                endpoint_name = db_config.get('document_endpoint_name') or db_config.get('endpoint_name')
-                workspace_url = db_config.get('workspace_url')
-                embedding_dimension = db_config.get('embedding_dimension', 1024)
-                personal_access_token = db_config.get('personal_access_token')
-                service_principal_client_id = db_config.get('service_principal_client_id')
-                service_principal_client_secret = db_config.get('service_principal_client_secret')
+                endpoint_name = db_config.get(
+                    "document_endpoint_name"
+                ) or db_config.get("endpoint_name")
+                workspace_url = db_config.get("workspace_url")
+                embedding_dimension = db_config.get("embedding_dimension", 1024)
+                personal_access_token = db_config.get("personal_access_token")
+                service_principal_client_id = db_config.get(
+                    "service_principal_client_id"
+                )
+                service_principal_client_secret = db_config.get(
+                    "service_principal_client_secret"
+                )
             else:
                 logger.error(f"Unexpected databricks_config type: {type(db_config)}")
                 return None
@@ -532,7 +566,7 @@ class KnowledgeEmbeddingService:
                 personal_access_token=personal_access_token,
                 service_principal_client_id=service_principal_client_id,
                 service_principal_client_secret=service_principal_client_secret,
-                user_token=user_token
+                user_token=user_token,
             )
 
             return storage

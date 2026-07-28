@@ -1,19 +1,20 @@
-import pytest
 import unittest.mock
-from unittest.mock import AsyncMock, MagicMock, patch, call
-from typing import Dict, Any, List
+from typing import Any, Dict, List
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
+import pytest
 
 from src.services.agent_builder.crew_preparation import (
-    CrewPreparation, 
-    validate_crew_config, 
+    CrewPreparation,
     handle_crew_error,
-    process_crew_output
+    process_crew_output,
+    validate_crew_config,
 )
 
 
 class TestCrewPreparation:
     """Test suite for CrewPreparation class."""
-    
+
     @pytest.fixture
     def sample_config(self):
         """Sample crew configuration."""
@@ -25,26 +26,26 @@ class TestCrewPreparation:
                     "goal": "Research AI trends",
                     "backstory": "Expert AI researcher",
                     "tools": ["search_tool"],
-                    "verbose": True
+                    "verbose": True,
                 },
                 {
-                    "name": "writer", 
+                    "name": "writer",
                     "role": "Content Writer",
                     "goal": "Write reports",
                     "backstory": "Experienced writer",
                     "tools": ["write_tool"],
-                    "verbose": False
-                }
+                    "verbose": False,
+                },
             ],
             "tasks": [
                 {
                     "id": "research_task",
                     "name": "research_task",
                     "description": "Research AI trends",
-                    "agent": "researcher", 
+                    "agent": "researcher",
                     "expected_output": "Research report",
                     "tools": ["search_tool"],
-                    "async_execution": False
+                    "async_execution": False,
                 },
                 {
                     "id": "write_task",
@@ -54,199 +55,269 @@ class TestCrewPreparation:
                     "expected_output": "Blog post",
                     "context": ["research_task"],
                     "tools": ["write_tool"],
-                    "async_execution": True
-                }
+                    "async_execution": True,
+                },
             ],
             "crew": {
                 "process": "sequential",
                 "verbose": True,
                 "memory": True,
                 "planning": False,
-                "reasoning": False
+                "reasoning": False,
             },
             "model": "gpt-4",
-            "max_rpm": 10
+            "max_rpm": 10,
         }
-    
+
     @pytest.fixture
     def mock_tool_service(self):
         """Mock tool service."""
         tool_service = MagicMock()
         tool_service.get_tool = AsyncMock()
         return tool_service
-    
+
     @pytest.fixture
     def mock_tool_factory(self):
         """Mock tool factory."""
         tool_factory = MagicMock()
         tool_factory.create_tool = AsyncMock()
         return tool_factory
-    
+
     @pytest.fixture
     def crew_preparation(self, sample_config, mock_tool_service, mock_tool_factory):
         """CrewPreparation instance with sample config."""
         return CrewPreparation(sample_config, mock_tool_service, mock_tool_factory)
-    
+
     def test_init(self, sample_config, mock_tool_service, mock_tool_factory):
         """Test CrewPreparation initialization."""
         prep = CrewPreparation(sample_config, mock_tool_service, mock_tool_factory)
-        
+
         assert prep.config == sample_config
         assert prep.tool_service == mock_tool_service
         assert prep.tool_factory == mock_tool_factory
         assert prep.agents == {}
         assert prep.tasks == []
         assert prep.crew is None
-    
+
     @pytest.mark.asyncio
     async def test_prepare_success(self, crew_preparation):
         """Test successful crew preparation."""
-        with patch('src.services.agent_builder.crew_preparation.validate_crew_config', return_value=True), \
-             patch.object(crew_preparation, '_create_agents', return_value=True), \
-             patch.object(crew_preparation, '_create_tasks', return_value=True), \
-             patch.object(crew_preparation, '_create_crew', return_value=True):
-            
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.validate_crew_config",
+                return_value=True,
+            ),
+            patch.object(crew_preparation, "_create_agents", return_value=True),
+            patch.object(crew_preparation, "_create_tasks", return_value=True),
+            patch.object(crew_preparation, "_create_crew", return_value=True),
+        ):
+
             result = await crew_preparation.prepare()
             assert result is True
-    
+
     @pytest.mark.asyncio
     async def test_prepare_invalid_config(self, crew_preparation):
         """Test preparation with invalid configuration."""
-        with patch('src.services.agent_builder.crew_preparation.validate_crew_config', return_value=False):
+        with patch(
+            "src.services.agent_builder.crew_preparation.validate_crew_config",
+            return_value=False,
+        ):
             result = await crew_preparation.prepare()
             assert result is False
-    
+
     @pytest.mark.asyncio
     async def test_prepare_agent_creation_failure(self, crew_preparation):
         """Test preparation when agent creation fails."""
-        with patch('src.services.agent_builder.crew_preparation.validate_crew_config', return_value=True), \
-             patch.object(crew_preparation, '_create_agents', return_value=False):
-            
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.validate_crew_config",
+                return_value=True,
+            ),
+            patch.object(crew_preparation, "_create_agents", return_value=False),
+        ):
+
             result = await crew_preparation.prepare()
             assert result is False
-    
+
     @pytest.mark.asyncio
     async def test_prepare_task_creation_failure(self, crew_preparation):
         """Test preparation when task creation fails."""
-        with patch('src.services.agent_builder.crew_preparation.validate_crew_config', return_value=True), \
-             patch.object(crew_preparation, '_create_agents', return_value=True), \
-             patch.object(crew_preparation, '_create_tasks', return_value=False):
-            
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.validate_crew_config",
+                return_value=True,
+            ),
+            patch.object(crew_preparation, "_create_agents", return_value=True),
+            patch.object(crew_preparation, "_create_tasks", return_value=False),
+        ):
+
             result = await crew_preparation.prepare()
             assert result is False
-    
+
     @pytest.mark.asyncio
     async def test_prepare_crew_creation_failure(self, crew_preparation):
         """Test preparation when crew creation fails."""
-        with patch('src.services.agent_builder.crew_preparation.validate_crew_config', return_value=True), \
-             patch.object(crew_preparation, '_create_agents', return_value=True), \
-             patch.object(crew_preparation, '_create_tasks', return_value=True), \
-             patch.object(crew_preparation, '_create_crew', return_value=False):
-            
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.validate_crew_config",
+                return_value=True,
+            ),
+            patch.object(crew_preparation, "_create_agents", return_value=True),
+            patch.object(crew_preparation, "_create_tasks", return_value=True),
+            patch.object(crew_preparation, "_create_crew", return_value=False),
+        ):
+
             result = await crew_preparation.prepare()
             assert result is False
-    
+
     @pytest.mark.asyncio
     async def test_prepare_exception_handling(self, crew_preparation):
         """Test preparation handles exceptions properly."""
-        with patch('src.services.agent_builder.crew_preparation.validate_crew_config', side_effect=Exception("Test error")), \
-             patch('src.services.agent_builder.crew_preparation.handle_crew_error') as mock_handle_error:
-            
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.validate_crew_config",
+                side_effect=Exception("Test error"),
+            ),
+            patch(
+                "src.services.agent_builder.crew_preparation.handle_crew_error"
+            ) as mock_handle_error,
+        ):
+
             result = await crew_preparation.prepare()
             assert result is False
             mock_handle_error.assert_called_once()
-    
+
     @pytest.mark.asyncio
     async def test_create_agents_success(self, crew_preparation):
         """Test successful agent creation."""
         mock_agent1 = MagicMock()
         mock_agent2 = MagicMock()
-        
-        with patch('src.services.agent_builder.crew_preparation.create_agent', side_effect=[mock_agent1, mock_agent2]) as mock_create:
+
+        with patch(
+            "src.services.agent_builder.crew_preparation.create_agent",
+            side_effect=[mock_agent1, mock_agent2],
+        ) as mock_create:
             result = await crew_preparation._create_agents()
-            
+
             assert result is True
             assert len(crew_preparation.agents) == 2
             assert crew_preparation.agents["researcher"] == mock_agent1
             assert crew_preparation.agents["writer"] == mock_agent2
-            
+
             # Verify create_agent was called correctly
             assert mock_create.call_count == 2
             call_kwargs_list = [c.kwargs for c in mock_create.call_args_list]
-            researcher_call = next(ck for ck in call_kwargs_list if ck.get('agent_key') == 'researcher')
-            assert researcher_call['agent_config'] == crew_preparation.config['agents'][0]
-            assert researcher_call['tool_service'] is crew_preparation.tool_service
-            assert researcher_call['tool_factory'] is crew_preparation.tool_factory
-            assert researcher_call['config'] is crew_preparation.config
-            assert 'agent_id' in researcher_call  # modern implementation passes resolved agent_id
+            researcher_call = next(
+                ck for ck in call_kwargs_list if ck.get("agent_key") == "researcher"
+            )
+            assert (
+                researcher_call["agent_config"] == crew_preparation.config["agents"][0]
+            )
+            assert researcher_call["tool_service"] is crew_preparation.tool_service
+            assert researcher_call["tool_factory"] is crew_preparation.tool_factory
+            assert researcher_call["config"] is crew_preparation.config
+            assert (
+                "agent_id" in researcher_call
+            )  # modern implementation passes resolved agent_id
 
     @pytest.mark.asyncio
     async def test_create_agents_with_fallback_names(self, crew_preparation):
         """Test agent creation with fallback naming."""
         # Modify config to test fallback naming
         crew_preparation.config["agents"] = [
-            {"role": "Analyst", "goal": "Analyze data", "backstory": "Expert analyst"},  # No name, should use role
-            {"role": "Worker", "goal": "Do work", "backstory": "Hard worker"}  # No name or role, should use agent_1
+            {
+                "role": "Analyst",
+                "goal": "Analyze data",
+                "backstory": "Expert analyst",
+            },  # No name, should use role
+            {
+                "role": "Worker",
+                "goal": "Do work",
+                "backstory": "Hard worker",
+            },  # No name or role, should use agent_1
         ]
-        
+
         mock_agent1 = MagicMock()
         mock_agent2 = MagicMock()
-        
-        with patch('src.services.agent_builder.crew_preparation.create_agent', side_effect=[mock_agent1, mock_agent2]):
+
+        with patch(
+            "src.services.agent_builder.crew_preparation.create_agent",
+            side_effect=[mock_agent1, mock_agent2],
+        ):
             result = await crew_preparation._create_agents()
-            
+
             assert result is True
             assert "Analyst" in crew_preparation.agents
             assert "Worker" in crew_preparation.agents
-    
+
     @pytest.mark.asyncio
     async def test_create_agents_creation_failure(self, crew_preparation):
         """Test agent creation when create_agent returns None."""
-        with patch('src.services.agent_builder.crew_preparation.create_agent', return_value=None):
+        with patch(
+            "src.services.agent_builder.crew_preparation.create_agent",
+            return_value=None,
+        ):
             result = await crew_preparation._create_agents()
             assert result is False
-    
+
     @pytest.mark.asyncio
     async def test_create_agents_exception_handling(self, crew_preparation):
         """Test agent creation handles exceptions."""
-        with patch('src.services.agent_builder.crew_preparation.create_agent', side_effect=Exception("Test error")), \
-             patch('src.services.agent_builder.crew_preparation.handle_crew_error') as mock_handle_error:
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.create_agent",
+                side_effect=Exception("Test error"),
+            ),
+            patch(
+                "src.services.agent_builder.crew_preparation.handle_crew_error"
+            ) as mock_handle_error,
+        ):
 
             result = await crew_preparation._create_agents()
             assert result is False
             mock_handle_error.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_crew_level_reasoning_config_propagated_to_agents(self, crew_preparation):
+    async def test_crew_level_reasoning_config_propagated_to_agents(
+        self, crew_preparation
+    ):
         """Crew-level reasoning + reasoning_config must be fanned out to each agent's
         config so the shared builder can apply the model's native reasoning budget
         to each agent's own LLM."""
         crew_preparation.config["crew"]["reasoning"] = True
         crew_preparation.config["crew"]["reasoning_config"] = {
-            "reasoning_effort": "low", "max_steps": 3, "max_replans": 0,
+            "reasoning_effort": "low",
+            "max_steps": 3,
+            "max_replans": 0,
         }
-        with patch('src.services.agent_builder.crew_preparation.create_agent',
-                   side_effect=[MagicMock(), MagicMock()]) as mock_create:
+        with patch(
+            "src.services.agent_builder.crew_preparation.create_agent",
+            side_effect=[MagicMock(), MagicMock()],
+        ) as mock_create:
             result = await crew_preparation._create_agents()
 
             assert result is True
             for ck in (c.kwargs for c in mock_create.call_args_list):
-                cfg = ck['agent_config']
-                assert cfg['reasoning'] is True
-                assert cfg['reasoning_config'] == {
-                    "reasoning_effort": "low", "max_steps": 3, "max_replans": 0,
+                cfg = ck["agent_config"]
+                assert cfg["reasoning"] is True
+                assert cfg["reasoning_config"] == {
+                    "reasoning_effort": "low",
+                    "max_steps": 3,
+                    "max_replans": 0,
                 }
 
     @pytest.mark.asyncio
     async def test_no_reasoning_config_when_crew_has_none(self, crew_preparation):
         """Without a crew-level reasoning_config, none is injected onto agents."""
         crew_preparation.config["crew"]["reasoning"] = False
-        with patch('src.services.agent_builder.crew_preparation.create_agent',
-                   side_effect=[MagicMock(), MagicMock()]) as mock_create:
+        with patch(
+            "src.services.agent_builder.crew_preparation.create_agent",
+            side_effect=[MagicMock(), MagicMock()],
+        ) as mock_create:
             await crew_preparation._create_agents()
             for ck in (c.kwargs for c in mock_create.call_args_list):
-                assert 'reasoning_config' not in ck['agent_config']
-    
+                assert "reasoning_config" not in ck["agent_config"]
+
     @pytest.mark.asyncio
     async def test_create_tasks_success(self, crew_preparation):
         """Test successful task creation."""
@@ -254,11 +325,16 @@ class TestCrewPreparation:
         crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
 
         mock_task1 = MagicMock()
-        mock_task1.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
+        mock_task1.async_execution = (
+            False  # Explicitly set to avoid MagicMock truthy behavior
+        )
         mock_task2 = MagicMock()
         mock_task2.async_execution = True  # Match config (write_task has async=True)
 
-        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch(
+            "src.services.agent_builder.task_adapter.create_task",
+            side_effect=[mock_task1, mock_task2],
+        ):
             result = await crew_preparation._create_tasks()
 
             # Only 1 async task, so no completion task added
@@ -266,7 +342,7 @@ class TestCrewPreparation:
             assert len(crew_preparation.tasks) == 2
             assert crew_preparation.tasks[0] == mock_task1
             assert crew_preparation.tasks[1] == mock_task2
-    
+
     @pytest.mark.asyncio
     async def test_create_tasks_with_context_resolution(self, crew_preparation):
         """Test task creation with context resolution."""
@@ -274,50 +350,58 @@ class TestCrewPreparation:
         crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
 
         mock_task1 = MagicMock()
-        mock_task1.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
+        mock_task1.async_execution = (
+            False  # Explicitly set to avoid MagicMock truthy behavior
+        )
         mock_task2 = MagicMock()
         mock_task2.async_execution = True  # Match config (write_task has async=True)
         mock_task2.context = None  # Initialize context
 
-        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch(
+            "src.services.agent_builder.task_adapter.create_task",
+            side_effect=[mock_task1, mock_task2],
+        ):
             result = await crew_preparation._create_tasks()
 
             assert result is True
             # Context is set then cleared for async tasks to enable parallel execution
             # (but since only 1 async task, context is set and not cleared)
             assert mock_task2.context == [mock_task1]
-    
+
     @pytest.mark.asyncio
     async def test_create_tasks_agent_fallback(self, crew_preparation):
         """Test task creation with agent fallback."""
         # Setup one agent
         crew_preparation.agents = {"researcher": MagicMock()}
-        
+
         # Modify config to have task with invalid agent
         crew_preparation.config["tasks"] = [
             {
                 "id": "test_task",
-                "name": "test_task", 
+                "name": "test_task",
                 "description": "Test task",
                 "agent": "nonexistent_agent",
-                "expected_output": "Test output"
+                "expected_output": "Test output",
             }
         ]
-        
+
         mock_task = MagicMock()
-        
-        with patch('src.services.agent_builder.task_adapter.create_task', return_value=mock_task):
+
+        with patch(
+            "src.services.agent_builder.task_adapter.create_task",
+            return_value=mock_task,
+        ):
             result = await crew_preparation._create_tasks()
             assert result is True
-    
+
     @pytest.mark.asyncio
     async def test_create_tasks_no_agents_available(self, crew_preparation):
         """Test task creation when no agents are available."""
         crew_preparation.agents = {}
-        
+
         result = await crew_preparation._create_tasks()
         assert result is False
-    
+
     @pytest.mark.asyncio
     async def test_create_tasks_async_execution_parallel(self, crew_preparation):
         """Test parallel execution setup for multiple async tasks.
@@ -351,7 +435,7 @@ class TestCrewPreparation:
                 "description": "Second task",
                 "agent": "writer",
                 "expected_output": "Output 2",
-            }
+            },
         ]
 
         mock_task1 = MagicMock()
@@ -366,9 +450,12 @@ class TestCrewPreparation:
         mock_task2.description = "Second task"
         mock_task2.agent = MagicMock()
 
-        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]) as mock_create:
+        with patch(
+            "src.services.agent_builder.task_adapter.create_task",
+            side_effect=[mock_task1, mock_task2],
+        ) as mock_create:
             # Patch crewai.Task since the code does 'from crewai import Task as CrewAITask'
-            with patch('src.services.execution.runtime.Task') as mock_task_class:
+            with patch("src.services.execution.runtime.Task") as mock_task_class:
                 mock_completion_task = MagicMock()
                 mock_task_class.return_value = mock_completion_task
 
@@ -377,11 +464,11 @@ class TestCrewPreparation:
                 assert result is True
 
                 # Both tasks should be created with async_execution=True
-                first_call_config = mock_create.call_args_list[0][1]['task_config']
-                assert first_call_config['async_execution'] is True
+                first_call_config = mock_create.call_args_list[0][1]["task_config"]
+                assert first_call_config["async_execution"] is True
 
-                second_call_config = mock_create.call_args_list[1][1]['task_config']
-                assert second_call_config['async_execution'] is True
+                second_call_config = mock_create.call_args_list[1][1]["task_config"]
+                assert second_call_config["async_execution"] is True
 
                 # Both async tasks remain async (for parallel execution)
                 assert mock_task1.async_execution is True
@@ -390,19 +477,26 @@ class TestCrewPreparation:
                 # A completion task should be added (3 tasks total)
                 assert len(crew_preparation.tasks) == 3
                 assert crew_preparation.tasks[2] == mock_completion_task
-    
+
     @pytest.mark.asyncio
     async def test_create_tasks_exception_handling(self, crew_preparation):
         """Test task creation handles exceptions."""
         crew_preparation.agents = {"researcher": MagicMock()}
-        
-        with patch('src.services.agent_builder.crew_preparation.create_task', side_effect=Exception("Test error")), \
-             patch('src.services.agent_builder.crew_preparation.handle_crew_error') as mock_handle_error:
-            
+
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.create_task",
+                side_effect=Exception("Test error"),
+            ),
+            patch(
+                "src.services.agent_builder.crew_preparation.handle_crew_error"
+            ) as mock_handle_error,
+        ):
+
             result = await crew_preparation._create_tasks()
             assert result is False
             mock_handle_error.assert_called_once()
-    
+
     @pytest.mark.asyncio
     async def test_create_tasks_string_context(self, crew_preparation):
         """Test task creation with string context."""
@@ -415,7 +509,7 @@ class TestCrewPreparation:
                 "name": "research_task",
                 "description": "Research AI trends",
                 "agent": "researcher",
-                "expected_output": "Research report"
+                "expected_output": "Research report",
             },
             {
                 "id": "write_task",
@@ -423,22 +517,29 @@ class TestCrewPreparation:
                 "description": "Write blog post",
                 "agent": "writer",
                 "expected_output": "Blog post",
-                "context": "research_task"  # String context
-            }
+                "context": "research_task",  # String context
+            },
         ]
 
         mock_task1 = MagicMock()
-        mock_task1.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
+        mock_task1.async_execution = (
+            False  # Explicitly set to avoid MagicMock truthy behavior
+        )
         mock_task2 = MagicMock()
-        mock_task2.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
+        mock_task2.async_execution = (
+            False  # Explicitly set to avoid MagicMock truthy behavior
+        )
         mock_task2.context = None
 
-        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch(
+            "src.services.agent_builder.task_adapter.create_task",
+            side_effect=[mock_task1, mock_task2],
+        ):
             result = await crew_preparation._create_tasks()
 
             assert result is True
             assert mock_task2.context == [mock_task1]
-    
+
     @pytest.mark.asyncio
     async def test_create_tasks_dict_context_with_task_ids(self, crew_preparation):
         """Test task creation with dict context containing task_ids."""
@@ -451,7 +552,7 @@ class TestCrewPreparation:
                 "name": "research_task",
                 "description": "Research AI trends",
                 "agent": "researcher",
-                "expected_output": "Research report"
+                "expected_output": "Research report",
             },
             {
                 "id": "write_task",
@@ -459,22 +560,31 @@ class TestCrewPreparation:
                 "description": "Write blog post",
                 "agent": "writer",
                 "expected_output": "Blog post",
-                "context": {"task_ids": ["research_task"]}  # Dict context with task_ids
-            }
+                "context": {
+                    "task_ids": ["research_task"]
+                },  # Dict context with task_ids
+            },
         ]
 
         mock_task1 = MagicMock()
-        mock_task1.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
+        mock_task1.async_execution = (
+            False  # Explicitly set to avoid MagicMock truthy behavior
+        )
         mock_task2 = MagicMock()
-        mock_task2.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
+        mock_task2.async_execution = (
+            False  # Explicitly set to avoid MagicMock truthy behavior
+        )
         mock_task2.context = None
 
-        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch(
+            "src.services.agent_builder.task_adapter.create_task",
+            side_effect=[mock_task1, mock_task2],
+        ):
             result = await crew_preparation._create_tasks()
 
             assert result is True
             assert mock_task2.context == [mock_task1]
-    
+
     @pytest.mark.asyncio
     async def test_create_tasks_context_refs_with_task_prefix(self, crew_preparation):
         """Test that context refs with 'task_' prefix resolve to raw-ID keys."""
@@ -487,7 +597,7 @@ class TestCrewPreparation:
                 "name": "research_task",
                 "description": "Research AI trends",
                 "agent": "researcher",
-                "expected_output": "Research report"
+                "expected_output": "Research report",
             },
             {
                 "id": "def-456",
@@ -495,8 +605,8 @@ class TestCrewPreparation:
                 "description": "Write blog post",
                 "agent": "writer",
                 "expected_output": "Blog post",
-                "context": ["task_abc-123"]  # Frontend-style prefixed reference
-            }
+                "context": ["task_abc-123"],  # Frontend-style prefixed reference
+            },
         ]
 
         mock_task1 = MagicMock()
@@ -505,14 +615,19 @@ class TestCrewPreparation:
         mock_task2.async_execution = False
         mock_task2.context = None
 
-        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]):
+        with patch(
+            "src.services.agent_builder.task_adapter.create_task",
+            side_effect=[mock_task1, mock_task2],
+        ):
             result = await crew_preparation._create_tasks()
 
             assert result is True
             assert mock_task2.context == [mock_task1]
 
     @pytest.mark.asyncio
-    async def test_create_tasks_context_refs_task_prefix_unresolvable(self, crew_preparation):
+    async def test_create_tasks_context_refs_task_prefix_unresolvable(
+        self, crew_preparation
+    ):
         """Test that context refs with 'task_' prefix still warn when stripped ID is missing."""
         crew_preparation.agents = {"researcher": MagicMock(), "writer": MagicMock()}
 
@@ -522,7 +637,7 @@ class TestCrewPreparation:
                 "name": "research_task",
                 "description": "Research AI trends",
                 "agent": "researcher",
-                "expected_output": "Research report"
+                "expected_output": "Research report",
             },
             {
                 "id": "def-456",
@@ -530,8 +645,8 @@ class TestCrewPreparation:
                 "description": "Write blog post",
                 "agent": "writer",
                 "expected_output": "Blog post",
-                "context": ["task_nonexistent-id"]  # task_ prefix but ID doesn't exist
-            }
+                "context": ["task_nonexistent-id"],  # task_ prefix but ID doesn't exist
+            },
         ]
 
         mock_task1 = MagicMock()
@@ -539,8 +654,13 @@ class TestCrewPreparation:
         mock_task2 = MagicMock()
         mock_task2.async_execution = False
 
-        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]), \
-             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
+        with (
+            patch(
+                "src.services.agent_builder.task_adapter.create_task",
+                side_effect=[mock_task1, mock_task2],
+            ),
+            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+        ):
 
             result = await crew_preparation._create_tasks()
 
@@ -569,14 +689,14 @@ class TestCrewPreparation:
                 "name": "research_task",
                 "description": "Research",
                 "agent": "researcher",
-                "expected_output": "Report"
+                "expected_output": "Report",
             },
             {
                 "id": "bbb-222",
                 "name": "analysis_task",
                 "description": "Analyze",
                 "agent": "analyst",
-                "expected_output": "Analysis"
+                "expected_output": "Analysis",
             },
             {
                 "id": "ccc-333",
@@ -585,8 +705,8 @@ class TestCrewPreparation:
                 "agent": "writer",
                 "expected_output": "Document",
                 # One valid prefixed ref, one invalid prefixed ref
-                "context": ["task_aaa-111", "task_does-not-exist"]
-            }
+                "context": ["task_aaa-111", "task_does-not-exist"],
+            },
         ]
 
         mock_task1 = MagicMock()
@@ -597,8 +717,13 @@ class TestCrewPreparation:
         mock_task3.async_execution = False
         mock_task3.context = None
 
-        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2, mock_task3]), \
-             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
+        with (
+            patch(
+                "src.services.agent_builder.task_adapter.create_task",
+                side_effect=[mock_task1, mock_task2, mock_task3],
+            ),
+            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+        ):
 
             result = await crew_preparation._create_tasks()
 
@@ -622,7 +747,7 @@ class TestCrewPreparation:
                 "description": "Research AI trends",
                 "agent": "researcher",
                 "expected_output": "Research report",
-                "context": []  # Empty context (no warning expected)
+                "context": [],  # Empty context (no warning expected)
             },
             {
                 "id": "write_task",
@@ -630,24 +755,35 @@ class TestCrewPreparation:
                 "description": "Write report",
                 "agent": "writer",
                 "expected_output": "Written report",
-                "context": ["nonexistent1", "nonexistent2"]  # All invalid references
-            }
+                "context": ["nonexistent1", "nonexistent2"],  # All invalid references
+            },
         ]
 
         mock_task1 = MagicMock()
-        mock_task1.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
+        mock_task1.async_execution = (
+            False  # Explicitly set to avoid MagicMock truthy behavior
+        )
         mock_task2 = MagicMock()
-        mock_task2.async_execution = False  # Explicitly set to avoid MagicMock truthy behavior
+        mock_task2.async_execution = (
+            False  # Explicitly set to avoid MagicMock truthy behavior
+        )
 
-        with patch('src.services.agent_builder.task_adapter.create_task', side_effect=[mock_task1, mock_task2]), \
-             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
+        with (
+            patch(
+                "src.services.agent_builder.task_adapter.create_task",
+                side_effect=[mock_task1, mock_task2],
+            ),
+            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+        ):
 
             result = await crew_preparation._create_tasks()
 
             assert result is True
             # Check that warning was logged for no resolvable context tasks
-            mock_logger.warning.assert_any_call("No context tasks could be resolved for task write_task")
-    
+            mock_logger.warning.assert_any_call(
+                "No context tasks could be resolved for task write_task"
+            )
+
     @pytest.mark.asyncio
     async def test_create_crew_basic_success(self, crew_preparation):
         """Test basic crew creation success."""
@@ -657,14 +793,23 @@ class TestCrewPreparation:
 
         mock_crew = MagicMock()
 
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ),
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
 
             assert result is True
             assert crew_preparation.crew == mock_crew
-    
+
     @pytest.mark.asyncio
     async def test_create_crew_with_databricks_environment(self, crew_preparation):
         """Test crew creation in Databricks environment."""
@@ -674,14 +819,26 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
         mock_llm = MagicMock()
 
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
-             patch('src.services.llm.manager.LLMManager.get_llm', return_value=mock_llm), \
-             patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ),
+            patch("src.services.llm.manager.LLMManager.get_llm", return_value=mock_llm),
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                return_value=None,
+            ),
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
             assert result is True
-    
+
     @pytest.mark.asyncio
     async def test_create_crew_never_forwards_planning(self, crew_preparation):
         """The CrewAI-style planner was removed: a legacy crew config carrying
@@ -698,10 +855,24 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
         mock_manager_llm = MagicMock()
 
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
-             patch('src.services.llm.manager.LLMManager.configure_kasal_llm') as mock_configure_llm, \
-             patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ) as mock_crew_class,
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm"
+            ) as mock_configure_llm,
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                return_value=None,
+            ),
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             mock_configure_llm.return_value = mock_manager_llm
 
@@ -710,15 +881,17 @@ class TestCrewPreparation:
             assert result is True
 
             call_kwargs = mock_crew_class.call_args[1]
-            assert 'planning' not in call_kwargs
-            assert 'planning_llm' not in call_kwargs
-            assert 'reasoning' not in call_kwargs
-            assert 'reasoning_llm' not in call_kwargs
+            assert "planning" not in call_kwargs
+            assert "planning_llm" not in call_kwargs
+            assert "reasoning" not in call_kwargs
+            assert "reasoning_llm" not in call_kwargs
             # No planner model was resolved for the legacy planning_llm.
             assert all(
-                c.args[0] != "gpt-3.5-turbo" for c in mock_configure_llm.call_args_list if c.args
+                c.args[0] != "gpt-3.5-turbo"
+                for c in mock_configure_llm.call_args_list
+                if c.args
             )
-    
+
     @pytest.mark.asyncio
     async def test_create_crew_with_max_rpm(self, crew_preparation):
         """Test crew creation with max RPM setting."""
@@ -728,29 +901,49 @@ class TestCrewPreparation:
 
         mock_crew = MagicMock()
 
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ) as mock_crew_class,
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
 
             assert result is True
             call_kwargs = mock_crew_class.call_args[1]
-            assert call_kwargs['max_rpm'] == 15
-    
+            assert call_kwargs["max_rpm"] == 15
+
     @pytest.mark.asyncio
     async def test_create_crew_exception_handling(self, crew_preparation):
         """Test crew creation handles exceptions."""
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
 
-        with patch('src.services.agent_builder.crew_preparation.Crew', side_effect=Exception("Test error")), \
-             patch('src.services.agent_builder.crew_preparation.handle_crew_error') as mock_handle_error, \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                side_effect=Exception("Test error"),
+            ),
+            patch(
+                "src.services.agent_builder.crew_preparation.handle_crew_error"
+            ) as mock_handle_error,
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
             assert result is False
             mock_handle_error.assert_called_once()
-    
+
     @pytest.mark.asyncio
     async def test_create_crew_llm_manager_import_error(self, crew_preparation):
         """Test crew creation handles ImportError for LLMManager."""
@@ -760,15 +953,27 @@ class TestCrewPreparation:
 
         mock_crew = MagicMock()
 
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
-             patch('src.services.llm.manager.LLMManager.get_llm', side_effect=ImportError("Module not found")), \
-             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger, \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.get_llm",
+                side_effect=ImportError("Module not found"),
+            ),
+            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
 
             assert result is True
-    
+
     @pytest.mark.asyncio
     async def test_create_crew_llm_manager_exception(self, crew_preparation):
         """Test crew creation handles exceptions in LLM configuration."""
@@ -778,50 +983,92 @@ class TestCrewPreparation:
 
         mock_crew = MagicMock()
 
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
-             patch('src.services.llm.manager.LLMManager.get_llm', side_effect=Exception("LLM error")), \
-             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger, \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.get_llm",
+                side_effect=Exception("LLM error"),
+            ),
+            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
 
             assert result is True
-    
+
     @pytest.mark.asyncio
     async def test_create_crew_databricks_fallback_on_llm_error(self, crew_preparation):
         """Test crew creation falls back to Databricks model when LLM fails in Databricks environment."""
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
         crew_preparation.config["model"] = "gpt-4"
-        
+
         mock_crew = MagicMock()
         mock_fallback_llm = MagicMock()
-        
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
-             patch('src.services.llm.manager.LLMManager.get_llm', side_effect=[Exception("LLM error"), mock_fallback_llm]), \
-             patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger, \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.get_llm",
+                side_effect=[Exception("LLM error"), mock_fallback_llm],
+            ),
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                return_value=None,
+            ),
+            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
 
             assert result is True
-    
+
     @pytest.mark.asyncio
     async def test_create_crew_no_model_databricks_default(self, crew_preparation):
         """Test crew creation uses Databricks default when no model specified in Databricks environment."""
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
         # Explicitly remove model from config
-        crew_preparation.config.pop('model', None)
-        
+        crew_preparation.config.pop("model", None)
+
         mock_crew = MagicMock()
         mock_default_llm = MagicMock()
-        
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
-             patch('src.services.llm.manager.LLMManager.get_llm', return_value=mock_default_llm), \
-             patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.get_llm",
+                return_value=mock_default_llm,
+            ),
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                return_value=None,
+            ),
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
 
@@ -833,95 +1080,165 @@ class TestCrewPreparation:
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
         # Explicitly remove model from config
-        crew_preparation.config.pop('model', None)
+        crew_preparation.config.pop("model", None)
 
         mock_crew = MagicMock()
 
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
-             patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ),
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                return_value=None,
+            ),
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
 
             assert result is True
-    
+
     @pytest.mark.asyncio
     async def test_create_crew_with_embedder_config_in_agents(self, crew_preparation):
         """Test crew creation finds embedder config in agent configuration."""
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
-        
+
         # Add embedder config to agent
         crew_preparation.config["agents"] = [
-            {"name": "agent1", "embedder_config": {"provider": "openai", "config": {"model": "text-embedding-ada-002"}}}
+            {
+                "name": "agent1",
+                "embedder_config": {
+                    "provider": "openai",
+                    "config": {"model": "text-embedding-ada-002"},
+                },
+            }
         ]
-        
+
         mock_crew = MagicMock()
-        
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
-             patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', return_value="test-key"), \
-             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger, \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ),
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                return_value="test-key",
+            ),
+            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
 
             assert result is True
-    
+
     @pytest.mark.asyncio
     async def test_create_crew_openai_api_key_in_databricks(self, crew_preparation):
         """Test crew creation handles OpenAI API key configuration in Databricks Apps environment."""
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
-        
+
         mock_crew = MagicMock()
-        
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
-             patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', return_value="test-openai-key"), \
-             patch.dict('os.environ', {}, clear=True), \
-             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger, \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ),
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                return_value="test-openai-key",
+            ),
+            patch.dict("os.environ", {}, clear=True),
+            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
 
             assert result is True
-            mock_logger.info.assert_any_call("OpenAI API key is configured, keeping it for CrewAI")
-    
+            mock_logger.info.assert_any_call(
+                "OpenAI API key is configured, keeping it for CrewAI"
+            )
+
     @pytest.mark.asyncio
     async def test_create_crew_no_openai_key_in_databricks(self, crew_preparation):
         """Test crew creation sets dummy OpenAI key when none configured in Databricks Apps environment."""
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
-        
+
         mock_crew = MagicMock()
-        
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
-             patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch.dict('os.environ', {}, clear=True), \
-             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger, \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ),
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                return_value=None,
+            ),
+            patch.dict("os.environ", {}, clear=True),
+            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
 
             assert result is True
-            mock_logger.info.assert_any_call("No OpenAI API key configured, set dummy key for CrewAI validation")
-    
+            mock_logger.info.assert_any_call(
+                "No OpenAI API key configured, set dummy key for CrewAI validation"
+            )
+
     @pytest.mark.asyncio
     async def test_create_crew_openai_key_error_in_databricks(self, crew_preparation):
         """Test crew creation handles errors when checking OpenAI API key in Databricks Apps environment."""
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
-        
+
         mock_crew = MagicMock()
-        
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew), \
-             patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', side_effect=Exception("API error")), \
-             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger, \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ),
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                side_effect=Exception("API error"),
+            ),
+            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
 
             assert result is True
-    
+
     @pytest.mark.asyncio
     async def test_execute_success(self, crew_preparation):
         """Test successful crew execution."""
@@ -932,8 +1249,16 @@ class TestCrewPreparation:
 
         mock_processed_output = {"result": "processed"}
 
-        with patch('src.services.agent_builder.crew_preparation.process_crew_output', return_value=mock_processed_output), \
-             patch('src.services.agent_builder.crew_preparation.is_data_missing', return_value=False):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.process_crew_output",
+                return_value=mock_processed_output,
+            ),
+            patch(
+                "src.services.agent_builder.crew_preparation.is_data_missing",
+                return_value=False,
+            ),
+        ):
 
             result = await crew_preparation.execute()
 
@@ -957,14 +1282,24 @@ class TestCrewPreparation:
 
         mock_processed_output = {"result": "processed"}
 
-        with patch('src.services.agent_builder.crew_preparation.process_crew_output', return_value=mock_processed_output), \
-             patch('src.services.agent_builder.crew_preparation.is_data_missing', return_value=True), \
-             patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.process_crew_output",
+                return_value=mock_processed_output,
+            ),
+            patch(
+                "src.services.agent_builder.crew_preparation.is_data_missing",
+                return_value=True,
+            ),
+            patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+        ):
 
             result = await crew_preparation.execute()
 
             assert result == mock_processed_output
-            mock_logger.warning.assert_called_with("Crew execution completed but data may be missing")
+            mock_logger.warning.assert_called_with(
+                "Crew execution completed but data may be missing"
+            )
 
     @pytest.mark.asyncio
     async def test_execute_exception_handling(self, crew_preparation):
@@ -974,12 +1309,14 @@ class TestCrewPreparation:
         mock_crew.kickoff_async = AsyncMock(side_effect=Exception("Execution error"))
         crew_preparation.crew = mock_crew
 
-        with patch('src.services.agent_builder.crew_preparation.handle_crew_error') as mock_handle_error:
+        with patch(
+            "src.services.agent_builder.crew_preparation.handle_crew_error"
+        ) as mock_handle_error:
             result = await crew_preparation.execute()
 
             assert result == {"error": "Execution error"}
             mock_handle_error.assert_called_once()
-    
+
     @pytest.mark.asyncio
     async def test_legacy_planning_llm_resolves_no_model(self, crew_preparation):
         """A stored crew may still carry an unusable planning_llm. Since the planner
@@ -992,29 +1329,53 @@ class TestCrewPreparation:
 
         mock_crew = MagicMock()
 
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
-             patch('src.services.llm.manager.LLMManager.get_llm', side_effect=Exception("Model not found")) as mock_get_llm, \
-             patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.repositories.databricks_config_repository.DatabricksConfigRepository') as mock_databricks_repo, \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ) as mock_crew_class,
+            patch(
+                "src.services.llm.manager.LLMManager.get_llm",
+                side_effect=Exception("Model not found"),
+            ) as mock_get_llm,
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                return_value=None,
+            ),
+            patch(
+                "src.repositories.databricks_config_repository.DatabricksConfigRepository"
+            ) as mock_databricks_repo,
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             # Configure mock to return None for get_databricks_config
             mock_databricks_instance = MagicMock()
-            mock_databricks_instance.get_databricks_config = AsyncMock(return_value=None)
+            mock_databricks_instance.get_databricks_config = AsyncMock(
+                return_value=None
+            )
             mock_databricks_repo.return_value = mock_databricks_instance
 
             result = await crew_preparation._create_crew()
 
             assert result is True
             # The dead planner model is never looked up.
-            assert not any(c.args and c.args[0] == "invalid-model" for c in mock_get_llm.call_args_list)
+            assert not any(
+                c.args and c.args[0] == "invalid-model"
+                for c in mock_get_llm.call_args_list
+            )
 
             call_kwargs = mock_crew_class.call_args[1]
-            assert 'planning' not in call_kwargs
-            assert 'planning_llm' not in call_kwargs
-    
+            assert "planning" not in call_kwargs
+            assert "planning_llm" not in call_kwargs
+
     @pytest.mark.asyncio
-    async def test_create_crew_reasoning_is_agent_level_not_crew(self, crew_preparation):
+    async def test_create_crew_reasoning_is_agent_level_not_crew(
+        self, crew_preparation
+    ):
         """Test that reasoning config is NOT passed to Crew (it's an Agent-level parameter).
 
         In CrewAI, 'reasoning' is an Agent-level parameter, NOT a Crew parameter.
@@ -1024,13 +1385,27 @@ class TestCrewPreparation:
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
         crew_preparation.config["crew"]["reasoning"] = True
-        crew_preparation.config["crew"]["memory"] = False  # Disable memory to avoid DB calls
+        crew_preparation.config["crew"][
+            "memory"
+        ] = False  # Disable memory to avoid DB calls
 
         mock_crew = MagicMock()
 
-        with patch('src.services.agent_builder.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
-             patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                return_value=mock_crew,
+            ) as mock_crew_class,
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                return_value=None,
+            ),
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
 
@@ -1039,9 +1414,9 @@ class TestCrewPreparation:
             # Verify crew was created WITHOUT reasoning in kwargs
             # (reasoning is an Agent-level param, not Crew-level)
             call_kwargs = mock_crew_class.call_args[1]
-            assert 'reasoning' not in call_kwargs
-            assert 'reasoning_llm' not in call_kwargs
-    
+            assert "reasoning" not in call_kwargs
+            assert "reasoning_llm" not in call_kwargs
+
     @pytest.mark.asyncio
     async def test_reasoning_propagated_to_agents(self, crew_preparation):
         """Crew-level reasoning is fanned out to each agent's config so the shared
@@ -1056,19 +1431,24 @@ class TestCrewPreparation:
         mock_agent1 = MagicMock()
         mock_agent2 = MagicMock()
 
-        with patch('src.services.agent_builder.crew_preparation.create_agent', side_effect=[mock_agent1, mock_agent2]) as mock_create:
+        with patch(
+            "src.services.agent_builder.crew_preparation.create_agent",
+            side_effect=[mock_agent1, mock_agent2],
+        ) as mock_create:
             result = await crew_preparation._create_agents()
 
             assert result is True
             assert len(crew_preparation.agents) == 2
 
             for call in mock_create.call_args_list:
-                agent_config = call.kwargs['agent_config']
-                assert agent_config.get('reasoning') is True
-                assert 'max_reasoning_attempts' not in agent_config
+                agent_config = call.kwargs["agent_config"]
+                assert agent_config.get("reasoning") is True
+                assert "max_reasoning_attempts" not in agent_config
 
     @pytest.mark.asyncio
-    async def test_create_crew_hierarchical_minimal_kwargs_preserves_manager_llm(self, crew_preparation):
+    async def test_create_crew_hierarchical_minimal_kwargs_preserves_manager_llm(
+        self, crew_preparation
+    ):
         """Test that minimal_kwargs fallback preserves manager_llm for hierarchical process."""
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
@@ -1080,6 +1460,7 @@ class TestCrewPreparation:
 
         # Simulate TypeError on first Crew() call, success on minimal_kwargs
         call_count = 0
+
         def crew_side_effect(**kwargs):
             nonlocal call_count
             call_count += 1
@@ -1089,11 +1470,25 @@ class TestCrewPreparation:
             # Second call (minimal_kwargs) succeeds
             return mock_crew
 
-        with patch('src.services.agent_builder.crew_preparation.Crew', side_effect=crew_side_effect) as mock_crew_class, \
-             patch('src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm',
-                   return_value=mock_manager_llm), \
-             patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                side_effect=crew_side_effect,
+            ) as mock_crew_class,
+            patch(
+                "src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm",
+                return_value=mock_manager_llm,
+            ),
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                return_value=None,
+            ),
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
 
@@ -1105,11 +1500,13 @@ class TestCrewPreparation:
 
             # Verify the second call (minimal_kwargs) included manager_llm
             second_call_kwargs = mock_crew_class.call_args_list[1][1]
-            assert 'manager_llm' in second_call_kwargs
-            assert second_call_kwargs['manager_llm'] == mock_manager_llm
+            assert "manager_llm" in second_call_kwargs
+            assert second_call_kwargs["manager_llm"] == mock_manager_llm
 
     @pytest.mark.asyncio
-    async def test_create_crew_hierarchical_minimal_kwargs_preserves_manager_agent(self, crew_preparation):
+    async def test_create_crew_hierarchical_minimal_kwargs_preserves_manager_agent(
+        self, crew_preparation
+    ):
         """Test that minimal_kwargs fallback preserves manager_agent for hierarchical process."""
         crew_preparation.agents = {"agent1": MagicMock()}
         crew_preparation.tasks = [MagicMock()]
@@ -1117,7 +1514,7 @@ class TestCrewPreparation:
         crew_preparation.config["crew"]["manager_agent"] = {
             "role": "Manager",
             "goal": "Manage team",
-            "backstory": "Experienced"
+            "backstory": "Experienced",
         }
         crew_preparation.config["group_id"] = "test_group_123"
 
@@ -1126,6 +1523,7 @@ class TestCrewPreparation:
 
         # Simulate TypeError on first Crew() call, success on minimal_kwargs
         call_count = 0
+
         def crew_side_effect(**kwargs):
             nonlocal call_count
             call_count += 1
@@ -1139,10 +1537,25 @@ class TestCrewPreparation:
         async def mock_create_agent_func(**kwargs):
             return mock_manager_agent
 
-        with patch('src.services.agent_builder.crew_preparation.Crew', side_effect=crew_side_effect) as mock_crew_class, \
-             patch('src.services.execution.config.manager_config_builder.create_agent', side_effect=mock_create_agent_func), \
-             patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.Crew",
+                side_effect=crew_side_effect,
+            ) as mock_crew_class,
+            patch(
+                "src.services.execution.config.manager_config_builder.create_agent",
+                side_effect=mock_create_agent_func,
+            ),
+            patch(
+                "src.services.settings.api_keys.ApiKeysService.get_provider_api_key",
+                return_value=None,
+            ),
+            patch(
+                "src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
 
             result = await crew_preparation._create_crew()
 
@@ -1154,9 +1567,10 @@ class TestCrewPreparation:
 
             # Verify the second call (minimal_kwargs) included manager_agent
             second_call_kwargs = mock_crew_class.call_args_list[1][1]
-            assert 'manager_agent' in second_call_kwargs
-            assert second_call_kwargs['manager_agent'] == mock_manager_agent
-    
+            assert "manager_agent" in second_call_kwargs
+            assert second_call_kwargs["manager_agent"] == mock_manager_agent
+
+
 class TestCreateAgentsMCPRequirements:
     """Test suite for MCP server requirements resolution in _create_agents."""
 
@@ -1184,7 +1598,13 @@ class TestCreateAgentsMCPRequirements:
                     "expected_output": "Report",
                 }
             ],
-            "crew": {"process": "sequential", "verbose": True, "memory": False, "planning": False, "reasoning": False},
+            "crew": {
+                "process": "sequential",
+                "verbose": True,
+                "memory": False,
+                "planning": False,
+                "reasoning": False,
+            },
             "model": "gpt-4",
         }
 
@@ -1312,87 +1732,92 @@ class TestCreateAgentsMCPRequirements:
 
 class TestCrewPreparationHelperFunctions:
     """Test suite for helper functions in crew_preparation module."""
-    
+
     def test_validate_crew_config_success(self):
         """Test successful config validation."""
-        config = {
-            "agents": [{"name": "agent1"}],
-            "tasks": [{"name": "task1"}]
-        }
-        
-        with patch('src.services.agent_builder.crew_preparation.logger'):
+        config = {"agents": [{"name": "agent1"}], "tasks": [{"name": "task1"}]}
+
+        with patch("src.services.agent_builder.crew_preparation.logger"):
             result = validate_crew_config(config)
             assert result is True
-    
+
     def test_validate_crew_config_missing_agents(self):
         """Test config validation with missing agents."""
         config = {"tasks": [{"name": "task1"}]}
-        
-        with patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
+
+        with patch("src.services.agent_builder.crew_preparation.logger") as mock_logger:
             result = validate_crew_config(config)
             assert result is False
-            mock_logger.error.assert_called_with("Missing or empty required section: agents")
-    
+            mock_logger.error.assert_called_with(
+                "Missing or empty required section: agents"
+            )
+
     def test_validate_crew_config_missing_tasks(self):
         """Test config validation with missing tasks."""
         config = {"agents": [{"name": "agent1"}]}
-        
-        with patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
+
+        with patch("src.services.agent_builder.crew_preparation.logger") as mock_logger:
             result = validate_crew_config(config)
             assert result is False
-            mock_logger.error.assert_called_with("Missing or empty required section: tasks")
-    
+            mock_logger.error.assert_called_with(
+                "Missing or empty required section: tasks"
+            )
+
     def test_validate_crew_config_empty_agents(self):
         """Test config validation with empty agents list."""
         config = {"agents": [], "tasks": [{"name": "task1"}]}
-        
-        with patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
+
+        with patch("src.services.agent_builder.crew_preparation.logger") as mock_logger:
             result = validate_crew_config(config)
             assert result is False
-            mock_logger.error.assert_called_with("Missing or empty required section: agents")
-    
+            mock_logger.error.assert_called_with(
+                "Missing or empty required section: agents"
+            )
+
     def test_validate_crew_config_empty_tasks(self):
         """Test config validation with empty tasks list."""
         config = {"agents": [{"name": "agent1"}], "tasks": []}
-        
-        with patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
+
+        with patch("src.services.agent_builder.crew_preparation.logger") as mock_logger:
             result = validate_crew_config(config)
             assert result is False
-            mock_logger.error.assert_called_with("Missing or empty required section: tasks")
-    
+            mock_logger.error.assert_called_with(
+                "Missing or empty required section: tasks"
+            )
+
     def test_handle_crew_error(self):
         """Test error handling function."""
         test_exception = ValueError("Test error")
         test_message = "Test operation failed"
-        
-        with patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
+
+        with patch("src.services.agent_builder.crew_preparation.logger") as mock_logger:
             handle_crew_error(test_exception, test_message)
-            
+
             mock_logger.error.assert_called_once_with(
-                "Test operation failed: Test error",
-                exc_info=True
+                "Test operation failed: Test error", exc_info=True
             )
+
 
 class TestProcessCrewOutput:
     """Test suite for process_crew_output function."""
-    
+
     @pytest.mark.asyncio
     async def test_process_crew_output_dict_input(self):
         """Test processing dict input."""
         result = {"key": "value"}
         output = await process_crew_output(result)
         assert output == result
-    
+
     @pytest.mark.asyncio
     async def test_process_crew_output_object_with_raw(self):
         """Test processing object with raw attribute."""
         mock_result = MagicMock()
         mock_result.raw = "raw content"
-        
+
         output = await process_crew_output(mock_result)
         expected = {"result": "raw content", "type": "crew_result"}
         assert output == expected
-    
+
     @pytest.mark.asyncio
     async def test_process_crew_output_string_input(self):
         """Test processing string input."""
@@ -1400,28 +1825,30 @@ class TestProcessCrewOutput:
         output = await process_crew_output(result)
         expected = {"result": "test string", "type": "processed"}
         assert output == expected
-    
+
     @pytest.mark.asyncio
     async def test_process_crew_output_exception_handling(self):
         """Test exception handling in process_crew_output."""
         # Mock the entire process_crew_output function to test exception handling
         from unittest.mock import patch
-        
-        with patch('src.services.agent_builder.crew_preparation.logger') as mock_logger:
+
+        with patch("src.services.agent_builder.crew_preparation.logger") as mock_logger:
             # Test actual exception handling by calling with a mock that will cause an exception in str()
             class FailingObject:
                 def __str__(self):
                     raise Exception("Conversion error")
+
                 def __getattribute__(self, name):
-                    if name == 'raw':
+                    if name == "raw":
                         raise Exception("raw access error")
                     return super().__getattribute__(name)
-            
+
             output = await process_crew_output(FailingObject())
-            
+
             assert "error" in output
             assert "Failed to process output" in output["error"]
             mock_logger.error.assert_called_once()
+
 
 class TestDedupeAgentTaskTools:
     """Tests for _dedupe_agent_task_tools — the agent∩task duplicate-tool fix."""
@@ -1433,11 +1860,23 @@ class TestDedupeAgentTaskTools:
         """A tool on BOTH the agent and its task is dropped from the agent."""
         config = {
             "agents": [
-                {"id": "a1", "name": "pcg-agent", "role": "Specialist", "tools": ["90"]},
+                {
+                    "id": "a1",
+                    "name": "pcg-agent",
+                    "role": "Specialist",
+                    "tools": ["90"],
+                },
             ],
             "tasks": [
-                {"id": "t1", "name": "t1", "agent": "pcg-agent", "tools": ["90"],
-                 "tool_configs": {"Pipeline Config Generator": {"workspace_id": "ws"}}},
+                {
+                    "id": "t1",
+                    "name": "t1",
+                    "agent": "pcg-agent",
+                    "tools": ["90"],
+                    "tool_configs": {
+                        "Pipeline Config Generator": {"workspace_id": "ws"}
+                    },
+                },
             ],
         }
         prep = self._prep(config)
@@ -1445,7 +1884,12 @@ class TestDedupeAgentTaskTools:
         assert config["agents"][0]["tools"] == []
         # Task keeps its tool + config untouched.
         assert config["tasks"][0]["tools"] == ["90"]
-        assert config["tasks"][0]["tool_configs"]["Pipeline Config Generator"]["workspace_id"] == "ws"
+        assert (
+            config["tasks"][0]["tool_configs"]["Pipeline Config Generator"][
+                "workspace_id"
+            ]
+            == "ws"
+        )
 
     def test_keeps_agent_only_tool(self):
         """An agent tool NOT on any of its tasks is preserved."""
@@ -1465,7 +1909,12 @@ class TestDedupeAgentTaskTools:
         """Only the overlapping tool is removed; agent-only tools stay."""
         config = {
             "agents": [
-                {"id": "a1", "name": "agent", "role": "R", "tools": ["90", "extra_tool"]},
+                {
+                    "id": "a1",
+                    "name": "agent",
+                    "role": "R",
+                    "tools": ["90", "extra_tool"],
+                },
             ],
             "tasks": [
                 {"id": "t1", "name": "t1", "agent": "agent", "tools": ["90"]},
@@ -1493,10 +1942,20 @@ class TestDedupeAgentTaskTools:
         """Task references the agent by role, not name — still de-duped."""
         config = {
             "agents": [
-                {"id": "a1", "name": "agent", "role": "Pipeline Specialist", "tools": ["90"]},
+                {
+                    "id": "a1",
+                    "name": "agent",
+                    "role": "Pipeline Specialist",
+                    "tools": ["90"],
+                },
             ],
             "tasks": [
-                {"id": "t1", "name": "t1", "agent": "Pipeline Specialist", "tools": ["90"]},
+                {
+                    "id": "t1",
+                    "name": "t1",
+                    "agent": "Pipeline Specialist",
+                    "tools": ["90"],
+                },
             ],
         }
         prep = self._prep(config)
@@ -1520,13 +1979,19 @@ class TestDedupeAgentTaskTools:
         assert config["agents"][0]["tools"] == ["90"]
 
     def test_no_tasks_is_noop(self):
-        config = {"agents": [{"id": "a1", "name": "a", "role": "R", "tools": ["90"]}], "tasks": []}
+        config = {
+            "agents": [{"id": "a1", "name": "a", "role": "R", "tools": ["90"]}],
+            "tasks": [],
+        }
         prep = self._prep(config)
         prep._dedupe_agent_task_tools()
         assert config["agents"][0]["tools"] == ["90"]
 
     def test_no_agents_is_noop(self):
-        config = {"agents": [], "tasks": [{"id": "t", "name": "t", "agent": "x", "tools": ["90"]}]}
+        config = {
+            "agents": [],
+            "tasks": [{"id": "t", "name": "t", "agent": "x", "tools": ["90"]}],
+        }
         prep = self._prep(config)
         prep._dedupe_agent_task_tools()  # must not raise
 

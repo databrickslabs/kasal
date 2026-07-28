@@ -2,10 +2,12 @@
 Comprehensive unit tests for execution_history_service.py module.
 Target: 80%+ coverage
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from sqlalchemy.exc import SQLAlchemyError
+
 import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 
 class TestExecutionHistoryService:
@@ -36,10 +38,11 @@ class TestExecutionHistoryService:
     def service(self, mock_session, mock_history_repo, mock_logs_repo):
         """Create service instance with mocks."""
         from src.services.execution.history import ExecutionHistoryService
+
         return ExecutionHistoryService(
             session=mock_session,
             execution_history_repository=mock_history_repo,
-            execution_logs_repository=mock_logs_repo
+            execution_logs_repository=mock_logs_repo,
         )
 
 
@@ -61,10 +64,11 @@ class TestGetExecutionHistory:
     @pytest.fixture
     def service(self, mock_session, mock_history_repo, mock_logs_repo):
         from src.services.execution.history import ExecutionHistoryService
+
         return ExecutionHistoryService(
             session=mock_session,
             execution_history_repository=mock_history_repo,
-            execution_logs_repository=mock_logs_repo
+            execution_logs_repository=mock_logs_repo,
         )
 
     @pytest.mark.asyncio
@@ -78,7 +82,9 @@ class TestGetExecutionHistory:
         mock_run.inputs = {}
         mock_run.created_at = "2024-01-01T00:00:00"
 
-        mock_history_repo.get_execution_history = AsyncMock(return_value=([mock_run], 1))
+        mock_history_repo.get_execution_history = AsyncMock(
+            return_value=([mock_run], 1)
+        )
 
         result = await service.get_execution_history(limit=50, offset=0)
 
@@ -88,12 +94,16 @@ class TestGetExecutionHistory:
         assert len(result.executions) == 1
 
     @pytest.mark.asyncio
-    async def test_get_execution_history_with_group_ids(self, service, mock_history_repo):
+    async def test_get_execution_history_with_group_ids(
+        self, service, mock_history_repo
+    ):
         """Test retrieval of execution history with group filtering."""
         group_ids = [str(uuid.uuid4())]
         mock_history_repo.get_execution_history = AsyncMock(return_value=([], 0))
 
-        result = await service.get_execution_history(limit=50, offset=0, group_ids=group_ids)
+        result = await service.get_execution_history(
+            limit=50, offset=0, group_ids=group_ids
+        )
 
         mock_history_repo.get_execution_history.assert_called_once_with(
             limit=50, offset=0, group_ids=group_ids
@@ -101,7 +111,9 @@ class TestGetExecutionHistory:
         assert result.total == 0
 
     @pytest.mark.asyncio
-    async def test_get_execution_history_string_result(self, service, mock_history_repo):
+    async def test_get_execution_history_string_result(
+        self, service, mock_history_repo
+    ):
         """Test handling of string result field."""
         mock_run = MagicMock()
         mock_run.id = 1
@@ -111,14 +123,18 @@ class TestGetExecutionHistory:
         mock_run.inputs = {}
         mock_run.created_at = "2024-01-01T00:00:00"
 
-        mock_history_repo.get_execution_history = AsyncMock(return_value=([mock_run], 1))
+        mock_history_repo.get_execution_history = AsyncMock(
+            return_value=([mock_run], 1)
+        )
 
         result = await service.get_execution_history()
 
         assert result.total == 1
 
     @pytest.mark.asyncio
-    async def test_get_execution_history_with_yaml_inputs(self, service, mock_history_repo):
+    async def test_get_execution_history_with_yaml_inputs(
+        self, service, mock_history_repo
+    ):
         """Test handling of agents_yaml and tasks_yaml in inputs."""
         mock_run = MagicMock()
         mock_run.id = 1
@@ -126,19 +142,23 @@ class TestGetExecutionHistory:
         mock_run.status = "completed"
         mock_run.result = {"content": "Test"}
         mock_run.inputs = {
-            'agents_yaml': {'agent1': {'role': 'test'}},
-            'tasks_yaml': {'task1': {'description': 'test'}}
+            "agents_yaml": {"agent1": {"role": "test"}},
+            "tasks_yaml": {"task1": {"description": "test"}},
         }
         mock_run.created_at = "2024-01-01T00:00:00"
 
-        mock_history_repo.get_execution_history = AsyncMock(return_value=([mock_run], 1))
+        mock_history_repo.get_execution_history = AsyncMock(
+            return_value=([mock_run], 1)
+        )
 
         result = await service.get_execution_history()
 
         assert result.total == 1
 
     @pytest.mark.asyncio
-    async def test_get_execution_history_sqlalchemy_error(self, service, mock_history_repo):
+    async def test_get_execution_history_sqlalchemy_error(
+        self, service, mock_history_repo
+    ):
         """Test handling of SQLAlchemy errors."""
         mock_history_repo.get_execution_history = AsyncMock(
             side_effect=SQLAlchemyError("Database error")
@@ -148,7 +168,9 @@ class TestGetExecutionHistory:
             await service.get_execution_history()
 
     @pytest.mark.asyncio
-    async def test_get_execution_history_general_error(self, service, mock_history_repo):
+    async def test_get_execution_history_general_error(
+        self, service, mock_history_repo
+    ):
         """Test handling of general errors."""
         mock_history_repo.get_execution_history = AsyncMock(
             side_effect=Exception("General error")
@@ -176,10 +198,11 @@ class TestGetExecutionById:
     @pytest.fixture
     def service(self, mock_session, mock_history_repo, mock_logs_repo):
         from src.services.execution.history import ExecutionHistoryService
+
         return ExecutionHistoryService(
             session=mock_session,
             execution_history_repository=mock_history_repo,
-            execution_logs_repository=mock_logs_repo
+            execution_logs_repository=mock_logs_repo,
         )
 
     @pytest.mark.asyncio
@@ -209,17 +232,23 @@ class TestGetExecutionById:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_execution_by_id_with_tenant_ids(self, service, mock_history_repo):
+    async def test_get_execution_by_id_with_tenant_ids(
+        self, service, mock_history_repo
+    ):
         """Test retrieval with tenant filtering."""
         tenant_ids = [str(uuid.uuid4())]
         mock_history_repo.get_execution_by_id = AsyncMock(return_value=None)
 
         result = await service.get_execution_by_id(1, tenant_ids=tenant_ids)
 
-        mock_history_repo.get_execution_by_id.assert_called_once_with(1, tenant_ids=tenant_ids)
+        mock_history_repo.get_execution_by_id.assert_called_once_with(
+            1, tenant_ids=tenant_ids
+        )
 
     @pytest.mark.asyncio
-    async def test_get_execution_by_id_sqlalchemy_error(self, service, mock_history_repo):
+    async def test_get_execution_by_id_sqlalchemy_error(
+        self, service, mock_history_repo
+    ):
         """Test handling of SQLAlchemy errors."""
         mock_history_repo.get_execution_by_id = AsyncMock(
             side_effect=SQLAlchemyError("Database error")
@@ -247,10 +276,11 @@ class TestCheckExecutionExists:
     @pytest.fixture
     def service(self, mock_session, mock_history_repo, mock_logs_repo):
         from src.services.execution.history import ExecutionHistoryService
+
         return ExecutionHistoryService(
             session=mock_session,
             execution_history_repository=mock_history_repo,
-            execution_logs_repository=mock_logs_repo
+            execution_logs_repository=mock_logs_repo,
         )
 
     @pytest.mark.asyncio
@@ -300,14 +330,17 @@ class TestGetExecutionOutputs:
     @pytest.fixture
     def service(self, mock_session, mock_history_repo, mock_logs_repo):
         from src.services.execution.history import ExecutionHistoryService
+
         return ExecutionHistoryService(
             session=mock_session,
             execution_history_repository=mock_history_repo,
-            execution_logs_repository=mock_logs_repo
+            execution_logs_repository=mock_logs_repo,
         )
 
     @pytest.mark.asyncio
-    async def test_get_execution_outputs_success(self, service, mock_history_repo, mock_logs_repo, mock_session):
+    async def test_get_execution_outputs_success(
+        self, service, mock_history_repo, mock_logs_repo, mock_session
+    ):
         """Test successful retrieval of execution outputs."""
         job_id = str(uuid.uuid4())
 
@@ -327,7 +360,9 @@ class TestGetExecutionOutputs:
         assert result.total == 1
 
     @pytest.mark.asyncio
-    async def test_get_execution_outputs_with_tenant_filter(self, service, mock_history_repo, mock_logs_repo, mock_session):
+    async def test_get_execution_outputs_with_tenant_filter(
+        self, service, mock_history_repo, mock_logs_repo, mock_session
+    ):
         """Test retrieval with tenant filtering when execution not found."""
         job_id = str(uuid.uuid4())
         tenant_ids = [str(uuid.uuid4())]
@@ -340,7 +375,9 @@ class TestGetExecutionOutputs:
         assert len(result.outputs) == 0
 
     @pytest.mark.asyncio
-    async def test_get_execution_outputs_with_pagination(self, service, mock_history_repo, mock_logs_repo, mock_session):
+    async def test_get_execution_outputs_with_pagination(
+        self, service, mock_history_repo, mock_logs_repo, mock_session
+    ):
         """Test retrieval with pagination."""
         job_id = str(uuid.uuid4())
 
@@ -371,14 +408,17 @@ class TestGetDebugOutputs:
     @pytest.fixture
     def service(self, mock_session, mock_history_repo, mock_logs_repo):
         from src.services.execution.history import ExecutionHistoryService
+
         return ExecutionHistoryService(
             session=mock_session,
             execution_history_repository=mock_history_repo,
-            execution_logs_repository=mock_logs_repo
+            execution_logs_repository=mock_logs_repo,
         )
 
     @pytest.mark.asyncio
-    async def test_get_debug_outputs_success(self, service, mock_history_repo, mock_logs_repo):
+    async def test_get_debug_outputs_success(
+        self, service, mock_history_repo, mock_logs_repo
+    ):
         """Test successful retrieval of debug outputs."""
         job_id = str(uuid.uuid4())
 
@@ -431,24 +471,35 @@ class TestDeleteAllExecutions:
     @pytest.fixture
     def service(self, mock_session, mock_history_repo, mock_logs_repo):
         from src.services.execution.history import ExecutionHistoryService
+
         return ExecutionHistoryService(
             session=mock_session,
             execution_history_repository=mock_history_repo,
-            execution_logs_repository=mock_logs_repo
+            execution_logs_repository=mock_logs_repo,
         )
 
     @pytest.mark.asyncio
-    async def test_delete_all_executions_success(self, service, mock_history_repo, mock_session):
+    async def test_delete_all_executions_success(
+        self, service, mock_history_repo, mock_session
+    ):
         """Test successful deletion of all executions."""
-        mock_history_repo.delete_all_executions = AsyncMock(return_value={
-            'run_count': 5,
-            'task_status_count': 10,
-            'error_trace_count': 2
-        })
+        mock_history_repo.delete_all_executions = AsyncMock(
+            return_value={
+                "run_count": 5,
+                "task_status_count": 10,
+                "error_trace_count": 2,
+            }
+        )
 
-        with patch('src.services.trace.ExecutionTraceService') as mock_trace_service, \
-             patch('src.services.execution.logs.writer.ExecutionLogsService') as mock_logs_service, \
-             patch('src.services.execution.service.ExecutionService') as mock_exec_service:
+        with (
+            patch("src.services.trace.ExecutionTraceService") as mock_trace_service,
+            patch(
+                "src.services.execution.logs.writer.ExecutionLogsService"
+            ) as mock_logs_service,
+            patch(
+                "src.services.execution.service.ExecutionService"
+            ) as mock_exec_service,
+        ):
             mock_trace_instance = MagicMock()
             mock_trace_instance.repository = MagicMock()
             mock_trace_instance.repository.delete_all = AsyncMock(return_value=3)
@@ -465,7 +516,9 @@ class TestDeleteAllExecutions:
             assert result.success is True
 
     @pytest.mark.asyncio
-    async def test_delete_all_executions_with_group_ids(self, service, mock_history_repo, mock_session):
+    async def test_delete_all_executions_with_group_ids(
+        self, service, mock_history_repo, mock_session
+    ):
         """Test deletion with group filtering."""
         group_ids = [str(uuid.uuid4())]
         job_id = str(uuid.uuid4())
@@ -475,15 +528,23 @@ class TestDeleteAllExecutions:
         mock_result.fetchall.return_value = [(job_id,)]
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        mock_history_repo.delete_all_executions = AsyncMock(return_value={
-            'run_count': 1,
-            'task_status_count': 2,
-            'error_trace_count': 1
-        })
+        mock_history_repo.delete_all_executions = AsyncMock(
+            return_value={
+                "run_count": 1,
+                "task_status_count": 2,
+                "error_trace_count": 1,
+            }
+        )
 
-        with patch('src.services.trace.ExecutionTraceService') as mock_trace_service, \
-             patch('src.services.execution.logs.writer.ExecutionLogsService') as mock_logs_service, \
-             patch('src.services.execution.service.ExecutionService') as mock_exec_service:
+        with (
+            patch("src.services.trace.ExecutionTraceService") as mock_trace_service,
+            patch(
+                "src.services.execution.logs.writer.ExecutionLogsService"
+            ) as mock_logs_service,
+            patch(
+                "src.services.execution.service.ExecutionService"
+            ) as mock_exec_service,
+        ):
             mock_trace_instance = MagicMock()
             mock_trace_instance.repository = MagicMock()
             mock_trace_instance.repository.delete_by_job_id = AsyncMock(return_value=1)
@@ -500,7 +561,9 @@ class TestDeleteAllExecutions:
             assert result.success is True
 
     @pytest.mark.asyncio
-    async def test_delete_all_executions_no_executions_found(self, service, mock_history_repo, mock_session):
+    async def test_delete_all_executions_no_executions_found(
+        self, service, mock_history_repo, mock_session
+    ):
         """Test deletion when no executions found for groups."""
         group_ids = [str(uuid.uuid4())]
 
@@ -521,14 +584,24 @@ class TestDeleteAllExecutions:
         mock_result = MagicMock()
         mock_result.fetchall.return_value = [(str(uuid.uuid4()),)]
         mock_session.execute = AsyncMock(return_value=mock_result)
-        mock_history_repo.delete_all_executions = AsyncMock(return_value={
-            'run_count': 1, 'task_status_count': 0, 'error_trace_count': 0
-        })
+        mock_history_repo.delete_all_executions = AsyncMock(
+            return_value={
+                "run_count": 1,
+                "task_status_count": 0,
+                "error_trace_count": 0,
+            }
+        )
 
-        with patch('src.services.trace.ExecutionTraceService') as mock_trace_service, \
-             patch('src.services.execution.logs.writer.ExecutionLogsService') as mock_logs_service, \
-             patch('src.services.recipes.recipes.WorkflowRecipeService') as mock_recipes, \
-             patch('src.services.execution.service.ExecutionService') as mock_exec_service:
+        with (
+            patch("src.services.trace.ExecutionTraceService") as mock_trace_service,
+            patch(
+                "src.services.execution.logs.writer.ExecutionLogsService"
+            ) as mock_logs_service,
+            patch("src.services.recipes.recipes.WorkflowRecipeService") as mock_recipes,
+            patch(
+                "src.services.execution.service.ExecutionService"
+            ) as mock_exec_service,
+        ):
             trace_instance = MagicMock()
             trace_instance.repository = MagicMock()
             trace_instance.repository.delete_by_job_id = AsyncMock(return_value=1)
@@ -540,7 +613,7 @@ class TestDeleteAllExecutions:
 
             recipe_instance = MagicMock()
             recipe_instance.delete_for_groups = AsyncMock(
-                return_value={'recipe_count': 4, 'trial_count': 9}
+                return_value={"recipe_count": 4, "trial_count": 9}
             )
             mock_recipes.return_value = recipe_instance
             mock_exec_service.executions = {}
@@ -562,10 +635,12 @@ class TestDeleteAllExecutions:
         mock_result.fetchall.return_value = []
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        with patch('src.services.recipes.recipes.WorkflowRecipeService') as mock_recipes:
+        with patch(
+            "src.services.recipes.recipes.WorkflowRecipeService"
+        ) as mock_recipes:
             recipe_instance = MagicMock()
             recipe_instance.delete_for_groups = AsyncMock(
-                return_value={'recipe_count': 2, 'trial_count': 0}
+                return_value={"recipe_count": 2, "trial_count": 0}
             )
             mock_recipes.return_value = recipe_instance
 
@@ -593,10 +668,11 @@ class TestDeleteExecution:
     @pytest.fixture
     def service(self, mock_session, mock_history_repo, mock_logs_repo):
         from src.services.execution.history import ExecutionHistoryService
+
         return ExecutionHistoryService(
             session=mock_session,
             execution_history_repository=mock_history_repo,
-            execution_logs_repository=mock_logs_repo
+            execution_logs_repository=mock_logs_repo,
         )
 
     @pytest.mark.asyncio
@@ -608,14 +684,19 @@ class TestDeleteExecution:
         mock_run.job_id = job_id
 
         mock_history_repo.get_execution_by_id = AsyncMock(return_value=mock_run)
-        mock_history_repo.delete_execution = AsyncMock(return_value={
-            'task_status_count': 2,
-            'error_trace_count': 1
-        })
+        mock_history_repo.delete_execution = AsyncMock(
+            return_value={"task_status_count": 2, "error_trace_count": 1}
+        )
 
-        with patch('src.services.trace.ExecutionTraceService') as mock_trace_service, \
-             patch('src.services.execution.logs.writer.ExecutionLogsService') as mock_logs_service, \
-             patch('src.services.execution.service.ExecutionService') as mock_exec_service:
+        with (
+            patch("src.services.trace.ExecutionTraceService") as mock_trace_service,
+            patch(
+                "src.services.execution.logs.writer.ExecutionLogsService"
+            ) as mock_logs_service,
+            patch(
+                "src.services.execution.service.ExecutionService"
+            ) as mock_exec_service,
+        ):
             mock_trace_instance = MagicMock()
             mock_trace_instance.repository = MagicMock()
             mock_trace_instance.repository.delete_by_job_id = AsyncMock(return_value=1)
@@ -659,10 +740,11 @@ class TestDeleteExecutionByJobId:
     @pytest.fixture
     def service(self, mock_session, mock_history_repo, mock_logs_repo):
         from src.services.execution.history import ExecutionHistoryService
+
         return ExecutionHistoryService(
             session=mock_session,
             execution_history_repository=mock_history_repo,
-            execution_logs_repository=mock_logs_repo
+            execution_logs_repository=mock_logs_repo,
         )
 
     @pytest.mark.asyncio
@@ -674,14 +756,19 @@ class TestDeleteExecutionByJobId:
         mock_run.id = 1
 
         mock_history_repo.get_execution_by_job_id = AsyncMock(return_value=mock_run)
-        mock_history_repo.delete_execution_by_job_id = AsyncMock(return_value={
-            'task_status_count': 2,
-            'error_trace_count': 1
-        })
+        mock_history_repo.delete_execution_by_job_id = AsyncMock(
+            return_value={"task_status_count": 2, "error_trace_count": 1}
+        )
 
-        with patch('src.services.trace.ExecutionTraceService') as mock_trace_service, \
-             patch('src.services.execution.logs.writer.ExecutionLogsService') as mock_logs_service, \
-             patch('src.services.execution.service.ExecutionService') as mock_exec_service:
+        with (
+            patch("src.services.trace.ExecutionTraceService") as mock_trace_service,
+            patch(
+                "src.services.execution.logs.writer.ExecutionLogsService"
+            ) as mock_logs_service,
+            patch(
+                "src.services.execution.service.ExecutionService"
+            ) as mock_exec_service,
+        ):
             mock_trace_instance = MagicMock()
             mock_trace_instance.repository = MagicMock()
             mock_trace_instance.repository.delete_by_job_id = AsyncMock(return_value=1)
@@ -698,7 +785,9 @@ class TestDeleteExecutionByJobId:
             assert result.success is True
 
     @pytest.mark.asyncio
-    async def test_delete_execution_by_job_id_not_found(self, service, mock_history_repo):
+    async def test_delete_execution_by_job_id_not_found(
+        self, service, mock_history_repo
+    ):
         """Test deletion when job_id not found."""
         mock_history_repo.get_execution_by_job_id = AsyncMock(return_value=None)
 
@@ -727,10 +816,11 @@ class TestCheckpointMethods:
     @pytest.fixture
     def service(self, mock_session, mock_history_repo, mock_logs_repo):
         from src.services.execution.history import ExecutionHistoryService
+
         return ExecutionHistoryService(
             session=mock_session,
             execution_history_repository=mock_history_repo,
-            execution_logs_repository=mock_logs_repo
+            execution_logs_repository=mock_logs_repo,
         )
 
     @pytest.mark.asyncio
@@ -738,7 +828,9 @@ class TestCheckpointMethods:
         """Test getting checkpoints for a flow."""
         flow_id = str(uuid.uuid4())
         mock_checkpoint = MagicMock()
-        mock_history_repo.get_checkpoints_for_flow = AsyncMock(return_value=[mock_checkpoint])
+        mock_history_repo.get_checkpoints_for_flow = AsyncMock(
+            return_value=[mock_checkpoint]
+        )
 
         result = await service.get_checkpoints_for_flow(flow_id)
 
@@ -757,7 +849,9 @@ class TestCheckpointMethods:
         )
 
     @pytest.mark.asyncio
-    async def test_set_checkpoint_active(self, service, mock_history_repo, mock_session):
+    async def test_set_checkpoint_active(
+        self, service, mock_history_repo, mock_session
+    ):
         """Test setting checkpoint as active."""
         flow_uuid = str(uuid.uuid4())
         mock_history_repo.set_checkpoint_info = AsyncMock(return_value=True)
@@ -798,10 +892,11 @@ class TestGetExecutionByJobId:
     @pytest.fixture
     def service(self, mock_session, mock_history_repo, mock_logs_repo):
         from src.services.execution.history import ExecutionHistoryService
+
         return ExecutionHistoryService(
             session=mock_session,
             execution_history_repository=mock_history_repo,
-            execution_logs_repository=mock_logs_repo
+            execution_logs_repository=mock_logs_repo,
         )
 
     @pytest.mark.asyncio

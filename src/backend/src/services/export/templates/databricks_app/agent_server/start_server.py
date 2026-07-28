@@ -1,10 +1,9 @@
 from pathlib import Path
 
+from agent_server.otel import setup_otel_logging
 from dotenv import load_dotenv
 from fastapi import Request
 from mlflow.genai.agent_server import AgentServer
-
-from agent_server.otel import setup_otel_logging
 
 # Load env vars from .env before importing the agent for proper auth
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env", override=True)

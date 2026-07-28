@@ -4,30 +4,39 @@ Unit tests for ConverterService.
 Tests the business logic for converter operations including
 history tracking, job management, and saved configurations.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi import HTTPException
 
-from src.services.powerbi.conversions import ConverterService
 from src.schemas.conversion import (
     ConversionHistoryCreate,
-    ConversionHistoryUpdate,
     ConversionHistoryFilter,
+    ConversionHistoryUpdate,
     ConversionJobCreate,
-    ConversionJobUpdate,
     ConversionJobStatusUpdate,
+    ConversionJobUpdate,
     SavedConfigurationCreate,
-    SavedConfigurationUpdate,
     SavedConfigurationFilter,
+    SavedConfigurationUpdate,
 )
+from src.services.powerbi.conversions import ConverterService
 from src.utils.user_context import GroupContext
 
 
 # Mock models for testing
 class MockConversionHistory:
-    def __init__(self, id=1, source_format="powerbi", target_format="dax",
-                 status="success", group_id="group-1", created_by_email="user@example.com"):
+    def __init__(
+        self,
+        id=1,
+        source_format="powerbi",
+        target_format="dax",
+        status="success",
+        group_id="group-1",
+        created_by_email="user@example.com",
+    ):
         self.id = id
         self.source_format = source_format
         self.target_format = target_format
@@ -42,8 +51,14 @@ class MockConversionHistory:
 
 
 class MockConversionJob:
-    def __init__(self, id="job-123", status="pending", source_format="powerbi",
-                 target_format="dax", group_id="group-1"):
+    def __init__(
+        self,
+        id="job-123",
+        status="pending",
+        source_format="powerbi",
+        target_format="dax",
+        group_id="group-1",
+    ):
         self.id = id
         self.status = status
         self.source_format = source_format
@@ -56,9 +71,17 @@ class MockConversionJob:
 
 
 class MockSavedConfiguration:
-    def __init__(self, id=1, name="Config", source_format="powerbi",
-                 target_format="dax", created_by_email="user@example.com",
-                 is_public=False, is_template=False, use_count=0):
+    def __init__(
+        self,
+        id=1,
+        name="Config",
+        source_format="powerbi",
+        target_format="dax",
+        created_by_email="user@example.com",
+        is_public=False,
+        is_template=False,
+        use_count=0,
+    ):
         self.id = id
         self.name = name
         self.source_format = source_format
@@ -107,6 +130,7 @@ def converter_service(mock_session, mock_group_context):
 
 # ===== ConversionHistory Service Tests =====
 
+
 class TestConverterServiceHistory:
     """Test cases for conversion history operations."""
 
@@ -114,9 +138,7 @@ class TestConverterServiceHistory:
     async def test_create_history_success(self, converter_service):
         """Test successful history creation."""
         history_data = ConversionHistoryCreate(
-            source_format="powerbi",
-            target_format="dax",
-            status="success"
+            source_format="powerbi", target_format="dax", status="success"
         )
 
         mock_history = MockConversionHistory()
@@ -140,8 +162,7 @@ class TestConverterServiceHistory:
         service.history_repo = AsyncMock()
 
         history_data = ConversionHistoryCreate(
-            source_format="powerbi",
-            target_format="dax"
+            source_format="powerbi", target_format="dax"
         )
 
         mock_history = MockConversionHistory()
@@ -205,14 +226,18 @@ class TestConverterServiceHistory:
     async def test_list_history_with_execution_id(self, converter_service):
         """Test list history filtered by execution ID."""
         mock_histories = [MockConversionHistory(id=1), MockConversionHistory(id=2)]
-        converter_service.history_repo.find_by_execution_id.return_value = mock_histories
+        converter_service.history_repo.find_by_execution_id.return_value = (
+            mock_histories
+        )
 
         filter_params = ConversionHistoryFilter(execution_id="exec-123")
         result = await converter_service.list_history(filter_params)
 
         assert result.count == 2
         assert len(result.history) == 2
-        converter_service.history_repo.find_by_execution_id.assert_called_once_with("exec-123")
+        converter_service.history_repo.find_by_execution_id.assert_called_once_with(
+            "exec-123"
+        )
 
     @pytest.mark.asyncio
     async def test_list_history_by_formats(self, converter_service):
@@ -221,9 +246,7 @@ class TestConverterServiceHistory:
         converter_service.history_repo.find_by_formats.return_value = mock_histories
 
         filter_params = ConversionHistoryFilter(
-            source_format="powerbi",
-            target_format="dax",
-            limit=10
+            source_format="powerbi", target_format="dax", limit=10
         )
         result = await converter_service.list_history(filter_params)
 
@@ -254,7 +277,7 @@ class TestConverterServiceHistory:
             "popular_conversions": [
                 {"source_format": "powerbi", "target_format": "dax", "count": 50}
             ],
-            "period_days": 30
+            "period_days": 30,
         }
         converter_service.history_repo.get_statistics.return_value = mock_stats
 
@@ -267,6 +290,7 @@ class TestConverterServiceHistory:
 
 # ===== ConversionJob Service Tests =====
 
+
 class TestConverterServiceJobs:
     """Test cases for conversion job operations."""
 
@@ -276,7 +300,7 @@ class TestConverterServiceJobs:
         job_data = ConversionJobCreate(
             source_format="powerbi",
             target_format="dax",
-            configuration={"option1": "value1"}
+            configuration={"option1": "value1"},
         )
 
         mock_job = MockConversionJob()
@@ -336,10 +360,7 @@ class TestConverterServiceJobs:
         updated_job = MockConversionJob(id="job-123", status="running")
         converter_service.job_repo.update_status.return_value = updated_job
 
-        status_update = ConversionJobStatusUpdate(
-            status="running",
-            progress=0.5
-        )
+        status_update = ConversionJobStatusUpdate(status="running", progress=0.5)
         result = await converter_service.update_job_status("job-123", status_update)
 
         assert result.status == "running"
@@ -403,6 +424,7 @@ class TestConverterServiceJobs:
 
 # ===== SavedConfiguration Service Tests =====
 
+
 class TestConverterServiceConfigurations:
     """Test cases for saved configuration operations."""
 
@@ -413,7 +435,7 @@ class TestConverterServiceConfigurations:
             name="My Config",
             source_format="powerbi",
             target_format="dax",
-            configuration={"option1": "value1"}
+            configuration={"option1": "value1"},
         )
 
         mock_config = MockSavedConfiguration()
@@ -438,7 +460,7 @@ class TestConverterServiceConfigurations:
             name="Config",
             source_format="powerbi",
             target_format="dax",
-            configuration={}
+            configuration={},
         )
 
         with pytest.raises(HTTPException) as exc_info:
@@ -469,7 +491,9 @@ class TestConverterServiceConfigurations:
     @pytest.mark.asyncio
     async def test_update_saved_config_success(self, converter_service):
         """Test successful configuration update."""
-        existing_config = MockSavedConfiguration(id=123, created_by_email="user@example.com")
+        existing_config = MockSavedConfiguration(
+            id=123, created_by_email="user@example.com"
+        )
         updated_config = MockSavedConfiguration(id=123, name="Updated Config")
 
         converter_service.config_repo.get.return_value = existing_config
@@ -484,8 +508,7 @@ class TestConverterServiceConfigurations:
     async def test_update_saved_config_not_authorized(self, converter_service):
         """Test configuration update by non-owner."""
         existing_config = MockSavedConfiguration(
-            id=123,
-            created_by_email="other@example.com"
+            id=123, created_by_email="other@example.com"
         )
         converter_service.config_repo.get.return_value = existing_config
 
@@ -499,7 +522,9 @@ class TestConverterServiceConfigurations:
     @pytest.mark.asyncio
     async def test_delete_saved_config_success(self, converter_service):
         """Test successful configuration deletion."""
-        existing_config = MockSavedConfiguration(id=123, created_by_email="user@example.com")
+        existing_config = MockSavedConfiguration(
+            id=123, created_by_email="user@example.com"
+        )
         converter_service.config_repo.get.return_value = existing_config
         converter_service.config_repo.delete.return_value = True
 
@@ -511,8 +536,7 @@ class TestConverterServiceConfigurations:
     async def test_delete_saved_config_not_authorized(self, converter_service):
         """Test configuration deletion by non-owner."""
         existing_config = MockSavedConfiguration(
-            id=123,
-            created_by_email="other@example.com"
+            id=123, created_by_email="other@example.com"
         )
         converter_service.config_repo.get.return_value = existing_config
 
@@ -552,8 +576,7 @@ class TestConverterServiceConfigurations:
         converter_service.config_repo.find_by_formats.return_value = mock_configs
 
         filter_params = SavedConfigurationFilter(
-            source_format="powerbi",
-            target_format="dax"
+            source_format="powerbi", target_format="dax"
         )
         result = await converter_service.list_saved_configs(filter_params)
 

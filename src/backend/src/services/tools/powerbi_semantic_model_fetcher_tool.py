@@ -19,17 +19,17 @@ Date: 2026
 import asyncio
 import base64
 import contextvars
-import logging
 import json
+import logging
 import re
-from typing import Any, Optional, Type, Dict, List
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from typing import Any, Dict, List, Optional, Type
+
+import httpx
+from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
-from pydantic import BaseModel, Field, PrivateAttr
-import httpx
-
 from src.services.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ class PowerBISemanticModelFetcherSchema(BaseModel):
     # ===== POWER BI CONFIGURATION =====
     report_id: Optional[str] = Field(
         None,
-        description="[Power BI] Optional Report ID (GUID) to auto-extract default filters from."
+        description="[Power BI] Optional Report ID (GUID) to auto-extract default filters from.",
     )
 
     # NOTE: connection / auth / LLM plumbing is deliberately NOT part of this
@@ -74,21 +74,20 @@ class PowerBISemanticModelFetcherSchema(BaseModel):
 
     # ===== OPTIONS =====
     skip_system_tables: bool = Field(
-        True,
-        description="[Options] Skip system tables like LocalDateTable."
+        True, description="[Options] Skip system tables like LocalDateTable."
     )
     enable_info_columns: bool = Field(
         False,
-        description="[Options] Enable INFO.COLUMNS() metadata enrichment (requires DMV permissions). Default False."
+        description="[Options] Enable INFO.COLUMNS() metadata enrichment (requires DMV permissions). Default False.",
     )
     output_format: str = Field(
         "json",
-        description="[Output] Output format: 'json' (default, machine-parseable) or 'markdown'."
+        description="[Output] Output format: 'json' (default, machine-parseable) or 'markdown'.",
     )
     cache_ttl_days: int = Field(
         1,
         description="[Cache] Number of days to keep the cached semantic model metadata before re-fetching. "
-                    "Default is 1 (refresh daily). Set to 7 for weekly refresh."
+        "Default is 1 (refresh daily). Set to 7 for weekly refresh.",
     )
 
 
@@ -127,6 +126,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
     def __init__(self, **kwargs: Any) -> None:
         import uuid
+
         instance_id = str(uuid.uuid4())[:8]
         logger.info(f"[FetcherTool.__init__] Instance ID: {instance_id}")
 
@@ -157,10 +157,15 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         if not isinstance(value, str):
             return False
         placeholder_patterns = [
-            r'^[0-9]{8}-[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{12}$',
-            r'your_.*_here', r'your-.*-here', r'<.*>', r'\{.*\}',
-            r'placeholder', r'example\.com', r'^https://your-',
-            r'^https://.*-url\.com$',
+            r"^[0-9]{8}-[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{12}$",
+            r"your_.*_here",
+            r"your-.*-here",
+            r"<.*>",
+            r"\{.*\}",
+            r"placeholder",
+            r"example\.com",
+            r"^https://your-",
+            r"^https://.*-url\.com$",
         ]
         value_lower = value.lower()
         for pattern in placeholder_patterns:
@@ -171,7 +176,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
     def _run(self, **kwargs: Any) -> str:
         """Execute the fetcher pipeline."""
         try:
-            instance_id = getattr(self, '_instance_id', 'UNKNOWN')
+            instance_id = getattr(self, "_instance_id", "UNKNOWN")
             logger.info(f"[FetcherTool] Instance {instance_id} - _run() called")
 
             # Filter out placeholder values
@@ -185,13 +190,23 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             # Merge: default config takes precedence for auth/connection params
             merged_config = {}
             config_params = [
-                "workspace_id", "dataset_id", "report_id", "tenant_id", "client_id",
-                "client_secret", "username", "password", "auth_method", "access_token",
+                "workspace_id",
+                "dataset_id",
+                "report_id",
+                "tenant_id",
+                "client_id",
+                "client_secret",
+                "username",
+                "password",
+                "auth_method",
+                "access_token",
             ]
             for key in config_params:
                 default_val = self._default_config.get(key)
                 kwarg_val = filtered_kwargs.get(key)
-                merged_config[key] = default_val if default_val is not None else kwarg_val
+                merged_config[key] = (
+                    default_val if default_val is not None else kwarg_val
+                )
 
             # Options — prefer kwargs if provided
             for key in ["skip_system_tables", "enable_info_columns", "output_format"]:
@@ -208,17 +223,21 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 return "Error: dataset_id is required."
 
             # Validate authentication
-            has_sp_auth = all([
-                merged_config.get("tenant_id"),
-                merged_config.get("client_id"),
-                merged_config.get("client_secret"),
-            ])
-            has_sa_auth = all([
-                merged_config.get("tenant_id"),
-                merged_config.get("client_id"),
-                merged_config.get("username"),
-                merged_config.get("password"),
-            ])
+            has_sp_auth = all(
+                [
+                    merged_config.get("tenant_id"),
+                    merged_config.get("client_id"),
+                    merged_config.get("client_secret"),
+                ]
+            )
+            has_sa_auth = all(
+                [
+                    merged_config.get("tenant_id"),
+                    merged_config.get("client_id"),
+                    merged_config.get("username"),
+                    merged_config.get("password"),
+                ]
+            )
             has_oauth = bool(merged_config.get("access_token"))
 
             if not has_sp_auth and not has_sa_auth and not has_oauth:
@@ -230,7 +249,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     "- User OAuth: access_token"
                 )
 
-            result = _run_async_in_sync_context(self._execute_fetcher_pipeline(merged_config))
+            result = _run_async_in_sync_context(
+                self._execute_fetcher_pipeline(merged_config)
+            )
             return result
 
         except Exception as e:
@@ -244,7 +265,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         report_id = config.get("report_id")
         output_format = config.get("output_format", "json")
 
-        logger.info(f"[FetcherTool] Starting pipeline: workspace={workspace_id}, dataset={dataset_id}")
+        logger.info(
+            f"[FetcherTool] Starting pipeline: workspace={workspace_id}, dataset={dataset_id}"
+        )
 
         # Step 1: Get access token
         try:
@@ -257,7 +280,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         # Get group_id from trace_context (set by crew execution), fall back to config, then default
         group_id = (
             config.get("group_id")
-            or (getattr(self, "trace_context", None) or {}).get("group_context", {}).get("primary_group_id")
+            or (getattr(self, "trace_context", None) or {})
+            .get("group_context", {})
+            .get("primary_group_id")
             or "default"
         )
         model_context = {
@@ -295,7 +320,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         for col in table.get("columns", []):
                             cached_columns.append({"table": table_name, "column": col})
                     if cached_columns:
-                        logger.info(f"[CACHE FIX] Rebuilt {len(cached_columns)} top-level columns from per-table data")
+                        logger.info(
+                            f"[CACHE FIX] Rebuilt {len(cached_columns)} top-level columns from per-table data"
+                        )
                 model_context = {
                     "measures": cached_metadata.get("measures", []),
                     "relationships": cached_metadata.get("relationships", []),
@@ -318,24 +345,38 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 # Re-fetch sample data ONCE if cache has empty sample_data but tables have columns
                 if not cached_sample_data and model_context.get("columns"):
                     try:
-                        logger.info("[CACHE FIX] Sample data missing from cache — fetching once")
+                        logger.info(
+                            "[CACHE FIX] Sample data missing from cache — fetching once"
+                        )
                         sample_values = await self._fetch_sample_column_values(
-                            workspace_id, dataset_id, access_token, model_context, config
+                            workspace_id,
+                            dataset_id,
+                            access_token,
+                            model_context,
+                            config,
                         )
                         model_context["sample_data"] = sample_values or {}
-                        logger.info(f"[CACHE FIX] Fetched {len(sample_values)} sample value sets — persisting to cache")
+                        logger.info(
+                            f"[CACHE FIX] Fetched {len(sample_values)} sample value sets — persisting to cache"
+                        )
                         # Persist updated cache so next run skips re-fetch
                         try:
-                            async with ToolSessionProvider.cache_service() as cache_service:
+                            async with (
+                                ToolSessionProvider.cache_service() as cache_service
+                            ):
                                 updated_metadata = cache_service.build_metadata_dict(
                                     measures=model_context.get("measures", []),
-                                    relationships=model_context.get("relationships", []),
+                                    relationships=model_context.get(
+                                        "relationships", []
+                                    ),
                                     schema={
                                         "tables": model_context.get("tables", []),
                                         "columns": model_context.get("columns", []),
                                     },
                                     sample_data=model_context["sample_data"],
-                                    default_filters=default_filters if report_id else None,
+                                    default_filters=(
+                                        default_filters if report_id else None
+                                    ),
                                     slicers=slicers if report_id else None,
                                 )
                                 await cache_service.save_metadata(
@@ -345,40 +386,60 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                                     metadata=updated_metadata,
                                     report_id=report_id,
                                 )
-                                logger.info("[CACHE UPDATED] Sample data now persisted — next run will be instant")
+                                logger.info(
+                                    "[CACHE UPDATED] Sample data now persisted — next run will be instant"
+                                )
                         except Exception as e:
-                            logger.warning(f"[CACHE FIX] Failed to update cache with sample data: {e}")
+                            logger.warning(
+                                f"[CACHE FIX] Failed to update cache with sample data: {e}"
+                            )
                     except Exception as e:
                         logger.warning(f"[CACHE FIX] Could not fetch sample data: {e}")
                 # Re-fetch slicers ONCE if cache has no slicers but report_id is present
                 if report_id and "slicers" not in cached_metadata:
                     try:
-                        logger.info("[CACHE FIX] Slicers missing from cache — fetching once")
+                        logger.info(
+                            "[CACHE FIX] Slicers missing from cache — fetching once"
+                        )
                         report_parts = await self._extract_report_definition_parts(
                             workspace_id, report_id, access_token
                         )
                         slicers = self._extract_slicers_from_report(report_parts)
-                        logger.info(f"[CACHE FIX] Fetched {len(slicers)} slicers — fetching distinct values")
+                        logger.info(
+                            f"[CACHE FIX] Fetched {len(slicers)} slicers — fetching distinct values"
+                        )
                         # Fetch distinct values for slicer columns
                         if slicers:
                             try:
                                 await self._fetch_slicer_distinct_values(
-                                    workspace_id, dataset_id, access_token, slicers, model_context
+                                    workspace_id,
+                                    dataset_id,
+                                    access_token,
+                                    slicers,
+                                    model_context,
                                 )
                             except Exception as e:
-                                logger.warning(f"[CACHE FIX] Slicer distinct values failed: {e}")
+                                logger.warning(
+                                    f"[CACHE FIX] Slicer distinct values failed: {e}"
+                                )
                         # Persist updated cache so next run skips re-fetch
                         try:
-                            async with ToolSessionProvider.cache_service() as cache_service:
+                            async with (
+                                ToolSessionProvider.cache_service() as cache_service
+                            ):
                                 updated_metadata = cache_service.build_metadata_dict(
                                     measures=model_context.get("measures", []),
-                                    relationships=model_context.get("relationships", []),
+                                    relationships=model_context.get(
+                                        "relationships", []
+                                    ),
                                     schema={
                                         "tables": model_context.get("tables", []),
                                         "columns": model_context.get("columns", []),
                                     },
                                     sample_data=model_context.get("sample_data", {}),
-                                    default_filters=default_filters if report_id else None,
+                                    default_filters=(
+                                        default_filters if report_id else None
+                                    ),
                                     slicers=slicers,
                                 )
                                 await cache_service.save_metadata(
@@ -388,9 +449,13 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                                     metadata=updated_metadata,
                                     report_id=report_id,
                                 )
-                                logger.info("[CACHE UPDATED] Slicers now persisted — next run will be instant")
+                                logger.info(
+                                    "[CACHE UPDATED] Slicers now persisted — next run will be instant"
+                                )
                         except Exception as e:
-                            logger.warning(f"[CACHE FIX] Failed to update cache with slicers: {e}")
+                            logger.warning(
+                                f"[CACHE FIX] Failed to update cache with slicers: {e}"
+                            )
                     except Exception as e:
                         logger.warning(f"[CACHE FIX] Could not fetch slicers: {e}")
                 # Backfill slicer distinct values if slicers exist but sample_data lacks them
@@ -399,22 +464,34 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     for v in model_context.get("sample_data", {}).values()
                 ):
                     try:
-                        logger.info("[CACHE FIX] Slicer distinct values missing — fetching once")
+                        logger.info(
+                            "[CACHE FIX] Slicer distinct values missing — fetching once"
+                        )
                         await self._fetch_slicer_distinct_values(
-                            workspace_id, dataset_id, access_token, slicers, model_context
+                            workspace_id,
+                            dataset_id,
+                            access_token,
+                            slicers,
+                            model_context,
                         )
                         # Re-persist cache with updated sample_data
                         try:
-                            async with ToolSessionProvider.cache_service() as cache_service:
+                            async with (
+                                ToolSessionProvider.cache_service() as cache_service
+                            ):
                                 updated_metadata = cache_service.build_metadata_dict(
                                     measures=model_context.get("measures", []),
-                                    relationships=model_context.get("relationships", []),
+                                    relationships=model_context.get(
+                                        "relationships", []
+                                    ),
                                     schema={
                                         "tables": model_context.get("tables", []),
                                         "columns": model_context.get("columns", []),
                                     },
                                     sample_data=model_context.get("sample_data", {}),
-                                    default_filters=default_filters if report_id else None,
+                                    default_filters=(
+                                        default_filters if report_id else None
+                                    ),
                                     slicers=slicers,
                                 )
                                 await cache_service.save_metadata(
@@ -424,15 +501,27 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                                     metadata=updated_metadata,
                                     report_id=report_id,
                                 )
-                                logger.info("[CACHE UPDATED] Slicer distinct values now persisted")
+                                logger.info(
+                                    "[CACHE UPDATED] Slicer distinct values now persisted"
+                                )
                         except Exception as e:
-                            logger.warning(f"[CACHE FIX] Failed to update cache with slicer values: {e}")
+                            logger.warning(
+                                f"[CACHE FIX] Failed to update cache with slicer values: {e}"
+                            )
                     except Exception as e:
-                        logger.warning(f"[CACHE FIX] Could not fetch slicer distinct values: {e}")
+                        logger.warning(
+                            f"[CACHE FIX] Could not fetch slicer distinct values: {e}"
+                        )
                 # Re-validate filters: skip parameters + check datatypes (one-time backfill)
-                if report_id and default_filters and "_filters_validated" not in cached_metadata:
+                if (
+                    report_id
+                    and default_filters
+                    and "_filters_validated" not in cached_metadata
+                ):
                     try:
-                        logger.info("[CACHE FIX] Re-validating filters (parameter exclusion + datatype check)")
+                        logger.info(
+                            "[CACHE FIX] Re-validating filters (parameter exclusion + datatype check)"
+                        )
                         report_parts = await self._extract_report_definition_parts(
                             workspace_id, report_id, access_token
                         )
@@ -446,10 +535,14 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         )
                         # Re-persist with validated filters + marker
                         try:
-                            async with ToolSessionProvider.cache_service() as cache_service:
+                            async with (
+                                ToolSessionProvider.cache_service() as cache_service
+                            ):
                                 updated_metadata = cache_service.build_metadata_dict(
                                     measures=model_context.get("measures", []),
-                                    relationships=model_context.get("relationships", []),
+                                    relationships=model_context.get(
+                                        "relationships", []
+                                    ),
                                     schema={
                                         "tables": model_context.get("tables", []),
                                         "columns": model_context.get("columns", []),
@@ -466,13 +559,21 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                                     metadata=updated_metadata,
                                     report_id=report_id,
                                 )
-                                logger.info("[CACHE UPDATED] Validated filters now persisted")
+                                logger.info(
+                                    "[CACHE UPDATED] Validated filters now persisted"
+                                )
                         except Exception as e:
-                            logger.warning(f"[CACHE FIX] Failed to update cache with validated filters: {e}")
+                            logger.warning(
+                                f"[CACHE FIX] Failed to update cache with validated filters: {e}"
+                            )
                     except Exception as e:
-                        logger.warning(f"[CACHE FIX] Could not re-validate filters: {e}")
+                        logger.warning(
+                            f"[CACHE FIX] Could not re-validate filters: {e}"
+                        )
             else:
-                logger.info(f"[CACHE MISS] Fetching fresh metadata for dataset {dataset_id}")
+                logger.info(
+                    f"[CACHE MISS] Fetching fresh metadata for dataset {dataset_id}"
+                )
         except Exception as e:
             logger.warning(f"[Cache] Cache check failed: {e}")
 
@@ -503,7 +604,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             workspace_id, report_id, access_token
                         )
                         default_filters = await self._extract_default_filters(
-                            workspace_id, report_id, access_token,
+                            workspace_id,
+                            report_id,
+                            access_token,
                             report_parts=report_parts,
                             model_context=model_context,
                         )
@@ -528,37 +631,59 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             sp_token = await self._get_access_token(sp_config)
                             sp_fabric_token = sp_token
                             try:
-                                sp_fabric_token = await self._get_fabric_token(sp_config)
+                                sp_fabric_token = await self._get_fabric_token(
+                                    sp_config
+                                )
                             except Exception as e:
-                                logger.warning(f"[SP Fallback] Fabric token for report failed: {e}")
+                                logger.warning(
+                                    f"[SP Fallback] Fabric token for report failed: {e}"
+                                )
 
-                            sp_report_parts = await self._extract_report_definition_parts(
-                                workspace_id, report_id, sp_fabric_token
+                            sp_report_parts = (
+                                await self._extract_report_definition_parts(
+                                    workspace_id, report_id, sp_fabric_token
+                                )
                             )
                             if sp_report_parts:
                                 sp_filters = await self._extract_default_filters(
-                                    workspace_id, report_id, sp_token,
+                                    workspace_id,
+                                    report_id,
+                                    sp_token,
                                     report_parts=sp_report_parts,
                                     model_context=model_context,
                                 )
-                                sp_slicers = self._extract_slicers_from_report(sp_report_parts)
+                                sp_slicers = self._extract_slicers_from_report(
+                                    sp_report_parts
+                                )
                                 if sp_filters:
                                     default_filters = sp_filters
-                                    logger.info(f"[SP Fallback] Filled {len(sp_filters)} filters from SP")
+                                    logger.info(
+                                        f"[SP Fallback] Filled {len(sp_filters)} filters from SP"
+                                    )
                                 if sp_slicers:
                                     slicers = sp_slicers
-                                    logger.info(f"[SP Fallback] Filled {len(sp_slicers)} slicers from SP")
+                                    logger.info(
+                                        f"[SP Fallback] Filled {len(sp_slicers)} slicers from SP"
+                                    )
                         except Exception as e:
-                            logger.warning(f"[SP Fallback] Report extraction with SP failed: {e}")
+                            logger.warning(
+                                f"[SP Fallback] Report extraction with SP failed: {e}"
+                            )
 
                 # Step 2c.2: Fetch distinct values for slicer columns
                 if slicers:
                     try:
                         await self._fetch_slicer_distinct_values(
-                            workspace_id, dataset_id, access_token, slicers, model_context
+                            workspace_id,
+                            dataset_id,
+                            access_token,
+                            slicers,
+                            model_context,
                         )
                     except Exception as e:
-                        logger.warning(f"[FetcherTool] Slicer distinct values failed: {e}")
+                        logger.warning(
+                            f"[FetcherTool] Slicer distinct values failed: {e}"
+                        )
 
                 # Step 2d: Save to cache
                 try:
@@ -582,7 +707,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             report_id=report_id,
                         )
                         cache_saved = True
-                        logger.info(f"[CACHE SAVED] Metadata cached for dataset {dataset_id}")
+                        logger.info(
+                            f"[CACHE SAVED] Metadata cached for dataset {dataset_id}"
+                        )
                 except Exception as e:
                     logger.warning(f"[Cache] Failed to save: {e}")
 
@@ -600,7 +727,11 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             _slicer_tables_missing: Dict[str, bool] = {}
             for _s in slicers:
                 _s_tbl = _s.get("table", "")
-                if _s_tbl and _s_tbl not in _existing_table_names and _s_tbl not in _slicer_tables_missing:
+                if (
+                    _s_tbl
+                    and _s_tbl not in _existing_table_names
+                    and _s_tbl not in _slicer_tables_missing
+                ):
                     _slicer_tables_missing[_s_tbl] = True
             if _slicer_tables_missing:
                 logger.info(
@@ -613,11 +744,17 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     if workspace_id and dataset_id and access_token:
                         try:
                             _col_meta = await self._fetch_column_metadata_for_table(
-                                workspace_id, dataset_id, access_token, _missing_tbl, config
+                                workspace_id,
+                                dataset_id,
+                                access_token,
+                                _missing_tbl,
+                                config,
                             )
                             _stub["columns"] = [
-                                c["column_name"] for c in _col_meta
-                                if c.get("column_name") and not c.get("is_hidden", False)
+                                c["column_name"]
+                                for c in _col_meta
+                                if c.get("column_name")
+                                and not c.get("is_hidden", False)
                             ]
                         except Exception as _e:
                             logger.warning(
@@ -657,7 +794,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 "report_id": report_id,
                 "cache_hit": cache_hit,
                 "cache_saved": True,
-                "semantic_enrichment_applied": config.get("enable_semantic_enrichment", False),
+                "semantic_enrichment_applied": config.get(
+                    "enable_semantic_enrichment", False
+                ),
                 "summary": {
                     "measure_count": measure_count,
                     "table_count": table_count,
@@ -799,7 +938,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             lines.append("## Measures\n")
             for m in measures[:30]:
                 expr = m.get("expression", "")[:80]
-                lines.append(f"- **{m['name']}** (Table: {m.get('table', '')}): `{expr}...`")
+                lines.append(
+                    f"- **{m['name']}** (Table: {m.get('table', '')}): `{expr}...`"
+                )
             lines.append("")
 
         tables = output.get("tables", [])
@@ -837,12 +978,18 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
     async def _get_access_token(self, config: Dict[str, Any]) -> str:
         """Get OAuth access token using centralized auth utilities."""
-        from src.services.tools.powerbi_auth_utils import get_powerbi_access_token_from_config
+        from src.services.tools.powerbi_auth_utils import (
+            get_powerbi_access_token_from_config,
+        )
+
         return await get_powerbi_access_token_from_config(config)
 
     async def _get_fabric_token(self, config: Dict[str, Any]) -> str:
         """Get Fabric API token for TMDL access."""
-        from src.services.tools.powerbi_auth_utils import get_fabric_access_token_from_config
+        from src.services.tools.powerbi_auth_utils import (
+            get_fabric_access_token_from_config,
+        )
+
         return await get_fabric_access_token_from_config(config)
 
     # =====================================================================
@@ -850,7 +997,11 @@ class PowerBISemanticModelFetcherTool(BaseTool):
     # =====================================================================
 
     async def _extract_model_context(
-        self, workspace_id: str, dataset_id: str, access_token: str, config: Dict[str, Any]
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        config: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Extract measures, relationships, and tables from the semantic model."""
         model_context: Dict[str, Any] = {
@@ -862,23 +1013,37 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         # Get Fabric token for TMDL
         fabric_token = access_token
         try:
-            if config.get("tenant_id") and config.get("client_id") and config.get("client_secret"):
+            if (
+                config.get("tenant_id")
+                and config.get("client_id")
+                and config.get("client_secret")
+            ):
                 fabric_token = await self._get_fabric_token(config)
         except Exception as e:
             logger.warning(f"Could not get Fabric token, using Power BI token: {e}")
 
         # 3-tier fallback: Fabric TMDL → Admin Scanner → DAX
-        tmdl_parts = await self._fetch_tmdl_via_fabric(workspace_id, dataset_id, fabric_token)
+        tmdl_parts = await self._fetch_tmdl_via_fabric(
+            workspace_id, dataset_id, fabric_token
+        )
         if tmdl_parts is not None:
-            measures, tables = self._parse_tmdl_for_measures_and_tables(tmdl_parts, config)
-            logger.info(f"[Model Context] Fabric TMDL: {len(measures)} measure(s), {len(tables)} table(s)")
+            measures, tables = self._parse_tmdl_for_measures_and_tables(
+                tmdl_parts, config
+            )
+            logger.info(
+                f"[Model Context] Fabric TMDL: {len(measures)} measure(s), {len(tables)} table(s)"
+            )
         else:
-            logger.info("[Model Context] Fabric API unavailable — trying Admin Scanner API")
+            logger.info(
+                "[Model Context] Fabric API unavailable — trying Admin Scanner API"
+            )
             measures, tables = await self._fetch_model_via_admin_scanner(
                 workspace_id, dataset_id, access_token, config
             )
             if not measures and not tables:
-                logger.info("[Model Context] Admin Scanner unavailable — falling back to DAX")
+                logger.info(
+                    "[Model Context] Admin Scanner unavailable — falling back to DAX"
+                )
                 measures, tables = await self._fetch_model_via_powerbi_dax(
                     workspace_id, dataset_id, access_token, config
                 )
@@ -915,23 +1080,33 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     logger.warning(f"[SP Fallback] Fabric token failed: {e}")
 
                 # Try TMDL → Admin Scanner → DAX with SP credentials
-                sp_tmdl_parts = await self._fetch_tmdl_via_fabric(workspace_id, dataset_id, sp_fabric_token)
+                sp_tmdl_parts = await self._fetch_tmdl_via_fabric(
+                    workspace_id, dataset_id, sp_fabric_token
+                )
                 if sp_tmdl_parts is not None:
-                    sp_measures, sp_tables = self._parse_tmdl_for_measures_and_tables(sp_tmdl_parts, config)
-                    logger.info(f"[SP Fallback] Fabric TMDL: {len(sp_measures)} measures, {len(sp_tables)} tables")
+                    sp_measures, sp_tables = self._parse_tmdl_for_measures_and_tables(
+                        sp_tmdl_parts, config
+                    )
+                    logger.info(
+                        f"[SP Fallback] Fabric TMDL: {len(sp_measures)} measures, {len(sp_tables)} tables"
+                    )
                 else:
                     sp_measures, sp_tables = await self._fetch_model_via_admin_scanner(
                         workspace_id, dataset_id, sp_access_token, config
                     )
                     if not sp_measures and not sp_tables:
-                        sp_measures, sp_tables = await self._fetch_model_via_powerbi_dax(
-                            workspace_id, dataset_id, sp_access_token, config
+                        sp_measures, sp_tables = (
+                            await self._fetch_model_via_powerbi_dax(
+                                workspace_id, dataset_id, sp_access_token, config
+                            )
                         )
 
                 # Measures: SP result fills the empty list from the DAX-fallback path
                 if not sa_measures and sp_measures:
                     model_context["measures"] = sp_measures
-                    logger.info(f"[SP Fallback] Filled {len(sp_measures)} measures from SP")
+                    logger.info(
+                        f"[SP Fallback] Filled {len(sp_measures)} measures from SP"
+                    )
 
                 # Tables: UNION merge — SP TMDL/Admin discovers more tables than
                 # INFO.VIEW.RELATIONSHIPS() (which only sees tables with relationships).
@@ -947,7 +1122,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             model_context["tables"].append(_sp_tbl)
                             _existing_by_name[_name] = _sp_tbl
                             _added += 1
-                        elif not _existing_by_name[_name].get("columns") and _sp_tbl.get("columns"):
+                        elif not _existing_by_name[_name].get(
+                            "columns"
+                        ) and _sp_tbl.get("columns"):
                             # Existing table has no columns — enrich from SP
                             _existing_by_name[_name]["columns"] = _sp_tbl["columns"]
                             _enriched += 1
@@ -958,10 +1135,14 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     )
 
             except Exception as e:
-                logger.warning(f"[SP Fallback] SP extraction failed (continuing with SA data): {e}")
+                logger.warning(
+                    f"[SP Fallback] SP extraction failed (continuing with SA data): {e}"
+                )
 
         # Fetch relationships via DAX
-        relationships = await self._fetch_relationships(workspace_id, dataset_id, access_token, config)
+        relationships = await self._fetch_relationships(
+            workspace_id, dataset_id, access_token, config
+        )
         model_context["relationships"] = relationships
 
         # Build top-level columns list from per-table columns
@@ -1001,9 +1182,15 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         poll_data = poll_response.json()
                         if poll_data.get("status") == "Succeeded":
                             result_url = location + "/result"
-                            result_response = await client.get(result_url, headers=headers)
+                            result_response = await client.get(
+                                result_url, headers=headers
+                            )
                             result_response.raise_for_status()
-                            return result_response.json().get("definition", {}).get("parts", [])
+                            return (
+                                result_response.json()
+                                .get("definition", {})
+                                .get("parts", [])
+                            )
                         elif poll_data.get("status") == "Failed":
                             logger.error(f"[TMDL] Fabric operation failed: {poll_data}")
                             return None
@@ -1013,7 +1200,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 elif response.status_code == 200:
                     return response.json().get("definition", {}).get("parts", [])
                 else:
-                    logger.warning(f"[TMDL] Fabric API returned HTTP {response.status_code}")
+                    logger.warning(
+                        f"[TMDL] Fabric API returned HTTP {response.status_code}"
+                    )
                     return None
 
             except Exception as e:
@@ -1021,7 +1210,11 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 return None
 
     async def _fetch_model_via_admin_scanner(
-        self, workspace_id: str, dataset_id: str, access_token: str, config: Dict[str, Any]
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        config: Dict[str, Any],
     ) -> tuple:
         """Fetch full model schema via the Power BI Admin Metadata Scanner API."""
         base = "https://api.powerbi.com/v1.0/myorg/admin/workspaces"
@@ -1044,7 +1237,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     json={"workspaces": [workspace_id]},
                 )
                 if response.status_code in (401, 403):
-                    logger.info(f"[Admin Scanner] SP lacks admin permissions (HTTP {response.status_code})")
+                    logger.info(
+                        f"[Admin Scanner] SP lacks admin permissions (HTTP {response.status_code})"
+                    )
                     return [], []
                 response.raise_for_status()
                 scan_id = response.json().get("id")
@@ -1060,7 +1255,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             try:
                 for _ in range(30):
                     await asyncio.sleep(2)
-                    poll = await client.get(f"{base}/scanStatus/{scan_id}", headers=headers)
+                    poll = await client.get(
+                        f"{base}/scanStatus/{scan_id}", headers=headers
+                    )
                     poll.raise_for_status()
                     status = poll.json().get("status", "")
                     if status == "Succeeded":
@@ -1074,7 +1271,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
             # Step 3: fetch result
             try:
-                result_resp = await client.get(f"{base}/scanResult/{scan_id}", headers=headers)
+                result_resp = await client.get(
+                    f"{base}/scanResult/{scan_id}", headers=headers
+                )
                 result_resp.raise_for_status()
                 workspaces = result_resp.json().get("workspaces", [])
             except Exception:
@@ -1085,19 +1284,31 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         tables: List[Dict[str, Any]] = []
 
         target_ws = next(
-            (ws for ws in workspaces if ws.get("id", "").lower() == workspace_id.lower()), None
+            (
+                ws
+                for ws in workspaces
+                if ws.get("id", "").lower() == workspace_id.lower()
+            ),
+            None,
         )
         if not target_ws:
             return [], []
         target_ds = next(
-            (ds for ds in target_ws.get("datasets", []) if ds.get("id", "").lower() == dataset_id.lower()), None
+            (
+                ds
+                for ds in target_ws.get("datasets", [])
+                if ds.get("id", "").lower() == dataset_id.lower()
+            ),
+            None,
         )
         if not target_ds:
             return [], []
 
         for table in target_ds.get("tables", []):
             table_name = table.get("name", "")
-            if skip_system and ("LocalDateTable" in table_name or "DateTableTemplate" in table_name):
+            if skip_system and (
+                "LocalDateTable" in table_name or "DateTableTemplate" in table_name
+            ):
                 continue
             columns = [
                 col.get("name", "")
@@ -1110,37 +1321,63 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 expression = measure.get("expression", "")
                 if not measure_name or not expression.strip():
                     continue
-                measures.append({"name": measure_name, "table": table_name, "expression": expression.strip()})
+                measures.append(
+                    {
+                        "name": measure_name,
+                        "table": table_name,
+                        "expression": expression.strip(),
+                    }
+                )
 
-        logger.info(f"[Admin Scanner] {len(measures)} measure(s), {len(tables)} table(s)")
+        logger.info(
+            f"[Admin Scanner] {len(measures)} measure(s), {len(tables)} table(s)"
+        )
         return measures, tables
 
     async def _fetch_model_via_powerbi_dax(
-        self, workspace_id: str, dataset_id: str, access_token: str, config: Dict[str, Any]
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        config: Dict[str, Any],
     ) -> tuple:
         """Fallback: derive table names from INFO.VIEW.RELATIONSHIPS()."""
         query_url = (
             f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}"
             f"/datasets/{dataset_id}/executeQueries"
         )
-        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
         tables: List[Dict[str, Any]] = []
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
-                    query_url, headers=headers,
-                    json={"queries": [{"query": "EVALUATE INFO.VIEW.RELATIONSHIPS()"}], "serializerSettings": {"includeNulls": True}},
+                    query_url,
+                    headers=headers,
+                    json={
+                        "queries": [{"query": "EVALUATE INFO.VIEW.RELATIONSHIPS()"}],
+                        "serializerSettings": {"includeNulls": True},
+                    },
                 )
             response.raise_for_status()
-            rows = response.json().get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
+            rows = (
+                response.json()
+                .get("results", [{}])[0]
+                .get("tables", [{}])[0]
+                .get("rows", [])
+            )
             seen: set = set()
             for row in rows:
                 for key in ("[FromTable]", "[ToTable]"):
                     name = row.get(key, "")
                     if not name or name in seen:
                         continue
-                    if config.get("skip_system_tables", True) and ("LocalDateTable" in name or "DateTableTemplate" in name):
+                    if config.get("skip_system_tables", True) and (
+                        "LocalDateTable" in name or "DateTableTemplate" in name
+                    ):
                         continue
                     seen.add(name)
                     tables.append({"name": name})
@@ -1152,14 +1389,24 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             try:
                 async with httpx.AsyncClient(timeout=60.0) as client:
                     col_response = await client.post(
-                        query_url, headers=headers,
+                        query_url,
+                        headers=headers,
                         json={
-                            "queries": [{"query": "EVALUATE SELECTCOLUMNS(INFO.VIEW.COLUMNS(), [TableName], [ExplicitName], [DataType], [IsHidden])"}],
+                            "queries": [
+                                {
+                                    "query": "EVALUATE SELECTCOLUMNS(INFO.VIEW.COLUMNS(), [TableName], [ExplicitName], [DataType], [IsHidden])"
+                                }
+                            ],
                             "serializerSettings": {"includeNulls": True},
                         },
                     )
                 col_response.raise_for_status()
-                col_rows = col_response.json().get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
+                col_rows = (
+                    col_response.json()
+                    .get("results", [{}])[0]
+                    .get("tables", [{}])[0]
+                    .get("rows", [])
+                )
 
                 # Group columns by table name
                 columns_by_table: Dict[str, List[str]] = {}
@@ -1174,7 +1421,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     cols = columns_by_table.get(table["name"], [])
                     if cols:
                         table["columns"] = cols
-                logger.info(f"[PowerBI Fallback] Enriched {sum(1 for t in tables if t.get('columns'))} tables with columns via INFO.VIEW.COLUMNS()")
+                logger.info(
+                    f"[PowerBI Fallback] Enriched {sum(1 for t in tables if t.get('columns'))} tables with columns via INFO.VIEW.COLUMNS()"
+                )
 
                 # Discover additional tables that have columns but no relationships.
                 # INFO.VIEW.RELATIONSHIPS() only returns tables that participate in a
@@ -1187,7 +1436,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 for tbl_name, cols in columns_by_table.items():
                     if tbl_name in _known_table_names:
                         continue
-                    if skip_system and ("LocalDateTable" in tbl_name or "DateTableTemplate" in tbl_name):
+                    if skip_system and (
+                        "LocalDateTable" in tbl_name or "DateTableTemplate" in tbl_name
+                    ):
                         continue
                     _known_table_names.add(tbl_name)
                     tables.append({"name": tbl_name, "columns": cols})
@@ -1217,18 +1468,25 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 continue
             try:
                 tmdl_content = base64.b64decode(payload).decode("utf-8")
-                table_match = re.match(r"table\s+(?:'([^']+)'|(\w+))", tmdl_content.strip())
+                table_match = re.match(
+                    r"table\s+(?:'([^']+)'|(\w+))", tmdl_content.strip()
+                )
                 if not table_match:
                     continue
                 table_name = table_match.group(1) or table_match.group(2)
                 if config.get("skip_system_tables", True):
-                    if "LocalDateTable" in table_name or "DateTableTemplate" in table_name:
+                    if (
+                        "LocalDateTable" in table_name
+                        or "DateTableTemplate" in table_name
+                    ):
                         continue
 
                 tables.append({"name": table_name})
 
                 # Columns
-                column_pattern = re.compile(r"column\s+(?:'([^']+)'|(\w+))", re.MULTILINE)
+                column_pattern = re.compile(
+                    r"column\s+(?:'([^']+)'|(\w+))", re.MULTILINE
+                )
                 columns = []
                 for col_match in column_pattern.finditer(tmdl_content):
                     col_name = col_match.group(1) or col_match.group(2)
@@ -1247,27 +1505,38 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     measure_name = match.group(1) or match.group(2)
                     expression = match.group(3).strip()
                     clean_lines = []
-                    for line in expression.split('\n'):
+                    for line in expression.split("\n"):
                         stripped = line.strip()
-                        if stripped.startswith(('lineageTag:', 'formatString:', 'annotation', 'isHidden')):
+                        if stripped.startswith(
+                            ("lineageTag:", "formatString:", "annotation", "isHidden")
+                        ):
                             break
                         clean_lines.append(line)
-                    measures.append({
-                        "name": measure_name,
-                        "table": table_name,
-                        "expression": '\n'.join(clean_lines).strip(),
-                    })
+                    measures.append(
+                        {
+                            "name": measure_name,
+                            "table": table_name,
+                            "expression": "\n".join(clean_lines).strip(),
+                        }
+                    )
             except Exception as e:
                 logger.warning(f"Error parsing TMDL from {path}: {e}")
 
         return measures, tables
 
     async def _fetch_relationships(
-        self, workspace_id: str, dataset_id: str, access_token: str, config: Dict[str, Any]
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        config: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
         """Extract relationships using INFO.VIEW.RELATIONSHIPS() DAX function."""
         url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
-        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
         payload = {
             "queries": [{"query": "EVALUATE INFO.VIEW.RELATIONSHIPS()"}],
             "serializerSettings": {"includeNulls": True},
@@ -1277,7 +1546,12 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             try:
                 response = await client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
-                rows = response.json().get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
+                rows = (
+                    response.json()
+                    .get("results", [{}])[0]
+                    .get("tables", [{}])[0]
+                    .get("rows", [])
+                )
                 relationships = []
                 seen_ids = set()
                 for row in rows:
@@ -1288,15 +1562,20 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     from_table = row.get("[FromTable]", "")
                     to_table = row.get("[ToTable]", "")
                     if config.get("skip_system_tables", True):
-                        if "LocalDateTable" in from_table or "LocalDateTable" in to_table:
+                        if (
+                            "LocalDateTable" in from_table
+                            or "LocalDateTable" in to_table
+                        ):
                             continue
-                    relationships.append({
-                        "from_table": from_table,
-                        "from_column": row.get("[FromColumn]", ""),
-                        "to_table": to_table,
-                        "to_column": row.get("[ToColumn]", ""),
-                        "is_active": row.get("[IsActive]", True),
-                    })
+                    relationships.append(
+                        {
+                            "from_table": from_table,
+                            "from_column": row.get("[FromColumn]", ""),
+                            "to_table": to_table,
+                            "to_column": row.get("[ToColumn]", ""),
+                            "is_active": row.get("[IsActive]", True),
+                        }
+                    )
                 return relationships
             except Exception as e:
                 logger.error(f"Relationships extraction error: {e}")
@@ -1307,8 +1586,12 @@ class PowerBISemanticModelFetcherTool(BaseTool):
     # =====================================================================
 
     async def _enrich_model_context_with_metadata(
-        self, model_context: Dict[str, Any], workspace_id: str, dataset_id: str,
-        access_token: str, config: Dict[str, Any]
+        self,
+        model_context: Dict[str, Any],
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        config: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Enrich model context with column metadata and sample values."""
         enriched_context = {**model_context}
@@ -1321,7 +1604,10 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 for table in tables[:10]:
                     table_name = table["name"]
                     if config.get("skip_system_tables", True):
-                        if "LocalDateTable" in table_name or "DateTableTemplate" in table_name:
+                        if (
+                            "LocalDateTable" in table_name
+                            or "DateTableTemplate" in table_name
+                        ):
                             continue
                     try:
                         columns_metadata = await self._fetch_column_metadata_for_table(
@@ -1329,19 +1615,29 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         )
                         if columns_metadata:
                             table["column_metadata"] = columns_metadata
-                            table["column_types"] = {c["column_name"]: c["data_type"] for c in columns_metadata}
+                            table["column_types"] = {
+                                c["column_name"]: c["data_type"]
+                                for c in columns_metadata
+                            }
                             table["column_descriptions"] = {
                                 c["column_name"]: c.get("description", "")
-                                for c in columns_metadata if c.get("description")
+                                for c in columns_metadata
+                                if c.get("description")
                             }
                             total_columns_enriched += len(columns_metadata)
                             tables_enriched += 1
                     except Exception as e:
-                        logger.debug(f"[Context Enrichment] Could not fetch metadata for '{table_name}': {e}")
+                        logger.debug(
+                            f"[Context Enrichment] Could not fetch metadata for '{table_name}': {e}"
+                        )
                 if tables_enriched > 0:
-                    logger.info(f"[Context Enrichment] Added column metadata for {tables_enriched} tables")
+                    logger.info(
+                        f"[Context Enrichment] Added column metadata for {tables_enriched} tables"
+                    )
             except Exception as e:
-                logger.warning(f"[Context Enrichment] Column metadata enrichment error: {e}")
+                logger.warning(
+                    f"[Context Enrichment] Column metadata enrichment error: {e}"
+                )
 
         # Sample values
         try:
@@ -1349,7 +1645,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 workspace_id, dataset_id, access_token, enriched_context, config
             )
             enriched_context["sample_data"] = sample_values
-            logger.info(f"[Context Enrichment] Added sample values for {len(sample_values)} columns")
+            logger.info(
+                f"[Context Enrichment] Added sample values for {len(sample_values)} columns"
+            )
         except Exception as e:
             logger.warning(f"[Context Enrichment] Could not fetch sample values: {e}")
 
@@ -1358,19 +1656,31 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             try:
                 await self._generate_semantic_enrichment(enriched_context, config)
             except Exception as e:
-                logger.warning(f"[Context Enrichment] Semantic enrichment failed (continuing): {e}")
+                logger.warning(
+                    f"[Context Enrichment] Semantic enrichment failed (continuing): {e}"
+                )
 
         return enriched_context
 
     async def _fetch_column_metadata_for_table(
-        self, workspace_id: str, dataset_id: str, access_token: str,
-        table_name: str, config: Dict[str, Any]
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        table_name: str,
+        config: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
         """Fetch column metadata for a specific table using INFO.COLUMNS()."""
         url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
-        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
         dax_query = f'EVALUATE INFO.COLUMNS("{table_name}")'
-        payload = {"queries": [{"query": dax_query}], "serializerSettings": {"includeNulls": True}}
+        payload = {
+            "queries": [{"query": dax_query}],
+            "serializerSettings": {"includeNulls": True},
+        }
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
@@ -1378,24 +1688,35 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 if response.status_code != 200:
                     return []
                 response.raise_for_status()
-                rows = response.json().get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
+                rows = (
+                    response.json()
+                    .get("results", [{}])[0]
+                    .get("tables", [{}])[0]
+                    .get("rows", [])
+                )
                 columns = []
                 for row in rows:
                     column_name = row.get("[ExplicitName]", "") or row.get("[Name]", "")
-                    columns.append({
-                        "table_name": table_name,
-                        "column_name": column_name,
-                        "data_type": row.get("[DataType]", ""),
-                        "is_hidden": row.get("[IsHidden]", False),
-                        "description": row.get("[Description]", ""),
-                    })
+                    columns.append(
+                        {
+                            "table_name": table_name,
+                            "column_name": column_name,
+                            "data_type": row.get("[DataType]", ""),
+                            "is_hidden": row.get("[IsHidden]", False),
+                            "description": row.get("[Description]", ""),
+                        }
+                    )
                 return columns
             except Exception:
                 return []
 
     async def _fetch_sample_column_values(
-        self, workspace_id: str, dataset_id: str, access_token: str,
-        model_context: Dict[str, Any], config: Dict[str, Any]
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        model_context: Dict[str, Any],
+        config: Dict[str, Any],
     ) -> Dict[str, Dict[str, Any]]:
         """Fetch sample values for ALL columns across all tables."""
         sample_values: Dict[str, Dict[str, Any]] = {}
@@ -1405,13 +1726,19 @@ class PowerBISemanticModelFetcherTool(BaseTool):
             table_name = table["name"]
             columns = table.get("columns", [])
             if not columns:
-                logger.debug(f"[Sample Values] Skipping table '{table_name}' — no columns")
+                logger.debug(
+                    f"[Sample Values] Skipping table '{table_name}' — no columns"
+                )
                 continue
             for column in columns:
                 try:
                     # Quote table name for DAX (handles spaces/special chars)
-                    dax_query = f"EVALUATE TOPN(10, SUMMARIZECOLUMNS('{table_name}'[{column}]))"
-                    result = await self._execute_dax_query(workspace_id, dataset_id, access_token, dax_query)
+                    dax_query = (
+                        f"EVALUATE TOPN(10, SUMMARIZECOLUMNS('{table_name}'[{column}]))"
+                    )
+                    result = await self._execute_dax_query(
+                        workspace_id, dataset_id, access_token, dax_query
+                    )
                     if result.get("success") and result.get("data"):
                         values = [list(row.values())[0] for row in result["data"][:10]]
                         sample_values[f"{table_name}[{column}]"] = {
@@ -1419,11 +1746,17 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             "sample_values": values,
                         }
                     elif result.get("error"):
-                        logger.debug(f"[Sample Values] DAX error for '{table_name}'[{column}]: {result['error']}")
+                        logger.debug(
+                            f"[Sample Values] DAX error for '{table_name}'[{column}]: {result['error']}"
+                        )
                 except Exception as e:
-                    logger.debug(f"[Sample Values] Exception for '{table_name}'[{column}]: {e}")
+                    logger.debug(
+                        f"[Sample Values] Exception for '{table_name}'[{column}]: {e}"
+                    )
                     continue
-        logger.info(f"[Sample Values] Fetched {len(sample_values)} column sample value sets")
+        logger.info(
+            f"[Sample Values] Fetched {len(sample_values)} column sample value sets"
+        )
         return sample_values
 
     # =====================================================================
@@ -1464,7 +1797,8 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
         _SYSTEM_TABLES = ("LocalDateTable", "DateTableTemplate", "DateTable")
         tables = [
-            t for t in model_context.get("tables", [])
+            t
+            for t in model_context.get("tables", [])
             if not any(skip in t.get("name", "") for skip in _SYSTEM_TABLES)
         ]
         measures = model_context.get("measures", [])
@@ -1497,7 +1831,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
     ) -> None:
         """Batch-enrich tables with grain and purpose via LLM. Mutates in-place."""
         from src.services.llm.manager import LLMManager
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
 
         _SYSTEM = (
             "You are a senior data architect specialising in Power BI semantic models. "
@@ -1524,7 +1858,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 "- grain: what one row represents (≤1 sentence)\n"
                 "- purpose: what business entity this table represents (≤1 sentence)\n\n"
                 + "\n\n".join(table_blocks)
-                + '\n\nOutput ONLY this JSON:\n'
+                + "\n\nOutput ONLY this JSON:\n"
                 '{"tables": [{"name": "...", "grain": "...", "purpose": "..."}]}'
             )
 
@@ -1568,7 +1902,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
     ) -> None:
         """Batch-enrich columns and measures with descriptions + synonyms. Mutates in-place."""
         from src.services.llm.manager import LLMManager
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
 
         _SYSTEM_COL = (
             "You are a senior data architect specialising in Power BI semantic models. "
@@ -1600,7 +1934,8 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     samples = sample_data.get(key, {}).get("sample_values", [])
                     sample_str = (
                         f" (examples: {', '.join(str(v) for v in samples[:5])})"
-                        if samples else ""
+                        if samples
+                        else ""
                     )
                     col_lines.append(f"- {cname}{sample_str}")
 
@@ -1636,7 +1971,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                             target["description"] = item["description"]
                         if item.get("synonyms"):
                             existing = target.get("synonyms", [])
-                            new_syns = [s for s in item["synonyms"] if s not in existing]
+                            new_syns = [
+                                s for s in item["synonyms"] if s not in existing
+                            ]
                             target["synonyms"] = existing + new_syns
                     logger.debug(
                         f"[SemanticEnrichment] Column batch {table_name}[{i}:{i+batch_size}] — "
@@ -1697,8 +2034,12 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 )
 
     async def _fetch_slicer_distinct_values(
-        self, workspace_id: str, dataset_id: str, access_token: str,
-        slicers: List[Dict[str, Any]], model_context: Dict[str, Any]
+        self,
+        workspace_id: str,
+        dataset_id: str,
+        access_token: str,
+        slicers: List[Dict[str, Any]],
+        model_context: Dict[str, Any],
     ) -> None:
         """Fetch ALL distinct values for slicer columns and replace sample_data entries.
 
@@ -1720,16 +2061,22 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 seen.add(key)
                 unique_slicer_cols.append(key)
 
-        logger.info(f"[Slicer Values] Fetching distinct values for {len(unique_slicer_cols)} slicer columns")
+        logger.info(
+            f"[Slicer Values] Fetching distinct values for {len(unique_slicer_cols)} slicer columns"
+        )
 
         for table, column in unique_slicer_cols:
             try:
                 dax_query = f"EVALUATE DISTINCT('{table}'[{column}])"
-                result = await self._execute_dax_query(workspace_id, dataset_id, access_token, dax_query)
+                result = await self._execute_dax_query(
+                    workspace_id, dataset_id, access_token, dax_query
+                )
                 if result.get("success") and result.get("data"):
                     values = [list(row.values())[0] for row in result["data"]]
                     sample_key = f"{table}[{column}]"
-                    old_count = len(sample_data.get(sample_key, {}).get("sample_values", []))
+                    old_count = len(
+                        sample_data.get(sample_key, {}).get("sample_values", [])
+                    )
                     sample_data[sample_key] = {
                         "type": "slicer_values",
                         "sample_values": values,
@@ -1739,21 +2086,39 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         f"(replaced {old_count} sample values)"
                     )
                 elif result.get("error"):
-                    logger.warning(f"[Slicer Values] DAX error for '{table}'[{column}]: {result['error']}")
+                    logger.warning(
+                        f"[Slicer Values] DAX error for '{table}'[{column}]: {result['error']}"
+                    )
             except Exception as e:
-                logger.warning(f"[Slicer Values] Exception for '{table}'[{column}]: {e}")
+                logger.warning(
+                    f"[Slicer Values] Exception for '{table}'[{column}]: {e}"
+                )
                 continue
 
-        logger.info(f"[Slicer Values] Done — {len(unique_slicer_cols)} slicer columns processed")
+        logger.info(
+            f"[Slicer Values] Done — {len(unique_slicer_cols)} slicer columns processed"
+        )
 
     async def _execute_dax_query(
         self, workspace_id: str, dataset_id: str, access_token: str, dax_query: str
     ) -> Dict[str, Any]:
         """Execute DAX query via Power BI Execute Queries API (for sample values)."""
         url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
-        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
-        payload = {"queries": [{"query": dax_query}], "serializerSettings": {"includeNulls": True}}
-        result: Dict[str, Any] = {"success": False, "data": [], "row_count": 0, "columns": [], "error": None}
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "queries": [{"query": dax_query}],
+            "serializerSettings": {"includeNulls": True},
+        }
+        result: Dict[str, Any] = {
+            "success": False,
+            "data": [],
+            "row_count": 0,
+            "columns": [],
+            "error": None,
+        }
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             try:
@@ -1791,10 +2156,15 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         Returns the raw list of report definition parts (base64-encoded payloads).
         Handles both synchronous (200) and asynchronous (202) API responses.
         """
-        logger.info(f"[Report Definition] Fetching report definition for report {report_id}")
+        logger.info(
+            f"[Report Definition] Fetching report definition for report {report_id}"
+        )
 
         url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/reports/{report_id}/getDefinition"
-        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
 
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=headers, json={}, timeout=60.0)
@@ -1808,13 +2178,23 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         poll_data = poll_response.json()
                         if poll_data.get("status") == "Succeeded":
                             result_url = location + "/result"
-                            result_response = await client.get(result_url, headers=headers)
+                            result_response = await client.get(
+                                result_url, headers=headers
+                            )
                             result_response.raise_for_status()
-                            parts = result_response.json().get("definition", {}).get("parts", [])
-                            logger.info(f"[Report Definition] Got {len(parts)} parts (async)")
+                            parts = (
+                                result_response.json()
+                                .get("definition", {})
+                                .get("parts", [])
+                            )
+                            logger.info(
+                                f"[Report Definition] Got {len(parts)} parts (async)"
+                            )
                             return parts
                         elif poll_data.get("status") == "Failed":
-                            logger.warning("[Report Definition] Async definition request failed")
+                            logger.warning(
+                                "[Report Definition] Async definition request failed"
+                            )
                             return []
             elif response.status_code == 200:
                 parts = response.json().get("definition", {}).get("parts", [])
@@ -1824,7 +2204,10 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         return []
 
     async def _extract_default_filters(
-        self, workspace_id: str, report_id: str, access_token: str,
+        self,
+        workspace_id: str,
+        report_id: str,
+        access_token: str,
         report_parts: Optional[List[Dict[str, Any]]] = None,
         model_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -1844,7 +2227,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 report_parts = await self._extract_report_definition_parts(
                     workspace_id, report_id, access_token
                 )
-            return self._parse_tmdl_for_filters(report_parts, model_context=model_context)
+            return self._parse_tmdl_for_filters(
+                report_parts, model_context=model_context
+            )
         except Exception as e:
             logger.warning(f"[Filter Extraction] Error: {e}")
             return {}
@@ -1853,7 +2238,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
     # Slicer Extraction
     # =====================================================================
 
-    def _extract_slicers_from_report(self, report_parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _extract_slicers_from_report(
+        self, report_parts: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Extract slicer visuals from Power BI report definition (PBIR format).
 
         Supports two PBIR formats:
@@ -1862,10 +2249,14 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         """
         slicers: List[Dict[str, Any]] = []
         SLICER_TYPES = {
-            "slicer", "listSlicer", "dateSlicer", "relativeDateSlicer",
-            "advancedSlicerVisual", "chicletSlicer", "timeline",
+            "slicer",
+            "listSlicer",
+            "dateSlicer",
+            "relativeDateSlicer",
+            "advancedSlicerVisual",
+            "chicletSlicer",
+            "timeline",
         }
-
 
         # Step 1: Build page_id → page_name map from page.json files
         page_names: Dict[str, str] = {}
@@ -1887,10 +2278,14 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     if not page_id and len(path_parts) >= 2:
                         page_id = path_parts[-2]
                     if page_id:
-                        display_name = page_data.get("displayName", page_data.get("name", page_id))
+                        display_name = page_data.get(
+                            "displayName", page_data.get("name", page_id)
+                        )
                         page_names[page_id] = display_name
                 except Exception as e:
-                    logger.debug(f"[Slicer Extraction] Error parsing page.json at {path}: {e}")
+                    logger.debug(
+                        f"[Slicer Extraction] Error parsing page.json at {path}: {e}"
+                    )
 
         # Step 2: Parse visual.json files (Method 1 — separate files)
         for part in report_parts:
@@ -1918,7 +2313,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     for key in ("visuals", "Visuals"):
                         if key in path_parts:
                             idx = path_parts.index(key) + 1
-                            visual_id = path_parts[idx] if idx < len(path_parts) else None
+                            visual_id = (
+                                path_parts[idx] if idx < len(path_parts) else None
+                            )
                             break
                     if not visual_id and len(path_parts) >= 2:
                         visual_id = path_parts[-2]
@@ -1928,20 +2325,37 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     if not title:
                         vcobjects = visual_data.get("visual", {}).get("vcObjects", {})
                         title_obj = vcobjects.get("title", [{}])
-                        if title_obj and isinstance(title_obj, list) and len(title_obj) > 0:
-                            title = title_obj[0].get("properties", {}).get("text", {}).get("expr", {}).get("Literal", {}).get("Value", "")
+                        if (
+                            title_obj
+                            and isinstance(title_obj, list)
+                            and len(title_obj) > 0
+                        ):
+                            title = (
+                                title_obj[0]
+                                .get("properties", {})
+                                .get("text", {})
+                                .get("expr", {})
+                                .get("Literal", {})
+                                .get("Value", "")
+                            )
                             if isinstance(title, str):
                                 title = title.strip("'\"")
 
                     # Extract table/column binding from queryDefinition
-                    table, column = self._extract_slicer_binding(visual_data.get("visual", {}))
+                    table, column = self._extract_slicer_binding(
+                        visual_data.get("visual", {})
+                    )
 
                     # Extract active slicer selection
-                    default_value = self._extract_slicer_selection(visual_data, visual_data.get("visual", {}))
+                    default_value = self._extract_slicer_selection(
+                        visual_data, visual_data.get("visual", {})
+                    )
 
                     slicer = {
                         "page_id": page_id,
-                        "page_name": page_names.get(page_id, "Unknown") if page_id else "Unknown",
+                        "page_name": (
+                            page_names.get(page_id, "Unknown") if page_id else "Unknown"
+                        ),
                         "visual_id": visual_id,
                         "visual_type": visual_type,
                         "title": title or visual_type,
@@ -1951,14 +2365,20 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                     }
                     slicers.append(slicer)
                     dv_str = f" [default: {default_value}]" if default_value else ""
-                    logger.info(f"[Slicer Extraction] Found slicer: {slicer['title']} → {table}[{column}]{dv_str}")
+                    logger.info(
+                        f"[Slicer Extraction] Found slicer: {slicer['title']} → {table}[{column}]{dv_str}"
+                    )
 
                 except Exception as e:
-                    logger.debug(f"[Slicer Extraction] Error parsing visual.json at {path}: {e}")
+                    logger.debug(
+                        f"[Slicer Extraction] Error parsing visual.json at {path}: {e}"
+                    )
 
         # Step 3: Fallback — parse from report.json embedded format (Method 2)
         if not slicers:
-            slicers = self._extract_slicers_from_embedded_report(report_parts, SLICER_TYPES)
+            slicers = self._extract_slicers_from_embedded_report(
+                report_parts, SLICER_TYPES
+            )
 
         logger.info(f"[Slicer Extraction] Total slicers found: {len(slicers)}")
         return slicers
@@ -1971,7 +2391,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
         for part in report_parts:
             path = part.get("path", "")
-            if not (path.lower() == "report.json" or path.lower().endswith("/report.json")):
+            if not (
+                path.lower() == "report.json" or path.lower().endswith("/report.json")
+            ):
                 continue
 
             try:
@@ -1991,11 +2413,15 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 for page_data in pages_data:
                     if not isinstance(page_data, dict):
                         continue
-                    page_name = page_data.get("displayName", page_data.get("name", "Unknown"))
+                    page_name = page_data.get(
+                        "displayName", page_data.get("name", "Unknown")
+                    )
                     page_id = page_data.get("name") or page_data.get("id")
 
                     # Find visuals within the page
-                    visuals_data = page_data.get("visualContainers") or page_data.get("visuals")
+                    visuals_data = page_data.get("visualContainers") or page_data.get(
+                        "visuals"
+                    )
                     if not visuals_data or not isinstance(visuals_data, list):
                         continue
 
@@ -2015,34 +2441,57 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                                     continue
                             elif isinstance(config_val, dict):
                                 parsed_config = config_val
-                            visual_type = parsed_config.get("singleVisual", {}).get("visualType", "")
+                            visual_type = parsed_config.get("singleVisual", {}).get(
+                                "visualType", ""
+                            )
                         elif "visualType" in vis_data:
                             visual_type = vis_data.get("visualType", "")
                             parsed_config = vis_data
-                        elif "visual" in vis_data and isinstance(vis_data["visual"], dict):
+                        elif "visual" in vis_data and isinstance(
+                            vis_data["visual"], dict
+                        ):
                             visual_type = vis_data["visual"].get("visualType", "")
                             parsed_config = vis_data
 
                         if visual_type.lower() not in {s.lower() for s in slicer_types}:
                             continue
 
-                        visual_id = vis_data.get("name") or vis_data.get("id") or f"visual_{vis_idx}"
+                        visual_id = (
+                            vis_data.get("name")
+                            or vis_data.get("id")
+                            or f"visual_{vis_idx}"
+                        )
 
                         # Extract title from config
                         title = ""
                         sv = parsed_config.get("singleVisual", {})
                         vcobjects = sv.get("vcObjects", {})
                         title_obj = vcobjects.get("title", [{}])
-                        if title_obj and isinstance(title_obj, list) and len(title_obj) > 0:
-                            title = title_obj[0].get("properties", {}).get("text", {}).get("expr", {}).get("Literal", {}).get("Value", "")
+                        if (
+                            title_obj
+                            and isinstance(title_obj, list)
+                            and len(title_obj) > 0
+                        ):
+                            title = (
+                                title_obj[0]
+                                .get("properties", {})
+                                .get("text", {})
+                                .get("expr", {})
+                                .get("Literal", {})
+                                .get("Value", "")
+                            )
                             if isinstance(title, str):
                                 title = title.strip("'\"")
 
                         # Extract table/column binding
-                        table, column = self._extract_slicer_binding_embedded(parsed_config)
+                        table, column = self._extract_slicer_binding_embedded(
+                            parsed_config
+                        )
 
                         # Extract active slicer selection from visual-level filters
-                        default_value = self._extract_slicer_selection(vis_data, parsed_config)
+                        default_value = self._extract_slicer_selection(
+                            vis_data, parsed_config
+                        )
 
                         slicer = {
                             "page_id": page_id,
@@ -2056,7 +2505,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         }
                         slicers.append(slicer)
                         dv_str = f" [default: {default_value}]" if default_value else ""
-                        logger.info(f"[Slicer Extraction] Found embedded slicer: {slicer['title']} → {table}[{column}]{dv_str}")
+                        logger.info(
+                            f"[Slicer Extraction] Found embedded slicer: {slicer['title']} → {table}[{column}]{dv_str}"
+                        )
 
             except Exception as e:
                 logger.debug(f"[Slicer Extraction] Error parsing report.json: {e}")
@@ -2195,7 +2646,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         return (table, column)
 
             # Fallback: dataTransforms
-            data_transforms = sv.get("dataTransforms", parsed_config.get("dataTransforms", {}))
+            data_transforms = sv.get(
+                "dataTransforms", parsed_config.get("dataTransforms", {})
+            )
             selects = data_transforms.get("selects", [])
             for sel in selects:
                 query_ref = sel.get("queryRef", "")
@@ -2223,8 +2676,13 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
     # Common Power BI parameter table name patterns
     _PARAMETER_TABLE_PATTERNS = (
-        "parameter", "__parameter", "param_", "_param",
-        "daterange", "date range", "what-if",
+        "parameter",
+        "__parameter",
+        "param_",
+        "_param",
+        "daterange",
+        "date range",
+        "what-if",
     )
 
     def _is_parameter_table(self, table_name: str) -> bool:
@@ -2262,7 +2720,8 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         return ""
 
     def _parse_tmdl_for_filters(
-        self, tmdl_parts: List[Dict[str, Any]],
+        self,
+        tmdl_parts: List[Dict[str, Any]],
         model_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Parse report definition (PBIR format) to extract filters.
@@ -2287,22 +2746,30 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                 if param_reason:
                     expression = filter_def.get("expression", {})
                     col = expression.get("Column", {})
-                    entity = col.get("Expression", {}).get("SourceRef", {}).get("Entity", "")
+                    entity = (
+                        col.get("Expression", {}).get("SourceRef", {}).get("Entity", "")
+                    )
                     prop = col.get("Property", "")
                     logger.info(
                         f"[Filter Extraction] Skipping parameter filter: "
                         f"{entity}[{prop}] — reason: {param_reason} (source: {source})"
                     )
                     continue
-                filter_name, filter_description = self._extract_filter_from_definition(filter_def)
+                filter_name, filter_description = self._extract_filter_from_definition(
+                    filter_def
+                )
                 if filter_name and filter_description:
                     if column_type_map and filter_name in column_type_map:
                         filter_description = self._validate_filter_datatype(
-                            filter_name, filter_description, column_type_map[filter_name],
+                            filter_name,
+                            filter_description,
+                            column_type_map[filter_name],
                         )
                     if filter_name not in filters:
                         filters[filter_name] = filter_description
-                        logger.info(f"[Filter Extraction] {source}: {filter_name} = {filter_description}")
+                        logger.info(
+                            f"[Filter Extraction] {source}: {filter_name} = {filter_description}"
+                        )
                 else:
                     expr_keys = list(filter_def.get("expression", {}).keys())
                     logger.info(
@@ -2313,7 +2780,7 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
         # Accumulate page-level filters separately so we can merge them after
         # report-level filters (report-level takes precedence on conflicts).
-        page_filter_raw: Dict[str, Any] = {}   # filter_name → description
+        page_filter_raw: Dict[str, Any] = {}  # filter_name → description
         page_filter_pages: Dict[str, set] = {}  # filter_name → set of page names
 
         try:
@@ -2329,10 +2796,16 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         report_json = json.loads(content)
                         if "filters" in report_json:
                             filters_str = report_json["filters"]
-                            defs = json.loads(filters_str) if isinstance(filters_str, str) else filters_str
+                            defs = (
+                                json.loads(filters_str)
+                                if isinstance(filters_str, str)
+                                else filters_str
+                            )
                             _process_filter_list(defs, "report-level")
                     except json.JSONDecodeError as e:
-                        logger.warning(f"[Filter Extraction] Failed to parse report.json: {e}")
+                        logger.warning(
+                            f"[Filter Extraction] Failed to parse report.json: {e}"
+                        )
 
                 # ── Page-level filters ("Filters on this page") ──
                 elif "/pages/" in path_lower and path_lower.endswith("/page.json"):
@@ -2340,39 +2813,57 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         content = base64.b64decode(payload).decode("utf-8")
                         page_json = json.loads(content)
                         if "filters" in page_json:
-                            page_name = page_json.get("displayName", page_json.get("name", path))
+                            page_name = page_json.get(
+                                "displayName", page_json.get("name", path)
+                            )
                             filters_str = page_json["filters"]
-                            defs = json.loads(filters_str) if isinstance(filters_str, str) else filters_str
+                            defs = (
+                                json.loads(filters_str)
+                                if isinstance(filters_str, str)
+                                else filters_str
+                            )
                             for filter_def in defs:
                                 if self._is_parameter_filter(filter_def):
                                     continue
-                                fname, fdesc = self._extract_filter_from_definition(filter_def)
+                                fname, fdesc = self._extract_filter_from_definition(
+                                    filter_def
+                                )
                                 if fname and fdesc:
-                                    page_filter_pages.setdefault(fname, set()).add(page_name)
+                                    page_filter_pages.setdefault(fname, set()).add(
+                                        page_name
+                                    )
                                     if fname not in page_filter_raw:
                                         page_filter_raw[fname] = fdesc
                     except json.JSONDecodeError as e:
-                        logger.warning(f"[Filter Extraction] Failed to parse page.json at {path}: {e}")
+                        logger.warning(
+                            f"[Filter Extraction] Failed to parse page.json at {path}: {e}"
+                        )
 
         except Exception as e:
             logger.warning(f"[Filter Extraction] Error parsing report: {e}")
 
         # Merge page-level filters — report-level already in `filters` takes precedence.
         # Count total pages to describe scope in logs.
-        total_pages = len([
-            p for p in tmdl_parts
-            if "/pages/" in p.get("path", "").lower()
-            and p.get("path", "").lower().endswith("/page.json")
-        ])
+        total_pages = len(
+            [
+                p
+                for p in tmdl_parts
+                if "/pages/" in p.get("path", "").lower()
+                and p.get("path", "").lower().endswith("/page.json")
+            ]
+        )
         for fname, page_names in page_filter_pages.items():
             if fname in filters:
                 continue  # already captured at report level
             fdesc = page_filter_raw[fname]
             if column_type_map and fname in column_type_map:
-                fdesc = self._validate_filter_datatype(fname, fdesc, column_type_map[fname])
+                fdesc = self._validate_filter_datatype(
+                    fname, fdesc, column_type_map[fname]
+                )
             filters[fname] = fdesc
             scope = (
-                "all pages" if total_pages > 0 and len(page_names) >= total_pages
+                "all pages"
+                if total_pages > 0 and len(page_names) >= total_pages
                 else f"{len(page_names)}/{total_pages} pages"
             )
             logger.info(f"[Filter Extraction] page-level ({scope}): {fname} = {fdesc}")
@@ -2381,9 +2872,16 @@ class PowerBISemanticModelFetcherTool(BaseTool):
 
     # Power BI DataType enum → human-readable name
     _PBI_DTYPE_MAP = {
-        "1": "whole_number", "2": "decimal", "3": "currency",
-        "4": "date", "5": "boolean", "6": "string", "7": "binary",
-        "8": "datetime", "9": "time", "10": "duration",
+        "1": "whole_number",
+        "2": "decimal",
+        "3": "currency",
+        "4": "date",
+        "5": "boolean",
+        "6": "string",
+        "7": "binary",
+        "8": "datetime",
+        "9": "time",
+        "10": "duration",
     }
 
     def _validate_filter_datatype(
@@ -2395,12 +2893,15 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         """
         dtype_name = self._PBI_DTYPE_MAP.get(column_dtype, column_dtype)
         numeric_types = {"1", "2", "3"}  # whole_number, decimal, currency
-        date_types = {"4", "8", "9"}     # date, datetime, time
+        date_types = {"4", "8", "9"}  # date, datetime, time
         string_type = "6"
 
         # Extract literal values from filter description for validation
         # Check for quoted string values in a numeric/date column
-        has_quoted = "'" in filter_description and filter_description not in ("has filter", "has complex filter")
+        has_quoted = "'" in filter_description and filter_description not in (
+            "has filter",
+            "has complex filter",
+        )
         is_numeric_col = column_dtype in numeric_types
         is_date_col = column_dtype in date_types
         is_string_col = column_dtype == string_type
@@ -2409,7 +2910,11 @@ class PowerBISemanticModelFetcherTool(BaseTool):
         if is_numeric_col and has_quoted:
             # Filter has string-quoted values but column is numeric
             mismatch = True
-        elif is_date_col and has_quoted and not re.search(r"\d{4}-\d{2}-\d{2}", filter_description):
+        elif (
+            is_date_col
+            and has_quoted
+            and not re.search(r"\d{4}-\d{2}-\d{2}", filter_description)
+        ):
             # Date column but filter values don't look like dates
             mismatch = True
         elif is_string_col and re.match(r"^[><=!]+ \d+\.?\d*$", filter_description):
@@ -2470,7 +2975,9 @@ class PowerBISemanticModelFetcherTool(BaseTool):
                         return f"NOT IN ({', '.join(value_strs)})"
                 elif "StartsWith" in not_expr:
                     starts_with = not_expr["StartsWith"]
-                    right_val = starts_with.get("Right", {}).get("Literal", {}).get("Value", "")
+                    right_val = (
+                        starts_with.get("Right", {}).get("Literal", {}).get("Value", "")
+                    )
                     cleaned_val = right_val.strip("'\"")
                     return f"NOT STARTS WITH '{cleaned_val}'"
             elif "In" in condition:

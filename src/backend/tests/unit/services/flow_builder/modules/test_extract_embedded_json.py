@@ -46,14 +46,16 @@ def test_non_string_returns_none():
 def test_ignores_braces_inside_string_values():
     # The first balanced object is the real one; trailing prose with stray braces
     # must not corrupt extraction.
-    out = extract_embedded_json('{"url": "https://x/y", "has_results": true} then } noise')
+    out = extract_embedded_json(
+        '{"url": "https://x/y", "has_results": true} then } noise'
+    )
     assert out["has_results"] is True
 
 
 def test_invalid_fenced_block_falls_through_to_brace_scan():
     # First fenced block is not valid JSON → skip it (continue) and recover the
     # bare object found later in the text.
-    text = "```json\nnot valid json\n```\nand then {\"has_results\": true}"
+    text = '```json\nnot valid json\n```\nand then {"has_results": true}'
     assert extract_embedded_json(text) == {"has_results": True}
 
 

@@ -73,7 +73,9 @@ def _sqlalchemy_names(tree: ast.AST) -> set[str]:
     """
     names = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("sqlalchemy"):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+            "sqlalchemy"
+        ):
             names.update(alias.asname or alias.name for alias in node.names)
     return names
 
@@ -89,7 +91,9 @@ def _builds_queries(path: pathlib.Path) -> bool:
             continue
         fn = node.func
         if isinstance(fn, ast.Attribute) and fn.attr in _QUERY_METHODS:
-            owner = (getattr(fn.value, "id", "") or getattr(fn.value, "attr", "")).lower()
+            owner = (
+                getattr(fn.value, "id", "") or getattr(fn.value, "attr", "")
+            ).lower()
             if "session" in owner or "conn" in owner:
                 return True
         if isinstance(fn, ast.Name) and fn.id in builders:
@@ -114,15 +118,16 @@ def test_no_new_service_builds_queries():
         "These services construct queries; that belongs in a repository:\n  "
         + "\n  ".join(new)
         + "\n\nA service may hold a session for commit/rollback, but the query "
-          "itself goes behind a repository — otherwise group scoping, field "
-          "encryption and cascades silently do not run."
+        "itself goes behind a repository — otherwise group scoping, field "
+        "encryption and cascades silently do not run."
     )
 
 
 def test_baseline_has_no_stale_entries():
     """A file fixed but left in the baseline hides the next regression in it."""
     stale = sorted(_BASELINE - _offenders())
-    assert not stale, (
-        "These no longer build queries — delete them from _BASELINE:\n  "
-        + "\n  ".join(stale)
+    assert (
+        not stale
+    ), "These no longer build queries — delete them from _BASELINE:\n  " + "\n  ".join(
+        stale
     )

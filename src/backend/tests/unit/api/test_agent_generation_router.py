@@ -4,13 +4,14 @@ Unit tests for agent generation API router.
 Tests the /agent-generation/generate POST endpoint with mocked
 AgentGenerationService and dependency overrides.
 """
-import pytest
+
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.api.agent_generation_router import router, AgentPrompt
+from src.api.agent_generation_router import AgentPrompt, router
 from src.core.dependencies import get_group_context
 from src.db.database_router import get_smart_db_session
 from src.utils.user_context import GroupContext
@@ -118,7 +119,9 @@ class TestGenerateAgent:
 
         assert response.status_code == 422
 
-    def test_service_value_error_returns_400(self, client, mock_agent_generation_service):
+    def test_service_value_error_returns_400(
+        self, client, mock_agent_generation_service
+    ):
         """ValueError raised by service is mapped to 400."""
         mock_agent_generation_service.generate_agent.side_effect = ValueError(
             "Invalid prompt"
@@ -136,9 +139,7 @@ class TestGenerateAgent:
         self, client, mock_agent_generation_service
     ):
         """Unhandled exception from service is caught as 500."""
-        mock_agent_generation_service.generate_agent.side_effect = RuntimeError(
-            "boom"
-        )
+        mock_agent_generation_service.generate_agent.side_effect = RuntimeError("boom")
 
         response = client.post(
             "/agent-generation/generate",

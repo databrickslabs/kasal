@@ -15,8 +15,8 @@ Engine-native fixes for things kasal fought in crewAI:
 
 import asyncio
 import json
-import re
 import logging
+import re
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -30,6 +30,7 @@ from src.core.events.types import (
     LLMCallStartedEvent,
     LLMCallType,
 )
+
 from .constants import (
     CONTEXT_WINDOW_USAGE_RATIO,
     DEFAULT_CONTEXT_WINDOW_SIZE,
@@ -83,8 +84,13 @@ class BaseLLM(BaseModel):
         from_agent: Any = None,
     ) -> str:
         return await asyncio.to_thread(
-            self.call, messages, tools, callbacks, available_functions,
-            from_task, from_agent,
+            self.call,
+            messages,
+            tools,
+            callbacks,
+            available_functions,
+            from_task,
+            from_agent,
         )
 
     # ----------------------------- capabilities -----------------------------
@@ -102,7 +108,8 @@ class BaseLLM(BaseModel):
         window = LLM_CONTEXT_WINDOW_SIZES.get(self.model)
         if window is None:
             matches = [
-                key for key in LLM_CONTEXT_WINDOW_SIZES
+                key
+                for key in LLM_CONTEXT_WINDOW_SIZES
                 if self.model.startswith(key) or key in self.model
             ]
             if matches:
@@ -145,7 +152,9 @@ class BaseLLM(BaseModel):
             try:
                 arguments = json.loads(arguments) if arguments.strip() else {}
             except json.JSONDecodeError:
-                logger.warning("unparseable tool arguments for %r: %.200s", name, arguments)
+                logger.warning(
+                    "unparseable tool arguments for %r: %.200s", name, arguments
+                )
                 return None
         try:
             result = function(**arguments)
@@ -191,16 +200,16 @@ class BaseLLM(BaseModel):
             self._usage["prompt_tokens"] += usage.get("prompt_tokens", 0) or 0
             self._usage["completion_tokens"] += usage.get("completion_tokens", 0) or 0
             self._usage["total_tokens"] += usage.get("total_tokens", 0) or 0
-            self._usage["cached_prompt_tokens"] += usage.get("cached_prompt_tokens", 0) or 0
+            self._usage["cached_prompt_tokens"] += (
+                usage.get("cached_prompt_tokens", 0) or 0
+            )
             self._usage["successful_requests"] += 1
 
     def get_usage_metrics(self) -> dict[str, Any]:
         with self._usage_lock:
             return dict(self._usage)
 
-    def _validate_structured_output(
-        self, text: str, response_format: Any
-    ) -> Any:
+    def _validate_structured_output(self, text: str, response_format: Any) -> Any:
         """Parse ``text`` into ``response_format``, or return it unchanged.
 
         Callers do ``isinstance(response, Model) or Model.model_validate(response)``;
@@ -209,7 +218,9 @@ class BaseLLM(BaseModel):
         "analysis failed, defaulting to insert" is the usual symptom). Returning
         the original text on failure keeps that fallback available.
         """
-        if not (isinstance(response_format, type) and issubclass(response_format, BaseModel)):
+        if not (
+            isinstance(response_format, type) and issubclass(response_format, BaseModel)
+        ):
             return text
         if not isinstance(text, str):
             return text
@@ -222,7 +233,8 @@ class BaseLLM(BaseModel):
             return response_format.model_validate_json(candidate)
         except Exception:
             logger.warning(
-                "structured output did not validate against %s", response_format.__name__
+                "structured output did not validate against %s",
+                response_format.__name__,
             )
             return text
 
@@ -275,7 +287,10 @@ class BaseLLM(BaseModel):
         event_bus.emit(
             self,
             LLMCallFailedEvent(
-                model=self.model, error=error, from_task=from_task, from_agent=from_agent
+                model=self.model,
+                error=error,
+                from_task=from_task,
+                from_agent=from_agent,
             ),
         )
 

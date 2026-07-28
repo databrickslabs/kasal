@@ -9,13 +9,15 @@ enable_long_term/enable_entity flags has been removed. Now memory is either:
 
 The system falls back to DEFAULT when no active backend is configured.
 """
+
 import pytest
+
 from src.schemas.memory_backend import (
-    MemoryBackendConfig,
-    MemoryBackendType,
+    CognitiveMemoryConfig,
     DatabricksMemoryConfig,
     LakebaseMemoryConfig,
-    CognitiveMemoryConfig,
+    MemoryBackendConfig,
+    MemoryBackendType,
 )
 
 

@@ -20,6 +20,7 @@ Usage:
     --schema my_schema \
     --output proposed_pipeline_config.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,17 +32,34 @@ from collections import defaultdict
 from typing import Any
 
 __all__ = [
-    "get_token", "get_fabric_token", "extract_relationships", "extract_measures",
-    "trigger_admin_scan", "parse_admin_tables", "extract_report_definition",
-    "fetch_tmdl_parts", "parse_tmdl_to_admin_tables",
-    "build_config", "to_snake_case",
-    "derive_join_key_map", "derive_enrichment_joins", "derive_dim_alias_map",
-    "derive_switch_decompositions", "derive_filter_sets",
-    "derive_measure_resolutions", "derive_measure_usage", "derive_column_overrides",
-    "derive_mapping_only_tables", "derive_column_metadata",
-    "derive_column_alias_map", "derive_parameter_defaults",
-    "derive_name_prefixes", "derive_dimension_exclusions", "derive_period_dims",
-    "derive_measure_metadata", "derive_dimension_metadata",
+    "get_token",
+    "get_fabric_token",
+    "extract_relationships",
+    "extract_measures",
+    "trigger_admin_scan",
+    "parse_admin_tables",
+    "extract_report_definition",
+    "fetch_tmdl_parts",
+    "parse_tmdl_to_admin_tables",
+    "build_config",
+    "to_snake_case",
+    "derive_join_key_map",
+    "derive_enrichment_joins",
+    "derive_dim_alias_map",
+    "derive_switch_decompositions",
+    "derive_filter_sets",
+    "derive_measure_resolutions",
+    "derive_measure_usage",
+    "derive_column_overrides",
+    "derive_mapping_only_tables",
+    "derive_column_metadata",
+    "derive_column_alias_map",
+    "derive_parameter_defaults",
+    "derive_name_prefixes",
+    "derive_dimension_exclusions",
+    "derive_period_dims",
+    "derive_measure_metadata",
+    "derive_dimension_metadata",
 ]
 
 try:
@@ -55,6 +73,7 @@ except ImportError:
 # Auth
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def get_token(tenant_id: str, client_id: str, client_secret: str) -> str:
     """Acquire OAuth2 token via client_credentials grant (Service Principal).
 
@@ -65,12 +84,16 @@ def get_token(tenant_id: str, client_id: str, client_secret: str) -> str:
     ``extract_*`` functions below.
     """
     url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
-    resp = requests.post(url, data={
-        "grant_type": "client_credentials",
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "scope": "https://analysis.windows.net/powerbi/api/.default",
-    }, timeout=30)
+    resp = requests.post(
+        url,
+        data={
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scope": "https://analysis.windows.net/powerbi/api/.default",
+        },
+        timeout=30,
+    )
     _check_response(resp, f"Auth (client_id={client_id[:8]}...)")
     return resp.json()["access_token"]
 
@@ -88,7 +111,10 @@ def fetch_tmdl_parts(
         f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}"
         f"/semanticModels/{dataset_id}/getDefinition?format=TMDL"
     )
-    headers = {"Authorization": f"Bearer {fabric_token}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {fabric_token}",
+        "Content-Type": "application/json",
+    }
     try:
         resp = requests.post(url, headers=headers, timeout=180)
         if resp.status_code == 200:
@@ -103,7 +129,9 @@ def fetch_tmdl_parts(
                 pdata = poll.json()
                 status = pdata.get("status")
                 if status == "Succeeded":
-                    result = requests.get(location + "/result", headers=headers, timeout=60)
+                    result = requests.get(
+                        location + "/result", headers=headers, timeout=60
+                    )
                     _check_response(result, "TMDL getDefinition result")
                     return result.json().get("definition", {}).get("parts", [])
                 if status == "Failed":
@@ -144,12 +172,16 @@ def parse_tmdl_to_admin_tables(
 
             # Columns
             columns = []
-            for cmatch in re.finditer(r"column\s+(?:'([^']+)'|(\w+))", content, re.MULTILINE):
-                columns.append({
-                    "name": cmatch.group(1) or cmatch.group(2),
-                    "dataType": "",
-                    "isHidden": False,
-                })
+            for cmatch in re.finditer(
+                r"column\s+(?:'([^']+)'|(\w+))", content, re.MULTILINE
+            ):
+                columns.append(
+                    {
+                        "name": cmatch.group(1) or cmatch.group(2),
+                        "dataType": "",
+                        "isHidden": False,
+                    }
+                )
 
             # Measures / calculationItems
             measures = []
@@ -163,7 +195,9 @@ def parse_tmdl_to_admin_tables(
                 expr = mmatch.group(3).strip()
                 clean = []
                 for line in expr.split("\n"):
-                    if line.strip().startswith(("lineageTag:", "formatString:", "annotation", "isHidden")):
+                    if line.strip().startswith(
+                        ("lineageTag:", "formatString:", "annotation", "isHidden")
+                    ):
                         break
                     clean.append(line)
                 measures.append({"name": mname, "expression": "\n".join(clean).strip()})
@@ -196,7 +230,7 @@ def parse_tmdl_to_admin_tables(
                 if inline:
                     body_lines.append(inline)
                 # Walk the lines AFTER the `source =` line.
-                after = content[smatch.end():].split("\n")
+                after = content[smatch.end() :].split("\n")
                 for line in after:
                     if not line.strip():
                         body_lines.append(line)
@@ -245,9 +279,7 @@ def _check_response(resp, context: str = "") -> None:
             body = resp.json()
         except Exception:
             body = resp.text
-        raise RuntimeError(
-            f"{context} HTTP {resp.status_code}: {body}"
-        )
+        raise RuntimeError(f"{context} HTTP {resp.status_code}: {body}")
 
 
 def discover_report_id(token: str, workspace_id: str, dataset_id: str) -> str | None:
@@ -266,16 +298,19 @@ def discover_report_id(token: str, workspace_id: str, dataset_id: str) -> str | 
             return None
         reports = resp.json().get("value", [])
         matches = [
-            r for r in reports
+            r
+            for r in reports
             if str(r.get("datasetId", "")).lower() == str(dataset_id).lower()
         ]
         if not matches:
             return None
         # Prefer a real report over an auto-generated/usage one; else first match.
-        matches.sort(key=lambda r: (
-            "usage metrics" in str(r.get("name", "")).lower(),
-            "auto" in str(r.get("name", "")).lower(),
-        ))
+        matches.sort(
+            key=lambda r: (
+                "usage metrics" in str(r.get("name", "")).lower(),
+                "auto" in str(r.get("name", "")).lower(),
+            )
+        )
         return matches[0].get("id")
     except Exception:
         return None
@@ -285,22 +320,24 @@ def discover_report_id(token: str, workspace_id: str, dataset_id: str) -> str | 
 # Helpers
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def to_snake_case(name: str) -> str:
     """Convert PascalCase/camelCase/mixed to snake_case."""
-    s = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1_\2', name)
-    s = re.sub(r'([a-z\d])([A-Z])', r'\1_\2', s)
-    s = re.sub(r'[\s\-]+', '_', s)
-    return s.lower().strip('_')
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+    s = re.sub(r"([a-z\d])([A-Z])", r"\1_\2", s)
+    s = re.sub(r"[\s\-]+", "_", s)
+    return s.lower().strip("_")
 
 
 def _humanize(name: str) -> str:
     """Turn a snake_case column name into a display name."""
-    return name.replace('_', ' ').title()
+    return name.replace("_", " ").title()
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # API 1: Execute Queries — INFO.VIEW.RELATIONSHIPS()
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def extract_relationships(token: str, workspace_id: str, dataset_id: str) -> list[dict]:
     """Call INFO.VIEW.RELATIONSHIPS() → list of relationship dicts."""
@@ -319,16 +356,18 @@ def extract_relationships(token: str, workspace_id: str, dataset_id: str) -> lis
     rows = data.get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
     relationships = []
     for row in rows:
-        relationships.append({
-            "from_table": row.get("[FromTable]", ""),
-            "from_column": row.get("[FromColumn]", ""),
-            "from_cardinality": row.get("[FromCardinality]", ""),
-            "to_table": row.get("[ToTable]", ""),
-            "to_column": row.get("[ToColumn]", ""),
-            "to_cardinality": row.get("[ToCardinality]", ""),
-            "is_active": row.get("[IsActive]", True),
-            "id": row.get("[ID]", ""),
-        })
+        relationships.append(
+            {
+                "from_table": row.get("[FromTable]", ""),
+                "from_column": row.get("[FromColumn]", ""),
+                "from_cardinality": row.get("[FromCardinality]", ""),
+                "to_table": row.get("[ToTable]", ""),
+                "to_column": row.get("[ToColumn]", ""),
+                "to_cardinality": row.get("[ToCardinality]", ""),
+                "is_active": row.get("[IsActive]", True),
+                "id": row.get("[ID]", ""),
+            }
+        )
     return relationships
 
 
@@ -370,7 +409,7 @@ def derive_join_key_map(
         # Strip common prefixes for alias
         for prefix in ("c_dim_", "dim_", "c_"):
             if alias.startswith(prefix):
-                alias = "dim_" + alias[len(prefix):]
+                alias = "dim_" + alias[len(prefix) :]
                 break
         else:
             if not alias.startswith("dim_"):
@@ -441,7 +480,7 @@ def derive_enrichment_joins(
         alias = to_snake_case(dim_table)
         for prefix in ("c_dim_", "dim_", "c_"):
             if alias.startswith(prefix):
-                alias = "dim_" + alias[len(prefix):]
+                alias = "dim_" + alias[len(prefix) :]
                 break
         else:
             if not alias.startswith("dim_"):
@@ -484,7 +523,7 @@ def derive_dim_alias_map(relationships: list[dict]) -> dict[str, str]:
             alias = to_snake_case(dim_table)
             for prefix in ("c_dim_", "dim_", "c_"):
                 if alias.startswith(prefix):
-                    alias = "dim_" + alias[len(prefix):]
+                    alias = "dim_" + alias[len(prefix) :]
                     break
             else:
                 if not alias.startswith("dim_"):
@@ -497,6 +536,7 @@ def derive_dim_alias_map(relationships: list[dict]) -> dict[str, str]:
 # ═══════════════════════════════════════════════════════════════════════
 # API 2: Execute Queries — $SYSTEM.MDSCHEMA_MEASURES
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def extract_measures(token: str, workspace_id: str, dataset_id: str) -> list[dict]:
     """Extract measures via Execute Queries API.
@@ -532,23 +572,27 @@ def extract_measures(token: str, workspace_id: str, dataset_id: str) -> list[dic
             name = _row_get(row, "Measure Name")
             if name.startswith("__"):
                 continue
-            measures.append({
-                "measure_name": name,
-                "table_name": _row_get(row, "Table"),
-                "expression": _row_get(row, "Expression"),
-                "description": _row_get(row, "Description"),
-            })
+            measures.append(
+                {
+                    "measure_name": name,
+                    "table_name": _row_get(row, "Table"),
+                    "expression": _row_get(row, "Expression"),
+                    "description": _row_get(row, "Description"),
+                }
+            )
         return measures
 
     # Strategy 2: DAX INFO function (works with SP workspace member)
-    print(f"  DMV query returned {resp.status_code}, falling back to EVALUATE INFO.VIEW.MEASURES()...")
+    print(
+        f"  DMV query returned {resp.status_code}, falling back to EVALUATE INFO.VIEW.MEASURES()..."
+    )
     fallback_query = (
         "EVALUATE SELECTCOLUMNS("
         "INFO.VIEW.MEASURES(), "
-        "\"Measure Name\", [Name], "
-        "\"Table\", [Table], "
-        "\"Expression\", [Expression], "
-        "\"Description\", [Description]"
+        '"Measure Name", [Name], '
+        '"Table", [Table], '
+        '"Expression", [Expression], '
+        '"Description", [Description]'
         ")"
     )
     body2 = {
@@ -565,12 +609,14 @@ def extract_measures(token: str, workspace_id: str, dataset_id: str) -> list[dic
         name = _row_get(row, "Measure Name")
         if name.startswith("__"):
             continue
-        measures.append({
-            "measure_name": name,
-            "table_name": _row_get(row, "Table"),
-            "expression": _row_get(row, "Expression"),
-            "description": _row_get(row, "Description"),
-        })
+        measures.append(
+            {
+                "measure_name": name,
+                "table_name": _row_get(row, "Table"),
+                "expression": _row_get(row, "Expression"),
+                "description": _row_get(row, "Description"),
+            }
+        )
     return measures
 
 
@@ -600,9 +646,8 @@ def derive_switch_decompositions(measures: list[dict]) -> dict[str, list[dict]]:
         }
         if branches:
             skeleton["_detected_branches"] = branches
-            skeleton["comment"] = (
-                f"SWITCH({len(branches)} branches): "
-                + ", ".join(b.get("case_value", "?") for b in branches[:5])
+            skeleton["comment"] = f"SWITCH({len(branches)} branches): " + ", ".join(
+                b.get("case_value", "?") for b in branches[:5]
             )
 
         decompositions[table].append(skeleton)
@@ -614,8 +659,9 @@ def _extract_switch_branches(dax: str) -> list[dict]:
     """Parse SWITCH(TRUE(), ...) branches from DAX."""
     branches: list[dict] = []
     switch_match = re.search(
-        r'SWITCH\s*\(\s*TRUE\s*\(\s*\)\s*,\s*(.+)',
-        dax, re.IGNORECASE | re.DOTALL,
+        r"SWITCH\s*\(\s*TRUE\s*\(\s*\)\s*,\s*(.+)",
+        dax,
+        re.IGNORECASE | re.DOTALL,
     )
     if not switch_match:
         return branches
@@ -626,25 +672,27 @@ def _extract_switch_branches(dax: str) -> list[dict]:
         re.DOTALL,
     )
     for bm in branch_re.finditer(body):
-        branches.append({
-            "variable": bm.group(1),
-            "case_value": bm.group(2),
-            "dax_snippet": bm.group(3).strip().rstrip(",").strip()[:200],
-        })
+        branches.append(
+            {
+                "variable": bm.group(1),
+                "case_value": bm.group(2),
+                "dax_snippet": bm.group(3).strip().rstrip(",").strip()[:200],
+            }
+        )
     return branches
 
 
 def _calculate_branch_bodies(text: str) -> list[str]:
     """Return the balanced inner text of every top-level ``CALCULATE( ... )``."""
     bodies: list[str] = []
-    for m in re.finditer(r'CALCULATE\s*\(', text, re.IGNORECASE):
+    for m in re.finditer(r"CALCULATE\s*\(", text, re.IGNORECASE):
         start = m.end()
         depth = 1
         pos = start
         while pos < len(text) and depth > 0:
-            if text[pos] == '(':
+            if text[pos] == "(":
                 depth += 1
-            elif text[pos] == ')':
+            elif text[pos] == ")":
                 depth -= 1
                 if depth == 0:
                     bodies.append(text[start:pos])
@@ -682,14 +730,14 @@ def derive_geo_switch_decompositions(measures: list[dict]) -> dict[str, list[dic
             continue
         du = dax.upper()
         # geo-selector: SWITCH(TRUE(), …) whose condition tests plant filter state
-        if not re.search(r'SWITCH\s*\(\s*TRUE\s*\(\s*\)', du):
+        if not re.search(r"SWITCH\s*\(\s*TRUE\s*\(\s*\)", du):
             continue
-        if not re.search(r'ISFILTERED|HASONEVALUE', du):
+        if not re.search(r"ISFILTERED|HASONEVALUE", du):
             continue
         # Strip var…return scaffolding so the branch CALCULATEs are the ones found.
         body = dax
-        _ret = re.search(r'\breturn\b\s*(.+)$', body, re.IGNORECASE | re.DOTALL)
-        if _ret and re.match(r'(?is)^\s*var\s+', body):
+        _ret = re.search(r"\breturn\b\s*(.+)$", body, re.IGNORECASE | re.DOTALL)
+        if _ret and re.match(r"(?is)^\s*var\s+", body):
             body = _ret.group(1)
         branches = _calculate_branch_bodies(body)
         if len(branches) < 2:
@@ -697,11 +745,11 @@ def derive_geo_switch_decompositions(measures: list[dict]) -> dict[str, list[dic
 
         # Base measure name → strip a leading Plant_Comp / Plant_Company token and
         # the geo word, so `Plant_Comp KBI_Value_Actual` → `kbi_value_actual`.
-        base = re.sub(r'(?i)^\s*plant[_ ]?comp(?:any)?[_ ]*', '', name).strip()
+        base = re.sub(r"(?i)^\s*plant[_ ]?comp(?:any)?[_ ]*", "", name).strip()
         base_snake = to_snake_case(base) or to_snake_case(name)
 
         emitted = []
-        for label, branch in (('plant', branches[0]), ('company', branches[1])):
+        for label, branch in (("plant", branches[0]), ("company", branches[1])):
             resolved = _resolve_referenced_measure_dax(f"CALCULATE({branch})")
             if not resolved:
                 continue
@@ -710,11 +758,13 @@ def derive_geo_switch_decompositions(measures: list[dict]) -> dict[str, list[dic
             sql = base_expr
             if filters:
                 sql = f"{base_expr} FILTER (WHERE {' AND '.join(filters)})"
-            emitted.append({
-                "name": f"{label}_{base_snake}",
-                "raw_expr": sql,
-                "comment": f"{label.capitalize()} branch of geo-selector SWITCH [{name}]",
-            })
+            emitted.append(
+                {
+                    "name": f"{label}_{base_snake}",
+                    "raw_expr": sql,
+                    "comment": f"{label.capitalize()} branch of geo-selector SWITCH [{name}]",
+                }
+            )
         # Only emit when BOTH branches resolved — a half-decomposition would be
         # worse than leaving the parent measure to the normal path.
         if len(emitted) == 2:
@@ -749,18 +799,13 @@ def derive_filter_sets(
                 filter_sets[set_key] = sorted(set(values))
 
     # From DAX IN({...}) patterns
-    in_pattern = re.compile(
-        r"(\w+)\s+IN\s*\(\s*\{([^}]+)\}\s*\)", re.IGNORECASE
-    )
+    in_pattern = re.compile(r"(\w+)\s+IN\s*\(\s*\{([^}]+)\}\s*\)", re.IGNORECASE)
     for m in measures:
         dax = m.get("expression", "") or ""
         for im in in_pattern.finditer(dax):
             col_name = im.group(1)
             values_str = im.group(2)
-            values = [
-                v.strip().strip('"').strip("'")
-                for v in values_str.split(",")
-            ]
+            values = [v.strip().strip('"').strip("'") for v in values_str.split(",")]
             set_key = to_snake_case(col_name).upper()
             if values and set_key not in filter_sets:
                 filter_sets[set_key] = sorted(set(values))
@@ -795,26 +840,26 @@ def _resolve_referenced_measure_dax(dax: str) -> dict | None:
     # scaffolding), not the real aggregate branch, and resolution fails — which is
     # exactly why the _BP twins dropped while the scaffolding-free _Actual twins
     # resolved. Cut to the RETURN body so the aggregate is the first CALCULATE.
-    _ret = re.search(r'\breturn\b\s*(.+)$', d, re.IGNORECASE | re.DOTALL)
-    if _ret and re.match(r'(?is)^\s*var\s+', d):
+    _ret = re.search(r"\breturn\b\s*(.+)$", d, re.IGNORECASE | re.DOTALL)
+    if _ret and re.match(r"(?is)^\s*var\s+", d):
         d = _ret.group(1).strip()
 
     # Constant (e.g. AVG_KBI_Div_Factor's effective value is 1 in the GT).
-    if re.fullmatch(r'-?\d+(?:\.\d+)?', d):
+    if re.fullmatch(r"-?\d+(?:\.\d+)?", d):
         return {"base_expr": d, "base_filters": []}
 
     def _first_calculate_body(text: str) -> str | None:
         """Return the balanced inner text of the FIRST ``CALCULATE( ... )``."""
-        cm = re.search(r'CALCULATE\s*\(', text, re.IGNORECASE)
+        cm = re.search(r"CALCULATE\s*\(", text, re.IGNORECASE)
         if not cm:
             return None
         start = cm.end()
         depth = 1
         pos = start
         while pos < len(text) and depth > 0:
-            if text[pos] == '(':
+            if text[pos] == "(":
                 depth += 1
-            elif text[pos] == ')':
+            elif text[pos] == ")":
                 depth -= 1
                 if depth == 0:
                     return text[start:pos]
@@ -825,9 +870,8 @@ def _resolve_referenced_measure_dax(dax: str) -> dict | None:
     # the FIRST CALCULATE(...) branch — the plant/default branch the ground truth
     # picks. Bound the parse to that single balanced CALCULATE so a second branch's
     # filters (e.g. "Company Code") don't leak into this resolution.
-    if re.match(r'(?is)^\s*(?:var\s+.*?return\s+)?switch\s*\(', d) or (
-        'CALCULATE' in d.upper()
-        and not re.match(r'(?is)^\s*CALCULATE\s*\(', d)
+    if re.match(r"(?is)^\s*(?:var\s+.*?return\s+)?switch\s*\(", d) or (
+        "CALCULATE" in d.upper() and not re.match(r"(?is)^\s*CALCULATE\s*\(", d)
     ):
         body = _first_calculate_body(d)
         if body is not None:
@@ -841,10 +885,11 @@ def _resolve_referenced_measure_dax(dax: str) -> dict | None:
 
     # Aggregate over Table[Column]  →  SUM(source.col)
     agg = re.search(
-        r'\b(SUM|SUMX|AVERAGE|MIN|MAX|COUNT|DISTINCTCOUNT)\s*\('
-        r'(?:\s*\w+\s*,\s*)?'                    # SUMX(Table, ...) optional table arg
-        r"(?:'[^']+'|\w+)\[(\w+)\]",             # Table[col] / 'Table Name'[col]
-        inner, re.IGNORECASE,
+        r"\b(SUM|SUMX|AVERAGE|MIN|MAX|COUNT|DISTINCTCOUNT)\s*\("
+        r"(?:\s*\w+\s*,\s*)?"  # SUMX(Table, ...) optional table arg
+        r"(?:'[^']+'|\w+)\[(\w+)\]",  # Table[col] / 'Table Name'[col]
+        inner,
+        re.IGNORECASE,
     )
     if not agg:
         # Also handle the SUMX(FILTER(fact, <pred>), fact[col]) shape, where the
@@ -852,15 +897,20 @@ def _resolve_referenced_measure_dax(dax: str) -> dict | None:
         # is the FINAL Table[col] argument. (Plant/Company KBI selectors on the
         # _BP side use this shape, unlike the _Actual side's CALCULATE(SUM,…).)
         agg = re.search(
-            r'\b(SUMX|COUNTX|AVERAGEX)\s*\(\s*FILTER\s*\(.*\)\s*,\s*'
+            r"\b(SUMX|COUNTX|AVERAGEX)\s*\(\s*FILTER\s*\(.*\)\s*,\s*"
             r"(?:'[^']+'|\w+)\[(\w+)\]\s*\)",
-            inner, re.IGNORECASE | re.DOTALL,
+            inner,
+            re.IGNORECASE | re.DOTALL,
         )
         if not agg:
             return None
     func = agg.group(1).upper()
-    spark_func = {'SUMX': 'SUM', 'COUNTX': 'COUNT', 'AVERAGEX': 'AVG',
-                  'DISTINCTCOUNT': 'COUNT_DISTINCT'}.get(func, func)
+    spark_func = {
+        "SUMX": "SUM",
+        "COUNTX": "COUNT",
+        "AVERAGEX": "AVG",
+        "DISTINCTCOUNT": "COUNT_DISTINCT",
+    }.get(func, func)
     col = to_snake_case(agg.group(2))
     base_expr = f"{spark_func}(source.{col})"
 
@@ -885,7 +935,7 @@ def derive_measure_resolutions(measures: list[dict]) -> dict[str, dict]:
     # Build lookup: name → measure
     measure_by_name = {m["measure_name"]: m for m in measures}
 
-    ref_re = re.compile(r'\[([^\]]+)\]')
+    ref_re = re.compile(r"\[([^\]]+)\]")
 
     for m in measures:
         dax = m.get("expression", "") or ""
@@ -950,7 +1000,7 @@ def derive_measure_usage(measures: list[dict]) -> dict[str, int]:
     can't join to this map. When an original name already IS its own snake form
     the two keys coincide (no duplication).
     """
-    ref_re = re.compile(r'\[([^\]]+)\]')
+    ref_re = re.compile(r"\[([^\]]+)\]")
     measure_names = {m["measure_name"] for m in measures}
     usage: dict[str, int] = {name: 0 for name in measure_names}
 
@@ -961,7 +1011,8 @@ def derive_measure_usage(measures: list[dict]) -> dict[str, int]:
             continue
         # Count each referenced measure at most once per referencing measure.
         referenced = {
-            ref for ref in (rm.group(1) for rm in ref_re.finditer(dax))
+            ref
+            for ref in (rm.group(1) for rm in ref_re.finditer(dax))
             if ref in measure_names and ref != name
         }
         for ref in referenced:
@@ -1009,8 +1060,9 @@ def derive_column_overrides(
             # Find matching table
             target_table = ""
             for tbl_name in admin_tables:
-                if (tbl_name == tbl_ref or
-                        tbl_name.replace(" ", "_") == tbl_ref.replace(" ", "_")):
+                if tbl_name == tbl_ref or tbl_name.replace(" ", "_") == tbl_ref.replace(
+                    " ", "_"
+                ):
                     target_table = tbl_name
                     break
             if not target_table:
@@ -1063,6 +1115,7 @@ def derive_mapping_only_tables(
 # API 3: Admin Scanner — Workspace Scan
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def trigger_admin_scan(
     admin_token: str,
     workspace_id: str,
@@ -1112,9 +1165,7 @@ def trigger_admin_scan(
 
     # Step 3: Get results
     result_url = f"{base}/scanResult/{scan_id}"
-    result_resp = requests.get(
-        result_url, headers=_headers(admin_token), timeout=60
-    )
+    result_resp = requests.get(result_url, headers=_headers(admin_token), timeout=60)
     _check_response(result_resp, "API 3 (Admin Scan result)")
     return result_resp.json()
 
@@ -1147,11 +1198,13 @@ def parse_admin_tables(
                 name = tbl.get("name", "")
                 columns = []
                 for col in tbl.get("columns", []):
-                    columns.append({
-                        "name": col.get("columnName", col.get("name", "")),
-                        "dataType": col.get("dataType", ""),
-                        "isHidden": col.get("isHidden", False),
-                    })
+                    columns.append(
+                        {
+                            "name": col.get("columnName", col.get("name", "")),
+                            "dataType": col.get("dataType", ""),
+                            "isHidden": col.get("isHidden", False),
+                        }
+                    )
                 source_expr = ""
                 for src in tbl.get("source", []):
                     source_expr = src.get("expression", "")
@@ -1207,7 +1260,7 @@ def derive_column_alias_map(admin_tables: dict[str, dict]) -> dict[str, str]:
     alias_map: dict[str, str] = {}
 
     rename_re = re.compile(
-        r'Table\.RenameColumns\s*\([^,]+,\s*\{([^}]+)\}',
+        r"Table\.RenameColumns\s*\([^,]+,\s*\{([^}]+)\}",
         re.IGNORECASE | re.DOTALL,
     )
     pair_re = re.compile(r'\{"([^"]+)"\s*,\s*"([^"]+)"\}')
@@ -1230,9 +1283,9 @@ def derive_parameter_defaults(admin_tables: dict[str, dict]) -> dict[str, str]:
     params: dict[str, str] = {}
 
     param_patterns = [
-        re.compile(r'\$\{(\w+)\}'),
+        re.compile(r"\$\{(\w+)\}"),
         re.compile(r'#"(\w+)"'),
-        re.compile(r':(\w+(?:Filter|Version|Range))\b'),
+        re.compile(r":(\w+(?:Filter|Version|Range))\b"),
     ]
 
     for tbl in admin_tables.values():
@@ -1254,8 +1307,17 @@ def derive_name_prefixes(admin_tables: dict[str, dict]) -> list[str]:
         for col in tbl.get("columns", []):
             name = to_snake_case(col["name"])
             # Check common prefixes
-            for prefix in ("bic_", "khr", "kco", "kpe", "kfx", "kbi",
-                           "zz_", "xx_", "bw_"):
+            for prefix in (
+                "bic_",
+                "khr",
+                "kco",
+                "kpe",
+                "kfx",
+                "kbi",
+                "zz_",
+                "xx_",
+                "bw_",
+            ):
                 if name.startswith(prefix):
                     prefix_counts[prefix] += 1
                     break
@@ -1268,12 +1330,28 @@ def derive_name_prefixes(admin_tables: dict[str, dict]) -> list[str]:
 # the emitted dimension list (conservative curation). Matched on the snake name
 # with underscores stripped (so "obj_vers"/"ObjVers"/"objvers" all collapse to
 # "objvers"), so real business columns are never caught. Extend deliberately.
-_ETL_PLUMBING_COLUMNS = frozenset({
-    "objvers", "logsys", "processrunid", "yearcard", "pastflag",
-    "recordmode", "aedat", "aezet", "erdat", "erzet",
-    "loadtime", "etlloaddate", "etltimestamp", "dwloaddate",
-    "sourcesystem", "batchid", "runid", "loadedat",
-})
+_ETL_PLUMBING_COLUMNS = frozenset(
+    {
+        "objvers",
+        "logsys",
+        "processrunid",
+        "yearcard",
+        "pastflag",
+        "recordmode",
+        "aedat",
+        "aezet",
+        "erdat",
+        "erzet",
+        "loadtime",
+        "etlloaddate",
+        "etltimestamp",
+        "dwloaddate",
+        "sourcesystem",
+        "batchid",
+        "runid",
+        "loadedat",
+    }
+)
 
 
 def _is_etl_plumbing(snake_name: str) -> bool:
@@ -1309,8 +1387,18 @@ def derive_period_dims(
     admin_tables: dict[str, dict],
 ) -> tuple[list[str], list[str]]:
     """Date/period columns → (period_dim_priority, int_period_dims)."""
-    period_keywords = {"date", "period", "fiscper", "fiscal", "month", "year",
-                       "quarter", "day", "time", "week"}
+    period_keywords = {
+        "date",
+        "period",
+        "fiscper",
+        "fiscal",
+        "month",
+        "year",
+        "quarter",
+        "day",
+        "time",
+        "week",
+    }
     date_types = {"datetime", "date", "dateTime", "DateTime"}
     int_types = {"int64", "int32", "integer", "Int64", "int", "long", "whole"}
 
@@ -1361,6 +1449,7 @@ def derive_period_dims(
 # API 4: Report Definition (optional)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def get_fabric_token(
     tenant_id: str,
     client_id: str,
@@ -1404,7 +1493,9 @@ def get_fabric_token(
 
 
 def extract_report_definition(
-    token: str, workspace_id: str, report_id: str,
+    token: str,
+    workspace_id: str,
+    report_id: str,
     tenant_id: str | None = None,
     client_id: str | None = None,
     client_secret: str | None = None,
@@ -1444,7 +1535,9 @@ def extract_report_definition(
             print(f"  Report definition: polling (202 Accepted)...")
             for attempt in range(60):
                 time.sleep(2)
-                poll_resp = requests.get(location, headers=_headers(fabric_token), timeout=30)
+                poll_resp = requests.get(
+                    location, headers=_headers(fabric_token), timeout=30
+                )
                 poll_data = poll_resp.json()
                 status = poll_data.get("status", "")
                 if status == "Succeeded":
@@ -1499,10 +1592,12 @@ def extract_report_definition(
                 except json.JSONDecodeError:
                     parsed = decoded
 
-            decoded_parts.append({
-                "path": path,
-                "payload": parsed,
-            })
+            decoded_parts.append(
+                {
+                    "path": path,
+                    "payload": parsed,
+                }
+            )
 
         print(f"  Report definition: {len(decoded_parts)} parts")
         paths = [p["path"] for p in decoded_parts[:10]]
@@ -1563,7 +1658,9 @@ def _extract_visual_synonym_map(report_def: dict | None) -> dict[str, dict]:
         # visual.json files contain the visual config
         if "visual" in path.lower() and path.endswith(".json"):
             try:
-                visual_data = json.loads(payload) if isinstance(payload, str) else payload
+                visual_data = (
+                    json.loads(payload) if isinstance(payload, str) else payload
+                )
                 _extract_synonyms_from_visual(visual_data, synonym_map)
             except (json.JSONDecodeError, TypeError):
                 continue
@@ -1571,10 +1668,16 @@ def _extract_visual_synonym_map(report_def: dict | None) -> dict[str, dict]:
         # report.json may contain embedded visuals
         if path.endswith("report.json") or path.endswith("definition.json"):
             try:
-                report_data = json.loads(payload) if isinstance(payload, str) else payload
+                report_data = (
+                    json.loads(payload) if isinstance(payload, str) else payload
+                )
                 # Embedded visuals in pages
-                for section in report_data.get("sections", report_data.get("pages", [])):
-                    for vc in section.get("visualContainers", section.get("visuals", [])):
+                for section in report_data.get(
+                    "sections", report_data.get("pages", [])
+                ):
+                    for vc in section.get(
+                        "visualContainers", section.get("visuals", [])
+                    ):
                         config = vc.get("config", {})
                         if isinstance(config, str):
                             try:
@@ -1589,7 +1692,8 @@ def _extract_visual_synonym_map(report_def: dict | None) -> dict[str, dict]:
 
 
 def _extract_synonyms_from_visual(
-    visual: dict, synonym_map: dict[str, dict],
+    visual: dict,
+    synonym_map: dict[str, dict],
 ) -> None:
     """Extract displayName→queryName pairs from a single visual config."""
     config = visual.get("config", visual)
@@ -1713,7 +1817,11 @@ def derive_measure_metadata(report_def: dict | None) -> dict[str, dict]:
 
         # Add display_name as synonym if it differs
         entry = metadata[table][snake]
-        if display and display != entry["display_name"] and display not in entry["synonyms"]:
+        if (
+            display
+            and display != entry["display_name"]
+            and display not in entry["synonyms"]
+        ):
             entry["synonyms"].append(display)
         # Also add the original PBI field name as synonym
         if field != snake and field not in entry["synonyms"]:
@@ -1733,8 +1841,18 @@ def derive_dimension_metadata(report_def: dict | None) -> dict[str, dict]:
         return {}
 
     # Dimension roles in visuals (not Values/Y which are measures)
-    dim_roles = {"Category", "Series", "Rows", "Columns", "Row", "Column",
-                 "X", "Legend", "Tooltips", "Details"}
+    dim_roles = {
+        "Category",
+        "Series",
+        "Rows",
+        "Columns",
+        "Row",
+        "Column",
+        "X",
+        "Legend",
+        "Tooltips",
+        "Details",
+    }
 
     metadata: dict[str, dict] = {}
     for query_name, info in synonym_map.items():
@@ -1759,7 +1877,11 @@ def derive_dimension_metadata(report_def: dict | None) -> dict[str, dict]:
             }
 
         entry = metadata[table][snake]
-        if display and display != entry["display_name"] and display not in entry["synonyms"]:
+        if (
+            display
+            and display != entry["display_name"]
+            and display not in entry["synonyms"]
+        ):
             entry["synonyms"].append(display)
         if field != snake and field not in entry["synonyms"]:
             entry["synonyms"].append(field)
@@ -1770,6 +1892,7 @@ def derive_dimension_metadata(report_def: dict | None) -> dict[str, dict]:
 # ═══════════════════════════════════════════════════════════════════════
 # Assembly — Build the full 26-key config
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def build_config(
     relationships: list[dict],
@@ -1794,9 +1917,7 @@ def build_config(
     )
 
     # 3. enrichment_joins
-    config["enrichment_joins"] = derive_enrichment_joins(
-        relationships, admin_tables
-    )
+    config["enrichment_joins"] = derive_enrichment_joins(relationships, admin_tables)
 
     # 4. filter_sets
     switch_decomps = derive_switch_decompositions(measures)
@@ -1841,9 +1962,7 @@ def build_config(
     raw_mapping = derive_mapping_only_tables(measures, admin_tables)
     clean_mapping: dict[str, dict] = {}
     for tbl, entry in raw_mapping.items():
-        clean_mapping[tbl] = {
-            k: v for k, v in entry.items() if not k.startswith("_")
-        }
+        clean_mapping[tbl] = {k: v for k, v in entry.items() if not k.startswith("_")}
     config["mapping_only_tables"] = clean_mapping
 
     # 9. dimension_exclusions
@@ -1896,16 +2015,12 @@ def build_config(
 
     # 24. switch_join_alias
     config["switch_join_alias"] = (
-        "TODO: SWITCH decomposition join alias"
-        if switch_decomps
-        else None
+        "TODO: SWITCH decomposition join alias" if switch_decomps else None
     )
 
     # 25. switch_join_col
     config["switch_join_col"] = (
-        "TODO: SWITCH decomposition join column"
-        if switch_decomps
-        else None
+        "TODO: SWITCH decomposition join column" if switch_decomps else None
     )
 
     # 26. manual_overrides
@@ -1933,8 +2048,10 @@ def _resolve_catalog_schema_placeholders(obj: Any, catalog: str, schema: str) ->
             return obj.replace("{catalog}", catalog).replace("{schema}", schema)
         return obj
     if isinstance(obj, dict):
-        return {k: _resolve_catalog_schema_placeholders(v, catalog, schema)
-                for k, v in obj.items()}
+        return {
+            k: _resolve_catalog_schema_placeholders(v, catalog, schema)
+            for k, v in obj.items()
+        }
     if isinstance(obj, list):
         return [_resolve_catalog_schema_placeholders(v, catalog, schema) for v in obj]
     return obj
@@ -2033,9 +2150,7 @@ def _detect_cwc_filter_column(
     for m in measures:
         dax = m.get("expression", "") or ""
         # Look for cwc_type, wc_type, bic_cwc_type patterns
-        cwc_match = re.search(
-            r"(\w*cwc[_\s]*type\w*)", dax, re.IGNORECASE
-        )
+        cwc_match = re.search(r"(\w*cwc[_\s]*type\w*)", dax, re.IGNORECASE)
         if cwc_match:
             return to_snake_case(cwc_match.group(1))
 
@@ -2054,16 +2169,16 @@ def _find_complex_measures(measures: list[dict]) -> list[dict]:
     complex_measures: list[dict] = []
 
     complex_patterns = [
-        r'CALCULATE\s*\(',
-        r'FILTER\s*\(\s*ALL',
-        r'SUMX\s*\(',
-        r'RANKX\s*\(',
-        r'TOPN\s*\(',
-        r'EARLIER\s*\(',
-        r'USERELATIONSHIP\s*\(',
-        r'CROSSJOIN\s*\(',
+        r"CALCULATE\s*\(",
+        r"FILTER\s*\(\s*ALL",
+        r"SUMX\s*\(",
+        r"RANKX\s*\(",
+        r"TOPN\s*\(",
+        r"EARLIER\s*\(",
+        r"USERELATIONSHIP\s*\(",
+        r"CROSSJOIN\s*\(",
     ]
-    complex_re = re.compile('|'.join(complex_patterns), re.IGNORECASE)
+    complex_re = re.compile("|".join(complex_patterns), re.IGNORECASE)
 
     for m in measures:
         dax = m.get("expression", "") or ""
@@ -2085,11 +2200,13 @@ def _build_manual_overrides_skeleton(
         table = m.get("table_name", "unknown")
         dax = m.get("expression", "") or ""
         snippet = dax[:200] + ("..." if len(dax) > 200 else "")
-        overrides[table].append({
-            "name": to_snake_case(m["measure_name"]),
-            "expr": f"TODO: complex measure '{m['measure_name']}' — DAX: {snippet}",
-            "comment": m.get("description", "") or m["measure_name"],
-        })
+        overrides[table].append(
+            {
+                "name": to_snake_case(m["measure_name"]),
+                "expr": f"TODO: complex measure '{m['measure_name']}' — DAX: {snippet}",
+                "comment": m.get("description", "") or m["measure_name"],
+            }
+        )
 
     return dict(overrides)
 
@@ -2097,6 +2214,7 @@ def _build_manual_overrides_skeleton(
 # ═══════════════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -2125,29 +2243,35 @@ def main():
     parser.add_argument("--dataset-id", required=True, help="PBI dataset GUID")
     parser.add_argument("--tenant-id", required=True, help="Azure AD tenant GUID")
     parser.add_argument(
-        "--client-id", required=True,
+        "--client-id",
+        required=True,
         help="Non-admin SP client ID (workspace member, Execute Queries)",
     )
     parser.add_argument("--client-secret", required=True, help="Non-admin SP secret")
     parser.add_argument(
-        "--admin-client-id", required=True,
+        "--admin-client-id",
+        required=True,
         help="Admin SP client ID (Admin Scanner API)",
     )
     parser.add_argument("--admin-client-secret", required=True, help="Admin SP secret")
     parser.add_argument(
-        "--catalog", default="main",
+        "--catalog",
+        default="main",
         help="Target UC catalog name (default: main)",
     )
     parser.add_argument(
-        "--schema", default="default",
+        "--schema",
+        default="default",
         help="Target UC schema name (default: default)",
     )
     parser.add_argument(
-        "--output", default="proposed_pipeline_config.json",
+        "--output",
+        default="proposed_pipeline_config.json",
         help="Output file path (default: proposed_pipeline_config.json)",
     )
     parser.add_argument(
-        "--report-id", default=None,
+        "--report-id",
+        default=None,
         help="Optional PBI report GUID for report-layer metadata",
     )
 
@@ -2185,8 +2309,11 @@ def main():
     if args.report_id:
         print("  API 4: Report Definition...")
         report_def = extract_report_definition(
-            token, args.workspace_id, args.report_id,
-            tenant_id=args.tenant_id, client_id=args.client_id,
+            token,
+            args.workspace_id,
+            args.report_id,
+            tenant_id=args.tenant_id,
+            client_id=args.client_id,
             client_secret=args.client_secret,
         )
         if report_def:
@@ -2197,8 +2324,12 @@ def main():
     # ── Step 3: Build config ─────────────────────────────────────
     print("\n[3/4] Deriving config keys...")
     config = build_config(
-        relationships, measures, admin_tables, report_def,
-        catalog=args.catalog, schema=args.schema,
+        relationships,
+        measures,
+        admin_tables,
+        report_def,
+        catalog=args.catalog,
+        schema=args.schema,
     )
 
     # Print per-key summary

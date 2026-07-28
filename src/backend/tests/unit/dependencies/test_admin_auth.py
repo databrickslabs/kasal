@@ -5,17 +5,21 @@ Covers: _create_user_from_forwarded_email, get_current_user_from_email,
         require_authenticated_user, get_authenticated_user, get_admin_user,
         get_system_admin_user
 """
-import os
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from fastapi import HTTPException
 
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from fastapi import HTTPException
 
 # ============================================================================
 # Helpers
 # ============================================================================
 
-def _make_group_context(email=None, user_role=None, highest_role=None, access_token=None):
+
+def _make_group_context(
+    email=None, user_role=None, highest_role=None, access_token=None
+):
     ctx = MagicMock()
     ctx.group_email = email
     ctx.user_role = user_role
@@ -26,6 +30,7 @@ def _make_group_context(email=None, user_role=None, highest_role=None, access_to
 
 def _make_user(email="user@example.com", is_system_admin=False, role="regular"):
     from unittest.mock import MagicMock
+
     user = MagicMock()
     user.email = email
     user.is_system_admin = is_system_admin
@@ -37,6 +42,7 @@ def _make_user(email="user@example.com", is_system_admin=False, role="regular"):
 # _create_user_from_forwarded_email
 # ============================================================================
 
+
 class TestCreateUserFromForwardedEmail:
 
     @pytest.mark.asyncio
@@ -47,7 +53,9 @@ class TestCreateUserFromForwardedEmail:
         mock_session.execute = AsyncMock(side_effect=Exception("DB error"))
         mock_session.rollback = AsyncMock()
 
-        result = await _create_user_from_forwarded_email(mock_session, "bad@example.com")
+        result = await _create_user_from_forwarded_email(
+            mock_session, "bad@example.com"
+        )
 
         assert result is None
         assert mock_session.rollback.called
@@ -68,7 +76,9 @@ class TestCreateUserFromForwardedEmail:
         mock_session.execute = AsyncMock(return_value=mock_result)
         mock_session.commit = AsyncMock()
 
-        result = await _create_user_from_forwarded_email(mock_session, "exist@example.com")
+        result = await _create_user_from_forwarded_email(
+            mock_session, "exist@example.com"
+        )
 
         assert result is existing
 
@@ -76,6 +86,7 @@ class TestCreateUserFromForwardedEmail:
 # ============================================================================
 # get_current_user_from_email
 # ============================================================================
+
 
 class TestGetCurrentUserFromEmail:
 
@@ -109,6 +120,7 @@ class TestGetCurrentUserFromEmail:
 # require_authenticated_user
 # ============================================================================
 
+
 class TestRequireAuthenticatedUser:
 
     @pytest.mark.asyncio
@@ -131,7 +143,9 @@ class TestRequireAuthenticatedUser:
         ctx = _make_group_context(email="user@example.com")
         user = _make_user("user@example.com")
 
-        with patch("src.dependencies.admin_auth.get_current_user_from_email", return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.get_current_user_from_email", return_value=user
+        ):
             result = await require_authenticated_user(session, ctx)
 
         assert result is user
@@ -145,8 +159,14 @@ class TestRequireAuthenticatedUser:
         created_user = _make_user("new@example.com")
 
         with (
-            patch("src.dependencies.admin_auth.get_current_user_from_email", return_value=None),
-            patch("src.dependencies.admin_auth._create_user_from_forwarded_email", return_value=created_user),
+            patch(
+                "src.dependencies.admin_auth.get_current_user_from_email",
+                return_value=None,
+            ),
+            patch(
+                "src.dependencies.admin_auth._create_user_from_forwarded_email",
+                return_value=created_user,
+            ),
         ):
             result = await require_authenticated_user(session, ctx)
 
@@ -160,8 +180,14 @@ class TestRequireAuthenticatedUser:
         ctx = _make_group_context(email="fail@example.com")
 
         with (
-            patch("src.dependencies.admin_auth.get_current_user_from_email", return_value=None),
-            patch("src.dependencies.admin_auth._create_user_from_forwarded_email", return_value=None),
+            patch(
+                "src.dependencies.admin_auth.get_current_user_from_email",
+                return_value=None,
+            ),
+            patch(
+                "src.dependencies.admin_auth._create_user_from_forwarded_email",
+                return_value=None,
+            ),
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await require_authenticated_user(session, ctx)
@@ -173,6 +199,7 @@ class TestRequireAuthenticatedUser:
 # get_authenticated_user
 # ============================================================================
 
+
 class TestGetAuthenticatedUser:
 
     @pytest.mark.asyncio
@@ -183,7 +210,9 @@ class TestGetAuthenticatedUser:
         ctx = _make_group_context(email="u@e.com")
         user = _make_user("u@e.com")
 
-        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user) as mock_req:
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user", return_value=user
+        ) as mock_req:
             result = await get_authenticated_user(session, ctx)
 
         assert result is user
@@ -193,6 +222,7 @@ class TestGetAuthenticatedUser:
 # ============================================================================
 # get_admin_user
 # ============================================================================
+
 
 class TestGetAdminUser:
 
@@ -204,7 +234,9 @@ class TestGetAdminUser:
         ctx = _make_group_context(email="admin@example.com")
         user = _make_user("admin@example.com", is_system_admin=True)
 
-        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user", return_value=user
+        ):
             result = await get_admin_user(session, ctx)
 
         assert result is user
@@ -217,7 +249,9 @@ class TestGetAdminUser:
         ctx = _make_group_context(email="gadmin@example.com", highest_role="admin")
         user = _make_user("gadmin@example.com", is_system_admin=False)
 
-        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user", return_value=user
+        ):
             result = await get_admin_user(session, ctx)
 
         assert result is user
@@ -232,7 +266,9 @@ class TestGetAdminUser:
         ctx.highest_role = None
         user = _make_user("grp@example.com", is_system_admin=False)
 
-        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user", return_value=user
+        ):
             result = await get_admin_user(session, ctx)
 
         assert result is user
@@ -246,7 +282,9 @@ class TestGetAdminUser:
         ctx.highest_role = None
         user = _make_user("regular@example.com", is_system_admin=False)
 
-        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user", return_value=user
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_admin_user(session, ctx)
 
@@ -261,7 +299,9 @@ class TestGetAdminUser:
         ctx.highest_role = None
         user = _make_user("norole@example.com", is_system_admin=False)
 
-        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user", return_value=user
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_admin_user(session, ctx)
 
@@ -275,7 +315,9 @@ class TestGetAdminUser:
         ctx = _make_group_context(email="upper@example.com", highest_role="ADMIN")
         user = _make_user("upper@example.com", is_system_admin=False)
 
-        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user", return_value=user
+        ):
             result = await get_admin_user(session, ctx)
 
         assert result is user
@@ -284,6 +326,7 @@ class TestGetAdminUser:
 # ============================================================================
 # get_system_admin_user  (global system admin — stricter than get_admin_user)
 # ============================================================================
+
 
 class TestGetSystemAdminUser:
     """
@@ -301,7 +344,9 @@ class TestGetSystemAdminUser:
         ctx = _make_group_context(email="sysadmin@example.com")
         user = _make_user("sysadmin@example.com", is_system_admin=True)
 
-        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user", return_value=user
+        ):
             result = await get_system_admin_user(session, ctx)
 
         assert result is user
@@ -313,10 +358,14 @@ class TestGetSystemAdminUser:
         from src.dependencies.admin_auth import get_system_admin_user
 
         session = AsyncMock()
-        ctx = _make_group_context(email="gadmin@example.com", highest_role="admin", user_role="admin")
+        ctx = _make_group_context(
+            email="gadmin@example.com", highest_role="admin", user_role="admin"
+        )
         user = _make_user("gadmin@example.com", is_system_admin=False)
 
-        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user", return_value=user
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_system_admin_user(session, ctx)
 
@@ -331,7 +380,9 @@ class TestGetSystemAdminUser:
         ctx = _make_group_context(email="regular@example.com", user_role="member")
         user = _make_user("regular@example.com", is_system_admin=False)
 
-        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user", return_value=user
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_system_admin_user(session, ctx)
 
@@ -349,7 +400,9 @@ class TestGetSystemAdminUser:
         user.email = "legacy@example.com"
         del user.is_system_admin  # attribute absent
 
-        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user", return_value=user
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_system_admin_user(session, ctx)
 
@@ -363,14 +416,19 @@ class TestGetSystemAdminUser:
         ctx = _make_group_context(email="sysadmin@example.com")
         user = _make_user("sysadmin@example.com", is_system_admin=True)
 
-        with patch("src.dependencies.admin_auth.require_authenticated_user", return_value=user) as mock_req:
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user", return_value=user
+        ) as mock_req:
             await get_system_admin_user(session, ctx)
 
         mock_req.assert_called_once_with(session, ctx)
 
     def test_require_system_admin_is_alias(self):
         """The route-level alias must point at the same callable."""
-        from src.dependencies.admin_auth import get_system_admin_user, require_system_admin
+        from src.dependencies.admin_auth import (
+            get_system_admin_user,
+            require_system_admin,
+        )
 
         assert require_system_admin is get_system_admin_user
 
@@ -379,6 +437,7 @@ class TestGetSystemAdminUser:
 # _create_user_from_forwarded_email — additional branch coverage
 # (unique username resolution, admin-email-in-dev detection, DB error path)
 # ============================================================================
+
 
 def _make_session():
     session = AsyncMock()
@@ -424,10 +483,13 @@ class TestCreateUserFromForwardedEmailBranches:
         session.refresh = AsyncMock(side_effect=lambda u: None)
 
         import src.dependencies.admin_auth as admin_auth_mod
+
         orig_user = admin_auth_mod.User
         admin_auth_mod.User = MagicMock(return_value=new_user)
         try:
-            result = await _create_user_from_forwarded_email(session, "newuser@example.com")
+            result = await _create_user_from_forwarded_email(
+                session, "newuser@example.com"
+            )
             # Either succeeds or returns None (select(User) may fail with mock)
             assert result is new_user or result is None
         finally:
@@ -444,17 +506,22 @@ class TestCreateUserFromForwardedEmailBranches:
 
         user_with_same_username = MagicMock()
         username_conflict_result = MagicMock()
-        username_conflict_result.scalars.return_value.first.return_value = user_with_same_username
+        username_conflict_result.scalars.return_value.first.return_value = (
+            user_with_same_username
+        )
 
         session.execute = AsyncMock(side_effect=[none_result, username_conflict_result])
         new_user = _make_user("newuser@mycompany.com")
         session.refresh = AsyncMock(side_effect=lambda u: None)
 
         import src.dependencies.admin_auth as admin_auth_mod
+
         orig_user = admin_auth_mod.User
         admin_auth_mod.User = MagicMock(return_value=new_user)
         try:
-            result = await _create_user_from_forwarded_email(session, "newuser@mycompany.com")
+            result = await _create_user_from_forwarded_email(
+                session, "newuser@mycompany.com"
+            )
             assert result is new_user or result is None
         finally:
             admin_auth_mod.User = orig_user
@@ -473,11 +540,14 @@ class TestCreateUserFromForwardedEmailBranches:
         session.refresh = AsyncMock(side_effect=lambda u: None)
 
         import src.dependencies.admin_auth as admin_auth_mod
+
         orig_user = admin_auth_mod.User
         admin_auth_mod.User = MagicMock(return_value=new_user)
         try:
-            with patch.dict(os.environ, {'ENVIRONMENT': 'development'}):
-                result = await _create_user_from_forwarded_email(session, "admin@localhost")
+            with patch.dict(os.environ, {"ENVIRONMENT": "development"}):
+                result = await _create_user_from_forwarded_email(
+                    session, "admin@localhost"
+                )
             assert result is new_user or result is None
         finally:
             admin_auth_mod.User = orig_user
@@ -498,6 +568,7 @@ class TestCreateUserFromForwardedEmailBranches:
 # ============================================================================
 # get_current_user_from_email — additional branch coverage
 # ============================================================================
+
 
 class TestGetCurrentUserFromEmailBranches:
 
@@ -522,9 +593,14 @@ class TestGetCurrentUserFromEmailBranches:
         mock_svc_instance = AsyncMock()
         mock_svc_instance.get_or_create_user_by_email = AsyncMock(return_value=user)
         # UserService is imported locally inside the function
-        with patch.dict('sys.modules', {
-            'src.services.groups.users': MagicMock(UserService=MagicMock(return_value=mock_svc_instance))
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "src.services.groups.users": MagicMock(
+                    UserService=MagicMock(return_value=mock_svc_instance)
+                )
+            },
+        ):
             result = await get_current_user_from_email(session, ctx)
         assert result is user
 
@@ -532,6 +608,7 @@ class TestGetCurrentUserFromEmailBranches:
 # ============================================================================
 # require_authenticated_user — additional branch coverage
 # ============================================================================
+
 
 class TestRequireAuthenticatedUserBranches:
 
@@ -554,7 +631,11 @@ class TestRequireAuthenticatedUserBranches:
         session = _make_session()
         ctx = _make_group_context(email="user@example.com")
         user = _make_user()
-        with patch('src.dependencies.admin_auth.get_current_user_from_email', new_callable=AsyncMock, return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.get_current_user_from_email",
+            new_callable=AsyncMock,
+            return_value=user,
+        ):
             result = await require_authenticated_user(session, ctx)
         assert result is user
 
@@ -566,8 +647,16 @@ class TestRequireAuthenticatedUserBranches:
         session = _make_session()
         ctx = _make_group_context(email="new@example.com")
         user = _make_user("new@example.com")
-        with patch('src.dependencies.admin_auth.get_current_user_from_email', new_callable=AsyncMock, return_value=None):
-            with patch('src.dependencies.admin_auth._create_user_from_forwarded_email', new_callable=AsyncMock, return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.get_current_user_from_email",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            with patch(
+                "src.dependencies.admin_auth._create_user_from_forwarded_email",
+                new_callable=AsyncMock,
+                return_value=user,
+            ):
                 result = await require_authenticated_user(session, ctx)
         assert result is user
 
@@ -578,8 +667,16 @@ class TestRequireAuthenticatedUserBranches:
 
         session = _make_session()
         ctx = _make_group_context(email="fail@example.com")
-        with patch('src.dependencies.admin_auth.get_current_user_from_email', new_callable=AsyncMock, return_value=None):
-            with patch('src.dependencies.admin_auth._create_user_from_forwarded_email', new_callable=AsyncMock, return_value=None):
+        with patch(
+            "src.dependencies.admin_auth.get_current_user_from_email",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            with patch(
+                "src.dependencies.admin_auth._create_user_from_forwarded_email",
+                new_callable=AsyncMock,
+                return_value=None,
+            ):
                 with pytest.raises(HTTPException) as exc:
                     await require_authenticated_user(session, ctx)
         assert exc.value.status_code == 401
@@ -588,6 +685,7 @@ class TestRequireAuthenticatedUserBranches:
 # ============================================================================
 # get_admin_user — additional role-check branch coverage
 # ============================================================================
+
 
 class TestGetAdminUserRoleChecks:
 
@@ -599,7 +697,11 @@ class TestGetAdminUserRoleChecks:
         session = _make_session()
         ctx = _make_group_context(email="admin@example.com")
         user = _make_user(is_system_admin=True)
-        with patch('src.dependencies.admin_auth.require_authenticated_user', new_callable=AsyncMock, return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user",
+            new_callable=AsyncMock,
+            return_value=user,
+        ):
             result = await get_admin_user(session, ctx)
         assert result is user
 
@@ -613,7 +715,11 @@ class TestGetAdminUserRoleChecks:
         ctx.highest_role = "admin"
         ctx.user_role = None
         user = _make_user(is_system_admin=False)
-        with patch('src.dependencies.admin_auth.require_authenticated_user', new_callable=AsyncMock, return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user",
+            new_callable=AsyncMock,
+            return_value=user,
+        ):
             result = await get_admin_user(session, ctx)
         assert result is user
 
@@ -627,7 +733,11 @@ class TestGetAdminUserRoleChecks:
         ctx.highest_role = None
         ctx.user_role = "admin"
         user = _make_user(is_system_admin=False)
-        with patch('src.dependencies.admin_auth.require_authenticated_user', new_callable=AsyncMock, return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user",
+            new_callable=AsyncMock,
+            return_value=user,
+        ):
             result = await get_admin_user(session, ctx)
         assert result is user
 
@@ -641,7 +751,11 @@ class TestGetAdminUserRoleChecks:
         ctx.highest_role = None
         ctx.user_role = "operator"
         user = _make_user(is_system_admin=False)
-        with patch('src.dependencies.admin_auth.require_authenticated_user', new_callable=AsyncMock, return_value=user):
+        with patch(
+            "src.dependencies.admin_auth.require_authenticated_user",
+            new_callable=AsyncMock,
+            return_value=user,
+        ):
             with pytest.raises(HTTPException) as exc:
                 await get_admin_user(session, ctx)
         assert exc.value.status_code == 403

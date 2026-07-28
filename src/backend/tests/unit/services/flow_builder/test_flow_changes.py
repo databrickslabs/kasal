@@ -9,13 +9,15 @@ Tests the three specific changes made to the flow execution system:
 """
 
 import asyncio
-import pytest
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class MockAsyncSession:
     """Mock that acts as both a session and an async context manager (like AsyncSession)."""
+
     def __init__(self, name="mock_session"):
         self._name = name
 
@@ -92,8 +94,12 @@ class TestFlowMethodsNoPlanner:
         mock_planning_llm = MagicMock()
 
         # Crew IS a module-level import; LLMManager is a lazy import inside the closure
-        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_class, \
-             patch('src.services.llm.manager.LLMManager') as mock_llm_manager:
+        with (
+            patch(
+                "src.services.flow_builder.modules.flow_methods.Crew"
+            ) as mock_crew_class,
+            patch("src.services.llm.manager.LLMManager") as mock_llm_manager,
+        ):
 
             mock_llm_manager.get_llm = AsyncMock(return_value=mock_planning_llm)
             mock_crew_instance = MagicMock()
@@ -106,8 +112,10 @@ class TestFlowMethodsNoPlanner:
                 crew_name="Test Crew",
                 callbacks={"job_id": "test-job"},
                 group_context=None,
-                create_execution_callbacks=MagicMock(return_value=(MagicMock(), MagicMock())),
-                crew_data=mock_crew_data
+                create_execution_callbacks=MagicMock(
+                    return_value=(MagicMock(), MagicMock())
+                ),
+                crew_data=mock_crew_data,
             )
 
             # Create mock flow instance (simulates 'self' in the @start decorated method)
@@ -115,7 +123,9 @@ class TestFlowMethodsNoPlanner:
             mock_flow.state = {}
 
             # Mock crew.kickoff_async to avoid actual execution
-            mock_crew_instance.kickoff_async = AsyncMock(return_value=MagicMock(raw="Test result"))
+            mock_crew_instance.kickoff_async = AsyncMock(
+                return_value=MagicMock(raw="Test result")
+            )
 
             # Execute the method (._meth is the inner function before @start wrapping)
             await method._meth(mock_flow)
@@ -125,9 +135,9 @@ class TestFlowMethodsNoPlanner:
 
             # Crew gets no planner kwargs, but is otherwise built normally.
             crew_call_kwargs = mock_crew_class.call_args[1]
-            assert 'planning' not in crew_call_kwargs
-            assert 'planning_llm' not in crew_call_kwargs
-            assert crew_call_kwargs['tasks'] == [mock_task]
+            assert "planning" not in crew_call_kwargs
+            assert "planning_llm" not in crew_call_kwargs
+            assert crew_call_kwargs["tasks"] == [mock_task]
 
     @pytest.mark.asyncio
     async def test_missing_planning_llm_does_not_borrow_agent_llm(self):
@@ -164,10 +174,14 @@ class TestFlowMethodsNoPlanner:
         mock_task.expected_output = "Test output"
         mock_task.context = None
 
-        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_class:
+        with patch(
+            "src.services.flow_builder.modules.flow_methods.Crew"
+        ) as mock_crew_class:
             mock_crew_instance = MagicMock()
             mock_crew_class.return_value = mock_crew_instance
-            mock_crew_instance.kickoff_async = AsyncMock(return_value=MagicMock(raw="Test result"))
+            mock_crew_instance.kickoff_async = AsyncMock(
+                return_value=MagicMock(raw="Test result")
+            )
 
             method = FlowMethodFactory.create_starting_point_crew_method(
                 method_name="test_start",
@@ -175,8 +189,10 @@ class TestFlowMethodsNoPlanner:
                 crew_name="Test Crew",
                 callbacks={"job_id": "test-job"},
                 group_context=None,
-                create_execution_callbacks=MagicMock(return_value=(MagicMock(), MagicMock())),
-                crew_data=mock_crew_data
+                create_execution_callbacks=MagicMock(
+                    return_value=(MagicMock(), MagicMock())
+                ),
+                crew_data=mock_crew_data,
             )
 
             mock_flow = MagicMock()
@@ -186,8 +202,8 @@ class TestFlowMethodsNoPlanner:
 
             # The agent's LLM stays the agent's; it is never promoted to a planner.
             crew_call_kwargs = mock_crew_class.call_args[1]
-            assert 'planning' not in crew_call_kwargs
-            assert 'planning_llm' not in crew_call_kwargs
+            assert "planning" not in crew_call_kwargs
+            assert "planning_llm" not in crew_call_kwargs
             assert mock_agent.llm is mock_agent_llm
 
     @pytest.mark.asyncio
@@ -222,10 +238,14 @@ class TestFlowMethodsNoPlanner:
         mock_task.expected_output = "Test output"
         mock_task.context = None
 
-        with patch('src.services.flow_builder.modules.flow_methods.Crew') as mock_crew_class:
+        with patch(
+            "src.services.flow_builder.modules.flow_methods.Crew"
+        ) as mock_crew_class:
             mock_crew_instance = MagicMock()
             mock_crew_class.return_value = mock_crew_instance
-            mock_crew_instance.kickoff_async = AsyncMock(return_value=MagicMock(raw="Test result"))
+            mock_crew_instance.kickoff_async = AsyncMock(
+                return_value=MagicMock(raw="Test result")
+            )
 
             method = FlowMethodFactory.create_starting_point_crew_method(
                 method_name="test_start",
@@ -233,8 +253,10 @@ class TestFlowMethodsNoPlanner:
                 crew_name="Test Crew",
                 callbacks={"job_id": "test-job"},
                 group_context=None,
-                create_execution_callbacks=MagicMock(return_value=(MagicMock(), MagicMock())),
-                crew_data=mock_crew_data
+                create_execution_callbacks=MagicMock(
+                    return_value=(MagicMock(), MagicMock())
+                ),
+                crew_data=mock_crew_data,
             )
 
             mock_flow = MagicMock()
@@ -244,8 +266,8 @@ class TestFlowMethodsNoPlanner:
 
             # No planner kwargs at all -- neither the flag nor an LLM.
             crew_call_kwargs = mock_crew_class.call_args[1]
-            assert 'planning' not in crew_call_kwargs
-            assert 'planning_llm' not in crew_call_kwargs
+            assert "planning" not in crew_call_kwargs
+            assert "planning_llm" not in crew_call_kwargs
 
 
 class TestFlowExecutionRunnerResultPropagation:
@@ -254,7 +276,9 @@ class TestFlowExecutionRunnerResultPropagation:
     @pytest.mark.asyncio
     async def test_update_execution_status_with_result(self):
         """Test update_execution_status_with_retry accepts and passes result parameter."""
-        from src.services.flow_builder.flow_execution_runner import update_execution_status_with_retry
+        from src.services.flow_builder.flow_execution_runner import (
+            update_execution_status_with_retry,
+        )
 
         execution_id = "test-exec-123"
         status = "COMPLETED"
@@ -262,47 +286,42 @@ class TestFlowExecutionRunnerResultPropagation:
         result = {"output": "Test output", "metrics": {"duration": 45}}
 
         # ExecutionStatusService is a lazy import inside the function
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
+        with patch(
+            "src.services.execution.status.ExecutionStatusService"
+        ) as mock_service:
             mock_service.update_status = AsyncMock(return_value=True)
 
             success = await update_execution_status_with_retry(
-                execution_id=execution_id,
-                status=status,
-                message=message,
-                result=result
+                execution_id=execution_id, status=status, message=message, result=result
             )
 
             mock_service.update_status.assert_called_once_with(
-                job_id=execution_id,
-                status=status,
-                message=message,
-                result=result
+                job_id=execution_id, status=status, message=message, result=result
             )
             assert success is True
 
     @pytest.mark.asyncio
     async def test_update_execution_status_without_result(self):
         """Test update_execution_status_with_retry works without result parameter."""
-        from src.services.flow_builder.flow_execution_runner import update_execution_status_with_retry
+        from src.services.flow_builder.flow_execution_runner import (
+            update_execution_status_with_retry,
+        )
 
         execution_id = "test-exec-456"
         status = "RUNNING"
         message = "Flow is running"
 
-        with patch('src.services.execution.status.ExecutionStatusService') as mock_service:
+        with patch(
+            "src.services.execution.status.ExecutionStatusService"
+        ) as mock_service:
             mock_service.update_status = AsyncMock(return_value=True)
 
             success = await update_execution_status_with_retry(
-                execution_id=execution_id,
-                status=status,
-                message=message
+                execution_id=execution_id, status=status, message=message
             )
 
             mock_service.update_status.assert_called_once_with(
-                job_id=execution_id,
-                status=status,
-                message=message,
-                result=None
+                job_id=execution_id, status=status, message=message, result=None
             )
             assert success is True
 
@@ -318,13 +337,18 @@ class TestFlowExecutionRunnerResultPropagation:
         mock_result_data = {"final_output": "Flow completed", "stats": {"tasks": 3}}
 
         # process_flow_executor IS at module level
-        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor, \
-             patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+        with (
+            patch(
+                "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+            ) as mock_executor,
+            patch(
+                "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+            ) as mock_update,
+        ):
 
-            mock_executor.run_flow_isolated = AsyncMock(return_value={
-                'status': 'COMPLETED',
-                'result': mock_result_data
-            })
+            mock_executor.run_flow_isolated = AsyncMock(
+                return_value={"status": "COMPLETED", "result": mock_result_data}
+            )
             mock_update.return_value = True
 
             await run_flow_in_process(
@@ -332,14 +356,14 @@ class TestFlowExecutionRunnerResultPropagation:
                 config=config,
                 running_jobs=running_jobs,
                 group_context=None,
-                user_token=None
+                user_token=None,
             )
 
             mock_update.assert_called_once()
             call_kwargs = mock_update.call_args[1]
-            assert call_kwargs['execution_id'] == execution_id
-            assert call_kwargs['status'] == 'COMPLETED'
-            assert call_kwargs['result'] == mock_result_data
+            assert call_kwargs["execution_id"] == execution_id
+            assert call_kwargs["status"] == "COMPLETED"
+            assert call_kwargs["result"] == mock_result_data
 
     @pytest.mark.asyncio
     async def test_run_flow_in_process_no_result_for_failed(self):
@@ -350,19 +374,26 @@ class TestFlowExecutionRunnerResultPropagation:
         config = {"flow_id": "test-flow", "inputs": {}}
         running_jobs = {}
 
-        with patch('src.services.flow_builder.flow_execution_runner.process_flow_executor') as mock_executor, \
-             patch('src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry') as mock_update:
+        with (
+            patch(
+                "src.services.flow_builder.flow_execution_runner.process_flow_executor"
+            ) as mock_executor,
+            patch(
+                "src.services.flow_builder.flow_execution_runner.update_execution_status_with_retry"
+            ) as mock_update,
+        ):
 
-            mock_executor.run_flow_isolated = AsyncMock(return_value={
-                'status': 'FAILED',
-                'error': 'Test error'
-            })
+            mock_executor.run_flow_isolated = AsyncMock(
+                return_value={"status": "FAILED", "error": "Test error"}
+            )
             mock_update.return_value = True
 
             # Mock the lazy-imported ExecutionStatusService for status check
-            with patch('src.services.execution.status.ExecutionStatusService') as mock_status_service:
+            with patch(
+                "src.services.execution.status.ExecutionStatusService"
+            ) as mock_status_service:
                 mock_execution = MagicMock()
-                mock_execution.status = 'RUNNING'
+                mock_execution.status = "RUNNING"
                 mock_status_service.get_status = AsyncMock(return_value=mock_execution)
 
                 await run_flow_in_process(
@@ -370,14 +401,14 @@ class TestFlowExecutionRunnerResultPropagation:
                     config=config,
                     running_jobs=running_jobs,
                     group_context=None,
-                    user_token=None
+                    user_token=None,
                 )
 
             mock_update.assert_called_once()
             call_kwargs = mock_update.call_args[1]
-            assert call_kwargs['execution_id'] == execution_id
-            assert call_kwargs['status'] == 'FAILED'
-            assert call_kwargs['result'] is None
+            assert call_kwargs["execution_id"] == execution_id
+            assert call_kwargs["status"] == "FAILED"
+            assert call_kwargs["result"] is None
 
 
 class TestFlowRunnerServiceFreshSession:
@@ -391,7 +422,9 @@ class TestFlowRunnerServiceFreshSession:
         mock_session = MagicMock()
 
         # Patch FlowExecutionService at module level (used in __init__)
-        with patch('src.services.flow_builder.flow_runner_service.FlowExecutionService') as mock_fes_class:
+        with patch(
+            "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+        ) as mock_fes_class:
             mock_fes_class.return_value = MagicMock()
             service = FlowRunnerService(mock_session)
 
@@ -401,7 +434,7 @@ class TestFlowRunnerServiceFreshSession:
             "nodes": [{"id": "node1", "type": "crew"}],
             "edges": [],
             "flow_config": {"startingPoints": ["node1"], "listeners": []},
-            "group_id": "test-group"
+            "group_id": "test-group",
         }
 
         # Track which sessions are used for FlowExecutionService
@@ -416,22 +449,35 @@ class TestFlowRunnerServiceFreshSession:
         # Set up two distinct sessions (must be async context managers like AsyncSession)
         mock_initial_session = MockAsyncSession("initial_session")
         mock_post_session = MockAsyncSession("post_session")
-        mock_factory = make_async_session_factory(mock_initial_session, mock_post_session)
+        mock_factory = make_async_session_factory(
+            mock_initial_session, mock_post_session
+        )
 
         # BackendFlow is re-imported inside method — patch at source module
-        with patch('src.services.flow_builder.flow_runner_service._smart_db_session', mock_factory), \
-             patch('src.services.flow_builder.flow_runner_service.FlowExecutionService', side_effect=track_fes), \
-             patch('src.services.flow_builder.flow_runner_service.ApiKeysService') as mock_api_keys, \
-             patch('src.services.flow_builder.backend_flow.BackendFlow') as mock_backend_flow_class:
+        with (
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                mock_factory,
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService",
+                side_effect=track_fes,
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as mock_api_keys,
+            patch(
+                "src.services.flow_builder.backend_flow.BackendFlow"
+            ) as mock_backend_flow_class,
+        ):
 
             mock_api_keys.get_provider_api_key = AsyncMock(return_value=None)
 
             # Mock BackendFlow instance
             mock_flow_instance = MagicMock()
-            mock_flow_instance.kickoff = AsyncMock(return_value={
-                "success": True,
-                "result": {"output": "Test output"}
-            })
+            mock_flow_instance.kickoff = AsyncMock(
+                return_value={"success": True, "result": {"output": "Test output"}}
+            )
             mock_backend_flow_class.return_value = mock_flow_instance
 
             result = await service._run_dynamic_flow(execution_id, job_id, config)
@@ -453,7 +499,9 @@ class TestFlowRunnerServiceFreshSession:
 
         mock_session = MagicMock()
 
-        with patch('src.services.flow_builder.flow_runner_service.FlowExecutionService') as mock_fes_class:
+        with patch(
+            "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+        ) as mock_fes_class:
             mock_fes_class.return_value = MagicMock()
             service = FlowRunnerService(mock_session)
 
@@ -463,12 +511,14 @@ class TestFlowRunnerServiceFreshSession:
             "nodes": [{"id": "node1"}],
             "edges": [],
             "flow_config": {"startingPoints": ["node1"]},
-            "group_id": "test-group"
+            "group_id": "test-group",
         }
 
         mock_initial_session = MockAsyncSession("initial_session")
         mock_post_session = MockAsyncSession("post_session")
-        mock_factory = make_async_session_factory(mock_initial_session, mock_post_session)
+        mock_factory = make_async_session_factory(
+            mock_initial_session, mock_post_session
+        )
 
         session_tracker = []
 
@@ -478,19 +528,30 @@ class TestFlowRunnerServiceFreshSession:
             session_tracker.append(sess)
             return mock_svc
 
-        with patch('src.services.flow_builder.flow_runner_service._smart_db_session', mock_factory), \
-             patch('src.services.flow_builder.flow_runner_service.FlowExecutionService', side_effect=track_fes), \
-             patch('src.services.flow_builder.flow_runner_service.ApiKeysService') as mock_api_keys, \
-             patch('src.services.flow_builder.backend_flow.BackendFlow') as mock_backend_flow_class:
+        with (
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                mock_factory,
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService",
+                side_effect=track_fes,
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as mock_api_keys,
+            patch(
+                "src.services.flow_builder.backend_flow.BackendFlow"
+            ) as mock_backend_flow_class,
+        ):
 
             mock_api_keys.get_provider_api_key = AsyncMock(return_value=None)
 
             # Mock BackendFlow to return failure
             mock_flow_instance = MagicMock()
-            mock_flow_instance.kickoff = AsyncMock(return_value={
-                "success": False,
-                "error": "Test error"
-            })
+            mock_flow_instance.kickoff = AsyncMock(
+                return_value={"success": False, "error": "Test error"}
+            )
             mock_backend_flow_class.return_value = mock_flow_instance
 
             result = await service._run_dynamic_flow(execution_id, job_id, config)
@@ -507,7 +568,9 @@ class TestFlowRunnerServiceFreshSession:
 
         mock_session = MagicMock()
 
-        with patch('src.services.flow_builder.flow_runner_service.FlowExecutionService') as mock_fes_class:
+        with patch(
+            "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+        ) as mock_fes_class:
             mock_fes_class.return_value = MagicMock()
             service = FlowRunnerService(mock_session)
 
@@ -517,12 +580,14 @@ class TestFlowRunnerServiceFreshSession:
             "nodes": [{"id": "node1"}],
             "edges": [],
             "flow_config": {"startingPoints": ["node1"]},
-            "group_id": "test-group"
+            "group_id": "test-group",
         }
 
         mock_initial_session = MockAsyncSession("initial_session")
         mock_post_session = MockAsyncSession("post_session")
-        mock_factory = make_async_session_factory(mock_initial_session, mock_post_session)
+        mock_factory = make_async_session_factory(
+            mock_initial_session, mock_post_session
+        )
 
         session_tracker = []
 
@@ -532,10 +597,22 @@ class TestFlowRunnerServiceFreshSession:
             session_tracker.append(sess)
             return mock_svc
 
-        with patch('src.services.flow_builder.flow_runner_service._smart_db_session', mock_factory), \
-             patch('src.services.flow_builder.flow_runner_service.FlowExecutionService', side_effect=track_fes), \
-             patch('src.services.flow_builder.flow_runner_service.ApiKeysService') as mock_api_keys, \
-             patch('src.services.flow_builder.backend_flow.BackendFlow') as mock_backend_flow_class:
+        with (
+            patch(
+                "src.services.flow_builder.flow_runner_service._smart_db_session",
+                mock_factory,
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.FlowExecutionService",
+                side_effect=track_fes,
+            ),
+            patch(
+                "src.services.flow_builder.flow_runner_service.ApiKeysService"
+            ) as mock_api_keys,
+            patch(
+                "src.services.flow_builder.backend_flow.BackendFlow"
+            ) as mock_backend_flow_class,
+        ):
 
             mock_api_keys.get_provider_api_key = AsyncMock(return_value=None)
 
@@ -552,7 +629,9 @@ class TestFlowRunnerServiceFreshSession:
             result = await service._run_dynamic_flow(execution_id, job_id, config)
 
             # Key assertion: two sessions created (initial + fresh post-execution)
-            assert mock_factory.call_count == 2, "Should create two sessions: initial and post-execution"
+            assert (
+                mock_factory.call_count == 2
+            ), "Should create two sessions: initial and post-execution"
 
             # The post-execution update used the FRESH session, not the original
             assert len(session_tracker) >= 2
@@ -568,7 +647,10 @@ class TestEmitErrorSpan:
     def _make_service(self):
         """Create a FlowRunnerService with mocked dependencies."""
         from src.services.flow_builder.flow_runner_service import FlowRunnerService
-        with patch('src.services.flow_builder.flow_runner_service.FlowExecutionService') as mock_fes:
+
+        with patch(
+            "src.services.flow_builder.flow_runner_service.FlowExecutionService"
+        ) as mock_fes:
             mock_fes.return_value = MagicMock()
             return FlowRunnerService(MagicMock())
 
@@ -582,16 +664,29 @@ class TestEmitErrorSpan:
         mock_provider = MagicMock()
         mock_span = MagicMock()
         mock_tracer = MagicMock()
-        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(return_value=False)
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=False
+        )
         mock_provider.get_tracer.return_value = mock_tracer
 
-        with patch('src.services.otel_tracing.otel_config.create_kasal_tracer_provider', return_value=mock_provider), \
-             patch('src.services.otel_tracing.db_exporter.KasalDBSpanExporter'):
+        with (
+            patch(
+                "src.services.otel_tracing.otel_config.create_kasal_tracer_provider",
+                return_value=mock_provider,
+            ),
+            patch("src.services.otel_tracing.db_exporter.KasalDBSpanExporter"),
+        ):
 
-            await service._emit_error_span("job-123", "Something failed", group_id="grp-1")
+            await service._emit_error_span(
+                "job-123", "Something failed", group_id="grp-1"
+            )
 
-        mock_span.set_attribute.assert_any_call("kasal.event_type", "flow_execution_failed")
+        mock_span.set_attribute.assert_any_call(
+            "kasal.event_type", "flow_execution_failed"
+        )
         mock_span.set_attribute.assert_any_call("kasal.job_id", "job-123")
         mock_span.set_attribute.assert_any_call("kasal.group_id", "grp-1")
         mock_provider.shutdown.assert_called_once()
@@ -606,16 +701,24 @@ class TestEmitErrorSpan:
         mock_provider = MagicMock()
         mock_span = MagicMock()
         mock_tracer = MagicMock()
-        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(return_value=False)
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=False
+        )
         mock_provider.get_tracer.return_value = mock_tracer
 
-        with patch('src.services.otel_tracing.otel_config.create_kasal_tracer_provider', return_value=mock_provider), \
-             patch('src.services.otel_tracing.db_exporter.KasalDBSpanExporter'):
+        with (
+            patch(
+                "src.services.otel_tracing.otel_config.create_kasal_tracer_provider",
+                return_value=mock_provider,
+            ),
+            patch("src.services.otel_tracing.db_exporter.KasalDBSpanExporter"),
+        ):
 
             await service._emit_error_span(
-                "job-456", "Error msg",
-                group_id="grp-2", group_email="user@example.com"
+                "job-456", "Error msg", group_id="grp-2", group_email="user@example.com"
             )
 
         mock_span.set_attribute.assert_any_call("kasal.group_email", "user@example.com")
@@ -628,8 +731,10 @@ class TestEmitErrorSpan:
 
         service = self._make_service()
 
-        with patch('src.services.otel_tracing.otel_config.create_kasal_tracer_provider',
-                   side_effect=RuntimeError("OTel init failed")):
+        with patch(
+            "src.services.otel_tracing.otel_config.create_kasal_tracer_provider",
+            side_effect=RuntimeError("OTel init failed"),
+        ):
 
             # Should NOT raise — the method catches all exceptions
             await service._emit_error_span("job-789", "Error msg")
@@ -644,12 +749,23 @@ class TestEmitErrorSpan:
         mock_provider = MagicMock()
         mock_span = MagicMock()
         mock_tracer = MagicMock()
-        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(return_value=mock_span)
-        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(return_value=False)
+        mock_tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=mock_span
+        )
+        mock_tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=False
+        )
         mock_provider.get_tracer.return_value = mock_tracer
 
-        with patch('src.services.otel_tracing.otel_config.create_kasal_tracer_provider', return_value=mock_provider), \
-             patch('src.services.otel_tracing.db_exporter.KasalDBSpanExporter') as mock_exporter:
+        with (
+            patch(
+                "src.services.otel_tracing.otel_config.create_kasal_tracer_provider",
+                return_value=mock_provider,
+            ),
+            patch(
+                "src.services.otel_tracing.db_exporter.KasalDBSpanExporter"
+            ) as mock_exporter,
+        ):
 
             await service._emit_error_span("job-no-group", "Error without group")
 
@@ -657,4 +773,6 @@ class TestEmitErrorSpan:
         mock_exporter.assert_called_once_with("job-no-group", None)
         # group_id and group_email should NOT be set
         set_attr_calls = [c[0] for c in mock_span.set_attribute.call_args_list]
-        assert ("kasal.group_id",) not in [(c[0],) for c in set_attr_calls if len(c) >= 1]
+        assert ("kasal.group_id",) not in [
+            (c[0],) for c in set_attr_calls if len(c) >= 1
+        ]

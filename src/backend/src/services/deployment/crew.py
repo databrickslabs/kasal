@@ -2,26 +2,27 @@
 Service for deploying crews to Databricks Model Serving.
 """
 
-from typing import TYPE_CHECKING, Dict, Any, Optional, List
-import logging
 import json
-import tempfile
+import logging
 import shutil
-from pathlib import Path
+import tempfile
 from datetime import datetime
-from sqlalchemy.ext.asyncio import AsyncSession
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
 import mlflow
 import mlflow.pyfunc
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.schemas.crew_export import (
-    ModelServingConfig,
-    DeploymentStatus,
-    DeploymentResponse
-)
-from src.repositories.crew_repository import CrewRepository
 from src.repositories.agent_repository import AgentRepository
+from src.repositories.crew_repository import CrewRepository
 from src.repositories.task_repository import TaskRepository
 from src.repositories.tool_repository import ToolRepository
+from src.schemas.crew_export import (
+    DeploymentResponse,
+    DeploymentStatus,
+    ModelServingConfig,
+)
 from src.utils.user_context import GroupContext
 
 if TYPE_CHECKING:  # imported for the annotation only, no runtime cost
@@ -50,7 +51,7 @@ class CrewDeploymentService:
         self,
         crew_id: str,
         config: ModelServingConfig,
-        group_context: Optional[GroupContext] = None
+        group_context: Optional[GroupContext] = None,
     ) -> DeploymentResponse:
         """
         Deploy a crew to Databricks Model Serving
@@ -92,29 +93,23 @@ class CrewDeploymentService:
 
         # 2. Create crew data structure
         crew_data = {
-            'id': str(crew.id),
-            'name': crew.name,
-            'agents': agents,
-            'tasks': tasks,
+            "id": str(crew.id),
+            "name": crew.name,
+            "agents": agents,
+            "tasks": tasks,
         }
 
         # 3. Create MLflow model
-        model_uri, model_version = await self._create_mlflow_model(
-            crew_data,
-            config
-        )
+        model_uri, model_version = await self._create_mlflow_model(crew_data, config)
 
         # 4. Deploy to Model Serving
         endpoint_url, deployment_status = await self._deploy_to_endpoint(
-            config.model_name,
-            model_version,
-            config
+            config.model_name, model_version, config
         )
 
         # 5. Generate usage example
         usage_example = self._generate_usage_example(
-            endpoint_url,
-            config.endpoint_name or config.model_name
+            endpoint_url, config.endpoint_name or config.model_name
         )
 
         return DeploymentResponse(
@@ -129,18 +124,16 @@ class CrewDeploymentService:
             endpoint_status=deployment_status,
             deployed_at=datetime.utcnow().isoformat(),
             metadata={
-                'agents_count': len(agents),
-                'tasks_count': len(tasks),
-                'workload_size': config.workload_size,
-                'scale_to_zero': config.scale_to_zero_enabled,
+                "agents_count": len(agents),
+                "tasks_count": len(tasks),
+                "workload_size": config.workload_size,
+                "scale_to_zero": config.scale_to_zero_enabled,
             },
-            usage_example=usage_example
+            usage_example=usage_example,
         )
 
     async def _create_mlflow_model(
-        self,
-        crew_data: Dict[str, Any],
-        config: ModelServingConfig
+        self, crew_data: Dict[str, Any], config: ModelServingConfig
     ) -> tuple[str, str]:
         """
         Create and log MLflow model
@@ -161,21 +154,20 @@ class CrewDeploymentService:
         try:
             # Save crew configuration
             crew_config_path = Path(temp_dir) / "crew_config.json"
-            with open(crew_config_path, 'w') as f:
+            with open(crew_config_path, "w") as f:
                 json.dump(crew_data, f, indent=2)
 
             # Define model signature
-            from mlflow.models.signature import infer_signature
             import pandas as pd
+            from mlflow.models.signature import infer_signature
 
             # Sample input/output for signature
-            sample_input = pd.DataFrame([{
-                "inputs": json.dumps({"topic": "Sample topic"})
-            }])
-            sample_output = pd.DataFrame([{
-                "result": "Sample result",
-                "execution_time": 0.0
-            }])
+            sample_input = pd.DataFrame(
+                [{"inputs": json.dumps({"topic": "Sample topic"})}]
+            )
+            sample_output = pd.DataFrame(
+                [{"result": "Sample result", "execution_time": 0.0}]
+            )
 
             signature = infer_signature(sample_input, sample_output)
 
@@ -185,28 +177,28 @@ class CrewDeploymentService:
             # Start MLflow run
             with mlflow.start_run(run_name=f"crew_deployment_{crew_data['name']}"):
                 # Log parameters
-                mlflow.log_param("crew_name", crew_data['name'])
-                mlflow.log_param("agents_count", len(crew_data['agents']))
-                mlflow.log_param("tasks_count", len(crew_data['tasks']))
+                mlflow.log_param("crew_name", crew_data["name"])
+                mlflow.log_param("agents_count", len(crew_data["agents"]))
+                mlflow.log_param("tasks_count", len(crew_data["tasks"]))
 
                 # Log crew configuration as artifact
                 mlflow.log_artifact(str(crew_config_path), "config")
 
                 # Define dependencies
                 conda_env = {
-                    'channels': ['conda-forge'],
-                    'dependencies': [
-                        'python=3.9',
-                        'pip',
+                    "channels": ["conda-forge"],
+                    "dependencies": [
+                        "python=3.9",
+                        "pip",
                         {
-                            'pip': [
-                                'crewai[tools]>=1.9.3',  # [tools] extra installs crewai-tools
-                                'pydantic>=2.0.0',
-                                'cloudpickle',
+                            "pip": [
+                                "crewai[tools]>=1.9.3",  # [tools] extra installs crewai-tools
+                                "pydantic>=2.0.0",
+                                "cloudpickle",
                             ]
-                        }
+                        },
                     ],
-                    'name': 'crew_env'
+                    "name": "crew_env",
                 }
 
                 # Log model
@@ -215,11 +207,15 @@ class CrewDeploymentService:
                     python_model=model_wrapper,
                     conda_env=conda_env,
                     signature=signature,
-                    artifacts={"crew_config": str(crew_config_path)}
+                    artifacts={"crew_config": str(crew_config_path)},
                 )
 
                 # Register model in Unity Catalog or MLflow Model Registry
-                if config.unity_catalog_model and config.catalog_name and config.schema_name:
+                if (
+                    config.unity_catalog_model
+                    and config.catalog_name
+                    and config.schema_name
+                ):
                     model_name = f"{config.catalog_name}.{config.schema_name}.{config.model_name}"
                 else:
                     model_name = config.model_name
@@ -227,7 +223,7 @@ class CrewDeploymentService:
                 model_version_info = mlflow.register_model(
                     model_uri=model_info.model_uri,
                     name=model_name,
-                    tags=config.tags or {}
+                    tags=config.tags or {},
                 )
 
                 model_uri = model_info.model_uri
@@ -242,10 +238,7 @@ class CrewDeploymentService:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     async def _deploy_to_endpoint(
-        self,
-        model_name: str,
-        model_version: str,
-        config: ModelServingConfig
+        self, model_name: str, model_version: str, config: ModelServingConfig
     ) -> tuple[str, DeploymentStatus]:
         """
         Deploy model to Model Serving endpoint
@@ -260,12 +253,14 @@ class CrewDeploymentService:
         """
         from databricks.sdk import WorkspaceClient
         from databricks.sdk.service.serving import (
+            AutoCaptureConfigInput,
             EndpointCoreConfigInput,
             ServedEntityInput,
-            AutoCaptureConfigInput
         )
-        from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
         from databricks.sdk.useragent import with_product
+
+        from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
+
         with_product(f"{KASAL_BASE}_{KasalProduct.DEPLOYMENT}", VERSION)
 
         w = WorkspaceClient()
@@ -280,7 +275,7 @@ class CrewDeploymentService:
             scale_to_zero_enabled=config.scale_to_zero_enabled,
             min_provisioned_throughput=config.min_instances,
             max_provisioned_throughput=config.max_instances,
-            environment_vars=config.environment_vars or {}
+            environment_vars=config.environment_vars or {},
         )
 
         # Check if endpoint exists
@@ -292,11 +287,15 @@ class CrewDeploymentService:
             w.serving_endpoints.update_config(
                 name=endpoint_name,
                 served_entities=[served_entity],
-                auto_capture_config=AutoCaptureConfigInput(
-                    catalog_name=config.catalog_name,
-                    schema_name=config.schema_name,
-                    enabled=True
-                ) if config.unity_catalog_model else None
+                auto_capture_config=(
+                    AutoCaptureConfigInput(
+                        catalog_name=config.catalog_name,
+                        schema_name=config.schema_name,
+                        enabled=True,
+                    )
+                    if config.unity_catalog_model
+                    else None
+                ),
             )
 
             status = DeploymentStatus.UPDATING
@@ -309,19 +308,25 @@ class CrewDeploymentService:
                 name=endpoint_name,
                 config=EndpointCoreConfigInput(
                     served_entities=[served_entity],
-                    auto_capture_config=AutoCaptureConfigInput(
-                        catalog_name=config.catalog_name,
-                        schema_name=config.schema_name,
-                        enabled=True
-                    ) if config.unity_catalog_model else None
-                )
+                    auto_capture_config=(
+                        AutoCaptureConfigInput(
+                            catalog_name=config.catalog_name,
+                            schema_name=config.schema_name,
+                            enabled=True,
+                        )
+                        if config.unity_catalog_model
+                        else None
+                    ),
+                ),
             )
 
             status = DeploymentStatus.PENDING
 
         # Get endpoint URL
         endpoint = w.serving_endpoints.get(endpoint_name)
-        endpoint_url = f"https://{w.config.host}/serving-endpoints/{endpoint_name}/invocations"
+        endpoint_url = (
+            f"https://{w.config.host}/serving-endpoints/{endpoint_name}/invocations"
+        )
 
         logger.info(f"Endpoint {endpoint_name} deployed: {endpoint_url}")
 
@@ -369,16 +374,16 @@ class CrewDeploymentService:
         tool_names = await self._convert_tool_ids_to_names(agent.tools or [])
 
         return {
-            'id': str(agent.id),
-            'name': agent.name,
-            'role': agent.role,
-            'goal': agent.goal,
-            'backstory': agent.backstory,
-            'llm': agent.llm,
-            'tools': tool_names,
-            'max_iter': agent.max_iter,
-            'verbose': agent.verbose,
-            'allow_delegation': agent.allow_delegation,
+            "id": str(agent.id),
+            "name": agent.name,
+            "role": agent.role,
+            "goal": agent.goal,
+            "backstory": agent.backstory,
+            "llm": agent.llm,
+            "tools": tool_names,
+            "max_iter": agent.max_iter,
+            "verbose": agent.verbose,
+            "allow_delegation": agent.allow_delegation,
         }
 
     async def _task_to_dict(self, task) -> Dict[str, Any]:
@@ -387,19 +392,19 @@ class CrewDeploymentService:
         tool_names = await self._convert_tool_ids_to_names(task.tools or [])
 
         return {
-            'id': str(task.id),
-            'name': task.name,
-            'description': task.description,
-            'expected_output': task.expected_output,
-            'agent_id': task.agent_id,
-            'tools': tool_names,
-            'async_execution': task.async_execution,
-            'context': task.context or [],
+            "id": str(task.id),
+            "name": task.name,
+            "description": task.description,
+            "expected_output": task.expected_output,
+            "agent_id": task.agent_id,
+            "tools": tool_names,
+            "async_execution": task.async_execution,
+            "context": task.context or [],
         }
 
     def _generate_usage_example(self, endpoint_url: str, endpoint_name: str) -> str:
         """Generate usage example for the endpoint"""
-        return f'''# Invoke the deployed crew endpoint
+        return f"""# Invoke the deployed crew endpoint
 
 import requests
 import os
@@ -444,7 +449,7 @@ response = w.serving_endpoints.query(
 )
 
 print("Result:", response)
-'''
+"""
 
 
 class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
@@ -471,7 +476,7 @@ class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
         # Load crew configuration from artifacts
         crew_config_path = context.artifacts.get("crew_config")
         if crew_config_path:
-            with open(crew_config_path, 'r') as f:
+            with open(crew_config_path, "r") as f:
                 self.crew_config = json.load(f)
 
     def predict(self, context, model_input):
@@ -485,10 +490,12 @@ class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
         Returns:
             DataFrame with results
         """
-        import pandas as pd
         import json
         import time
-        from src.services.execution.runtime import Agent, Crew, Task, Process
+
+        import pandas as pd
+
+        from src.services.execution.runtime import Agent, Crew, Process, Task
 
         results = []
 
@@ -497,7 +504,7 @@ class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
 
             try:
                 # Parse inputs
-                inputs_str = row.get('inputs', '{}')
+                inputs_str = row.get("inputs", "{}")
                 if isinstance(inputs_str, str):
                     inputs = json.loads(inputs_str)
                 else:
@@ -512,71 +519,72 @@ class CrewAIModelWrapper(mlflow.pyfunc.PythonModel):
                 # Calculate execution time
                 execution_time = time.time() - start_time
 
-                results.append({
-                    'result': str(result),
-                    'execution_time': execution_time,
-                    'status': 'success'
-                })
+                results.append(
+                    {
+                        "result": str(result),
+                        "execution_time": execution_time,
+                        "status": "success",
+                    }
+                )
 
             except Exception as e:
                 execution_time = time.time() - start_time
-                results.append({
-                    'result': None,
-                    'execution_time': execution_time,
-                    'status': 'failed',
-                    'error': str(e)
-                })
+                results.append(
+                    {
+                        "result": None,
+                        "execution_time": execution_time,
+                        "status": "failed",
+                        "error": str(e),
+                    }
+                )
 
         return pd.DataFrame(results)
 
-    def _create_crew_from_config(self) -> 'Crew':
+    def _create_crew_from_config(self) -> "Crew":
         """
         Create CrewAI crew from configuration
 
         Returns:
             Configured Crew instance
         """
-        from src.services.execution.runtime import Agent, Crew, Task, Process
+        from src.services.execution.runtime import Agent, Crew, Process, Task
 
         # Create agents
         agents = []
-        for agent_config in self.crew_config.get('agents', []):
+        for agent_config in self.crew_config.get("agents", []):
             agent = Agent(
-                role=agent_config['role'],
-                goal=agent_config['goal'],
-                backstory=agent_config['backstory'],
-                llm=agent_config.get('llm', 'databricks-llama-4-maverick'),
-                max_iter=agent_config.get('max_iter', 25),
-                verbose=agent_config.get('verbose', False),
-                allow_delegation=agent_config.get('allow_delegation', False),
+                role=agent_config["role"],
+                goal=agent_config["goal"],
+                backstory=agent_config["backstory"],
+                llm=agent_config.get("llm", "databricks-llama-4-maverick"),
+                max_iter=agent_config.get("max_iter", 25),
+                verbose=agent_config.get("verbose", False),
+                allow_delegation=agent_config.get("allow_delegation", False),
             )
             agents.append(agent)
 
         # Create tasks
         tasks = []
-        for task_config in self.crew_config.get('tasks', []):
+        for task_config in self.crew_config.get("tasks", []):
             # Find agent by ID
-            agent_id = task_config.get('agent_id')
+            agent_id = task_config.get("agent_id")
             agent = None
-            for idx, a_config in enumerate(self.crew_config.get('agents', [])):
-                if a_config.get('id') == agent_id:
+            for idx, a_config in enumerate(self.crew_config.get("agents", [])):
+                if a_config.get("id") == agent_id:
                     agent = agents[idx]
                     break
 
             task = Task(
-                description=task_config['description'],
-                expected_output=task_config['expected_output'],
+                description=task_config["description"],
+                expected_output=task_config["expected_output"],
                 agent=agent,
-                async_execution=task_config.get('async_execution', False),
+                async_execution=task_config.get("async_execution", False),
             )
             tasks.append(task)
 
         # Create crew
         crew = Crew(
-            agents=agents,
-            tasks=tasks,
-            process=Process.sequential,
-            verbose=True
+            agents=agents, tasks=tasks, process=Process.sequential, verbose=True
         )
 
         return crew

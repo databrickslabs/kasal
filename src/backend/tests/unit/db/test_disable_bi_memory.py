@@ -8,8 +8,10 @@ but the seeder is insert-only so already-seeded DBs keep memory on. This startup
 self-heal flips them off. Verifies it disables only the bi-specialist group, is
 idempotent, and leaves other groups untouched.
 """
-import pytest
+
 from unittest.mock import MagicMock, patch
+
+import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.db import session as sess
@@ -37,18 +39,22 @@ async def test_disables_only_bi_specialist_and_is_idempotent():
             with patch.object(sess, "settings", fake_settings):
                 await sess._disable_bi_specialist_crew_memory(conn)
                 for t in ("crews", "agents"):
-                    rows = (await conn.exec_driver_sql(
-                        f"SELECT id, group_id, memory FROM {t} ORDER BY id"
-                    )).fetchall()
+                    rows = (
+                        await conn.exec_driver_sql(
+                            f"SELECT id, group_id, memory FROM {t} ORDER BY id"
+                        )
+                    ).fetchall()
                     mem = {r[0]: r[2] for r in rows}
                     assert mem["a"] == 0 and mem["b"] == 0  # bi-specialist off
-                    assert mem["c"] == 1                    # other group untouched
+                    assert mem["c"] == 1  # other group untouched
 
                 # idempotent: second run is a no-op, no error
                 await sess._disable_bi_specialist_crew_memory(conn)
-                rows = (await conn.exec_driver_sql(
-                    "SELECT memory FROM crews WHERE group_id='other-group'"
-                )).fetchall()
+                rows = (
+                    await conn.exec_driver_sql(
+                        "SELECT memory FROM crews WHERE group_id='other-group'"
+                    )
+                ).fetchall()
                 assert rows[0][0] == 1
     finally:
         await engine.dispose()

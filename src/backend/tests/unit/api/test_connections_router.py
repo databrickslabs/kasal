@@ -4,20 +4,31 @@ Unit tests for ConnectionsRouter.
 Tests the functionality of connections endpoints including
 generating connections between agents/tasks and testing API keys.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-import logging
-from src.dependencies.admin_auth import (
-    require_authenticated_user, get_authenticated_user, get_admin_user
-)
 
+import logging
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from src.dependencies.admin_auth import (
+    get_admin_user,
+    get_authenticated_user,
+    require_authenticated_user,
+)
 from src.schemas.connection import (
-    ConnectionRequest, ConnectionResponse, ApiKeyTestResponse,
-    Agent, Task, TaskContext, AgentAssignment, TaskAssignment, Dependency,
-    ApiKeyTestResult, PythonInfo
+    Agent,
+    AgentAssignment,
+    ApiKeyTestResponse,
+    ApiKeyTestResult,
+    ConnectionRequest,
+    ConnectionResponse,
+    Dependency,
+    PythonInfo,
+    Task,
+    TaskAssignment,
+    TaskContext,
 )
 from src.utils.user_context import GroupContext
 
@@ -43,8 +54,9 @@ def mock_group_context():
 @pytest.fixture
 def mock_current_user():
     """Create a mock authenticated user."""
-    from src.models.enums import UserRole, UserStatus
     from datetime import datetime
+
+    from src.models.enums import UserRole, UserStatus
 
     class MockUser:
         def __init__(self):
@@ -63,7 +75,8 @@ def mock_current_user():
 def client(mock_connection_service, mock_current_user, mock_group_context):
     """Create a test client."""
     from fastapi import FastAPI
-    from src.api.connections_router import router, get_connection_service
+
+    from src.api.connections_router import get_connection_service, router
     from src.core.dependencies import get_group_context
     from tests.unit.api.conftest import register_exception_handlers
 
@@ -96,17 +109,17 @@ def sample_connection_request():
             role="Developer",
             goal="Write code",
             backstory="Experienced developer",
-            tools=["code_editor"]
+            tools=["code_editor"],
         ),
         Agent(
             name="Agent 2",
             role="Tester",
             goal="Test code",
             backstory="QA specialist",
-            tools=["test_runner"]
-        )
+            tools=["test_runner"],
+        ),
     ]
-    
+
     tasks = [
         Task(
             name="Task 1",
@@ -117,8 +130,8 @@ def sample_connection_request():
                 type="development",
                 priority="high",
                 complexity="medium",
-                required_skills=["python", "javascript"]
-            )
+                required_skills=["python", "javascript"],
+            ),
         ),
         Task(
             name="Task 2",
@@ -129,18 +142,20 @@ def sample_connection_request():
                 type="testing",
                 priority="high",
                 complexity="low",
-                required_skills=["testing", "automation"]
-            )
-        )
+                required_skills=["testing", "automation"],
+            ),
+        ),
     ]
-    
+
     return ConnectionRequest(agents=agents, tasks=tasks)
 
 
 class TestGenerateConnections:
     """Test cases for generate connections endpoint."""
-    
-    def test_generate_connections_success(self, client, mock_connection_service, sample_connection_request):
+
+    def test_generate_connections_success(
+        self, client, mock_connection_service, sample_connection_request
+    ):
         """Test successful connection generation."""
         # Mock response
         mock_response = ConnectionResponse(
@@ -148,28 +163,37 @@ class TestGenerateConnections:
                 AgentAssignment(
                     agent_name="Agent 1",
                     tasks=[
-                        TaskAssignment(task_name="Task 1", reasoning="Developer agent best suited for coding")
-                    ]
+                        TaskAssignment(
+                            task_name="Task 1",
+                            reasoning="Developer agent best suited for coding",
+                        )
+                    ],
                 ),
                 AgentAssignment(
                     agent_name="Agent 2",
                     tasks=[
-                        TaskAssignment(task_name="Task 2", reasoning="Tester agent best suited for testing")
-                    ]
-                )
+                        TaskAssignment(
+                            task_name="Task 2",
+                            reasoning="Tester agent best suited for testing",
+                        )
+                    ],
+                ),
             ],
             dependencies=[
                 Dependency(
                     task_name="Task 2",
                     depends_on=["Task 1"],
-                    reasoning="Testing must happen after code is written"
+                    reasoning="Testing must happen after code is written",
                 )
-            ]
+            ],
         )
 
         mock_connection_service.generate_connections.return_value = mock_response
 
-        response = client.post("/connections/generate-connections", json=sample_connection_request.model_dump())
+        response = client.post(
+            "/connections/generate-connections",
+            json=sample_connection_request.model_dump(),
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -178,20 +202,34 @@ class TestGenerateConnections:
         assert data["assignments"][0]["agent_name"] == "Agent 1"
         assert data["assignments"][0]["tasks"][0]["task_name"] == "Task 1"
 
-    def test_generate_connections_validation_error(self, client, mock_connection_service, sample_connection_request):
+    def test_generate_connections_validation_error(
+        self, client, mock_connection_service, sample_connection_request
+    ):
         """Test connection generation with validation error."""
-        mock_connection_service.generate_connections.side_effect = ValueError("Invalid agent configuration")
+        mock_connection_service.generate_connections.side_effect = ValueError(
+            "Invalid agent configuration"
+        )
 
-        response = client.post("/connections/generate-connections", json=sample_connection_request.model_dump())
+        response = client.post(
+            "/connections/generate-connections",
+            json=sample_connection_request.model_dump(),
+        )
 
         assert response.status_code == 400
         assert "Invalid agent configuration" in response.json()["detail"]
 
-    def test_generate_connections_server_error(self, client, mock_connection_service, sample_connection_request):
+    def test_generate_connections_server_error(
+        self, client, mock_connection_service, sample_connection_request
+    ):
         """Test connection generation with server error."""
-        mock_connection_service.generate_connections.side_effect = Exception("Internal server error")
+        mock_connection_service.generate_connections.side_effect = Exception(
+            "Internal server error"
+        )
 
-        response = client.post("/connections/generate-connections", json=sample_connection_request.model_dump())
+        response = client.post(
+            "/connections/generate-connections",
+            json=sample_connection_request.model_dump(),
+        )
 
         assert response.status_code == 500
         assert "Internal server error" in response.json()["detail"]
@@ -210,10 +248,10 @@ class TestGenerateConnections:
                         "type": "general",
                         "priority": "medium",
                         "complexity": "medium",
-                        "required_skills": []
-                    }
+                        "required_skills": [],
+                    },
                 }
-            ]
+            ],
         }
 
         mock_response = ConnectionResponse(assignments=[], dependencies=[])
@@ -235,10 +273,10 @@ class TestGenerateConnections:
                     "role": "Developer",
                     "goal": "Write code",
                     "backstory": "Developer",
-                    "tools": []
+                    "tools": [],
                 }
             ],
-            "tasks": []
+            "tasks": [],
         }
 
         mock_response = ConnectionResponse(assignments=[], dependencies=[])
@@ -251,13 +289,18 @@ class TestGenerateConnections:
         assert len(data["assignments"]) == 0
         assert len(data["dependencies"]) == 0
 
-    def test_generate_connections_logging(self, client, mock_connection_service, sample_connection_request, caplog):
+    def test_generate_connections_logging(
+        self, client, mock_connection_service, sample_connection_request, caplog
+    ):
         """Test that connection generation logs properly."""
         mock_response = ConnectionResponse(assignments=[], dependencies=[])
         mock_connection_service.generate_connections.return_value = mock_response
 
         with caplog.at_level(logging.INFO):
-            response = client.post("/connections/generate-connections", json=sample_connection_request.model_dump())
+            response = client.post(
+                "/connections/generate-connections",
+                json=sample_connection_request.model_dump(),
+            )
 
         assert response.status_code == 200
         assert "Generating connections for 2 agents and 2 tasks" in caplog.text
@@ -266,14 +309,22 @@ class TestGenerateConnections:
 
 class TestApiKeyEndpoint:
     """Test cases for API key testing endpoint."""
-    
+
     def test_test_api_key_success(self, client, mock_connection_service):
         """Test successful API key testing."""
         mock_response = ApiKeyTestResponse(
-            openai=ApiKeyTestResult(has_key=True, valid=True, message="Valid", key_prefix="sk-"),
-            anthropic=ApiKeyTestResult(has_key=True, valid=True, message="Valid", key_prefix="sk-ant-"),
-            deepseek=ApiKeyTestResult(has_key=False, valid=False, message="API key not configured"),
-            python_info=PythonInfo(version="3.9.0", executable="/usr/bin/python", platform="linux")
+            openai=ApiKeyTestResult(
+                has_key=True, valid=True, message="Valid", key_prefix="sk-"
+            ),
+            anthropic=ApiKeyTestResult(
+                has_key=True, valid=True, message="Valid", key_prefix="sk-ant-"
+            ),
+            deepseek=ApiKeyTestResult(
+                has_key=False, valid=False, message="API key not configured"
+            ),
+            python_info=PythonInfo(
+                version="3.9.0", executable="/usr/bin/python", platform="linux"
+            ),
         )
 
         mock_connection_service.test_api_keys.return_value = mock_response
@@ -292,10 +343,18 @@ class TestApiKeyEndpoint:
     def test_test_api_key_all_invalid(self, client, mock_connection_service):
         """Test API key testing when all keys are invalid."""
         mock_response = ApiKeyTestResponse(
-            openai=ApiKeyTestResult(has_key=True, valid=False, message="Invalid API key"),
-            anthropic=ApiKeyTestResult(has_key=True, valid=False, message="Invalid API key"),
-            deepseek=ApiKeyTestResult(has_key=False, valid=False, message="API key not configured"),
-            python_info=PythonInfo(version="3.9.0", executable="/usr/bin/python", platform="linux")
+            openai=ApiKeyTestResult(
+                has_key=True, valid=False, message="Invalid API key"
+            ),
+            anthropic=ApiKeyTestResult(
+                has_key=True, valid=False, message="Invalid API key"
+            ),
+            deepseek=ApiKeyTestResult(
+                has_key=False, valid=False, message="API key not configured"
+            ),
+            python_info=PythonInfo(
+                version="3.9.0", executable="/usr/bin/python", platform="linux"
+            ),
         )
 
         mock_connection_service.test_api_keys.return_value = mock_response
@@ -312,7 +371,9 @@ class TestApiKeyEndpoint:
 
     def test_test_api_key_server_error(self, client, mock_connection_service):
         """Test API key testing with server error."""
-        mock_connection_service.test_api_keys.side_effect = Exception("Service unavailable")
+        mock_connection_service.test_api_keys.side_effect = Exception(
+            "Service unavailable"
+        )
 
         response = client.get("/connections/test-api-key")
 
@@ -324,8 +385,12 @@ class TestApiKeyEndpoint:
         mock_response = ApiKeyTestResponse(
             openai=ApiKeyTestResult(has_key=True, valid=True, message="Valid"),
             anthropic=ApiKeyTestResult(has_key=True, valid=False, message="Invalid"),
-            deepseek=ApiKeyTestResult(has_key=False, valid=False, message="Not configured"),
-            python_info=PythonInfo(version="3.9.0", executable="/usr/bin/python", platform="linux")
+            deepseek=ApiKeyTestResult(
+                has_key=False, valid=False, message="Not configured"
+            ),
+            python_info=PythonInfo(
+                version="3.9.0", executable="/usr/bin/python", platform="linux"
+            ),
         )
 
         mock_connection_service.test_api_keys.return_value = mock_response

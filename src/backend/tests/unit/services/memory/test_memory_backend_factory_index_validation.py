@@ -11,23 +11,25 @@ Updated for the app-modes refactoring:
 
 These tests cover the same logical branches as before but against the new API.
 """
+
 import sys
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.memory.backend_factory import (
-    MemoryBackendFactory,
-    DatabricksIndexValidationError,
-)
+import pytest
+
 from src.schemas.memory_backend import (
-    MemoryBackendConfig,
-    MemoryBackendType,
     DatabricksMemoryConfig,
     LakebaseMemoryConfig,
+    MemoryBackendConfig,
+    MemoryBackendType,
+)
+from src.services.memory.backend_factory import (
+    DatabricksIndexValidationError,
+    MemoryBackendFactory,
 )
 
-
 # ─── DatabricksIndexValidationError ──────────────────────────────────────────
+
 
 def test_databricks_index_validation_error_attrs():
     result = {
@@ -51,6 +53,7 @@ def test_databricks_index_validation_error_defaults():
 
 
 # ─── _validate_databricks_index (singular) ────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_validate_databricks_index_skips_no_workspace_url():
@@ -102,14 +105,17 @@ def _make_repo_module(describe_result=None, describe_side_effect=None):
 
 @pytest.mark.asyncio
 async def test_validate_databricks_index_passes_when_online():
-    mock_module, _ = _make_repo_module(describe_result={
-        "success": True,
-        "description": {"status": {"state": "ONLINE", "ready": True}},
-    })
+    mock_module, _ = _make_repo_module(
+        describe_result={
+            "success": True,
+            "description": {"status": {"state": "ONLINE", "ready": True}},
+        }
+    )
 
-    with patch.dict(sys.modules, {
-        "src.repositories.databricks_vector_index_repository": mock_module
-    }):
+    with patch.dict(
+        sys.modules,
+        {"src.repositories.databricks_vector_index_repository": mock_module},
+    ):
         # Should not raise
         await MemoryBackendFactory._validate_databricks_index(
             workspace_url="https://example.com",
@@ -122,14 +128,17 @@ async def test_validate_databricks_index_passes_when_online():
 
 @pytest.mark.asyncio
 async def test_validate_databricks_index_raises_missing():
-    mock_module, _ = _make_repo_module(describe_result={
-        "success": False,
-        "message": "index not found",
-    })
+    mock_module, _ = _make_repo_module(
+        describe_result={
+            "success": False,
+            "message": "index not found",
+        }
+    )
 
-    with patch.dict(sys.modules, {
-        "src.repositories.databricks_vector_index_repository": mock_module
-    }):
+    with patch.dict(
+        sys.modules,
+        {"src.repositories.databricks_vector_index_repository": mock_module},
+    ):
         with pytest.raises(DatabricksIndexValidationError) as exc_info:
             await MemoryBackendFactory._validate_databricks_index(
                 workspace_url="https://example.com",
@@ -143,14 +152,17 @@ async def test_validate_databricks_index_raises_missing():
 
 @pytest.mark.asyncio
 async def test_validate_databricks_index_raises_provisioning():
-    mock_module, _ = _make_repo_module(describe_result={
-        "success": True,
-        "description": {"status": {"state": "PROVISIONING", "ready": False}},
-    })
+    mock_module, _ = _make_repo_module(
+        describe_result={
+            "success": True,
+            "description": {"status": {"state": "PROVISIONING", "ready": False}},
+        }
+    )
 
-    with patch.dict(sys.modules, {
-        "src.repositories.databricks_vector_index_repository": mock_module
-    }):
+    with patch.dict(
+        sys.modules,
+        {"src.repositories.databricks_vector_index_repository": mock_module},
+    ):
         with pytest.raises(DatabricksIndexValidationError) as exc_info:
             await MemoryBackendFactory._validate_databricks_index(
                 workspace_url="https://example.com",
@@ -164,14 +176,17 @@ async def test_validate_databricks_index_raises_provisioning():
 
 @pytest.mark.asyncio
 async def test_validate_databricks_index_raises_unexpected_state():
-    mock_module, _ = _make_repo_module(describe_result={
-        "success": True,
-        "description": {"status": {"state": "FAILED", "ready": False}},
-    })
+    mock_module, _ = _make_repo_module(
+        describe_result={
+            "success": True,
+            "description": {"status": {"state": "FAILED", "ready": False}},
+        }
+    )
 
-    with patch.dict(sys.modules, {
-        "src.repositories.databricks_vector_index_repository": mock_module
-    }):
+    with patch.dict(
+        sys.modules,
+        {"src.repositories.databricks_vector_index_repository": mock_module},
+    ):
         with pytest.raises(DatabricksIndexValidationError) as exc_info:
             await MemoryBackendFactory._validate_databricks_index(
                 workspace_url="https://example.com",
@@ -185,11 +200,14 @@ async def test_validate_databricks_index_raises_unexpected_state():
 
 @pytest.mark.asyncio
 async def test_validate_databricks_index_raises_on_describe_exception():
-    mock_module, _ = _make_repo_module(describe_side_effect=RuntimeError("connection timeout"))
+    mock_module, _ = _make_repo_module(
+        describe_side_effect=RuntimeError("connection timeout")
+    )
 
-    with patch.dict(sys.modules, {
-        "src.repositories.databricks_vector_index_repository": mock_module
-    }):
+    with patch.dict(
+        sys.modules,
+        {"src.repositories.databricks_vector_index_repository": mock_module},
+    ):
         with pytest.raises(DatabricksIndexValidationError) as exc_info:
             await MemoryBackendFactory._validate_databricks_index(
                 workspace_url="https://example.com",
@@ -202,6 +220,7 @@ async def test_validate_databricks_index_raises_on_describe_exception():
 
 
 # ─── create_memory_backends - DEFAULT backend ─────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_create_memory_backends_default_type():
@@ -245,10 +264,13 @@ async def test_create_memory_backends_databricks_missing_index_raises():
         ),
     )
 
-    mock_module, _ = _make_repo_module(describe_result={"success": False, "message": "not found"})
-    with patch.dict(sys.modules, {
-        "src.repositories.databricks_vector_index_repository": mock_module
-    }):
+    mock_module, _ = _make_repo_module(
+        describe_result={"success": False, "message": "not found"}
+    )
+    with patch.dict(
+        sys.modules,
+        {"src.repositories.databricks_vector_index_repository": mock_module},
+    ):
         with pytest.raises(DatabricksIndexValidationError):
             await MemoryBackendFactory.create_memory_backends(
                 config=config, crew_id="grp_crew_uuid"
@@ -266,13 +288,16 @@ async def test_create_memory_backends_databricks_provisioning_raises():
         ),
     )
 
-    mock_module, _ = _make_repo_module(describe_result={
-        "success": True,
-        "description": {"status": {"state": "PROVISIONING", "ready": False}},
-    })
-    with patch.dict(sys.modules, {
-        "src.repositories.databricks_vector_index_repository": mock_module
-    }):
+    mock_module, _ = _make_repo_module(
+        describe_result={
+            "success": True,
+            "description": {"status": {"state": "PROVISIONING", "ready": False}},
+        }
+    )
+    with patch.dict(
+        sys.modules,
+        {"src.repositories.databricks_vector_index_repository": mock_module},
+    ):
         with pytest.raises(DatabricksIndexValidationError):
             await MemoryBackendFactory.create_memory_backends(
                 config=config, crew_id="grp_crew_uuid"
@@ -280,6 +305,7 @@ async def test_create_memory_backends_databricks_provisioning_raises():
 
 
 # ─── create_memory_backends - LAKEBASE backend ───────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_create_memory_backends_lakebase_no_config():
@@ -303,9 +329,12 @@ async def test_create_memory_backends_lakebase_returns_unified():
     mock_lakebase_module = MagicMock()
     mock_lakebase_module.LakebaseStorageBackend = MagicMock(return_value=mock_backend)
 
-    with patch.dict(sys.modules, {
-        "src.services.memory.lakebase_storage_backend": mock_lakebase_module,
-    }):
+    with patch.dict(
+        sys.modules,
+        {
+            "src.services.memory.lakebase_storage_backend": mock_lakebase_module,
+        },
+    ):
         result = await MemoryBackendFactory.create_memory_backends(
             config=config, crew_id="g1_crew_abc123"
         )
@@ -329,9 +358,12 @@ async def test_create_memory_backends_lakebase_with_job_id():
     mock_lakebase_module = MagicMock()
     mock_lakebase_module.LakebaseStorageBackend = MagicMock(side_effect=capture)
 
-    with patch.dict(sys.modules, {
-        "src.services.memory.lakebase_storage_backend": mock_lakebase_module,
-    }):
+    with patch.dict(
+        sys.modules,
+        {
+            "src.services.memory.lakebase_storage_backend": mock_lakebase_module,
+        },
+    ):
         await MemoryBackendFactory.create_memory_backends(
             config=config, crew_id="g1_crew_abc123", job_id="job-456"
         )

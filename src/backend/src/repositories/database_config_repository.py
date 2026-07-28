@@ -1,7 +1,9 @@
 """
 Repository for database configuration operations.
 """
-from typing import Optional, Dict, Any
+
+from typing import Any, Dict, Optional
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

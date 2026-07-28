@@ -9,9 +9,9 @@ Borrows patterns from the IDOR_2.0 value_normalizer_agent.py.
 """
 
 import difflib
-import re
 import logging
-from typing import Dict, List, Optional, Any
+import re
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +19,30 @@ logger = logging.getLogger(__name__)
 _ADJECTIVAL_SUFFIXES = ("ish", "ian", "ese", "ean", "an", "ic", "er", "i")
 
 # Stopwords to skip during token-word matching
-_MATCH_STOPWORDS = frozenset({
-    "and", "or", "of", "the", "in", "at", "a", "an", "for", "bu", "bv",
-    "vs", "by", "to", "is", "are", "was", "be", "per", "all",
-})
+_MATCH_STOPWORDS = frozenset(
+    {
+        "and",
+        "or",
+        "of",
+        "the",
+        "in",
+        "at",
+        "a",
+        "an",
+        "for",
+        "bu",
+        "bv",
+        "vs",
+        "by",
+        "to",
+        "is",
+        "are",
+        "was",
+        "be",
+        "per",
+        "all",
+    }
+)
 
 # difflib thresholds
 _TYPO_CUTOFF = 0.55
@@ -62,11 +82,13 @@ class ValueNormalizer:
             table_name, column_name = self._parse_filter_key(filter_key)
             if not table_name or not column_name:
                 normalized[filter_key] = filter_value
-                log_entries.append({
-                    "filter": filter_key,
-                    "status": "skipped",
-                    "reason": "Could not parse filter key",
-                })
+                log_entries.append(
+                    {
+                        "filter": filter_key,
+                        "status": "skipped",
+                        "reason": "Could not parse filter key",
+                    }
+                )
                 continue
 
             # Collect known values from sample_data and slicers
@@ -77,11 +99,13 @@ class ValueNormalizer:
             if not known_values:
                 # No reference values — pass through unchanged
                 normalized[filter_key] = filter_value
-                log_entries.append({
-                    "filter": filter_key,
-                    "status": "passthrough",
-                    "reason": "No reference values available",
-                })
+                log_entries.append(
+                    {
+                        "filter": filter_key,
+                        "status": "passthrough",
+                        "reason": "No reference values available",
+                    }
+                )
                 continue
 
             # Normalize single value or list of values
@@ -90,20 +114,24 @@ class ValueNormalizer:
                 for v in filter_value:
                     result = self._correct_single_value(str(v), known_values)
                     corrected.append(result["corrected"])
-                    log_entries.append({
-                        "filter": filter_key,
-                        "original": v,
-                        **result,
-                    })
+                    log_entries.append(
+                        {
+                            "filter": filter_key,
+                            "original": v,
+                            **result,
+                        }
+                    )
                 normalized[filter_key] = corrected
             else:
                 result = self._correct_single_value(str(filter_value), known_values)
                 normalized[filter_key] = result["corrected"]
-                log_entries.append({
-                    "filter": filter_key,
-                    "original": filter_value,
-                    **result,
-                })
+                log_entries.append(
+                    {
+                        "filter": filter_key,
+                        "original": filter_value,
+                        **result,
+                    }
+                )
 
         normalized["_normalization_log"] = log_entries
         return normalized
@@ -166,9 +194,7 @@ class ValueNormalizer:
         }
 
     @staticmethod
-    def _demonym_stem_match(
-        user_value: str, candidates: List[str]
-    ) -> Optional[str]:
+    def _demonym_stem_match(user_value: str, candidates: List[str]) -> Optional[str]:
         """Strip adjectival suffixes (ish, ian, ese, ean, an, ic, er, i) and match.
 
         Requires exactly one match to avoid ambiguity.
@@ -179,18 +205,13 @@ class ValueNormalizer:
                 stem = norm[: len(norm) - len(suffix)]
                 if len(stem) < 2:
                     continue
-                matches = [
-                    v for v in candidates
-                    if v.lower().startswith(stem)
-                ]
+                matches = [v for v in candidates if v.lower().startswith(stem)]
                 if len(matches) == 1:
                     return matches[0]
         return None
 
     @staticmethod
-    def _token_word_match(
-        user_value: str, candidates: List[str]
-    ) -> Optional[str]:
+    def _token_word_match(user_value: str, candidates: List[str]) -> Optional[str]:
         """Tokenize user input, find embedded words in canonical values.
 
         Tries exact word match, suffix-stripped prefix, abbreviation, then difflib.
@@ -198,8 +219,7 @@ class ValueNormalizer:
         """
         tokens = re.split(r"\s+", user_value.lower().strip())
         meaningful = [
-            t for t in tokens
-            if t and t not in _MATCH_STOPWORDS and len(t) >= 3
+            t for t in tokens if t and t not in _MATCH_STOPWORDS and len(t) >= 3
         ]
 
         if not meaningful:

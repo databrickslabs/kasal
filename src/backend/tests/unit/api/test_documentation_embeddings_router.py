@@ -3,28 +3,28 @@
 Tests all endpoints using direct async function calls with mocked service
 dependencies and TestClient for list-view integration tests.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from types import SimpleNamespace
-from datetime import datetime
 
+from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.documentation_embeddings_router import (
     create_documentation_embedding,
-    search_documentation_embeddings,
+    delete_documentation_embedding,
+    get_documentation_embedding,
+    get_documentation_embedding_service,
     get_documentation_embeddings,
     get_recent_documentation_embeddings,
-    get_documentation_embedding,
-    delete_documentation_embedding,
     router,
-    get_documentation_embedding_service,
+    search_documentation_embeddings,
 )
 from src.core.exceptions import NotFoundError
 from src.schemas.documentation_embedding import DocumentationEmbeddingCreate
 from src.utils.user_context import GroupContext
-
 from tests.unit.api.conftest import register_exception_handlers
 
 
@@ -56,6 +56,7 @@ def make_embedding(eid=1, source="test_src", title="Test Doc"):
 # ---------------------------------------------------------------------------
 # POST /documentation-embeddings/
 # ---------------------------------------------------------------------------
+
 
 class TestCreateDocumentationEmbedding:
     """Tests for create_documentation_embedding endpoint."""
@@ -140,6 +141,7 @@ class TestCreateDocumentationEmbedding:
 # GET /documentation-embeddings/search
 # ---------------------------------------------------------------------------
 
+
 class TestSearchDocumentationEmbeddings:
     """Tests for search_documentation_embeddings endpoint."""
 
@@ -180,18 +182,21 @@ class TestSearchDocumentationEmbeddings:
 # GET /documentation-embeddings/
 # ---------------------------------------------------------------------------
 
+
 class TestGetDocumentationEmbeddings:
     """Tests for get_documentation_embeddings endpoint (list view)."""
 
     @pytest.mark.asyncio
     async def test_list_no_filter(self):
         svc = AsyncMock()
-        svc.get_documentation_embeddings = AsyncMock(
-            return_value=[make_embedding()]
-        )
+        svc.get_documentation_embeddings = AsyncMock(return_value=[make_embedding()])
 
         result = await get_documentation_embeddings(
-            service=svc, skip=0, limit=100, source=None, title=None,
+            service=svc,
+            skip=0,
+            limit=100,
+            source=None,
+            title=None,
             group_context=gc(),
         )
 
@@ -206,7 +211,11 @@ class TestGetDocumentationEmbeddings:
         svc.search_by_source = AsyncMock(return_value=[make_embedding()])
 
         result = await get_documentation_embeddings(
-            service=svc, skip=0, limit=100, source="my_source", title=None,
+            service=svc,
+            skip=0,
+            limit=100,
+            source="my_source",
+            title=None,
             group_context=gc(),
         )
 
@@ -219,7 +228,11 @@ class TestGetDocumentationEmbeddings:
         svc.search_by_title = AsyncMock(return_value=[make_embedding()])
 
         result = await get_documentation_embeddings(
-            service=svc, skip=0, limit=100, source=None, title="Doc",
+            service=svc,
+            skip=0,
+            limit=100,
+            source=None,
+            title="Doc",
             group_context=gc(),
         )
 
@@ -233,7 +246,11 @@ class TestGetDocumentationEmbeddings:
         svc.search_by_source = AsyncMock(return_value=[])
 
         result = await get_documentation_embeddings(
-            service=svc, skip=0, limit=100, source="src", title="title",
+            service=svc,
+            skip=0,
+            limit=100,
+            source="src",
+            title="title",
             group_context=gc(),
         )
 
@@ -246,7 +263,11 @@ class TestGetDocumentationEmbeddings:
         svc.get_documentation_embeddings = AsyncMock(return_value=[])
 
         await get_documentation_embeddings(
-            service=svc, skip=10, limit=20, source=None, title=None,
+            service=svc,
+            skip=10,
+            limit=20,
+            source=None,
+            title=None,
             group_context=gc(),
         )
 
@@ -256,6 +277,7 @@ class TestGetDocumentationEmbeddings:
 # ---------------------------------------------------------------------------
 # GET /documentation-embeddings/recent
 # ---------------------------------------------------------------------------
+
 
 class TestGetRecentDocumentationEmbeddings:
     """Tests for get_recent_documentation_embeddings endpoint."""
@@ -267,7 +289,9 @@ class TestGetRecentDocumentationEmbeddings:
         svc.get_recent_embeddings = AsyncMock(return_value=embs)
 
         result = await get_recent_documentation_embeddings(
-            service=svc, limit=5, group_context=gc(),
+            service=svc,
+            limit=5,
+            group_context=gc(),
         )
 
         assert len(result) == 5
@@ -277,6 +301,7 @@ class TestGetRecentDocumentationEmbeddings:
 # ---------------------------------------------------------------------------
 # GET /documentation-embeddings/{embedding_id}
 # ---------------------------------------------------------------------------
+
 
 class TestGetDocumentationEmbeddingById:
     """Tests for get_documentation_embedding endpoint."""
@@ -288,7 +313,9 @@ class TestGetDocumentationEmbeddingById:
         svc.get_documentation_embedding = AsyncMock(return_value=emb)
 
         result = await get_documentation_embedding(
-            embedding_id=42, service=svc, group_context=gc(),
+            embedding_id=42,
+            service=svc,
+            group_context=gc(),
         )
 
         assert result.id == 42
@@ -300,13 +327,16 @@ class TestGetDocumentationEmbeddingById:
 
         with pytest.raises(NotFoundError):
             await get_documentation_embedding(
-                embedding_id=999, service=svc, group_context=gc(),
+                embedding_id=999,
+                service=svc,
+                group_context=gc(),
             )
 
 
 # ---------------------------------------------------------------------------
 # DELETE /documentation-embeddings/{embedding_id}
 # ---------------------------------------------------------------------------
+
 
 class TestDeleteDocumentationEmbedding:
     """Tests for delete_documentation_embedding endpoint."""
@@ -317,7 +347,9 @@ class TestDeleteDocumentationEmbedding:
         svc.delete_documentation_embedding = AsyncMock(return_value=True)
 
         result = await delete_documentation_embedding(
-            embedding_id=1, service=svc, group_context=gc(),
+            embedding_id=1,
+            service=svc,
+            group_context=gc(),
         )
 
         assert result["message"] == "Documentation embedding deleted successfully"
@@ -329,13 +361,16 @@ class TestDeleteDocumentationEmbedding:
 
         with pytest.raises(NotFoundError):
             await delete_documentation_embedding(
-                embedding_id=999, service=svc, group_context=gc(),
+                embedding_id=999,
+                service=svc,
+                group_context=gc(),
             )
 
 
 # ---------------------------------------------------------------------------
 # Router configuration
 # ---------------------------------------------------------------------------
+
 
 class TestRouterConfiguration:
     """Tests for router prefix and tags."""

@@ -5,12 +5,13 @@ Tests formula parsing, token extraction, and dependency resolution
 """
 
 import pytest
+
 from src.services.converters.base.models import KPI
 from src.services.converters.common.transformers.formula import (
-    KbiFormulaParser,
+    FormulaToken,
     KBIDependencyResolver,
+    KbiFormulaParser,
     TokenType,
-    FormulaToken
 )
 
 
@@ -167,7 +168,7 @@ class TestKBIDependencyResolver:
             description="Total Sales",
             formula="sales_amount",
             source_table="fact_sales",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         self.kbi_costs = KPI(
@@ -175,28 +176,28 @@ class TestKBIDependencyResolver:
             description="Total Costs",
             formula="cost_amount",
             source_table="fact_sales",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         self.kbi_profit = KPI(
             technical_name="profit",
             description="Profit",
             formula="[sales] - [costs]",
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         self.kbi_margin = KPI(
             technical_name="margin",
             description="Profit Margin",
             formula="[profit] / [sales] * 100",
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         self.all_kbis = [
             self.kbi_sales,
             self.kbi_costs,
             self.kbi_profit,
-            self.kbi_margin
+            self.kbi_margin,
         ]
 
     def test_build_kbi_lookup(self):
@@ -251,7 +252,7 @@ class TestKBIDependencyResolver:
             description="Invalid KBI",
             technical_name="invalid",
             formula="[non_existent_kbi] * 2",
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         # Should log warning but not crash
@@ -279,7 +280,9 @@ class TestKBIDependencyResolver:
         assert len(tree["dependencies"]) == 2  # profit and sales
 
         # Check that profit node has its own dependencies
-        profit_dep = next(d for d in tree["dependencies"] if d["kbi"].technical_name == "profit")
+        profit_dep = next(
+            d for d in tree["dependencies"] if d["kbi"].technical_name == "profit"
+        )
         assert len(profit_dep["dependencies"]) == 2  # sales and costs
 
     def test_get_dependency_tree_circular_detection(self):
@@ -289,14 +292,14 @@ class TestKBIDependencyResolver:
             description="KBI A",
             technical_name="kbi_a",
             formula="[kbi_b] + 1",
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         kbi_b = KPI(
             description="KBI B",
             technical_name="kbi_b",
             formula="[kbi_a] + 1",  # Circular!
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         resolver = KBIDependencyResolver(self.parser)
@@ -316,7 +319,7 @@ class TestKBIDependencyResolver:
             technical_name="sales_kbi",
             description="Total Sales",
             formula="sales_amount",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         resolver = KBIDependencyResolver(self.parser)

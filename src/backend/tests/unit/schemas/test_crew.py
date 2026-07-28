@@ -4,61 +4,85 @@ Unit tests for crew schemas.
 Tests the functionality of Pydantic schemas for crew operations
 including validation, serialization, and field constraints.
 """
-from src.utils.model_config import DEFAULT_ENGINE_MODEL
-import pytest
+
 from datetime import datetime
-from uuid import uuid4, UUID
+from typing import Any, Dict, List
+from uuid import UUID, uuid4
+
+import pytest
 from pydantic import ValidationError
-from typing import List, Dict, Any
 
 from src.schemas.crew import (
-    Position, Style, LLMGuardrailConfig, TaskConfig, NodeData, Node, Edge, CrewBase, CrewCreate,
-    CrewUpdate, CrewInDBBase, Crew, CrewResponse, CrewGenerationRequest,
-    AgentConfig, Agent, Task, CrewGenerationResponse, CrewCreationResponse,
-    CrewStreamingRequest, CrewStreamingResponse, CrewFromConversationRequest
+    Agent,
+    AgentConfig,
+    Crew,
+    CrewBase,
+    CrewCreate,
+    CrewCreationResponse,
+    CrewFromConversationRequest,
+    CrewGenerationRequest,
+    CrewGenerationResponse,
+    CrewInDBBase,
+    CrewResponse,
+    CrewStreamingRequest,
+    CrewStreamingResponse,
+    CrewUpdate,
+    Edge,
+    LLMGuardrailConfig,
+    Node,
+    NodeData,
+    Position,
+    Style,
+    Task,
+    TaskConfig,
 )
+from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 
 class TestPosition:
     """Test cases for Position schema."""
-    
+
     def test_valid_position(self):
         """Test valid Position creation."""
         position_data = {"x": 100.5, "y": 200.0}
         position = Position(**position_data)
         assert position.x == 100.5
         assert position.y == 200.0
-    
+
     def test_position_negative_coordinates(self):
         """Test Position with negative coordinates."""
         position_data = {"x": -50.0, "y": -100.0}
         position = Position(**position_data)
         assert position.x == -50.0
         assert position.y == -100.0
-    
+
     def test_position_zero_coordinates(self):
         """Test Position with zero coordinates."""
         position_data = {"x": 0.0, "y": 0.0}
         position = Position(**position_data)
         assert position.x == 0.0
         assert position.y == 0.0
-    
+
     def test_position_missing_fields(self):
         """Test Position validation with missing fields."""
         with pytest.raises(ValidationError) as exc_info:
             Position(x=100.0)
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "y" in missing_fields
-        
+
         with pytest.raises(ValidationError) as exc_info:
             Position(y=100.0)
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "x" in missing_fields
-    
+
     def test_position_integer_coordinates(self):
         """Test Position with integer coordinates."""
         position_data = {"x": 100, "y": 200}
@@ -71,7 +95,7 @@ class TestPosition:
 
 class TestStyle:
     """Test cases for Style schema."""
-    
+
     def test_valid_style_empty(self):
         """Test valid Style creation with no styling."""
         style = Style()
@@ -80,7 +104,7 @@ class TestStyle:
         assert style.borderRadius is None
         assert style.padding is None
         assert style.boxShadow is None
-    
+
     def test_valid_style_full(self):
         """Test valid Style creation with all fields."""
         style_data = {
@@ -88,7 +112,7 @@ class TestStyle:
             "border": "1px solid #ccc",
             "borderRadius": "8px",
             "padding": "16px",
-            "boxShadow": "0 2px 4px rgba(0,0,0,0.1)"
+            "boxShadow": "0 2px 4px rgba(0,0,0,0.1)",
         }
         style = Style(**style_data)
         assert style.background == "#ffffff"
@@ -96,13 +120,10 @@ class TestStyle:
         assert style.borderRadius == "8px"
         assert style.padding == "16px"
         assert style.boxShadow == "0 2px 4px rgba(0,0,0,0.1)"
-    
+
     def test_style_partial_fields(self):
         """Test Style with partial fields."""
-        style_data = {
-            "background": "#f0f0f0",
-            "borderRadius": "4px"
-        }
+        style_data = {"background": "#f0f0f0", "borderRadius": "4px"}
         style = Style(**style_data)
         assert style.background == "#f0f0f0"
         assert style.borderRadius == "4px"
@@ -116,9 +137,7 @@ class TestLLMGuardrailConfig:
 
     def test_valid_llm_guardrail_config(self):
         """Test valid LLMGuardrailConfig creation."""
-        config_data = {
-            "description": "Validate output format and accuracy"
-        }
+        config_data = {"description": "Validate output format and accuracy"}
         config = LLMGuardrailConfig(**config_data)
         assert config.description == "Validate output format and accuracy"
         # llm_model now defaults to None — the guardrail uses the run's model
@@ -129,7 +148,7 @@ class TestLLMGuardrailConfig:
         """Test LLMGuardrailConfig with custom LLM model."""
         config_data = {
             "description": "Check for factual accuracy",
-            "llm_model": "gpt-4"
+            "llm_model": "gpt-4",
         }
         config = LLMGuardrailConfig(**config_data)
         assert config.description == "Check for factual accuracy"
@@ -141,15 +160,14 @@ class TestLLMGuardrailConfig:
             LLMGuardrailConfig()
 
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "description" in missing_fields
 
     def test_llm_guardrail_config_null_model(self):
         """Test LLMGuardrailConfig with null model uses default."""
-        config_data = {
-            "description": "Validate task output",
-            "llm_model": None
-        }
+        config_data = {"description": "Validate task output", "llm_model": None}
         config = LLMGuardrailConfig(**config_data)
         assert config.description == "Validate task output"
         # When None is explicitly passed, it should remain None (not default)
@@ -157,9 +175,7 @@ class TestLLMGuardrailConfig:
 
     def test_llm_guardrail_config_serialization(self):
         """Test LLMGuardrailConfig serialization."""
-        config = LLMGuardrailConfig(
-            description="Ensure output meets quality standards"
-        )
+        config = LLMGuardrailConfig(description="Ensure output meets quality standards")
         config_dict = config.model_dump()
         assert config_dict["description"] == "Ensure output meets quality standards"
         assert config_dict["llm_model"] is None
@@ -167,7 +183,7 @@ class TestLLMGuardrailConfig:
 
 class TestTaskConfig:
     """Test cases for TaskConfig schema."""
-    
+
     def test_valid_task_config_defaults(self):
         """Test TaskConfig with default values."""
         config = TaskConfig()
@@ -186,7 +202,7 @@ class TestTaskConfig:
         assert config.human_input is False
         assert config.markdown is False
         assert config.llm_guardrail is None  # Default is None
-    
+
     def test_valid_task_config_full(self):
         """Test TaskConfig with all fields specified."""
         config_data = {
@@ -203,7 +219,7 @@ class TestTaskConfig:
             "validation_function": "validate_output",
             "callback_function": "on_complete",
             "human_input": True,
-            "markdown": True
+            "markdown": True,
         }
         config = TaskConfig(**config_data)
         assert config.cache_response is True
@@ -225,12 +241,9 @@ class TestTaskConfig:
         """Test TaskConfig with llm_guardrail field."""
         guardrail = LLMGuardrailConfig(
             description="Validate task output for accuracy",
-            llm_model="databricks-claude-sonnet-4-5"
+            llm_model="databricks-claude-sonnet-4-5",
         )
-        config = TaskConfig(
-            cache_response=True,
-            llm_guardrail=guardrail
-        )
+        config = TaskConfig(cache_response=True, llm_guardrail=guardrail)
         assert config.llm_guardrail is not None
         assert config.llm_guardrail.description == "Validate task output for accuracy"
         assert config.llm_guardrail.llm_model == "databricks-claude-sonnet-4-5"
@@ -243,7 +256,7 @@ class TestTaskConfig:
 
 class TestNodeData:
     """Test cases for NodeData schema."""
-    
+
     def test_valid_node_data_minimal(self):
         """Test NodeData with minimal required fields."""
         node_data = {"label": "Test Node"}
@@ -260,7 +273,7 @@ class TestNodeData:
         assert data.async_execution is False
         assert data.markdown is False
         assert data.llm_guardrail is None  # Default is None
-    
+
     def test_valid_node_data_agent(self):
         """Test NodeData for an agent node."""
         node_data = {
@@ -275,7 +288,7 @@ class TestNodeData:
             "verbose": True,
             "allow_delegation": False,
             "cache": True,
-            "memory": True
+            "memory": True,
         }
         data = NodeData(**node_data)
         assert data.label == "Data Analyst"
@@ -290,7 +303,7 @@ class TestNodeData:
         assert data.allow_delegation is False
         assert data.cache is True
         assert data.memory is True
-    
+
     def test_valid_node_data_task(self):
         """Test NodeData for a task node."""
         task_config = TaskConfig(priority=2, human_input=True)
@@ -303,7 +316,7 @@ class TestNodeData:
             "config": task_config,
             "context": ["task-123"],
             "async_execution": True,
-            "markdown": True
+            "markdown": True,
         }
         data = NodeData(**node_data)
         assert data.label == "Analysis Task"
@@ -319,9 +332,7 @@ class TestNodeData:
 
     def test_node_data_with_llm_guardrail(self):
         """Test NodeData for a task node with llm_guardrail."""
-        guardrail = LLMGuardrailConfig(
-            description="Validate task output accuracy"
-        )
+        guardrail = LLMGuardrailConfig(description="Validate task output accuracy")
         task_config = TaskConfig(llm_guardrail=guardrail)
         node_data = {
             "label": "Validated Task",
@@ -329,7 +340,7 @@ class TestNodeData:
             "description": "Task with validation",
             "taskId": "task-789",
             "config": task_config,
-            "llm_guardrail": guardrail
+            "llm_guardrail": guardrail,
         }
         data = NodeData(**node_data)
         assert data.llm_guardrail is not None
@@ -340,26 +351,23 @@ class TestNodeData:
         """Test NodeData validation with missing label."""
         with pytest.raises(ValidationError) as exc_info:
             NodeData()
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "label" in missing_fields
 
 
 class TestNode:
     """Test cases for Node schema."""
-    
+
     def test_valid_node_minimal(self):
         """Test Node with minimal required fields."""
         position = Position(x=100, y=200)
         node_data = NodeData(label="Test Node")
-        
-        node = Node(
-            id="node-1",
-            type="agent",
-            position=position,
-            data=node_data
-        )
+
+        node = Node(id="node-1", type="agent", position=position, data=node_data)
         assert node.id == "node-1"
         assert node.type == "agent"
         assert node.position.x == 100
@@ -371,14 +379,14 @@ class TestNode:
         assert node.positionAbsolute is None
         assert node.dragging is None
         assert node.style is None
-    
+
     def test_valid_node_full(self):
         """Test Node with all fields."""
         position = Position(x=100, y=200)
         position_absolute = Position(x=150, y=250)
         node_data = NodeData(label="Full Node", role="agent")
         style = Style(background="#ffffff", border="1px solid #ccc")
-        
+
         node = Node(
             id="node-1",
             type="agent",
@@ -389,7 +397,7 @@ class TestNode:
             selected=True,
             positionAbsolute=position_absolute,
             dragging=False,
-            style=style
+            style=style,
         )
         assert node.id == "node-1"
         assert node.type == "agent"
@@ -400,14 +408,16 @@ class TestNode:
         assert node.positionAbsolute.y == 250
         assert node.dragging is False
         assert node.style.background == "#ffffff"
-    
+
     def test_node_missing_required_fields(self):
         """Test Node validation with missing required fields."""
         with pytest.raises(ValidationError) as exc_info:
             Node(id="node-1")
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "type" in missing_fields
         assert "position" in missing_fields
         assert "data" in missing_fields
@@ -415,20 +425,16 @@ class TestNode:
 
 class TestEdge:
     """Test cases for Edge schema."""
-    
+
     def test_valid_edge_minimal(self):
         """Test Edge with minimal required fields."""
-        edge = Edge(
-            source="node-1",
-            target="node-2",
-            id="edge-1"
-        )
+        edge = Edge(source="node-1", target="node-2", id="edge-1")
         assert edge.source == "node-1"
         assert edge.target == "node-2"
         assert edge.id == "edge-1"
         assert edge.sourceHandle is None
         assert edge.targetHandle is None
-    
+
     def test_valid_edge_full(self):
         """Test Edge with all fields."""
         edge = Edge(
@@ -436,28 +442,30 @@ class TestEdge:
             target="node-2",
             id="edge-1",
             sourceHandle="output",
-            targetHandle="input"
+            targetHandle="input",
         )
         assert edge.source == "node-1"
         assert edge.target == "node-2"
         assert edge.id == "edge-1"
         assert edge.sourceHandle == "output"
         assert edge.targetHandle == "input"
-    
+
     def test_edge_missing_required_fields(self):
         """Test Edge validation with missing required fields."""
         with pytest.raises(ValidationError) as exc_info:
             Edge(source="node-1")
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "target" in missing_fields
         assert "id" in missing_fields
 
 
 class TestCrewBase:
     """Test cases for CrewBase schema."""
-    
+
     def test_valid_crew_base_minimal(self):
         """Test CrewBase with minimal required fields."""
         crew = CrewBase(name="Test Crew")
@@ -466,20 +474,20 @@ class TestCrewBase:
         assert crew.task_ids == []
         assert crew.nodes == []
         assert crew.edges == []
-    
+
     def test_valid_crew_base_full(self):
         """Test CrewBase with all fields."""
         position = Position(x=100, y=200)
         node_data = NodeData(label="Agent Node")
         node = Node(id="node-1", type="agent", position=position, data=node_data)
         edge = Edge(source="node-1", target="node-2", id="edge-1")
-        
+
         crew = CrewBase(
             name="Full Crew",
             agent_ids=["agent-1", "agent-2"],
             task_ids=["task-1", "task-2"],
             nodes=[node],
-            edges=[edge]
+            edges=[edge],
         )
         assert crew.name == "Full Crew"
         assert crew.agent_ids == ["agent-1", "agent-2"]
@@ -488,20 +496,22 @@ class TestCrewBase:
         assert len(crew.edges) == 1
         assert crew.nodes[0].id == "node-1"
         assert crew.edges[0].id == "edge-1"
-    
+
     def test_crew_base_missing_name(self):
         """Test CrewBase validation with missing name."""
         with pytest.raises(ValidationError) as exc_info:
             CrewBase()
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "name" in missing_fields
 
 
 class TestCrewCreate:
     """Test cases for CrewCreate schema."""
-    
+
     def test_crew_create_inheritance(self):
         """Test that CrewCreate inherits from CrewBase."""
         crew = CrewCreate(name="Test Crew")
@@ -510,18 +520,18 @@ class TestCrewCreate:
         assert crew.task_ids == []
         assert crew.nodes == []
         assert crew.edges == []
-        
+
         # Should have all base class attributes
-        assert hasattr(crew, 'name')
-        assert hasattr(crew, 'agent_ids')
-        assert hasattr(crew, 'task_ids')
-        assert hasattr(crew, 'nodes')
-        assert hasattr(crew, 'edges')
+        assert hasattr(crew, "name")
+        assert hasattr(crew, "agent_ids")
+        assert hasattr(crew, "task_ids")
+        assert hasattr(crew, "nodes")
+        assert hasattr(crew, "edges")
 
 
 class TestCrewUpdate:
     """Test cases for CrewUpdate schema."""
-    
+
     def test_crew_update_all_optional(self):
         """Test that all CrewUpdate fields are optional."""
         update = CrewUpdate()
@@ -530,32 +540,29 @@ class TestCrewUpdate:
         assert update.task_ids is None
         assert update.nodes is None
         assert update.edges is None
-    
+
     def test_crew_update_partial(self):
         """Test CrewUpdate with partial fields."""
-        update = CrewUpdate(
-            name="Updated Crew",
-            agent_ids=["agent-1"]
-        )
+        update = CrewUpdate(name="Updated Crew", agent_ids=["agent-1"])
         assert update.name == "Updated Crew"
         assert update.agent_ids == ["agent-1"]
         assert update.task_ids is None
         assert update.nodes is None
         assert update.edges is None
-    
+
     def test_crew_update_full(self):
         """Test CrewUpdate with all fields."""
         position = Position(x=100, y=200)
         node_data = NodeData(label="Updated Node")
         node = Node(id="node-1", type="agent", position=position, data=node_data)
         edge = Edge(source="node-1", target="node-2", id="edge-1")
-        
+
         update = CrewUpdate(
             name="Updated Crew",
             agent_ids=["agent-1", "agent-2"],
             task_ids=["task-1"],
             nodes=[node],
-            edges=[edge]
+            edges=[edge],
         )
         assert update.name == "Updated Crew"
         assert update.agent_ids == ["agent-1", "agent-2"]
@@ -566,18 +573,13 @@ class TestCrewUpdate:
 
 class TestCrewInDBBase:
     """Test cases for CrewInDBBase schema."""
-    
+
     def test_valid_crew_in_db_base(self):
         """Test CrewInDBBase with all required fields."""
         crew_id = uuid4()
         now = datetime.now()
-        
-        crew = CrewInDBBase(
-            name="DB Crew",
-            id=crew_id,
-            created_at=now,
-            updated_at=now
-        )
+
+        crew = CrewInDBBase(name="DB Crew", id=crew_id, created_at=now, updated_at=now)
         assert crew.name == "DB Crew"
         assert crew.id == crew_id
         assert crew.created_at == now
@@ -586,19 +588,21 @@ class TestCrewInDBBase:
         assert crew.task_ids == []
         assert crew.nodes == []
         assert crew.edges == []
-    
+
     def test_crew_in_db_base_config(self):
         """Test CrewInDBBase model configuration."""
-        assert hasattr(CrewInDBBase, 'model_config')
-        assert CrewInDBBase.model_config['from_attributes'] is True
-    
+        assert hasattr(CrewInDBBase, "model_config")
+        assert CrewInDBBase.model_config["from_attributes"] is True
+
     def test_crew_in_db_base_missing_fields(self):
         """Test CrewInDBBase validation with missing fields."""
         with pytest.raises(ValidationError) as exc_info:
             CrewInDBBase(name="Test Crew")
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "id" in missing_fields
         assert "created_at" in missing_fields
         assert "updated_at" in missing_fields
@@ -606,41 +610,36 @@ class TestCrewInDBBase:
 
 class TestCrew:
     """Test cases for Crew schema."""
-    
+
     def test_crew_inheritance(self):
         """Test that Crew inherits from CrewInDBBase."""
         crew_id = uuid4()
         now = datetime.now()
-        
-        crew = Crew(
-            name="Test Crew",
-            id=crew_id,
-            created_at=now,
-            updated_at=now
-        )
+
+        crew = Crew(name="Test Crew", id=crew_id, created_at=now, updated_at=now)
         assert crew.name == "Test Crew"
         assert crew.id == crew_id
         assert crew.created_at == now
         assert crew.updated_at == now
-        
+
         # Should have all base class attributes
-        assert hasattr(crew, 'name')
-        assert hasattr(crew, 'id')
-        assert hasattr(crew, 'created_at')
-        assert hasattr(crew, 'updated_at')
-        assert hasattr(crew, 'agent_ids')
-        assert hasattr(crew, 'task_ids')
-        assert hasattr(crew, 'nodes')
-        assert hasattr(crew, 'edges')
+        assert hasattr(crew, "name")
+        assert hasattr(crew, "id")
+        assert hasattr(crew, "created_at")
+        assert hasattr(crew, "updated_at")
+        assert hasattr(crew, "agent_ids")
+        assert hasattr(crew, "task_ids")
+        assert hasattr(crew, "nodes")
+        assert hasattr(crew, "edges")
 
 
 class TestCrewResponse:
     """Test cases for CrewResponse schema."""
-    
+
     def test_valid_crew_response(self):
         """Test CrewResponse with all required fields."""
         crew_id = uuid4()
-        
+
         response = CrewResponse(
             id=crew_id,
             name="Response Crew",
@@ -649,7 +648,7 @@ class TestCrewResponse:
             nodes=[],
             edges=[],
             created_at="2023-01-01T12:00:00Z",
-            updated_at="2023-01-01T12:00:00Z"
+            updated_at="2023-01-01T12:00:00Z",
         )
         assert response.id == crew_id
         assert response.name == "Response Crew"
@@ -659,19 +658,21 @@ class TestCrewResponse:
         assert response.edges == []
         assert response.created_at == "2023-01-01T12:00:00Z"
         assert response.updated_at == "2023-01-01T12:00:00Z"
-    
+
     def test_crew_response_config(self):
         """Test CrewResponse model configuration."""
-        assert hasattr(CrewResponse, 'model_config')
-        assert CrewResponse.model_config['from_attributes'] is True
-    
+        assert hasattr(CrewResponse, "model_config")
+        assert CrewResponse.model_config["from_attributes"] is True
+
     def test_crew_response_missing_fields(self):
         """Test CrewResponse validation with missing fields."""
         with pytest.raises(ValidationError) as exc_info:
             CrewResponse(name="Test Crew")
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "id" in missing_fields
         assert "agent_ids" in missing_fields
         assert "task_ids" in missing_fields
@@ -683,43 +684,43 @@ class TestCrewResponse:
 
 class TestCrewGenerationRequest:
     """Test cases for CrewGenerationRequest schema."""
-    
+
     def test_valid_crew_generation_request_minimal(self):
         """Test CrewGenerationRequest with minimal required fields."""
-        request = CrewGenerationRequest(
-            prompt="Create a data analysis crew"
-        )
+        request = CrewGenerationRequest(prompt="Create a data analysis crew")
         assert request.prompt == "Create a data analysis crew"
         assert request.model is None
         assert request.tools == []
         assert request.api_key is None
-    
+
     def test_valid_crew_generation_request_full(self):
         """Test CrewGenerationRequest with all fields."""
         request = CrewGenerationRequest(
             prompt="Create a comprehensive data analysis crew",
             model="gpt-4",
             tools=["pandas", "numpy", "matplotlib"],
-            api_key="sk-test-key"
+            api_key="sk-test-key",
         )
         assert request.prompt == "Create a comprehensive data analysis crew"
         assert request.model == "gpt-4"
         assert request.tools == ["pandas", "numpy", "matplotlib"]
         assert request.api_key == "sk-test-key"
-    
+
     def test_crew_generation_request_missing_prompt(self):
         """Test CrewGenerationRequest validation with missing prompt."""
         with pytest.raises(ValidationError) as exc_info:
             CrewGenerationRequest()
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "prompt" in missing_fields
 
 
 class TestAgentConfig:
     """Test cases for AgentConfig schema."""
-    
+
     def test_agent_config_defaults(self):
         """Test AgentConfig with default values."""
         config = AgentConfig()
@@ -739,7 +740,7 @@ class TestAgentConfig:
         assert config.max_retry_limit == 2
         assert config.use_system_prompt is True
         assert config.respect_context_window is True
-    
+
     def test_agent_config_custom_values(self):
         """Test AgentConfig with custom values."""
         config = AgentConfig(
@@ -758,7 +759,7 @@ class TestAgentConfig:
             code_execution_mode="unsafe",
             max_retry_limit=5,
             use_system_prompt=False,
-            respect_context_window=False
+            respect_context_window=False,
         )
         assert config.llm == "gpt-4"
         assert config.function_calling_llm == "gpt-3.5-turbo"
@@ -780,14 +781,14 @@ class TestAgentConfig:
 
 class TestAgent:
     """Test cases for Agent schema."""
-    
+
     def test_valid_agent_minimal(self):
         """Test Agent with minimal required fields."""
         agent = Agent(
             name="Data Analyst",
             role="analyst",
             goal="Analyze data",
-            backstory="Expert analyst"
+            backstory="Expert analyst",
         )
         assert agent.name == "Data Analyst"
         assert agent.role == "analyst"
@@ -800,7 +801,7 @@ class TestAgent:
         assert agent.verbose is False
         assert agent.allow_delegation is False
         assert agent.cache is True
-    
+
     def test_valid_agent_full(self):
         """Test Agent with all fields."""
         agent = Agent(
@@ -825,7 +826,7 @@ class TestAgent:
             code_execution_mode="unsafe",
             max_retry_limit=5,
             use_system_prompt=False,
-            respect_context_window=False
+            respect_context_window=False,
         )
         assert agent.id == "agent-123"
         assert agent.name == "Senior Data Analyst"
@@ -849,14 +850,16 @@ class TestAgent:
         assert agent.max_retry_limit == 5
         assert agent.use_system_prompt is False
         assert agent.respect_context_window is False
-    
+
     def test_agent_missing_required_fields(self):
         """Test Agent validation with missing required fields."""
         with pytest.raises(ValidationError) as exc_info:
             Agent(name="Test Agent")
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "role" in missing_fields
         assert "goal" in missing_fields
         assert "backstory" in missing_fields
@@ -864,13 +867,10 @@ class TestAgent:
 
 class TestTask:
     """Test cases for Task schema."""
-    
+
     def test_valid_task_minimal(self):
         """Test Task with minimal required fields."""
-        task = Task(
-            name="Data Analysis",
-            description="Analyze the dataset"
-        )
+        task = Task(name="Data Analysis", description="Analyze the dataset")
         assert task.name == "Data Analysis"
         assert task.description == "Analyze the dataset"
         assert task.id is None
@@ -888,7 +888,7 @@ class TestTask:
         assert task.human_input is False
         assert task.converter_cls is None
         assert task.markdown is False
-    
+
     def test_valid_task_full(self):
         """Test Task with all fields."""
         task = Task(
@@ -908,7 +908,7 @@ class TestTask:
             callback="on_analysis_complete",
             human_input=True,
             converter_cls="AnalysisConverter",
-            markdown=True
+            markdown=True,
         )
         assert task.id == "task-123"
         assert task.name == "Advanced Data Analysis"
@@ -927,94 +927,100 @@ class TestTask:
         assert task.human_input is True
         assert task.converter_cls == "AnalysisConverter"
         assert task.markdown is True
-    
+
     def test_task_missing_required_fields(self):
         """Test Task validation with missing required fields."""
         with pytest.raises(ValidationError) as exc_info:
             Task(name="Test Task")
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "description" in missing_fields
 
 
 class TestCrewGenerationResponse:
     """Test cases for CrewGenerationResponse schema."""
-    
+
     def test_valid_crew_generation_response(self):
         """Test CrewGenerationResponse with agents and tasks."""
         agents = [
             Agent(name="Analyst", role="analyst", goal="Analyze", backstory="Expert"),
-            Agent(name="Writer", role="writer", goal="Write", backstory="Professional")
+            Agent(name="Writer", role="writer", goal="Write", backstory="Professional"),
         ]
         tasks = [
             Task(name="Analysis", description="Analyze data"),
-            Task(name="Report", description="Write report")
+            Task(name="Report", description="Write report"),
         ]
-        
+
         response = CrewGenerationResponse(agents=agents, tasks=tasks)
         assert len(response.agents) == 2
         assert len(response.tasks) == 2
         assert response.agents[0].name == "Analyst"
         assert response.tasks[0].name == "Analysis"
-    
+
     def test_crew_generation_response_empty(self):
         """Test CrewGenerationResponse with empty lists."""
         response = CrewGenerationResponse(agents=[], tasks=[])
         assert len(response.agents) == 0
         assert len(response.tasks) == 0
-    
+
     def test_crew_generation_response_missing_fields(self):
         """Test CrewGenerationResponse validation with missing fields."""
         with pytest.raises(ValidationError) as exc_info:
             CrewGenerationResponse(agents=[])
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "tasks" in missing_fields
 
 
 class TestCrewCreationResponse:
     """Test cases for CrewCreationResponse schema."""
-    
+
     def test_valid_crew_creation_response(self):
         """Test CrewCreationResponse with created entities."""
         mock_agents = [{"id": 1, "name": "Agent 1"}, {"id": 2, "name": "Agent 2"}]
         mock_tasks = [{"id": 1, "name": "Task 1"}, {"id": 2, "name": "Task 2"}]
-        
+
         response = CrewCreationResponse(agents=mock_agents, tasks=mock_tasks)
         assert len(response.agents) == 2
         assert len(response.tasks) == 2
         assert response.agents[0]["id"] == 1
         assert response.tasks[0]["name"] == "Task 1"
-    
+
     def test_crew_creation_response_config(self):
         """Test CrewCreationResponse model configuration."""
-        assert hasattr(CrewCreationResponse, 'model_config')
-        assert CrewCreationResponse.model_config['from_attributes'] is True
-    
+        assert hasattr(CrewCreationResponse, "model_config")
+        assert CrewCreationResponse.model_config["from_attributes"] is True
+
     def test_crew_creation_response_missing_fields(self):
         """Test CrewCreationResponse validation with missing fields."""
         with pytest.raises(ValidationError) as exc_info:
             CrewCreationResponse(agents=[])
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "tasks" in missing_fields
 
 
 class TestSchemaIntegration:
     """Integration tests for crew schema interactions."""
-    
+
     def test_complete_crew_workflow(self):
         """Test a complete crew workflow with all schemas."""
         # Create a crew generation request
         request = CrewGenerationRequest(
             prompt="Create a data analysis crew with visualization",
             model="gpt-4",
-            tools=["pandas", "matplotlib", "seaborn"]
+            tools=["pandas", "matplotlib", "seaborn"],
         )
-        
+
         # Create agents and tasks (simulating generation response)
         agents = [
             Agent(
@@ -1022,24 +1028,24 @@ class TestSchemaIntegration:
                 role="analyst",
                 goal="Analyze data thoroughly",
                 backstory="Expert in statistical analysis",
-                tools=["pandas", "numpy"]
+                tools=["pandas", "numpy"],
             ),
             Agent(
                 name="Data Visualizer",
                 role="visualizer",
                 goal="Create insightful visualizations",
                 backstory="Specialist in data visualization",
-                tools=["matplotlib", "seaborn"]
-            )
+                tools=["matplotlib", "seaborn"],
+            ),
         ]
-        
+
         tasks = [
             Task(
                 name="Data Analysis",
                 description="Perform statistical analysis on the dataset",
                 expected_output="Statistical summary and insights",
                 tools=["pandas", "numpy"],
-                assigned_agent="agent-1"
+                assigned_agent="agent-1",
             ),
             Task(
                 name="Data Visualization",
@@ -1047,16 +1053,16 @@ class TestSchemaIntegration:
                 expected_output="Charts and graphs",
                 tools=["matplotlib", "seaborn"],
                 assigned_agent="agent-2",
-                context=["task-1"]
-            )
+                context=["task-1"],
+            ),
         ]
-        
+
         generation_response = CrewGenerationResponse(agents=agents, tasks=tasks)
-        
+
         # Create crew with nodes and edges
         position1 = Position(x=100, y=100)
         position2 = Position(x=300, y=100)
-        
+
         node1 = Node(
             id="node-1",
             type="agent",
@@ -1066,10 +1072,10 @@ class TestSchemaIntegration:
                 role="analyst",
                 goal="Analyze data thoroughly",
                 backstory="Expert in statistical analysis",
-                agentId="agent-1"
-            )
+                agentId="agent-1",
+            ),
         )
-        
+
         node2 = Node(
             id="node-2",
             type="agent",
@@ -1079,20 +1085,20 @@ class TestSchemaIntegration:
                 role="visualizer",
                 goal="Create insightful visualizations",
                 backstory="Specialist in data visualization",
-                agentId="agent-2"
-            )
+                agentId="agent-2",
+            ),
         )
-        
+
         edge = Edge(source="node-1", target="node-2", id="edge-1")
-        
+
         crew_create = CrewCreate(
             name="Data Analysis Crew",
             agent_ids=["agent-1", "agent-2"],
             task_ids=["task-1", "task-2"],
             nodes=[node1, node2],
-            edges=[edge]
+            edges=[edge],
         )
-        
+
         # Verify the complete workflow
         assert request.prompt == "Create a data analysis crew with visualization"
         assert len(generation_response.agents) == 2
@@ -1105,32 +1111,30 @@ class TestSchemaIntegration:
         assert crew_create.edges[0].source == "node-1"
         assert crew_create.edges[0].target == "node-2"
         assert generation_response.tasks[1].context == ["task-1"]  # Task dependency
-    
+
     def test_crew_update_workflow(self):
         """Test crew update workflow with partial updates."""
         # Create initial crew
         crew_create = CrewCreate(
-            name="Initial Crew",
-            agent_ids=["agent-1"],
-            task_ids=["task-1"]
+            name="Initial Crew", agent_ids=["agent-1"], task_ids=["task-1"]
         )
-        
+
         # Update crew with additional agents and tasks
         position = Position(x=200, y=200)
         new_node = Node(
             id="node-2",
             type="agent",
             position=position,
-            data=NodeData(label="New Agent", role="new_role", agentId="agent-2")
+            data=NodeData(label="New Agent", role="new_role", agentId="agent-2"),
         )
-        
+
         crew_update = CrewUpdate(
             name="Updated Crew",
             agent_ids=["agent-1", "agent-2"],
             task_ids=["task-1", "task-2"],
-            nodes=[new_node]
+            nodes=[new_node],
         )
-        
+
         # Verify update
         assert crew_create.name == "Initial Crew"
         assert len(crew_create.agent_ids) == 1
@@ -1148,7 +1152,7 @@ class TestCrewStreamingRequest:
         request = CrewStreamingRequest(
             prompt="Build a marketing analysis crew",
             model="gpt-4",
-            tools=["SerperDevTool", "ScrapeWebsiteTool"]
+            tools=["SerperDevTool", "ScrapeWebsiteTool"],
         )
         assert request.prompt == "Build a marketing analysis crew"
         assert request.model == "gpt-4"
@@ -1160,7 +1164,9 @@ class TestCrewStreamingRequest:
             CrewStreamingRequest()
 
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "prompt" in missing_fields
 
     def test_crew_streaming_request_optional_fields(self):
@@ -1171,10 +1177,7 @@ class TestCrewStreamingRequest:
 
     def test_crew_streaming_request_empty_tools(self):
         """Test CrewStreamingRequest with explicitly empty tools list."""
-        request = CrewStreamingRequest(
-            prompt="Crew with no tools",
-            tools=[]
-        )
+        request = CrewStreamingRequest(prompt="Crew with no tools", tools=[])
         assert request.tools == []
 
 
@@ -1192,7 +1195,9 @@ class TestCrewStreamingResponse:
             CrewStreamingResponse()
 
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "generation_id" in missing_fields
 
     def test_crew_streaming_response_uuid_style_id(self):

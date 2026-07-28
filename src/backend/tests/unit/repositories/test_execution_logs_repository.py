@@ -9,19 +9,20 @@ Tests the session-injected repository pattern including:
 - Pagination and ordering
 - SQL injection prevention via ORM
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-from datetime import datetime, timezone, timedelta
 
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.repositories.execution_logs_repository import ExecutionLogsRepository
 from src.models.execution_logs import ExecutionLog
-
+from src.repositories.execution_logs_repository import ExecutionLogsRepository
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class MockScalars:
     """Mock for SQLAlchemy Result.scalars()."""
@@ -74,6 +75,7 @@ def _make_log(
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def mock_session():
     """Create a mock AsyncSession with common methods."""
@@ -94,6 +96,7 @@ def repo(mock_session):
 # ===========================================================================
 # TestNormalizeTimestamp
 # ===========================================================================
+
 
 class TestNormalizeTimestamp:
     """Tests for _normalize_timestamp - a synchronous helper method."""
@@ -149,6 +152,7 @@ class TestNormalizeTimestamp:
 # ===========================================================================
 # TestCreateLog
 # ===========================================================================
+
 
 class TestCreateLog:
     """Tests for create_log method."""
@@ -212,7 +216,9 @@ class TestCreateLog:
         assert added_obj.timestamp.tzinfo is None
 
     @pytest.mark.asyncio
-    async def test_create_log_error_triggers_rollback_and_reraise(self, repo, mock_session):
+    async def test_create_log_error_triggers_rollback_and_reraise(
+        self, repo, mock_session
+    ):
         """On flush failure, rollback is attempted and exception is re-raised."""
         mock_session.flush.side_effect = Exception("DB write failed")
 
@@ -234,6 +240,7 @@ class TestCreateLog:
 # ===========================================================================
 # TestGetLogsByExecutionId
 # ===========================================================================
+
 
 class TestGetLogsByExecutionId:
     """Tests for get_logs_by_execution_id method."""
@@ -317,6 +324,7 @@ class TestGetLogsByExecutionId:
 # TestGetById
 # ===========================================================================
 
+
 class TestGetById:
     @pytest.mark.asyncio
     async def test_found(self, repo, mock_session):
@@ -335,6 +343,7 @@ class TestGetById:
 # ===========================================================================
 # TestDeleteByExecutionId
 # ===========================================================================
+
 
 class TestDeleteByExecutionId:
     @pytest.mark.asyncio
@@ -385,6 +394,7 @@ class TestDeleteByExecutionId:
 # TestDeleteAll
 # ===========================================================================
 
+
 class TestDeleteAll:
     @pytest.mark.asyncio
     async def test_delete_all_returns_rowcount(self, repo, mock_session):
@@ -403,6 +413,7 @@ class TestDeleteAll:
 # ===========================================================================
 # TestCountByExecutionId
 # ===========================================================================
+
 
 class TestCountByExecutionId:
     @pytest.mark.asyncio
@@ -451,6 +462,7 @@ class TestCountByExecutionId:
 # TestSessionInjection
 # ===========================================================================
 
+
 class TestSessionInjection:
     def test_init_stores_session(self, mock_session):
         repo = ExecutionLogsRepository(session=mock_session)
@@ -459,7 +471,9 @@ class TestSessionInjection:
     @pytest.mark.asyncio
     async def test_operations_use_injected_session(self, repo, mock_session):
         """All methods should use self.session, not create their own."""
-        mock_session.execute.return_value = MockResult(results=[], scalar_value=0, rowcount=0)
+        mock_session.execute.return_value = MockResult(
+            results=[], scalar_value=0, rowcount=0
+        )
 
         await repo.get_logs_by_execution_id("exec-1")
         await repo.get_by_id(1)
@@ -473,6 +487,7 @@ class TestSessionInjection:
 # ===========================================================================
 # TestSqlInjectionPrevention
 # ===========================================================================
+
 
 class TestSqlInjectionPrevention:
     """Tests verifying that ORM usage prevents SQL injection."""
@@ -509,6 +524,7 @@ class TestSqlInjectionPrevention:
 # ===========================================================================
 # TestDeleteOlderThan
 # ===========================================================================
+
 
 class TestDeleteOlderThan:
     """Tests for delete_older_than method."""

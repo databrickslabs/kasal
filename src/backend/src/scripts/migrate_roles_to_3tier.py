@@ -11,7 +11,9 @@ Run this script to update all existing role data:
 
 import asyncio
 import logging
+
 from sqlalchemy import text
+
 from src.db.session import async_session_factory
 
 logging.basicConfig(level=logging.INFO)
@@ -102,7 +104,9 @@ async def migrate_roles():
                     await session.execute(insert_editor)
                     logger.info("Created 'editor' role")
 
-                check_operator = text("SELECT COUNT(*) FROM roles WHERE name = 'operator'")
+                check_operator = text(
+                    "SELECT COUNT(*) FROM roles WHERE name = 'operator'"
+                )
                 result = await session.execute(check_operator)
 
                 if result.scalar() == 0:

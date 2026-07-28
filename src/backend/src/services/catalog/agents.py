@@ -1,18 +1,19 @@
 import logging
 from typing import Any, Dict, List, Optional, Type
-from sqlalchemy.ext.asyncio import AsyncSession
+
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_service import BaseService
 from src.models.agent import Agent
 from src.repositories.agent_repository import AgentRepository
-from src.schemas.agent import AgentCreate, AgentUpdate, AgentLimitedUpdate
-from src.utils.user_context import GroupContext
+from src.schemas.agent import AgentCreate, AgentLimitedUpdate, AgentUpdate
 from src.utils.sensitive_data_utils import (
-    encrypt_sensitive_fields,
     decrypt_sensitive_fields,
+    encrypt_sensitive_fields,
     safe_log_tool_configs,
 )
+from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class AgentService(BaseService[Agent, AgentCreate]):
         self,
         session: AsyncSession,
         repository_class: Type[AgentRepository] = AgentRepository,
-        model_class: Type[Agent] = Agent
+        model_class: Type[Agent] = Agent,
     ):
         """
         Initialize the service with session and optional repository and model classes.
@@ -58,7 +59,9 @@ class AgentService(BaseService[Agent, AgentCreate]):
             try:
                 agent.tool_configs = decrypt_sensitive_fields(agent.tool_configs)
             except Exception as e:
-                logger.error(f"Failed to decrypt tool_configs for agent {agent.id}: {e}")
+                logger.error(
+                    f"Failed to decrypt tool_configs for agent {agent.id}: {e}"
+                )
         return agent
 
     def _encrypt_tool_configs_in_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -71,28 +74,28 @@ class AgentService(BaseService[Agent, AgentCreate]):
         Returns:
             Dictionary with encrypted tool_configs
         """
-        if 'tool_configs' in data and data['tool_configs']:
+        if "tool_configs" in data and data["tool_configs"]:
             try:
-                data['tool_configs'] = encrypt_sensitive_fields(data['tool_configs'])
-                logger.debug(safe_log_tool_configs(data['tool_configs'], "Encrypted "))
+                data["tool_configs"] = encrypt_sensitive_fields(data["tool_configs"])
+                logger.debug(safe_log_tool_configs(data["tool_configs"], "Encrypted "))
             except Exception as e:
                 logger.error(f"Failed to encrypt tool_configs: {e}")
                 raise
         return data
-    
+
     @classmethod
-    def create(cls, session: AsyncSession) -> 'AgentService':
+    def create(cls, session: AsyncSession) -> "AgentService":
         """
         Factory method to create a properly configured AgentService instance.
-        
+
         Args:
             session: Database session for operations
-            
+
         Returns:
             An instance of AgentService
         """
         return cls(session=session)
-    
+
     async def get(self, id: str) -> Optional[Agent]:
         """
         Get an agent by ID with decrypted tool_configs.
@@ -106,7 +109,9 @@ class AgentService(BaseService[Agent, AgentCreate]):
         agent = await self.repository.get(id)
         return self._decrypt_agent_tool_configs(agent)
 
-    async def get_with_group_check(self, id: str, group_context: GroupContext) -> Optional[Agent]:
+    async def get_with_group_check(
+        self, id: str, group_context: GroupContext
+    ) -> Optional[Agent]:
         """
         Get an agent by ID with group verification and decrypted tool_configs.
 
@@ -164,8 +169,10 @@ class AgentService(BaseService[Agent, AgentCreate]):
         for agent in agents:
             self._decrypt_agent_tool_configs(agent)
         return agents
-    
-    async def update_with_partial_data(self, id: str, obj_in: AgentUpdate) -> Optional[Agent]:
+
+    async def update_with_partial_data(
+        self, id: str, obj_in: AgentUpdate
+    ) -> Optional[Agent]:
         """
         Update an agent with partial data, only updating fields that are set.
         Encrypts sensitive fields in tool_configs before storage.
@@ -184,14 +191,16 @@ class AgentService(BaseService[Agent, AgentCreate]):
             return await self.get(id)
 
         # Encrypt sensitive fields in tool_configs before storage
-        if 'tool_configs' in update_data:
+        if "tool_configs" in update_data:
             logger.debug(f"AgentService: encrypting tool_configs for agent {id}")
             update_data = self._encrypt_tool_configs_in_data(update_data)
 
         agent = await self.repository.update(id, update_data)
         return self._decrypt_agent_tool_configs(agent)
 
-    async def update_with_group_check(self, id: str, obj_in: AgentUpdate, group_context: GroupContext) -> Optional[Agent]:
+    async def update_with_group_check(
+        self, id: str, obj_in: AgentUpdate, group_context: GroupContext
+    ) -> Optional[Agent]:
         """
         Update an agent with group verification.
         Encrypts sensitive fields in tool_configs before storage.
@@ -216,14 +225,16 @@ class AgentService(BaseService[Agent, AgentCreate]):
             return agent
 
         # Encrypt sensitive fields in tool_configs before storage
-        if 'tool_configs' in update_data:
+        if "tool_configs" in update_data:
             logger.debug(f"AgentService: encrypting tool_configs for agent {id}")
             update_data = self._encrypt_tool_configs_in_data(update_data)
 
         agent = await self.repository.update(id, update_data)
         return self._decrypt_agent_tool_configs(agent)
 
-    async def update_limited_fields(self, id: str, obj_in: AgentLimitedUpdate) -> Optional[Agent]:
+    async def update_limited_fields(
+        self, id: str, obj_in: AgentLimitedUpdate
+    ) -> Optional[Agent]:
         """
         Update only limited fields of an agent.
         Encrypts sensitive fields in tool_configs before storage.
@@ -242,14 +253,16 @@ class AgentService(BaseService[Agent, AgentCreate]):
             return await self.get(id)
 
         # Encrypt sensitive fields in tool_configs before storage
-        if 'tool_configs' in update_data:
+        if "tool_configs" in update_data:
             logger.debug(f"AgentService: encrypting tool_configs for agent {id}")
             update_data = self._encrypt_tool_configs_in_data(update_data)
 
         agent = await self.repository.update(id, update_data)
         return self._decrypt_agent_tool_configs(agent)
 
-    async def update_limited_with_group_check(self, id: str, obj_in: AgentLimitedUpdate, group_context: GroupContext) -> Optional[Agent]:
+    async def update_limited_with_group_check(
+        self, id: str, obj_in: AgentLimitedUpdate, group_context: GroupContext
+    ) -> Optional[Agent]:
         """
         Update limited fields of an agent with group verification.
         Encrypts sensitive fields in tool_configs before storage.
@@ -274,13 +287,13 @@ class AgentService(BaseService[Agent, AgentCreate]):
             return agent
 
         # Encrypt sensitive fields in tool_configs before storage
-        if 'tool_configs' in update_data:
+        if "tool_configs" in update_data:
             logger.debug(f"AgentService: encrypting tool_configs for agent {id}")
             update_data = self._encrypt_tool_configs_in_data(update_data)
 
         agent = await self.repository.update(id, update_data)
         return self._decrypt_agent_tool_configs(agent)
-    
+
     @staticmethod
     async def _delete_agents_and_tasks(session, agent_ids: List[str]) -> None:
         """
@@ -328,7 +341,9 @@ class AgentService(BaseService[Agent, AgentCreate]):
             await session.commit()
             return True
 
-    async def delete_with_group_check(self, id: str, group_context: GroupContext) -> bool:
+    async def delete_with_group_check(
+        self, id: str, group_context: GroupContext
+    ) -> bool:
         """
         Delete an agent by ID with group verification.
 
@@ -392,9 +407,10 @@ class AgentService(BaseService[Agent, AgentCreate]):
         async with get_isolated_db_session() as session:
             await self._delete_agents_and_tasks(session, agent_ids)
             await session.commit()
-    
 
-    async def create_with_group(self, obj_in: AgentCreate, group_context: GroupContext) -> Agent:
+    async def create_with_group(
+        self, obj_in: AgentCreate, group_context: GroupContext
+    ) -> Agent:
         """
         Create a new agent with group isolation.
         Encrypts sensitive fields in tool_configs before storage.
@@ -408,8 +424,8 @@ class AgentService(BaseService[Agent, AgentCreate]):
         """
         # Convert schema to dict and add group fields
         agent_data = obj_in.model_dump()
-        agent_data['group_id'] = group_context.primary_group_id
-        agent_data['created_by_email'] = group_context.group_email
+        agent_data["group_id"] = group_context.primary_group_id
+        agent_data["created_by_email"] = group_context.group_email
 
         # Encrypt sensitive fields in tool_configs before storage
         agent_data = self._encrypt_tool_configs_in_data(agent_data)
@@ -436,4 +452,4 @@ class AgentService(BaseService[Agent, AgentCreate]):
         agents = await self.repository.find_by_group_ids(group_context.group_ids)
         for agent in agents:
             self._decrypt_agent_tool_configs(agent)
-        return agents 
+        return agents

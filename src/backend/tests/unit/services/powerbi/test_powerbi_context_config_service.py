@@ -4,26 +4,27 @@ Unit tests for PowerBIContextConfigService.
 Tests business logic for creating, updating, deleting, and retrieving
 business mappings and field synonyms with proper error handling.
 """
-import pytest
+
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi import HTTPException
 
-from src.services.powerbi.context_config import PowerBIContextConfigService
 from src.schemas.powerbi_context_config import (
     PowerBIBusinessMappingCreate,
+    PowerBIBusinessMappingResponse,
     PowerBIBusinessMappingUpdate,
     PowerBIFieldSynonymCreate,
-    PowerBIFieldSynonymUpdate,
-    PowerBIBusinessMappingResponse,
     PowerBIFieldSynonymResponse,
+    PowerBIFieldSynonymUpdate,
 )
-
+from src.services.powerbi.context_config import PowerBIContextConfigService
 
 # ---------------------------------------------------------------------------
 # Stub DB objects
 # ---------------------------------------------------------------------------
+
 
 def _now():
     return datetime.now(timezone.utc)
@@ -71,6 +72,7 @@ class StubFieldSynonym:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def mock_session():
     return AsyncMock()
@@ -107,6 +109,7 @@ def service(mock_session, mock_business_repo, mock_synonym_repo):
 # ---------------------------------------------------------------------------
 # Business Mappings
 # ---------------------------------------------------------------------------
+
 
 class TestCreateBusinessMapping:
     @pytest.mark.asyncio
@@ -215,7 +218,9 @@ class TestDeleteBusinessMapping:
         assert exc_info.value.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_raises_404_when_delete_returns_false(self, service, mock_business_repo):
+    async def test_raises_404_when_delete_returns_false(
+        self, service, mock_business_repo
+    ):
         existing = StubBusinessMapping(id=1, group_id="grp")
         mock_business_repo.get.return_value = existing
         mock_business_repo.delete.return_value = False
@@ -249,6 +254,7 @@ class TestGetBusinessMappings:
 # ---------------------------------------------------------------------------
 # Field Synonyms
 # ---------------------------------------------------------------------------
+
 
 class TestCreateFieldSynonym:
     @pytest.mark.asyncio
@@ -360,9 +366,12 @@ class TestGetFieldSynonyms:
 # Bulk / Dict operations
 # ---------------------------------------------------------------------------
 
+
 class TestGetAllContextConfig:
     @pytest.mark.asyncio
-    async def test_combines_mappings_and_synonyms(self, service, mock_business_repo, mock_synonym_repo):
+    async def test_combines_mappings_and_synonyms(
+        self, service, mock_business_repo, mock_synonym_repo
+    ):
         mock_business_repo.get_by_model.return_value = [StubBusinessMapping()]
         mock_synonym_repo.get_by_model.return_value = [StubFieldSynonym()]
 
@@ -372,7 +381,9 @@ class TestGetAllContextConfig:
         assert len(result.field_synonyms) == 1
 
     @pytest.mark.asyncio
-    async def test_empty_when_no_data(self, service, mock_business_repo, mock_synonym_repo):
+    async def test_empty_when_no_data(
+        self, service, mock_business_repo, mock_synonym_repo
+    ):
         mock_business_repo.get_by_model.return_value = []
         mock_synonym_repo.get_by_model.return_value = []
 
@@ -384,9 +395,13 @@ class TestGetAllContextConfig:
 
 class TestGetContextConfigDict:
     @pytest.mark.asyncio
-    async def test_returns_dict_format(self, service, mock_business_repo, mock_synonym_repo):
+    async def test_returns_dict_format(
+        self, service, mock_business_repo, mock_synonym_repo
+    ):
         mock_business_repo.get_as_dict.return_value = {"total sales": "[Total Sales]"}
-        mock_synonym_repo.get_as_dict.return_value = {"num_customers": ["customer count"]}
+        mock_synonym_repo.get_as_dict.return_value = {
+            "num_customers": ["customer count"]
+        }
 
         result = await service.get_context_config_dict("m1")
 
@@ -394,7 +409,9 @@ class TestGetContextConfigDict:
         assert result.field_synonyms == {"num_customers": ["customer count"]}
 
     @pytest.mark.asyncio
-    async def test_returns_none_when_dicts_are_empty(self, service, mock_business_repo, mock_synonym_repo):
+    async def test_returns_none_when_dicts_are_empty(
+        self, service, mock_business_repo, mock_synonym_repo
+    ):
         mock_business_repo.get_as_dict.return_value = {}
         mock_synonym_repo.get_as_dict.return_value = {}
 
@@ -405,7 +422,9 @@ class TestGetContextConfigDict:
         assert result.field_synonyms is None
 
     @pytest.mark.asyncio
-    async def test_raises_500_on_error(self, service, mock_business_repo, mock_synonym_repo):
+    async def test_raises_500_on_error(
+        self, service, mock_business_repo, mock_synonym_repo
+    ):
         mock_business_repo.get_as_dict.side_effect = RuntimeError("boom")
 
         with pytest.raises(HTTPException) as exc_info:

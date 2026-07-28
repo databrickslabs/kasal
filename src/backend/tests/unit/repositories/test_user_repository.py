@@ -1,10 +1,11 @@
 """Unit tests for UserRepository."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from src.repositories.user_repository import UserRepository
+import pytest
+
 from src.models.user import User
+from src.repositories.user_repository import UserRepository
 
 
 @pytest.fixture

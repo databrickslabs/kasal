@@ -8,17 +8,18 @@ Targets uncovered lines:
  678-679, 684-687, 695-701
 """
 
-import pytest
 import uuid
-from unittest.mock import MagicMock, AsyncMock, patch, Mock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
+
+import pytest
 
 from src.services.flow_builder.backend_flow import BackendFlow
 from src.services.flow_builder.exceptions import FlowPausedForApprovalException
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_bf(job_id="job-1", flow_id=None):
     return BackendFlow(job_id=job_id, flow_id=flow_id)
@@ -31,6 +32,7 @@ def _make_flow_id():
 # ---------------------------------------------------------------------------
 # __init__ / properties
 # ---------------------------------------------------------------------------
+
 
 class TestBackendFlowInit:
 
@@ -66,6 +68,7 @@ class TestBackendFlowInit:
 # ---------------------------------------------------------------------------
 # load_flow
 # ---------------------------------------------------------------------------
+
 
 class TestLoadFlow:
 
@@ -121,6 +124,7 @@ class TestLoadFlow:
 # _init_callbacks
 # ---------------------------------------------------------------------------
 
+
 class TestInitCallbacks:
 
     def test_init_callbacks_with_group_context(self):
@@ -139,14 +143,19 @@ class TestInitCallbacks:
 
         # Patch the local import by patching the module import
         import builtins
+
         real_import = builtins.__import__
+
         def mock_import(name, *args, **kwargs):
             if name == "src.utils.user_context":
                 raise ImportError("no module")
             return real_import(name, *args, **kwargs)
 
         # Just call it directly - the group_context warning path is exercised
-        with patch("src.utils.user_context.UserContext.set_group_context", side_effect=Exception("ctx err")):
+        with patch(
+            "src.utils.user_context.UserContext.set_group_context",
+            side_effect=Exception("ctx err"),
+        ):
             bf._init_callbacks()
         assert "callbacks" in bf.config
 
@@ -162,6 +171,7 @@ class TestInitCallbacks:
 # ---------------------------------------------------------------------------
 # flow() method
 # ---------------------------------------------------------------------------
+
 
 class TestFlowMethod:
 
@@ -187,19 +197,36 @@ class TestFlowMethod:
         }
         bf._repositories = {}
 
-        with patch("src.services.flow_builder.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
+        with patch(
+            "src.services.flow_builder.backend_flow.FlowBuilder.build_flow",
+            new=AsyncMock(return_value=MagicMock()),
+        ):
             result = await bf.flow()
         assert result is not None
 
     @pytest.mark.asyncio
     async def test_flow_sets_group_context(self):
         bf = _make_bf(flow_id=_make_flow_id())
-        bf._flow_data = {"id": None, "name": "f", "crew_id": None, "nodes": [], "edges": [], "flow_config": {}}
+        bf._flow_data = {
+            "id": None,
+            "name": "f",
+            "crew_id": None,
+            "nodes": [],
+            "edges": [],
+            "flow_config": {},
+        }
         group_ctx = MagicMock()
         bf._config = {"group_context": group_ctx}
 
-        with patch("src.utils.user_context.UserContext.set_group_context") as mock_set_ctx, \
-             patch("src.services.flow_builder.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
+        with (
+            patch(
+                "src.utils.user_context.UserContext.set_group_context"
+            ) as mock_set_ctx,
+            patch(
+                "src.services.flow_builder.backend_flow.FlowBuilder.build_flow",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+        ):
             await bf.flow()
         # Called at least once (may be called multiple times from flow() and _init_callbacks())
         assert mock_set_ctx.call_count >= 1
@@ -208,11 +235,26 @@ class TestFlowMethod:
     @pytest.mark.asyncio
     async def test_flow_group_context_import_error(self):
         bf = _make_bf()
-        bf._flow_data = {"id": None, "name": "f", "crew_id": None, "nodes": [], "edges": [], "flow_config": {}}
+        bf._flow_data = {
+            "id": None,
+            "name": "f",
+            "crew_id": None,
+            "nodes": [],
+            "edges": [],
+            "flow_config": {},
+        }
         bf._config = {"group_context": MagicMock()}
 
-        with patch("src.utils.user_context.UserContext.set_group_context", side_effect=Exception("no mod")), \
-             patch("src.services.flow_builder.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
+        with (
+            patch(
+                "src.utils.user_context.UserContext.set_group_context",
+                side_effect=Exception("no mod"),
+            ),
+            patch(
+                "src.services.flow_builder.backend_flow.FlowBuilder.build_flow",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+        ):
             result = await bf.flow()
         assert result is not None
 
@@ -234,24 +276,44 @@ class TestFlowMethod:
         flow_repo.get = AsyncMock(return_value=flow_data)
         bf._repositories = {"flow": flow_repo}
 
-        with patch("src.services.flow_builder.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=MagicMock())):
+        with patch(
+            "src.services.flow_builder.backend_flow.FlowBuilder.build_flow",
+            new=AsyncMock(return_value=MagicMock()),
+        ):
             result = await bf.flow()
         assert result is not None
 
     @pytest.mark.asyncio
     async def test_flow_build_error_raises_value_error(self):
         bf = _make_bf()
-        bf._flow_data = {"id": None, "name": "f", "crew_id": None, "nodes": [], "edges": [], "flow_config": {}}
+        bf._flow_data = {
+            "id": None,
+            "name": "f",
+            "crew_id": None,
+            "nodes": [],
+            "edges": [],
+            "flow_config": {},
+        }
         bf._config = {}
 
-        with patch("src.services.flow_builder.backend_flow.FlowBuilder.build_flow", new=AsyncMock(side_effect=RuntimeError("build fail"))):
+        with patch(
+            "src.services.flow_builder.backend_flow.FlowBuilder.build_flow",
+            new=AsyncMock(side_effect=RuntimeError("build fail")),
+        ):
             with pytest.raises(ValueError, match="Failed to create flow"):
                 await bf.flow()
 
     @pytest.mark.asyncio
     async def test_flow_with_resume_params(self):
         bf = _make_bf()
-        bf._flow_data = {"id": None, "name": "f", "crew_id": None, "nodes": [], "edges": [], "flow_config": {}}
+        bf._flow_data = {
+            "id": None,
+            "name": "f",
+            "crew_id": None,
+            "nodes": [],
+            "edges": [],
+            "flow_config": {},
+        }
         bf._config = {
             "resume_from_flow_uuid": "uuid-x",
             "resume_from_crew_sequence": 2,
@@ -259,7 +321,10 @@ class TestFlowMethod:
         }
 
         mock_dynamic_flow = MagicMock()
-        with patch("src.services.flow_builder.backend_flow.FlowBuilder.build_flow", new=AsyncMock(return_value=mock_dynamic_flow)):
+        with patch(
+            "src.services.flow_builder.backend_flow.FlowBuilder.build_flow",
+            new=AsyncMock(return_value=mock_dynamic_flow),
+        ):
             result = await bf.flow()
         assert result is mock_dynamic_flow
 
@@ -268,12 +333,18 @@ class TestFlowMethod:
 # kickoff_async
 # ---------------------------------------------------------------------------
 
+
 class TestKickoffAsync:
 
     def _setup_bf(self, flow_data=None):
         bf = _make_bf(flow_id=_make_flow_id())
         bf._flow_data = flow_data or {
-            "id": None, "name": "f", "crew_id": None, "nodes": [], "edges": [], "flow_config": {}
+            "id": None,
+            "name": "f",
+            "crew_id": None,
+            "nodes": [],
+            "edges": [],
+            "flow_config": {},
         }
         bf._config = {"callbacks": {"start_trace_writer": False}}
         return bf
@@ -402,15 +473,20 @@ class TestKickoffAsync:
             result = await bf.kickoff_async()
 
         # Should have passed id=resume-uuid as input
-        mock_crewai_flow.kickoff_async.assert_called_once_with(inputs={"id": "resume-uuid"})
+        mock_crewai_flow.kickoff_async.assert_called_once_with(
+            inputs={"id": "resume-uuid"}
+        )
 
     @pytest.mark.asyncio
     async def test_kickoff_async_flow_paused_exception_reraise(self):
         bf = self._setup_bf()
 
         pause_exc = FlowPausedForApprovalException(
-            approval_id="a", gate_node_id="g", message="pause",
-            execution_id="e", crew_sequence=0
+            approval_id="a",
+            gate_node_id="g",
+            message="pause",
+            execution_id="e",
+            crew_sequence=0,
         )
         mock_crewai_flow = MagicMock()
         mock_crewai_flow.kickoff_async = AsyncMock(side_effect=pause_exc)
@@ -424,7 +500,9 @@ class TestKickoffAsync:
         bf = self._setup_bf()
 
         mock_crewai_flow = MagicMock()
-        mock_crewai_flow.kickoff_async = AsyncMock(side_effect=RuntimeError("exec fail"))
+        mock_crewai_flow.kickoff_async = AsyncMock(
+            side_effect=RuntimeError("exec fail")
+        )
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
             result = await bf.kickoff_async()
@@ -436,7 +514,9 @@ class TestKickoffAsync:
     async def test_kickoff_async_flow_creation_fails(self):
         bf = self._setup_bf()
 
-        with patch.object(bf, "flow", new=AsyncMock(side_effect=RuntimeError("create fail"))):
+        with patch.object(
+            bf, "flow", new=AsyncMock(side_effect=RuntimeError("create fail"))
+        ):
             result = await bf.kickoff_async()
 
         assert result["success"] is False
@@ -471,8 +551,10 @@ class TestKickoffAsync:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value="result")
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.services.execution.logs.writer_task.LogWriterTask") as MockTM:
+        with (
+            patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
+            patch("src.services.execution.logs.writer_task.LogWriterTask") as MockTM,
+        ):
             MockTM.ensure_writer_started = AsyncMock()
             result = await bf.kickoff_async()
 
@@ -488,9 +570,13 @@ class TestKickoffAsync:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value="result")
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.services.execution.logs.writer_task.LogWriterTask") as MockTM:
-            MockTM.ensure_writer_started = AsyncMock(side_effect=Exception("trace fail"))
+        with (
+            patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
+            patch("src.services.execution.logs.writer_task.LogWriterTask") as MockTM,
+        ):
+            MockTM.ensure_writer_started = AsyncMock(
+                side_effect=Exception("trace fail")
+            )
             result = await bf.kickoff_async()
 
         # Should not fail even if trace writer raises
@@ -522,7 +608,9 @@ class TestKickoffAsync:
     async def test_kickoff_async_outer_exception_returns_failure(self):
         bf = self._setup_bf()
         # Make flow() itself raise at the outer level
-        with patch.object(bf, "flow", new=AsyncMock(side_effect=Exception("outer fail"))):
+        with patch.object(
+            bf, "flow", new=AsyncMock(side_effect=Exception("outer fail"))
+        ):
             result = await bf.kickoff_async()
         # The outer handler catches and returns failure
         assert result["success"] is False
@@ -532,12 +620,20 @@ class TestKickoffAsync:
 # kickoff()
 # ---------------------------------------------------------------------------
 
+
 class TestKickoff:
     """Tests for the synchronous kickoff() path."""
 
     def _setup_bf(self):
         bf = _make_bf(flow_id=_make_flow_id())
-        bf._flow_data = {"id": None, "name": "f", "crew_id": None, "nodes": [], "edges": [], "flow_config": {}}
+        bf._flow_data = {
+            "id": None,
+            "name": "f",
+            "crew_id": None,
+            "nodes": [],
+            "edges": [],
+            "flow_config": {},
+        }
         bf._config = {"callbacks": {}}
         return bf
 
@@ -550,8 +646,10 @@ class TestKickoff:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value={"result": "ok"})
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.db.session._request_session"):
+        with (
+            patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
+            patch("src.db.session._request_session"),
+        ):
             result = await bf.kickoff()
 
         assert result["success"] is True
@@ -569,8 +667,10 @@ class TestKickoff:
         state = {"id": "state-id-from-dict"}
         mock_crewai_flow.state = state
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.db.session._request_session"):
+        with (
+            patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
+            patch("src.db.session._request_session"),
+        ):
             result = await bf.kickoff()
 
         assert result["flow_uuid"] == "state-id-from-dict"
@@ -580,15 +680,20 @@ class TestKickoff:
         bf = self._setup_bf()
 
         pause_exc = FlowPausedForApprovalException(
-            approval_id="a", gate_node_id="g", message="pause",
-            execution_id="e", crew_sequence=0
+            approval_id="a",
+            gate_node_id="g",
+            message="pause",
+            execution_id="e",
+            crew_sequence=0,
         )
         mock_crewai_flow = MagicMock()
         mock_crewai_flow.starting_point_0 = MagicMock()
         mock_crewai_flow.kickoff_async = AsyncMock(side_effect=pause_exc)
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.db.session._request_session"):
+        with (
+            patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
+            patch("src.db.session._request_session"),
+        ):
             with pytest.raises(FlowPausedForApprovalException):
                 await bf.kickoff()
 
@@ -599,10 +704,14 @@ class TestKickoff:
 
         mock_crewai_flow = MagicMock()
         mock_crewai_flow.starting_point_0 = MagicMock()
-        mock_crewai_flow.kickoff_async = AsyncMock(side_effect=RuntimeError("kick error"))
+        mock_crewai_flow.kickoff_async = AsyncMock(
+            side_effect=RuntimeError("kick error")
+        )
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.db.session._request_session"):
+        with (
+            patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
+            patch("src.db.session._request_session"),
+        ):
             result = await bf.kickoff()
 
         assert result["success"] is False
@@ -612,7 +721,9 @@ class TestKickoff:
     async def test_kickoff_flow_create_fails_returns_failure(self):
         bf = self._setup_bf()
 
-        with patch.object(bf, "flow", new=AsyncMock(side_effect=RuntimeError("create fail"))):
+        with patch.object(
+            bf, "flow", new=AsyncMock(side_effect=RuntimeError("create fail"))
+        ):
             result = await bf.kickoff()
 
         assert result["success"] is False
@@ -628,8 +739,10 @@ class TestKickoff:
 
         mock_crewai_flow = EmptyFlow()
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.db.session._request_session"):
+        with (
+            patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
+            patch("src.db.session._request_session"),
+        ):
             result = await bf.kickoff()
 
         assert result["success"] is False
@@ -645,12 +758,16 @@ class TestKickoff:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value="done")
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.db.session._request_session"):
+        with (
+            patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
+            patch("src.db.session._request_session"),
+        ):
             result = await bf.kickoff()
 
         # Should pass inputs with id=resume-x
-        mock_crewai_flow.kickoff_async.assert_called_once_with(inputs={"id": "resume-x"})
+        mock_crewai_flow.kickoff_async.assert_called_once_with(
+            inputs={"id": "resume-x"}
+        )
 
     @pytest.mark.asyncio
     async def test_kickoff_result_is_none_continues(self):
@@ -661,8 +778,10 @@ class TestKickoff:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value=None)
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.db.session._request_session"):
+        with (
+            patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
+            patch("src.db.session._request_session"),
+        ):
             result = await bf.kickoff()
 
         assert result["success"] is True
@@ -677,8 +796,10 @@ class TestKickoff:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value="string output")
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.db.session._request_session"):
+        with (
+            patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
+            patch("src.db.session._request_session"),
+        ):
             result = await bf.kickoff()
 
         assert result["result"] == "string output"
@@ -696,8 +817,10 @@ class TestKickoff:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value=HasToDict())
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.db.session._request_session"):
+        with (
+            patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
+            patch("src.db.session._request_session"),
+        ):
             result = await bf.kickoff()
 
         assert result["result"] == {"to_dict": True}
@@ -727,8 +850,10 @@ class TestKickoff:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value="done")
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.db.session._request_session"):
+        with (
+            patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
+            patch("src.db.session._request_session"),
+        ):
             result = await bf.kickoff()
 
         assert bf._flow_data is not None
@@ -753,15 +878,24 @@ class TestKickoff:
             "nodes": [{"id": "n1"}],
             "edges": [{"source": "n0", "target": "n1"}],
         }
-        bf._flow_data = {"id": None, "name": "f", "crew_id": None, "nodes": [], "edges": [], "flow_config": {}}
+        bf._flow_data = {
+            "id": None,
+            "name": "f",
+            "crew_id": None,
+            "nodes": [],
+            "edges": [],
+            "flow_config": {},
+        }
 
         mock_crewai_flow = MagicMock()
         mock_crewai_flow.starting_point_0 = MagicMock()
         mock_crewai_flow.kickoff_async = AsyncMock(return_value="ok")
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.db.session._request_session"):
+        with (
+            patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)),
+            patch("src.db.session._request_session"),
+        ):
             result = await bf.kickoff()
 
         # flow_data should have been updated from config
@@ -772,12 +906,20 @@ class TestKickoff:
 # plot()
 # ---------------------------------------------------------------------------
 
+
 class TestPlot:
 
     @pytest.mark.asyncio
     async def test_plot_with_plot_method(self):
         bf = _make_bf()
-        bf._flow_data = {"id": None, "name": "f", "crew_id": None, "nodes": [], "edges": [], "flow_config": {}}
+        bf._flow_data = {
+            "id": None,
+            "name": "f",
+            "crew_id": None,
+            "nodes": [],
+            "edges": [],
+            "flow_config": {},
+        }
         bf._config = {}
 
         mock_crewai_flow = MagicMock()
@@ -792,7 +934,14 @@ class TestPlot:
     @pytest.mark.asyncio
     async def test_plot_without_plot_method(self):
         bf = _make_bf()
-        bf._flow_data = {"id": None, "name": "f", "crew_id": None, "nodes": [], "edges": [], "flow_config": {}}
+        bf._flow_data = {
+            "id": None,
+            "name": "f",
+            "crew_id": None,
+            "nodes": [],
+            "edges": [],
+            "flow_config": {},
+        }
         bf._config = {}
 
         mock_crewai_flow = MagicMock(spec=["kickoff"])
@@ -805,10 +954,19 @@ class TestPlot:
     @pytest.mark.asyncio
     async def test_plot_exception_returns_none(self):
         bf = _make_bf()
-        bf._flow_data = {"id": None, "name": "f", "crew_id": None, "nodes": [], "edges": [], "flow_config": {}}
+        bf._flow_data = {
+            "id": None,
+            "name": "f",
+            "crew_id": None,
+            "nodes": [],
+            "edges": [],
+            "flow_config": {},
+        }
         bf._config = {}
 
-        with patch.object(bf, "flow", new=AsyncMock(side_effect=RuntimeError("plot fail"))):
+        with patch.object(
+            bf, "flow", new=AsyncMock(side_effect=RuntimeError("plot fail"))
+        ):
             result = await bf.plot()
 
         assert result is None

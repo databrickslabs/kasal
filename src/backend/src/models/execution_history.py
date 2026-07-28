@@ -1,8 +1,19 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Index, Integer, String, JSON, Text, DateTime, ForeignKey, Boolean
+from uuid import uuid4
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from uuid import uuid4
 
 from src.db.base import Base
 
@@ -10,7 +21,7 @@ from src.db.base import Base
 def generate_job_id():
     """
     Generate a unique job ID.
-    
+
     Returns:
         str: A unique job ID
     """
@@ -19,17 +30,17 @@ def generate_job_id():
 
 class ExecutionHistory(Base):
     """Database model for tracking AI agent execution history and state.
-    
+
     This model represents a complete execution lifecycle of a CrewAI job or workflow,
     tracking status, results, errors, and supporting multi-tenant isolation through
     group-based data segregation.
-    
+
     The model supports comprehensive execution tracking including:
     - Execution lifecycle management (pending, running, completed, failed)
     - Graceful stop functionality with partial results
     - Multi-tenant isolation via group IDs
     - Relationship tracking to tasks and error traces
-    
+
     Attributes:
         id: Primary key identifier
         job_id: Unique execution identifier (UUID)
@@ -44,23 +55,23 @@ class ExecutionHistory(Base):
         created_at: Timestamp when execution started
         completed_at: Timestamp when execution completed
         run_name: Human-readable name for the execution
-        
+
         Stop Execution Fields:
         stopped_at: Timestamp when stop was requested
         stop_reason: Reason for stopping (user_requested, timeout, etc.)
         stop_requested_by: User who requested the stop
         partial_results: Results captured before stopping
         is_stopping: Flag indicating execution is being stopped
-        
+
         Multi-tenant Fields:
         group_id: Group identifier for data isolation
         group_email: User email for audit trail
-    
+
     Relationships:
         task_statuses: Related TaskStatus records for this execution
         error_traces: Related ErrorTrace records for debugging
         execution_traces: Detailed execution trace logs
-    
+
     Example:
         >>> execution = ExecutionHistory(
         ...     job_id="exec_123",
@@ -69,7 +80,7 @@ class ExecutionHistory(Base):
         ...     group_id="acme_corp"
         ... )
     """
-    
+
     __tablename__ = "executionhistory"
 
     __table_args__ = (
@@ -79,7 +90,9 @@ class ExecutionHistory(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    job_id = Column(String, primary_key=False, unique=True, default=generate_job_id, index=True)
+    job_id = Column(
+        String, primary_key=False, unique=True, default=generate_job_id, index=True
+    )
     # status/created_at are indexed: the trace broadcaster scans status IN
     # ('RUNNING', ...) every second and the executions list orders by
     # created_at DESC on the most-polled endpoint. (Existing deployed DBs get
@@ -92,21 +105,37 @@ class ExecutionHistory(Base):
     # a request any more (the planner is gone), so new rows use the False default.
     planning = Column(Boolean, default=False)
     trigger_type = Column(String, default="api")
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)  # Use timezone-naive UTC time
+    created_at = Column(
+        DateTime, default=datetime.utcnow, index=True
+    )  # Use timezone-naive UTC time
     run_name = Column(String)
     completed_at = Column(DateTime)
-    
+
     # Stop execution fields
     stopped_at = Column(DateTime, nullable=True)  # When the execution was stopped
-    stop_reason = Column(String, nullable=True)  # Reason for stopping (user requested, timeout, etc.)
-    stop_requested_by = Column(String(255), nullable=True)  # User who requested the stop
-    partial_results = Column(JSON, nullable=True)  # Store partial results before stopping
-    is_stopping = Column(Boolean, default=False, nullable=False)  # Flag to indicate execution is in stopping state
-    
+    stop_reason = Column(
+        String, nullable=True
+    )  # Reason for stopping (user requested, timeout, etc.)
+    stop_requested_by = Column(
+        String(255), nullable=True
+    )  # User who requested the stop
+    partial_results = Column(
+        JSON, nullable=True
+    )  # Store partial results before stopping
+    is_stopping = Column(
+        Boolean, default=False, nullable=False
+    )  # Flag to indicate execution is in stopping state
+
     # MLflow integration fields
-    mlflow_trace_id = Column(String, nullable=True, index=True)  # MLflow trace ID for evaluation linking
-    mlflow_experiment_name = Column(String, nullable=True)  # MLflow experiment name for reference
-    mlflow_evaluation_run_id = Column(String, nullable=True, index=True)  # MLflow evaluation run ID
+    mlflow_trace_id = Column(
+        String, nullable=True, index=True
+    )  # MLflow trace ID for evaluation linking
+    mlflow_experiment_name = Column(
+        String, nullable=True
+    )  # MLflow experiment name for reference
+    mlflow_evaluation_run_id = Column(
+        String, nullable=True, index=True
+    )  # MLflow evaluation run ID
 
     # Multi-group fields
     group_id = Column(String(100), index=True, nullable=True)  # Group isolation
@@ -114,36 +143,58 @@ class ExecutionHistory(Base):
 
     # Execution type and flow fields (consolidated from flow_executions table)
     execution_type = Column(String(20), default="crew", index=True)  # 'crew' or 'flow'
-    flow_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Optional reference to saved flow
+    flow_id = Column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )  # Optional reference to saved flow
 
     # Checkpoint/Persistence fields for CrewAI Flow state management
-    flow_uuid = Column(String(255), nullable=True, index=True)  # CrewAI's state.id for @persist
-    checkpoint_status = Column(String(50), nullable=True, default=None)  # 'active', 'resumed', 'expired', None
-    checkpoint_method = Column(String(255), nullable=True)  # Last checkpointed method name
+    flow_uuid = Column(
+        String(255), nullable=True, index=True
+    )  # CrewAI's state.id for @persist
+    checkpoint_status = Column(
+        String(50), nullable=True, default=None
+    )  # 'active', 'resumed', 'expired', None
+    checkpoint_method = Column(
+        String(255), nullable=True
+    )  # Last checkpointed method name
     # Crew-level checkpoint data for granular resume functionality
     # Structure: {"crew_checkpoints": [{"crew_node_id": "...", "crew_name": "...", "sequence": 1, "status": "completed", "output_preview": "...", "completed_at": "..."}]}
     checkpoint_data = Column(JSON, nullable=True, default=None)
 
     # Relationships
-    task_statuses = relationship("TaskStatus", back_populates="execution_history", 
-                                foreign_keys="TaskStatus.job_id", 
-                                primaryjoin="ExecutionHistory.job_id == TaskStatus.job_id")
-    error_traces = relationship("ErrorTrace", back_populates="execution_history", 
-                               foreign_keys="ErrorTrace.run_id",
-                               primaryjoin="ExecutionHistory.id == ErrorTrace.run_id")
-    
+    task_statuses = relationship(
+        "TaskStatus",
+        back_populates="execution_history",
+        foreign_keys="TaskStatus.job_id",
+        primaryjoin="ExecutionHistory.job_id == TaskStatus.job_id",
+    )
+    error_traces = relationship(
+        "ErrorTrace",
+        back_populates="execution_history",
+        foreign_keys="ErrorTrace.run_id",
+        primaryjoin="ExecutionHistory.id == ErrorTrace.run_id",
+    )
+
     # New relationship with ExecutionTrace
-    execution_traces = relationship("ExecutionTrace", back_populates="run",
-                                   foreign_keys="ExecutionTrace.run_id",
-                                   primaryjoin="ExecutionHistory.id == ExecutionTrace.run_id")
-    execution_traces_by_job_id = relationship("ExecutionTrace",
-                                             foreign_keys="ExecutionTrace.job_id",
-                                             primaryjoin="ExecutionHistory.job_id == ExecutionTrace.job_id")
+    execution_traces = relationship(
+        "ExecutionTrace",
+        back_populates="run",
+        foreign_keys="ExecutionTrace.run_id",
+        primaryjoin="ExecutionHistory.id == ExecutionTrace.run_id",
+    )
+    execution_traces_by_job_id = relationship(
+        "ExecutionTrace",
+        foreign_keys="ExecutionTrace.job_id",
+        primaryjoin="ExecutionHistory.job_id == ExecutionTrace.job_id",
+    )
 
     # HITL (Human in the Loop) approval relationships
-    hitl_approvals = relationship("HITLApproval", back_populates="execution",
-                                 foreign_keys="HITLApproval.execution_id",
-                                 primaryjoin="ExecutionHistory.job_id == HITLApproval.execution_id")
+    hitl_approvals = relationship(
+        "HITLApproval",
+        back_populates="execution",
+        foreign_keys="HITLApproval.execution_id",
+        primaryjoin="ExecutionHistory.job_id == HITLApproval.execution_id",
+    )
 
     def __init__(self, **kwargs):
         super(ExecutionHistory, self).__init__(**kwargs)
@@ -165,11 +216,11 @@ class ExecutionHistory(Base):
 
 class TaskStatus(Base):
     """Database model for tracking individual task status within an execution.
-    
+
     This model tracks the lifecycle and status of individual tasks that are part
     of a larger execution. Each task represents a discrete unit of work performed
     by an agent within the CrewAI system.
-    
+
     Attributes:
         id: Primary key identifier
         job_id: Foreign key linking to ExecutionHistory
@@ -178,10 +229,10 @@ class TaskStatus(Base):
         agent_name: Name of the agent handling this task
         started_at: Timestamp when task execution began
         completed_at: Timestamp when task completed (if applicable)
-    
+
     Relationships:
         execution_history: Parent ExecutionHistory record
-    
+
     Example:
         >>> task = TaskStatus(
         ...     job_id="exec_123",
@@ -190,20 +241,24 @@ class TaskStatus(Base):
         ...     agent_name="Research Agent"
         ... )
     """
-    
+
     __tablename__ = "taskstatus"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     job_id = Column(String, ForeignKey("executionhistory.job_id"), index=True)
     task_id = Column(String, nullable=False, index=True)
     status = Column(String, nullable=False)  # 'running', 'completed', or 'failed'
-    agent_name = Column(String, nullable=True)  # Store the name of the agent handling this task
-    started_at = Column(DateTime, default=datetime.utcnow)  # Use timezone-naive UTC time
+    agent_name = Column(
+        String, nullable=True
+    )  # Store the name of the agent handling this task
+    started_at = Column(
+        DateTime, default=datetime.utcnow
+    )  # Use timezone-naive UTC time
     completed_at = Column(DateTime, nullable=True)
-    
+
     # Relationship to the run
     execution_history = relationship("ExecutionHistory", back_populates="task_statuses")
-    
+
     def __init__(self, **kwargs):
         super(TaskStatus, self).__init__(**kwargs)
         if self.started_at is None:
@@ -212,11 +267,11 @@ class TaskStatus(Base):
 
 class ErrorTrace(Base):
     """Database model for detailed error tracking and debugging.
-    
+
     This model captures comprehensive error information when tasks or executions
     fail, providing detailed debugging data for troubleshooting AI agent failures.
     Each error trace is linked to a specific execution and task for traceability.
-    
+
     Attributes:
         id: Primary key identifier
         run_id: Foreign key linking to ExecutionHistory
@@ -225,10 +280,10 @@ class ErrorTrace(Base):
         error_message: Human-readable error description
         timestamp: When the error occurred (timezone-aware)
         error_metadata: JSON field for additional error context (stack trace, etc.)
-    
+
     Relationships:
         execution_history: Parent ExecutionHistory record
-    
+
     Example:
         >>> error = ErrorTrace(
         ...     run_id=1,
@@ -237,14 +292,14 @@ class ErrorTrace(Base):
         ...     error_message="Invalid input format",
         ...     error_metadata={"line": 42, "file": "agent.py"}
         ... )
-    
+
     Note:
         Uses timezone-aware timestamps for consistent time tracking across
         different deployment regions.
     """
-    
+
     __tablename__ = "errortrace"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     run_id = Column(Integer, ForeignKey("executionhistory.id"), index=True)
     task_key = Column(String, nullable=False, index=True)
@@ -252,7 +307,7 @@ class ErrorTrace(Base):
     error_message = Column(String, nullable=False)
     timestamp = Column(DateTime(timezone=True), default=datetime.now(timezone.utc))
     error_metadata = Column(JSON, default=dict)
-    
+
     # Relationship to the run
     execution_history = relationship("ExecutionHistory", back_populates="error_traces")
 
@@ -262,6 +317,3 @@ class ErrorTrace(Base):
             self.error_metadata = {}
         if self.timestamp is None:
             self.timestamp = datetime.now(timezone.utc)
-
-
- 

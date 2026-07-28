@@ -1,15 +1,16 @@
 """Unit tests for BillingRepository, BillingPeriodRepository, BillingAlertRepository."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
+from src.models.billing import BillingAlert, BillingPeriod, LLMUsageBilling
 from src.repositories.billing_repository import (
-    BillingRepository,
-    BillingPeriodRepository,
     BillingAlertRepository,
+    BillingPeriodRepository,
+    BillingRepository,
 )
-from src.models.billing import LLMUsageBilling, BillingPeriod, BillingAlert
 
 
 @pytest.fixture
@@ -56,7 +57,9 @@ class TestBillingRepository:
     @pytest.mark.asyncio
     async def test_get_usage_by_execution_with_group(self, repo, mock_session):
         records = [MagicMock(spec=LLMUsageBilling)]
-        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = records
+        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = (
+            records
+        )
 
         result = await repo.get_usage_by_execution("exec-1", group_id="g-1")
 
@@ -78,11 +81,15 @@ class TestBillingRepository:
     async def test_get_usage_by_date_range_with_filters(self, repo, mock_session):
         records = []
         chain = mock_session.query.return_value.filter.return_value
-        chain.filter.return_value.filter.return_value.order_by.return_value.all.return_value = records
+        chain.filter.return_value.filter.return_value.order_by.return_value.all.return_value = (
+            records
+        )
 
         start = datetime(2024, 1, 1)
         end = datetime(2024, 1, 31)
-        result = await repo.get_usage_by_date_range(start, end, group_id="g-1", user_email="a@b.com")
+        result = await repo.get_usage_by_date_range(
+            start, end, group_id="g-1", user_email="a@b.com"
+        )
 
         assert result == []
 
@@ -121,7 +128,9 @@ class TestBillingPeriodRepository:
     @pytest.mark.asyncio
     async def test_get_current_period_with_group(self, repo, mock_session):
         period = MagicMock(spec=BillingPeriod)
-        mock_session.query.return_value.filter.return_value.filter.return_value.first.return_value = period
+        mock_session.query.return_value.filter.return_value.filter.return_value.first.return_value = (
+            period
+        )
 
         result = await repo.get_current_period(group_id="g-1")
 
@@ -167,7 +176,9 @@ class TestBillingAlertRepository:
     @pytest.mark.asyncio
     async def test_get_active_alerts_with_group(self, repo, mock_session):
         alerts = []
-        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = alerts
+        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = (
+            alerts
+        )
 
         result = await repo.get_active_alerts(group_id="g-1")
 
@@ -200,6 +211,7 @@ class TestBillingAlertRepository:
 # ============================================================================
 # get_cost_summary_by_period / get_cost_by_model / get_cost_by_user
 # ============================================================================
+
 
 def _make_repo():
     session = MagicMock()
@@ -280,14 +292,16 @@ class TestBillingRepositoryCostReporting:
             total_tokens=1000,
             total_prompt_tokens=500,
             total_completion_tokens=500,
-            total_requests=5
+            total_requests=5,
         )
         query_chain = _make_query_chain(results=[row])
         session.query.return_value = query_chain
 
         start = datetime(2024, 1, 1)
         end = datetime(2024, 1, 31)
-        result = await repo.get_cost_summary_by_period(start, end, group_id="g1", group_by="day")
+        result = await repo.get_cost_summary_by_period(
+            start, end, group_id="g1", group_by="day"
+        )
         assert len(result) == 1
         assert result[0]["total_cost"] == 10.5
 
@@ -299,7 +313,7 @@ class TestBillingRepositoryCostReporting:
             model_provider="openai",
             total_cost=25.0,
             total_tokens=2000,
-            total_requests=10
+            total_requests=10,
         )
         query_chain = _make_query_chain(results=[row])
         session.query.return_value = query_chain
@@ -328,7 +342,7 @@ class TestBillingRepositoryCostReporting:
             user_email="user@example.com",
             total_cost=15.0,
             total_tokens=1500,
-            total_requests=8
+            total_requests=8,
         )
         query_chain = _make_query_chain(results=[row])
         session.query.return_value = query_chain

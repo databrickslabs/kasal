@@ -8,28 +8,25 @@ movement: every method still reads ``self`` exactly as it did in the single
 import asyncio
 import base64
 import contextvars
-import logging
 import json
+import logging
 import re
-from typing import Any, Optional, Type, Dict, List
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from typing import Any, Dict, List, Optional, Type
+
+import httpx
+from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
-from pydantic import BaseModel, Field, PrivateAttr
-import httpx
-
 from src.services.tools.tool_session_provider import ToolSessionProvider
-
 
 logger = logging.getLogger(__name__)
 
 
 class PowerBISemanticContextMixin:
     def _build_enriched_semantic_context(
-        self,
-        model_context: Dict[str, Any],
-        config: Dict[str, Any]
+        self, model_context: Dict[str, Any], config: Dict[str, Any]
     ) -> str:
         """
         Build enriched semantic context for LLM prompt (Microsoft Copilot-style).
@@ -136,8 +133,9 @@ class PowerBISemanticContextMixin:
         if relationships:
             # Filter relationships to only those involving tables in our context
             relevant_relationships = [
-                rel for rel in relationships
-                if rel['from_table'] in tables_seen or rel['to_table'] in tables_seen
+                rel
+                for rel in relationships
+                if rel["from_table"] in tables_seen or rel["to_table"] in tables_seen
             ]
 
             if relevant_relationships:
@@ -146,7 +144,9 @@ class PowerBISemanticContextMixin:
                     sections.append(
                         f"- {rel['from_table']}[{rel['from_column']}] → {rel['to_table']}[{rel['to_column']}]"
                     )
-                sections.append(f"\n**Note**: Showing {len(relevant_relationships)} relationships for included tables")
+                sections.append(
+                    f"\n**Note**: Showing {len(relevant_relationships)} relationships for included tables"
+                )
                 sections.append("")
 
         # ===== BUSINESS TERMINOLOGY & SYNONYMS =====
@@ -158,9 +158,11 @@ class PowerBISemanticContextMixin:
 
             if business_mappings:
                 sections.append("### Business Term Mappings")
-                sections.append("Use these to translate natural language into DAX filter expressions:\n")
+                sections.append(
+                    "Use these to translate natural language into DAX filter expressions:\n"
+                )
                 for term, expression in business_mappings.items():
-                    sections.append(f"- **\"{term}\"** → `{expression}`")
+                    sections.append(f'- **"{term}"** → `{expression}`')
                 sections.append("")
 
             if field_synonyms:
@@ -178,21 +180,27 @@ class PowerBISemanticContextMixin:
             for column, value_info in list(sample_values.items())[:10]:
                 if value_info.get("type") == "categorical":
                     values = value_info.get("sample_values", [])
-                    sections.append(f"- **{column}**: {', '.join([str(v) for v in values[:5]])}")
+                    sections.append(
+                        f"- **{column}**: {', '.join([str(v) for v in values[:5]])}"
+                    )
             sections.append("")
 
         # ===== CURRENT VIEW STATE (Active Filters) =====
         active_filters = config.get("active_filters", {})
         if active_filters:
             sections.append("## 🎯 CURRENT VIEW STATE (AUTO-APPLY FILTERS)\n")
-            sections.append("**IMPORTANT**: The following filters are CURRENTLY ACTIVE and should be automatically applied to the query:\n")
+            sections.append(
+                "**IMPORTANT**: The following filters are CURRENTLY ACTIVE and should be automatically applied to the query:\n"
+            )
             for filter_name, filter_value in active_filters.items():
                 if isinstance(filter_value, list):
-                    quoted_values = ', '.join([f"'{v}'" for v in filter_value])
+                    quoted_values = ", ".join([f"'{v}'" for v in filter_value])
                     sections.append(f"- **{filter_name}** IN ({quoted_values})")
                 else:
                     sections.append(f"- **{filter_name}** = {filter_value}")
-            sections.append("\n**Note**: User questions may not explicitly mention these filters, but they should still be applied!\n")
+            sections.append(
+                "\n**Note**: User questions may not explicitly mention these filters, but they should still be applied!\n"
+            )
 
         # ===== CONVERSATION HISTORY =====
         conversation_history = config.get("conversation_history", [])
@@ -201,9 +209,9 @@ class PowerBISemanticContextMixin:
             sections.append("Previous questions in this session (for context):\n")
             for i, turn in enumerate(conversation_history[-3:], 1):  # Last 3 turns
                 sections.append(f"**Q{i}**: {turn.get('question', '')}")
-                if turn.get('filters_used'):
+                if turn.get("filters_used"):
                     sections.append(f"  Filters used: {turn['filters_used']}")
-                if turn.get('answer'):
+                if turn.get("answer"):
                     sections.append(f"  Answer: {turn['answer']}")
             sections.append("")
 

@@ -5,18 +5,20 @@ Covers the retry/backoff and fallback behaviour plus the Databricks message
 sanitization DatabricksRetryLLM applies before every call.
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
 import json
-import sys
 import logging
+import sys
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 from src.services.llm.handlers.databricks_retry_llm import (
     DatabricksRetryLLM,
-    _resolve_schema_refs,
     _is_gemini_model,
+    _resolve_schema_refs,
     _sanitize_tools_for_gemini,
 )
+
 
 class TestSanitizeMessagesForDatabricks:
     """Test suite for DatabricksRetryLLM._sanitize_messages_for_databricks."""
@@ -113,8 +115,8 @@ class TestSanitizeMessagesForDatabricks:
         original = {"role": "user", "content": "hi", "cache_breakpoint": True}
         msgs = [original]
         DatabricksRetryLLM._sanitize_messages_for_databricks(msgs)
-        assert "cache_breakpoint" not in msgs[0]          # stripped in the sent list
-        assert original.get("cache_breakpoint") is True   # caller's dict untouched
+        assert "cache_breakpoint" not in msgs[0]  # stripped in the sent list
+        assert original.get("cache_breakpoint") is True  # caller's dict untouched
 
     def test_handles_non_dict_items(self):
         msgs = ["plain string", {"role": "user", "content": "Hello"}]
@@ -176,11 +178,19 @@ class TestEngineToolCallsWithContent:
         executed = []
 
         with patch.object(
-            OpenAICompletion, "client", new_callable=PropertyMock, return_value=fake_client
+            OpenAICompletion,
+            "client",
+            new_callable=PropertyMock,
+            return_value=fake_client,
         ):
             text, usage, call_type = llm._call_completions_api(
                 [{"role": "user", "content": "hi"}],
-                [{"type": "function", "function": {"name": "my_tool", "parameters": {}}}],
+                [
+                    {
+                        "type": "function",
+                        "function": {"name": "my_tool", "parameters": {}},
+                    }
+                ],
                 {"my_tool": lambda **kw: executed.append(1) or "tool-result"},
             )
 
@@ -744,9 +754,9 @@ class TestDatabricksRetryLLMRetryLogic:
         # with no numeric status (seen on new FMAPI models like claude-fable-5).
         # Regression: was treated as fatal and failed crew generation instantly.
         db_capacity = (
-            'litellm.serviceunavailableerror: databricksexception - '
+            "litellm.serviceunavailableerror: databricksexception - "
             '{"error_code":"temporarily_unavailable","message":"databricks is '
-            'unable to satisfy this request due to unexpected capacity '
+            "unable to satisfy this request due to unexpected capacity "
             'constraints - we apologize for the inconvenience."}'
         )
         assert mock_retry_llm._is_retryable_error(db_capacity) is True
@@ -791,8 +801,9 @@ class TestGetRetryTracerExceptionPath:
 
     def test_returns_none_when_otel_raises(self):
         """_get_retry_tracer returns None when opentelemetry raises on import."""
-        from src.services.llm.handlers.databricks_retry_llm import _get_retry_tracer
         import sys
+
+        from src.services.llm.handlers.databricks_retry_llm import _get_retry_tracer
 
         # Remove otel from sys.modules so import raises
         saved = sys.modules.pop("opentelemetry", None)
@@ -1114,8 +1125,6 @@ class TestMergeSystemMessagesForGemini:
         _merge_system_messages_for_gemini(messages, "gemini-pro")
         # Only 1 non-empty system message, so no merge happens
         assert len(messages) == 3  # unchanged (only 1 non-empty system)
-
-
 
 
 class TestGeminiSanitizationRunsInCall:

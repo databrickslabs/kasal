@@ -26,16 +26,18 @@ Usage:
 
 def main():
     # Import the libs
+    import argparse
     import os
+
     import msal
     import requests
-    import argparse
 
     # Fetch input parameters
     parser = argparse.ArgumentParser(
         description="Test Power BI Service Principal authentication and querying",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="")
+        epilog="",
+    )
 
     parser.add_argument(
         "--tenant-id",
@@ -90,7 +92,11 @@ def main():
     )
 
     if not result or "access_token" not in result:
-        error_msg = result.get("error_description", "Unknown error") if result else "No response"
+        error_msg = (
+            result.get("error_description", "Unknown error")
+            if result
+            else "No response"
+        )
         raise RuntimeError(f"Failed to acquire token: {error_msg}")
 
     access_token = result["access_token"]
@@ -98,14 +104,14 @@ def main():
     # Use with Power BI REST API
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
     # Now call Power BI APIs or MCP remote server
     response = requests.post(
         "https://api.fabric.microsoft.com/v1/mcp/powerbi",
         headers=headers,
-        json={"query": args.question}
+        json={"query": args.question},
     )
     print(response)
 

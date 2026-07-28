@@ -10,6 +10,7 @@ shared A2UI composer (``a2ui_runner.compose_surface``) exactly like every other
 deliverable (dashboards, presentations, …), so there is no Genie-specific prompt
 injection or hand-built surface to keep in sync.
 """
+
 from typing import Any, Optional
 
 # Managed-Genie MCP servers are registered as ``.../api/2.0/mcp/genie/<space_id>``.

@@ -75,7 +75,7 @@ class DatabricksAuthService:
             use_database: Enable database credential lookup (future)
             logger: Optional logger instance
         """
-        self.workspace_url = workspace_url.rstrip('/')
+        self.workspace_url = workspace_url.rstrip("/")
         self.api_key = api_key
         self._access_token = access_token
         self.client_id = client_id
@@ -124,8 +124,7 @@ class DatabricksAuthService:
                 return credentials["api_key"]
             elif credentials.get("client_id") and credentials.get("client_secret"):
                 return self._acquire_token_with_service_principal(
-                    credentials["client_id"],
-                    credentials["client_secret"]
+                    credentials["client_id"], credentials["client_secret"]
                 )
 
         # No valid credentials found
@@ -138,9 +137,7 @@ class DatabricksAuthService:
         )
 
     def _acquire_token_with_service_principal(
-        self,
-        client_id: Optional[str] = None,
-        client_secret: Optional[str] = None
+        self, client_id: Optional[str] = None, client_secret: Optional[str] = None
     ) -> str:
         """
         Acquire access token using Databricks OAuth with Service Principal.
@@ -192,9 +189,7 @@ class DatabricksAuthService:
                 self.logger.info("Access token acquired successfully")
                 return result["access_token"]
             else:
-                raise Exception(
-                    f"Failed to acquire access token. Response: {result}"
-                )
+                raise Exception(f"Failed to acquire access token. Response: {result}")
 
         except requests.exceptions.RequestException as ex:
             self.logger.error(f"Token acquisition failed: {str(ex)}")
@@ -269,7 +264,8 @@ class DatabricksAuthService:
         Returns:
             Dict with Authorization header and token
         """
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
+
         token = self.get_access_token()
         return {
             "Authorization": f"Bearer {token}",

@@ -3,19 +3,18 @@ from typing import Annotated, Any, Dict, List
 
 from fastapi import APIRouter, Depends, status
 
-from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
-
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
 from src.core.permissions import check_role_in_context, is_system_admin
 from src.models.engine_config import EngineConfig
 from src.schemas.engine_config import (
-    KasalFlowConfigUpdate,
     EngineConfigCreate,
     EngineConfigListResponse,
     EngineConfigResponse,
     EngineConfigToggleUpdate,
     EngineConfigUpdate,
     EngineConfigValueUpdate,
+    KasalFlowConfigUpdate,
     OtelAppTelemetryConfigUpdate,
 )
 from src.services.settings.engine import EngineConfigService
@@ -156,7 +155,9 @@ async def get_engine_config_by_key(
     config = await service.find_by_engine_and_key(engine_name, config_key)
     if not config:
         logger.warning(f"Engine configuration {engine_name}.{config_key} not found")
-        raise NotFoundError(f"Engine configuration {engine_name}.{config_key} not found")
+        raise NotFoundError(
+            f"Engine configuration {engine_name}.{config_key} not found"
+        )
 
     return config
 
@@ -345,7 +346,9 @@ async def update_config_value(
         logger.warning(
             f"Engine configuration {engine_name}.{config_key} not found for value update"
         )
-        raise NotFoundError(f"Engine configuration {engine_name}.{config_key} not found")
+        raise NotFoundError(
+            f"Engine configuration {engine_name}.{config_key} not found"
+        )
 
     logger.info(f"Engine config {engine_name}.{config_key} value updated successfully")
     return updated_config
@@ -368,7 +371,9 @@ async def get_kasal_flow_enabled(
     """
     # Check permissions - only system admins can access engine configuration
     if not is_system_admin(group_context):
-        raise ForbiddenError("Only system administrators can access engine configuration")
+        raise ForbiddenError(
+            "Only system administrators can access engine configuration"
+        )
 
     logger.info("API call: GET /engine-config/kasal/flow-enabled")
 
@@ -397,7 +402,9 @@ async def set_kasal_flow_enabled(
     """
     # Check permissions - only system admins can manage engine configuration
     if not is_system_admin(group_context):
-        raise ForbiddenError("Only system administrators can manage engine configuration")
+        raise ForbiddenError(
+            "Only system administrators can manage engine configuration"
+        )
 
     logger.info(
         f"API call: PATCH /engine-config/kasal/flow-enabled - enabled={config_data.flow_enabled}"
@@ -421,11 +428,16 @@ async def get_otel_app_telemetry_enabled(
     Only system administrators can access this configuration.
     """
     if not is_system_admin(group_context):
-        raise ForbiddenError("Only system administrators can access OTel App Telemetry configuration")
+        raise ForbiddenError(
+            "Only system administrators can access OTel App Telemetry configuration"
+        )
 
     enabled = await service.get_otel_app_telemetry_enabled()
     log_level = await service.get_otel_app_telemetry_log_level()
-    return {"otel_app_telemetry_enabled": enabled, "otel_app_telemetry_log_level": log_level}
+    return {
+        "otel_app_telemetry_enabled": enabled,
+        "otel_app_telemetry_log_level": log_level,
+    }
 
 
 @router.patch("/kasal/otel-app-telemetry")
@@ -441,9 +453,12 @@ async def set_otel_app_telemetry_enabled(
     tables via the Databricks App Telemetry sidecar.
     """
     if not is_system_admin(group_context):
-        raise ForbiddenError("Only system administrators can manage OTel App Telemetry configuration")
+        raise ForbiddenError(
+            "Only system administrators can manage OTel App Telemetry configuration"
+        )
 
     from src.core.logger import LoggerManager
+
     logger_manager = LoggerManager.get_instance()
 
     result: dict = {"success": True}

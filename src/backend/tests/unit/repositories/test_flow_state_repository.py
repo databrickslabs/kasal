@@ -4,11 +4,12 @@ Unit tests for FlowStateRepository.
 Covers add_state (append snapshot) and get_latest_state_json (latest-wins / None)
 against a real in-memory SQLite session.
 """
+
 import json
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.models.flow_state import FlowState

@@ -1,6 +1,7 @@
 """
 Database Management API Router.
 """
+
 import asyncio
 import json
 import os
@@ -102,7 +103,9 @@ async def export_database(
     )
 
     if not is_system_admin:
-        raise ForbiddenError("Only system administrators can export the database. This operation exports data from all workspaces.")
+        raise ForbiddenError(
+            "Only system administrators can export the database. This operation exports data from all workspaces."
+        )
 
     # CRITICAL: Set UserContext so PAT lookup can find group_id
     # The auth chain needs UserContext.get_group_context() to return the group_id
@@ -167,7 +170,9 @@ async def import_database(
     )
 
     if not is_system_admin:
-        raise ForbiddenError("Only system administrators can import database backups. This operation replaces data from all workspaces.")
+        raise ForbiddenError(
+            "Only system administrators can import database backups. This operation replaces data from all workspaces."
+        )
 
     # CRITICAL: Set UserContext so PAT lookup can find group_id
     # The auth chain needs UserContext.get_group_context() to return the group_id
@@ -374,9 +379,9 @@ async def debug_permissions(
                         "auth_method": auth_method,
                         "has_service_principal": bool(client_id and client_secret),
                         "has_user_token": bool(user_token),
-                        "token_preview": auth_token[:20] + "..."
-                        if auth_token
-                        else None,
+                        "token_preview": (
+                            auth_token[:20] + "..." if auth_token else None
+                        ),
                         "current_user": user_email,
                         "note": "Check if service principal credentials are working",
                     }
@@ -439,10 +444,12 @@ async def debug_headers(
 
     # Check ALL headers, not just filtered ones
     all_headers = {
-        k: v[:30] + "..."
-        if len(v) > 30
-        and any(word in k.lower() for word in ["token", "auth", "key", "secret"])
-        else v
+        k: (
+            v[:30] + "..."
+            if len(v) > 30
+            and any(word in k.lower() for word in ["token", "auth", "key", "secret"])
+            else v
+        )
         for k, v in headers_dict.items()
     }
 
@@ -466,18 +473,18 @@ async def debug_headers(
         "has_authorization_header": bool(auth_header),
         "authorization_is_bearer": has_bearer,
         "group_context_email": group_context.group_email if group_context else None,
-        "group_context_has_token": bool(group_context.access_token)
-        if group_context
-        else False,
+        "group_context_has_token": (
+            bool(group_context.access_token) if group_context else False
+        ),
         "environment": {
             "DATABRICKS_APP_NAME": os.getenv("DATABRICKS_APP_NAME"),
             "DATABRICKS_HOST": databricks_host_unified,
-            "DATABRICKS_CLIENT_ID": "present"
-            if os.getenv("DATABRICKS_CLIENT_ID")
-            else "missing",
-            "DATABRICKS_CLIENT_SECRET": "present"
-            if os.getenv("DATABRICKS_CLIENT_SECRET")
-            else "missing",
+            "DATABRICKS_CLIENT_ID": (
+                "present" if os.getenv("DATABRICKS_CLIENT_ID") else "missing"
+            ),
+            "DATABRICKS_CLIENT_SECRET": (
+                "present" if os.getenv("DATABRICKS_CLIENT_SECRET") else "missing"
+            ),
             "is_databricks_apps": bool(os.getenv("DATABRICKS_APP_NAME")),
         },
     }
@@ -914,7 +921,9 @@ async def enable_lakebase_without_migration(
                 "Provide the endpoint manually or verify the instance exists."
             )
 
-    return await service.enable_lakebase(instance_name, endpoint, expand_schema=expand_schema)
+    return await service.enable_lakebase(
+        instance_name, endpoint, expand_schema=expand_schema
+    )
 
 
 @router.post("/lakebase/test-connection", dependencies=_SYSTEM_ADMIN_ONLY)

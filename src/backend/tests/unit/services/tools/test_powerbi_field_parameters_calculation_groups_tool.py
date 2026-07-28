@@ -14,8 +14,9 @@ Strategy:
 
 import base64
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.tools.powerbi_field_parameters_calculation_groups_tool import (
     PowerBIFieldParametersCalculationGroupsSchema,
@@ -51,7 +52,7 @@ def _make_field_parameter_tmdl(table_name: str, items: list) -> str:
     source_items = []
     for label, src_table, src_measure, ordinal in items:
         source_items.append(
-            f'("{label}", NAMEOF(\'{src_table}\'[{src_measure}]), {ordinal})'
+            f"(\"{label}\", NAMEOF('{src_table}'[{src_measure}]), {ordinal})"
         )
     source_str = ", ".join(source_items)
     lines += [
@@ -89,6 +90,7 @@ def _make_measure_tmdl(table_name: str, measures: list) -> str:
 # Schema tests
 # ===========================================================================
 
+
 class TestPowerBIFieldParametersCalculationGroupsSchema:
     def test_constructs_with_no_args(self):
         # All remaining fields have defaults; plumbing comes from tool_configs.
@@ -99,10 +101,20 @@ class TestPowerBIFieldParametersCalculationGroupsSchema:
         """Connection/auth/LLM plumbing is injected via tool_configs (__init__),
         never exposed as LLM-fillable schema fields."""
         forbidden = {
-            "client_secret", "password", "access_token", "llm_token",
-            "api_key", "token", "tenant_id", "client_id", "username",
-            "auth_method", "workspace_id", "dataset_id",
-            "llm_workspace_url", "llm_model",
+            "client_secret",
+            "password",
+            "access_token",
+            "llm_token",
+            "api_key",
+            "token",
+            "tenant_id",
+            "client_id",
+            "username",
+            "auth_method",
+            "workspace_id",
+            "dataset_id",
+            "llm_workspace_url",
+            "llm_model",
         }
         leaked = forbidden & set(
             PowerBIFieldParametersCalculationGroupsSchema.model_fields
@@ -138,6 +150,7 @@ class TestPowerBIFieldParametersCalculationGroupsSchema:
 # Init tests
 # ===========================================================================
 
+
 class TestFieldParamsToolInit:
     def test_tool_name(self):
         tool = PowerBIFieldParametersCalculationGroupsTool()
@@ -159,7 +172,9 @@ class TestFieldParamsToolInit:
         assert tool._default_config["dataset_id"] == DS_ID
 
     def test_placeholder_filtered_on_init(self):
-        tool = PowerBIFieldParametersCalculationGroupsTool(workspace_id="{workspace_id}")
+        tool = PowerBIFieldParametersCalculationGroupsTool(
+            workspace_id="{workspace_id}"
+        )
         assert tool._default_config["workspace_id"] is None
 
     def test_target_catalog_default(self):
@@ -184,6 +199,7 @@ class TestFieldParamsToolInit:
 # ===========================================================================
 # _resolve_placeholder tests
 # ===========================================================================
+
 
 class TestFieldParamsResolvePlaceholder:
     def setup_method(self):
@@ -214,6 +230,7 @@ class TestFieldParamsResolvePlaceholder:
 # ===========================================================================
 # _run validation tests
 # ===========================================================================
+
 
 class TestFieldParamsRunValidation:
     def test_missing_workspace_returns_error(self):
@@ -248,8 +265,10 @@ class TestFieldParamsRunValidation:
         result = tool._run()
         assert "error" in result.lower()
 
-    @patch("src.services.tools.powerbi_auth_utils.validate_auth_config",
-           return_value=(True, ""))
+    @patch(
+        "src.services.tools.powerbi_auth_utils.validate_auth_config",
+        return_value=(True, ""),
+    )
     def test_valid_auth_calls_run_sync(self, _validate):
         tool = _make_tool()
         with patch.object(tool, "_run_sync", return_value="extracted") as mock_sync:
@@ -257,8 +276,10 @@ class TestFieldParamsRunValidation:
         mock_sync.assert_called_once()
         assert result == "extracted"
 
-    @patch("src.services.tools.powerbi_auth_utils.validate_auth_config",
-           return_value=(True, ""))
+    @patch(
+        "src.services.tools.powerbi_auth_utils.validate_auth_config",
+        return_value=(True, ""),
+    )
     def test_exception_returns_error_string(self, _validate):
         tool = _make_tool()
         with patch.object(tool, "_run_sync", side_effect=Exception("failure")):
@@ -269,6 +290,7 @@ class TestFieldParamsRunValidation:
 # ===========================================================================
 # _parse_field_parameters tests
 # ===========================================================================
+
 
 class TestParseFieldParameters:
     def setup_method(self):
@@ -301,7 +323,7 @@ class TestParseFieldParameters:
             [
                 ("Revenue", "Sales", "Total Revenue", 0),
                 ("Profit", "Sales", "Gross Profit", 1),
-            ]
+            ],
         )
         part = self._make_part("Measure_Selector", tmdl)
         result = self.tool._parse_field_parameters([part])
@@ -317,7 +339,7 @@ class TestParseFieldParameters:
             [
                 ("Profit", "Sales", "Profit", 1),
                 ("Revenue", "Sales", "Revenue", 0),
-            ]
+            ],
         )
         part = self._make_part("KPI_Selector", tmdl)
         result = self.tool._parse_field_parameters([part])
@@ -340,6 +362,7 @@ class TestParseFieldParameters:
 # ===========================================================================
 # _parse_calculation_groups tests
 # ===========================================================================
+
 
 class TestParseCalculationGroups:
     def setup_method(self):
@@ -367,8 +390,11 @@ class TestParseCalculationGroups:
             precedence=1,
             items=[
                 ("Current Period", "SELECTEDMEASURE()"),
-                ("Prior Period", "CALCULATE(SELECTEDMEASURE(), DATEADD('Date'[Date], -1, MONTH))"),
-            ]
+                (
+                    "Prior Period",
+                    "CALCULATE(SELECTEDMEASURE(), DATEADD('Date'[Date], -1, MONTH))",
+                ),
+            ],
         )
         part = self._make_part("Time_Calculations", tmdl)
         result = self.tool._parse_calculation_groups([part])
@@ -385,7 +411,7 @@ class TestParseCalculationGroups:
             items=[
                 ("YTD", "CALCULATE(SELECTEDMEASURE(), DATESYTD('Date'[Date]))"),
                 ("MTD", "CALCULATE(SELECTEDMEASURE(), DATESMTD('Date'[Date]))"),
-            ]
+            ],
         )
         part = self._make_part("Time_Intel", tmdl)
         result = self.tool._parse_calculation_groups([part])
@@ -408,6 +434,7 @@ class TestParseCalculationGroups:
 # _parse_all_measures tests
 # ===========================================================================
 
+
 class TestParseAllMeasures:
     def setup_method(self):
         self.tool = PowerBIFieldParametersCalculationGroupsTool()
@@ -425,7 +452,7 @@ class TestParseAllMeasures:
     def test_measures_extracted(self):
         tmdl = _make_measure_tmdl(
             "Sales",
-            [("Total Revenue", "SUM(Sales[Amount])"), ("Profit", "SUM(Sales[Profit])")]
+            [("Total Revenue", "SUM(Sales[Amount])"), ("Profit", "SUM(Sales[Profit])")],
         )
         part = self._make_part("Sales", tmdl)
         result = self.tool._parse_all_measures([part])
@@ -467,6 +494,7 @@ class TestParseAllMeasures:
 # _get_referenced_measures tests
 # ===========================================================================
 
+
 class TestGetReferencedMeasures:
     def setup_method(self):
         self.tool = PowerBIFieldParametersCalculationGroupsTool()
@@ -484,7 +512,11 @@ class TestGetReferencedMeasures:
             }
         ]
         all_measures = {
-            "Total Revenue": {"name": "Total Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}
+            "Total Revenue": {
+                "name": "Total Revenue",
+                "table": "Sales",
+                "expression": "SUM(Sales[Amount])",
+            }
         }
         result = self.tool._get_referenced_measures(field_params, all_measures)
         assert len(result) == 1
@@ -513,7 +545,11 @@ class TestGetReferencedMeasures:
             }
         ]
         all_measures = {
-            "Revenue": {"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}
+            "Revenue": {
+                "name": "Revenue",
+                "table": "Sales",
+                "expression": "SUM(Sales[Amount])",
+            }
         }
         result = self.tool._get_referenced_measures(field_params, all_measures)
         assert len(result) == 1
@@ -524,8 +560,16 @@ class TestGetReferencedMeasures:
             {"items": [{"source_table": "Sales", "source_measure": "Profit"}]},
         ]
         all_measures = {
-            "Revenue": {"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"},
-            "Profit": {"name": "Profit", "table": "Sales", "expression": "SUM(Sales[Profit])"},
+            "Revenue": {
+                "name": "Revenue",
+                "table": "Sales",
+                "expression": "SUM(Sales[Amount])",
+            },
+            "Profit": {
+                "name": "Profit",
+                "table": "Sales",
+                "expression": "SUM(Sales[Profit])",
+            },
         }
         result = self.tool._get_referenced_measures(field_params, all_measures)
         names = [r["name"] for r in result]
@@ -536,6 +580,7 @@ class TestGetReferencedMeasures:
 # ===========================================================================
 # _format_markdown_output tests
 # ===========================================================================
+
 
 class TestFormatMarkdownOutput:
     def setup_method(self):
@@ -553,7 +598,10 @@ class TestFormatMarkdownOutput:
         return {
             "name": name,
             "precedence": precedence,
-            "items": [{"name": n, "expression": e, "ordinal": i} for i, (n, e) in enumerate(items)],
+            "items": [
+                {"name": n, "expression": e, "ordinal": i}
+                for i, (n, e) in enumerate(items)
+            ],
         }
 
     def test_header_included(self):
@@ -570,9 +618,17 @@ class TestFormatMarkdownOutput:
         assert DS_ID in result
 
     def test_field_parameter_shown(self):
-        fp = self._make_fp("Measure Selector", [
-            {"ordinal": 0, "label": "Revenue", "source_table": "Sales", "source_measure": "Total Revenue"},
-        ])
+        fp = self._make_fp(
+            "Measure Selector",
+            [
+                {
+                    "ordinal": 0,
+                    "label": "Revenue",
+                    "source_table": "Sales",
+                    "source_measure": "Total Revenue",
+                },
+            ],
+        )
         result = self.tool._format_markdown_output(
             WS_ID, DS_ID, [fp], [], [], "main", "default", True, True
         )
@@ -580,7 +636,11 @@ class TestFormatMarkdownOutput:
         assert "Revenue" in result
 
     def test_calculation_group_shown(self):
-        cg = self._make_cg("Time Calc", 1, [("YTD", "CALCULATE(SELECTEDMEASURE(), DATESYTD('Date'[Date]))")])
+        cg = self._make_cg(
+            "Time Calc",
+            1,
+            [("YTD", "CALCULATE(SELECTEDMEASURE(), DATESYTD('Date'[Date]))")],
+        )
         result = self.tool._format_markdown_output(
             WS_ID, DS_ID, [], [cg], [], "main", "default", True, True
         )
@@ -608,7 +668,11 @@ class TestFormatMarkdownOutput:
 
     def test_referenced_measures_shown(self):
         measures = [
-            {"name": "Total Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}
+            {
+                "name": "Total Revenue",
+                "table": "Sales",
+                "expression": "SUM(Sales[Amount])",
+            }
         ]
         result = self.tool._format_markdown_output(
             WS_ID, DS_ID, [], [], measures, "main", "default", True, True
@@ -616,9 +680,7 @@ class TestFormatMarkdownOutput:
         assert "Total Revenue" in result
 
     def test_measure_without_expression_shows_placeholder(self):
-        measures = [
-            {"name": "Missing Measure", "table": "Sales", "expression": None}
-        ]
+        measures = [{"name": "Missing Measure", "table": "Sales", "expression": None}]
         result = self.tool._format_markdown_output(
             WS_ID, DS_ID, [], [], measures, "main", "default", True, True
         )
@@ -628,6 +690,7 @@ class TestFormatMarkdownOutput:
 # ===========================================================================
 # _format_json_output tests
 # ===========================================================================
+
 
 class TestFormatJsonOutput:
     def setup_method(self):
@@ -651,7 +714,14 @@ class TestFormatJsonOutput:
     def test_field_parameters_in_output(self):
         fp = {
             "name": "Selector",
-            "items": [{"ordinal": 0, "label": "Revenue", "source_table": "Sales", "source_measure": "Revenue"}],
+            "items": [
+                {
+                    "ordinal": 0,
+                    "label": "Revenue",
+                    "source_table": "Sales",
+                    "source_measure": "Revenue",
+                }
+            ],
             "associated_measure": None,
             "measure_expression": None,
         }
@@ -678,6 +748,7 @@ class TestFormatJsonOutput:
 # _run_sync tests
 # ===========================================================================
 
+
 class TestFieldParamsRunSync:
     def test_executes_coroutine(self):
         tool = PowerBIFieldParametersCalculationGroupsTool()
@@ -702,29 +773,34 @@ class TestFieldParamsRunSync:
 # Integration: _run with mocked _run_sync
 # ===========================================================================
 
+
 class TestFieldParamsRunIntegration:
-    @patch("src.services.tools.powerbi_auth_utils.validate_auth_config",
-           return_value=(True, ""))
+    @patch(
+        "src.services.tools.powerbi_auth_utils.validate_auth_config",
+        return_value=(True, ""),
+    )
     def test_run_returns_run_sync_result(self, _validate):
         tool = _make_tool()
         with patch.object(tool, "_run_sync", return_value="# markdown output"):
             result = tool._run()
         assert result == "# markdown output"
 
-    @patch("src.services.tools.powerbi_auth_utils.validate_auth_config",
-           return_value=(True, ""))
+    @patch(
+        "src.services.tools.powerbi_auth_utils.validate_auth_config",
+        return_value=(True, ""),
+    )
     def test_run_with_execution_inputs(self, _validate):
         tool = PowerBIFieldParametersCalculationGroupsTool(
             workspace_id="{ws}", dataset_id="{ds}", access_token=ACCESS_TOKEN
         )
         with patch.object(tool, "_run_sync", return_value="resolved result"):
-            result = tool._run(
-                execution_inputs={"ws": WS_ID, "ds": DS_ID}
-            )
+            result = tool._run(execution_inputs={"ws": WS_ID, "ds": DS_ID})
         assert isinstance(result, str)
 
-    @patch("src.services.tools.powerbi_auth_utils.validate_auth_config",
-           return_value=(True, ""))
+    @patch(
+        "src.services.tools.powerbi_auth_utils.validate_auth_config",
+        return_value=(True, ""),
+    )
     def test_run_with_json_output_format(self, _validate):
         tool = _make_tool(output_format="json")
         json_output = json.dumps({"field_parameters": [], "calculation_groups": []})
@@ -739,24 +815,32 @@ class TestSqlOutputEscaping:
 
     def _malicious(self):
         # a field-parameter label crafted to break out of the VALUES literal
-        return [{
-            "name": "Sel",
-            "items": [{
-                "label": "x'), ('evil", "source_table": "t",
-                "source_measure": "m", "ordinal": 0,
-            }],
-        }]
+        return [
+            {
+                "name": "Sel",
+                "items": [
+                    {
+                        "label": "x'), ('evil",
+                        "source_table": "t",
+                        "source_measure": "m",
+                        "ordinal": 0,
+                    }
+                ],
+            }
+        ]
 
     def test_field_param_label_is_escaped(self):
         tool = _make_tool()
-        out = tool._format_sql_output(
-            self._malicious(), [], [], "main", "default")
+        out = tool._format_sql_output(self._malicious(), [], [], "main", "default")
         # the single quote must be doubled, not left to break out
         assert "x''), (''evil" in out
         assert "'x'), ('evil'" not in out  # the raw breakout must NOT appear
 
     def test_module_helpers_escape(self):
         from src.services.tools.powerbi_field_parameters_calculation_groups_tool import (
-            _sql_lit, _sql_int)
+            _sql_int,
+            _sql_lit,
+        )
+
         assert _sql_lit("a'b") == "'a''b'"
         assert _sql_int("7") == 7 and _sql_int("nope", 3) == 3

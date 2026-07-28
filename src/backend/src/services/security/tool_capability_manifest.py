@@ -26,11 +26,14 @@ logger = logging.getLogger(__name__)
 
 class ToolCapability(Flag):
     """Capability flags classifying what a tool can do."""
+
     NONE = 0
-    READS_SENSITIVE_DATA = auto()           # reads internal/confidential data
-    INGESTS_UNTRUSTED_CONTENT = auto()      # fetches external, attacker-reachable content
-    EXTERNAL_COMMUNICATION = auto()         # makes outbound network requests
-    PERFORMS_DESTRUCTIVE_OPERATIONS = auto()  # triggers irreversible actions (delete, run, deploy)
+    READS_SENSITIVE_DATA = auto()  # reads internal/confidential data
+    INGESTS_UNTRUSTED_CONTENT = auto()  # fetches external, attacker-reachable content
+    EXTERNAL_COMMUNICATION = auto()  # makes outbound network requests
+    PERFORMS_DESTRUCTIVE_OPERATIONS = (
+        auto()
+    )  # triggers irreversible actions (delete, run, deploy)
 
 
 # Shorthand aliases for readability in the registry
@@ -43,55 +46,52 @@ _D = ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS
 # (CrewAI tool objects expose a snake_case .name that differs from the class name)
 TOOL_CAPABILITIES: Dict[str, ToolCapability] = {
     # Databricks / internal data tools
-    "GenieTool":                                      _S | _E,
-    "genie_tool":                                     _S | _E,  # runtime name
-    "DatabricksJobsTool":                             _S | _E | _D,   # can trigger job runs
-    "databricks_jobs_tool":                           _S | _E | _D,   # runtime name
-    "DatabricksKnowledgeSearchTool":                  _S | _E,
-    "databricks_knowledge_search_tool":               _S | _E,  # runtime name
+    "GenieTool": _S | _E,
+    "genie_tool": _S | _E,  # runtime name
+    "DatabricksJobsTool": _S | _E | _D,  # can trigger job runs
+    "databricks_jobs_tool": _S | _E | _D,  # runtime name
+    "DatabricksKnowledgeSearchTool": _S | _E,
+    "databricks_knowledge_search_tool": _S | _E,  # runtime name
     # Agent Bricks endpoints are opaque Mosaic AI agents: behind one endpoint
     # there may be Genie/Vector Search/UC reads AND web browsing AND outbound
     # calls. We can't see inside, so we assume all three capabilities — one
     # endpoint can trip the trifecta on its own.
-    "AgentBricksTool":                                _S | _U | _E,
-    "agent_bricks_tool":                              _S | _U | _E,  # runtime name
-
+    "AgentBricksTool": _S | _U | _E,
+    "agent_bricks_tool": _S | _U | _E,  # runtime name
     # Web / external search tools (ingest untrusted content)
-    "SerperDevTool":                                  _U | _E,
-    "search_the_internet_with_serper":                _U | _E,  # runtime name (snake_case)
-    "Search the internet with Serper":                _U | _E,  # runtime name (display)
-    "PerplexityTool":                                 _U | _E,
-    "perplexity_tool":                                _U | _E,  # runtime name
-    "ScrapeWebsiteTool":                              _U | _E,
-    "scrape_website":                                 _U | _E,  # runtime name
-
+    "SerperDevTool": _U | _E,
+    "search_the_internet_with_serper": _U | _E,  # runtime name (snake_case)
+    "Search the internet with Serper": _U | _E,  # runtime name (display)
+    "PerplexityTool": _U | _E,
+    "perplexity_tool": _U | _E,  # runtime name
+    "ScrapeWebsiteTool": _U | _E,
+    "scrape_website": _U | _E,  # runtime name
     # Image generation (external API, no sensitive read)
-    "Image Generation Tool":                          _E,
-
+    "Image Generation Tool": _E,
     # MCP (may ingest untrusted content from MCP servers)
-    "MCPTool":                                        _U | _E,
-
+    "MCPTool": _U | _E,
     # Power BI tools (read internal analytics data)
-    "PowerBIAnalysisTool":                            _S | _E,
-    "Power BI Comprehensive Analysis Tool":           _S | _E,
-    "Power BI Intelligent Analysis (Copilot-Style)":  _S | _E,   # runtime name for PowerBIAnalysisTool
-    "PowerBIConnectorTool":                           _S | _E,
-    "Power BI Connector":                             _S | _E,   # runtime name for PowerBIConnectorTool
-    "Measure Conversion Pipeline":                    _S | _E,
-    "M-Query Conversion Pipeline":                    _S | _E,
-    "Power BI Relationships Tool":                    _S | _E,
-    "Power BI Hierarchies Tool":                      _S | _E,
+    "PowerBIAnalysisTool": _S | _E,
+    "Power BI Comprehensive Analysis Tool": _S | _E,
+    "Power BI Intelligent Analysis (Copilot-Style)": _S
+    | _E,  # runtime name for PowerBIAnalysisTool
+    "PowerBIConnectorTool": _S | _E,
+    "Power BI Connector": _S | _E,  # runtime name for PowerBIConnectorTool
+    "Measure Conversion Pipeline": _S | _E,
+    "M-Query Conversion Pipeline": _S | _E,
+    "Power BI Relationships Tool": _S | _E,
+    "Power BI Hierarchies Tool": _S | _E,
     "Power BI Field Parameters & Calculation Groups Tool": _S | _E,
-    "Power BI Report References Tool":                _S | _E,
-
+    "Power BI Report References Tool": _S | _E,
     # PowerBI tools added in recent PRs — were missing from original manifest
-    "Power BI Semantic Model Fetcher":                _S | _E,   # fetches PBI model metadata via API
-    "Power BI Semantic Model DAX Generator":          _S | _E,   # reads + executes DAX against PBI
-    "Power BI Metadata Reducer":                      _S | _E,   # processes PBI semantic model data
-    "Power BI DAX Executor":                          _S | _E,   # executes DAX against PBI — reads sensitive data + external comm
-
+    "Power BI Semantic Model Fetcher": _S | _E,  # fetches PBI model metadata via API
+    "Power BI Semantic Model DAX Generator": _S
+    | _E,  # reads + executes DAX against PBI
+    "Power BI Metadata Reducer": _S | _E,  # processes PBI semantic model data
+    "Power BI DAX Executor": _S
+    | _E,  # executes DAX against PBI — reads sensitive data + external comm
     # DatabricksJobsTool runtime name (BaseTool.name differs from class name)
-    "Databricks Jobs Manager":                        _S | _E | _D,
+    "Databricks Jobs Manager": _S | _E | _D,
 }
 
 
@@ -133,6 +133,7 @@ def classify_mcp_server(name: str) -> ToolCapability:
 @dataclass
 class TrifectaAssessment:
     """Result of a lethal-trifecta capability check across a set of tools."""
+
     has_trifecta: bool
     reads_sensitive: bool
     ingests_untrusted: bool
@@ -226,7 +227,8 @@ def assess_destructive_risk(tool_names: Iterable[str]) -> List[str]:
         List of tool names classified as destructive (may be empty).
     """
     return [
-        name for name in tool_names
+        name
+        for name in tool_names
         if TOOL_CAPABILITIES.get(name, ToolCapability.NONE)
         & ToolCapability.PERFORMS_DESTRUCTIVE_OPERATIONS
     ]
@@ -235,6 +237,7 @@ def assess_destructive_risk(tool_names: Iterable[str]) -> List[str]:
 @dataclass
 class MixedTaskAssessment:
     """Result of checking whether a single task mixes untrusted input with sensitive/destructive tools."""
+
     is_mixed: bool
     untrusted_tools: List[str]
     sensitive_tools: List[str]
@@ -242,7 +245,9 @@ class MixedTaskAssessment:
     task_name: str = ""
 
 
-def assess_mixed_task(tool_names: Iterable[str], task_name: str = "") -> MixedTaskAssessment:
+def assess_mixed_task(
+    tool_names: Iterable[str], task_name: str = ""
+) -> MixedTaskAssessment:
     """
     Detect the anti-pattern where a single task combines untrusted-input tools
     (_U) with sensitive-data or destructive tools (_S or _D).
@@ -330,7 +335,7 @@ def apply_spotlighting_wrappers(crew: Any) -> int:
     wrapped_count = 0
     for agent in getattr(crew, "agents", []):
         new_tools = []
-        for tool in (getattr(agent, "tools", None) or []):
+        for tool in getattr(agent, "tools", None) or []:
             tool_name = getattr(tool, "name", "")
             caps = TOOL_CAPABILITIES.get(tool_name, ToolCapability.NONE)
             if caps & ToolCapability.INGESTS_UNTRUSTED_CONTENT:
@@ -340,6 +345,7 @@ def apply_spotlighting_wrappers(crew: Any) -> int:
                     def _wrapped(*args, **kwargs):
                         result = fn(*args, **kwargs)
                         return f"<<\n{result}\n>>"
+
                     return _wrapped
 
                 tool._run = make_wrapper(original_run)
@@ -378,26 +384,34 @@ def run_crew_security_checks(crew: Any, context: str = "") -> None:
 
     # 2. Collect all tool names (task-level + agent-level)
     try:
-        tool_names = list({
-            t.name
-            for task in getattr(crew, "tasks", [])
-            for t in (getattr(task, "tools", None) or [])
-        } | {
-            t.name
-            for agent in getattr(crew, "agents", [])
-            for t in (getattr(agent, "tools", None) or [])
-        })
+        tool_names = list(
+            {
+                t.name
+                for task in getattr(crew, "tasks", [])
+                for t in (getattr(task, "tools", None) or [])
+            }
+            | {
+                t.name
+                for agent in getattr(crew, "agents", [])
+                for t in (getattr(agent, "tools", None) or [])
+            }
+        )
 
         ctx = f" [{context}]" if context else ""
         n_tasks = len(getattr(crew, "tasks", []))
 
         # 3. Crew-wide trifecta
         _trifecta = assess_trifecta(tool_names)
-        log_trifecta_warning(_trifecta, context=f"{context} (crew-wide)" if context else "crew-wide")
+        log_trifecta_warning(
+            _trifecta, context=f"{context} (crew-wide)" if context else "crew-wide"
+        )
 
         # 4. Destructive tools
         _destructive = assess_destructive_risk(tool_names)
-        log_destructive_warning(_destructive, context=f"{context}" if context else f"crew with {n_tasks} task(s)")
+        log_destructive_warning(
+            _destructive,
+            context=f"{context}" if context else f"crew with {n_tasks} task(s)",
+        )
 
         # 5. Per-task trifecta + mixed-task check
         for task in getattr(crew, "tasks", []):

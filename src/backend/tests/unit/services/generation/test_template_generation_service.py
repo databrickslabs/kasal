@@ -11,16 +11,16 @@ Covers:
 """
 
 import json
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.schemas.template_generation import (
     TemplateGenerationRequest,
     TemplateGenerationResponse,
 )
 from src.services.generation.templates import TemplateGenerationService
-
 
 # ---------------------------------------------------------------------------
 # Helpers / Fixtures
@@ -73,9 +73,7 @@ def service(mock_session):
     Build a TemplateGenerationService with patched LLMLogService
     so we never touch the real DB for logging.
     """
-    with patch(
-        "src.services.generation.templates.LLMLogService"
-    ) as MockLogService:
+    with patch("src.services.generation.templates.LLMLogService") as MockLogService:
         mock_log_instance = MagicMock()
         mock_log_instance.create_log = AsyncMock()
         MockLogService.return_value = mock_log_instance
@@ -100,9 +98,7 @@ class TestInit:
 
     def test_init_creates_log_service(self):
         session = MagicMock()
-        with patch(
-            "src.services.generation.templates.LLMLogService"
-        ) as MockLog:
+        with patch("src.services.generation.templates.LLMLogService") as MockLog:
             svc = TemplateGenerationService(session, group_id=VALID_GROUP_ID)
         MockLog.assert_called_once_with(session)
         assert svc.log_service is MockLog.return_value
@@ -164,9 +160,7 @@ class TestLogLLMInteraction:
     @pytest.mark.asyncio
     async def test_log_swallows_exception(self, service):
         """Logging failures must not propagate to callers."""
-        service.log_service.create_log = AsyncMock(
-            side_effect=RuntimeError("DB down")
-        )
+        service.log_service.create_log = AsyncMock(side_effect=RuntimeError("DB down"))
 
         # Should NOT raise
         await service._log_llm_interaction(
@@ -191,15 +185,9 @@ class TestGenerateTemplatesHappyPath:
         request = _build_request()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -237,15 +225,9 @@ class TestGenerateTemplatesHappyPath:
         request = _build_request()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -278,15 +260,9 @@ class TestGenerateTemplatesHappyPath:
         request = _build_request()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -320,15 +296,9 @@ class TestGenerateTemplatesHappyPath:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -373,9 +343,7 @@ class TestGenerateTemplatesModelConfigErrors:
         request = _build_request()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
         ):
             mock_mcs_inst = AsyncMock()
             mock_mcs_inst.get_model_config = AsyncMock(return_value=None)
@@ -390,9 +358,7 @@ class TestGenerateTemplatesModelConfigErrors:
         request = _build_request()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
         ):
             mock_mcs_inst = AsyncMock()
             mock_mcs_inst.get_model_config = AsyncMock(
@@ -413,12 +379,8 @@ class TestGenerateTemplatesPromptTemplateErrors:
         request = _build_request()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
         ):
             mock_mcs_inst = AsyncMock()
             mock_mcs_inst.get_model_config = AsyncMock(return_value=VALID_MODEL_CONFIG)
@@ -437,12 +399,8 @@ class TestGenerateTemplatesPromptTemplateErrors:
         request = _build_request()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
         ):
             mock_mcs_inst = AsyncMock()
             mock_mcs_inst.get_model_config = AsyncMock(return_value=VALID_MODEL_CONFIG)
@@ -466,15 +424,9 @@ class TestGenerateTemplatesLLMCompletionErrors:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
         ):
             mock_mcs_inst = AsyncMock()
             mock_mcs_inst.get_model_config = AsyncMock(return_value=VALID_MODEL_CONFIG)
@@ -484,7 +436,8 @@ class TestGenerateTemplatesLLMCompletionErrors:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.completion = AsyncMock(side_effect=RuntimeError("Rate limit exceeded")
+            MockLLM.completion = AsyncMock(
+                side_effect=RuntimeError("Rate limit exceeded")
             )
 
             with pytest.raises(ValueError, match="Failed to generate templates"):
@@ -505,15 +458,9 @@ class TestGenerateTemplatesLLMCompletionErrors:
         )
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
         ):
             mock_mcs_inst = AsyncMock()
             mock_mcs_inst.get_model_config = AsyncMock(return_value=VALID_MODEL_CONFIG)
@@ -523,8 +470,7 @@ class TestGenerateTemplatesLLMCompletionErrors:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.completion = AsyncMock(side_effect=RuntimeError("LLM timeout")
-            )
+            MockLLM.completion = AsyncMock(side_effect=RuntimeError("LLM timeout"))
 
             with pytest.raises(ValueError, match="Failed to generate templates"):
                 await service.generate_templates(request)
@@ -540,15 +486,9 @@ class TestGenerateTemplatesJSONParseErrors:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -581,15 +521,9 @@ class TestGenerateTemplatesJSONParseErrors:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -621,15 +555,9 @@ class TestGenerateTemplatesMissingFields:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -659,15 +587,9 @@ class TestGenerateTemplatesMissingFields:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -696,15 +618,9 @@ class TestGenerateTemplatesMissingFields:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -734,15 +650,9 @@ class TestGenerateTemplatesMissingFields:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -773,15 +683,9 @@ class TestGenerateTemplatesMissingFields:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -818,15 +722,9 @@ class TestGenerateTemplatesEdgeCases:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -861,15 +759,9 @@ class TestGenerateTemplatesEdgeCases:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -911,15 +803,9 @@ class TestGenerateTemplatesEdgeCases:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -954,15 +840,9 @@ class TestGenerateTemplatesEdgeCases:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -994,15 +874,9 @@ class TestGenerateTemplatesEdgeCases:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -1025,9 +899,7 @@ class TestGenerateTemplatesEdgeCases:
 
             await service.generate_templates(request)
 
-        mock_ts_inst.get_template_content.assert_awaited_once_with(
-            "generate_templates"
-        )
+        mock_ts_inst.get_template_content.assert_awaited_once_with("generate_templates")
 
     @pytest.mark.asyncio
     async def test_generic_exception_reraises(self, service):
@@ -1037,15 +909,9 @@ class TestGenerateTemplatesEdgeCases:
         request = _build_request()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -1086,15 +952,9 @@ class TestGenerateTemplatesEdgeCases:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,
@@ -1130,15 +990,9 @@ class TestGenerateTemplatesEdgeCases:
         request = _build_request()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
         ):
             mock_mcs_inst = AsyncMock()
             mock_mcs_inst.get_model_config = AsyncMock(return_value=VALID_MODEL_CONFIG)
@@ -1148,7 +1002,8 @@ class TestGenerateTemplatesEdgeCases:
             mock_ts_inst.get_template_content = AsyncMock(return_value=SYSTEM_MESSAGE)
             MockTS.return_value = mock_ts_inst
 
-            MockLLM.completion = AsyncMock(side_effect=ValueError("provider not supported")
+            MockLLM.completion = AsyncMock(
+                side_effect=ValueError("provider not supported")
             )
 
             with pytest.raises(ValueError, match="provider not supported"):
@@ -1163,15 +1018,9 @@ class TestGenerateTemplatesEdgeCases:
         service.log_service.create_log = AsyncMock()
 
         with (
-            patch(
-                "src.services.generation.templates.ModelConfigService"
-            ) as MockMCS,
-            patch(
-                "src.services.generation.templates.TemplateService"
-            ) as MockTS,
-            patch(
-                "src.services.generation.templates.LLMManager"
-            ) as MockLLM,
+            patch("src.services.generation.templates.ModelConfigService") as MockMCS,
+            patch("src.services.generation.templates.TemplateService") as MockTS,
+            patch("src.services.generation.templates.LLMManager") as MockLLM,
             patch(
                 "src.services.generation.templates.robust_json_parser"
             ) as mock_parser,

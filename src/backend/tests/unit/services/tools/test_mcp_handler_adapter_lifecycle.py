@@ -1,14 +1,17 @@
 """
 Coverage tests for src/services/tools/mcp_handler.py
 """
-import pytest
+
 import asyncio
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
+import pytest
+
 import src.services.tools.mcp_handler as mcp_handler
 
-
 # ─── helpers ─────────────────────────────────────────────────────────────────
+
 
 def reset_globals():
     mcp_handler._active_mcp_adapters.clear()
@@ -32,6 +35,7 @@ def make_mock_mcp_module(adapter=None):
 
 # ─── register_mcp_adapter ─────────────────────────────────────────────────────
 
+
 def test_register_mcp_adapter():
     reset_globals()
     adapter = MagicMock()
@@ -41,6 +45,7 @@ def test_register_mcp_adapter():
 
 
 # ─── get_or_create_mcp_adapter ────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_get_or_create_mcp_adapter_creates_new():
@@ -87,12 +92,16 @@ async def test_get_or_create_mcp_adapter_pools_per_identity():
     pooled.tools = [MagicMock()]
 
     import hashlib
+
     fp_a = hashlib.sha256(b"Bearer token-user-a").hexdigest()[:12]
     mcp_handler._mcp_connection_pool[f"http://example.com_token_{fp_a}"] = pooled
 
     # Same URL/auth_type, user A's token → reused.
-    params_a = {"url": "http://example.com", "auth_type": "token",
-                "headers": {"Authorization": "Bearer token-user-a"}}
+    params_a = {
+        "url": "http://example.com",
+        "auth_type": "token",
+        "headers": {"Authorization": "Bearer token-user-a"},
+    }
     assert await mcp_handler.get_or_create_mcp_adapter(params_a) is pooled
 
     # User B's token → different key → a NEW adapter (mocked), never A's.
@@ -103,8 +112,11 @@ async def test_get_or_create_mcp_adapter_pools_per_identity():
     fresh.initialize = AsyncMock()
     mock_module = MagicMock()
     mock_module.MCPAdapter = MagicMock(return_value=fresh)
-    params_b = {"url": "http://example.com", "auth_type": "token",
-                "headers": {"Authorization": "Bearer token-user-b"}}
+    params_b = {
+        "url": "http://example.com",
+        "auth_type": "token",
+        "headers": {"Authorization": "Bearer token-user-b"},
+    }
     with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
         assert await mcp_handler.get_or_create_mcp_adapter(params_b) is fresh
 
@@ -166,12 +178,15 @@ async def test_get_or_create_mcp_adapter_registers_with_id():
 
     params = {"url": "http://example.com", "auth_type": "none"}
     with patch.dict(sys.modules, {"src.services.tools.mcp_adapter": mock_module}):
-        result = await mcp_handler.get_or_create_mcp_adapter(params, adapter_id="adapter-42")
+        result = await mcp_handler.get_or_create_mcp_adapter(
+            params, adapter_id="adapter-42"
+        )
 
     assert "adapter-42" in mcp_handler._active_mcp_adapters
 
 
 # ─── stop_all_adapters ────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_stop_all_adapters_empty():
@@ -188,7 +203,9 @@ async def test_stop_all_adapters_stops_pooled_and_tracked():
     mcp_handler._mcp_connection_pool["key1"] = mock_adapter
     mcp_handler._active_mcp_adapters["id1"] = mock_adapter
 
-    with patch("src.services.tools.mcp_handler.stop_mcp_adapter", new=AsyncMock()) as mock_stop:
+    with patch(
+        "src.services.tools.mcp_handler.stop_mcp_adapter", new=AsyncMock()
+    ) as mock_stop:
         await mcp_handler.stop_all_adapters()
 
     assert len(mcp_handler._active_mcp_adapters) == 0
@@ -204,7 +221,9 @@ async def test_stop_all_adapters_handles_errors():
     async def raise_error(adapter):
         raise Exception("stop failed")
 
-    with patch("src.services.tools.mcp_handler.stop_mcp_adapter", side_effect=raise_error):
+    with patch(
+        "src.services.tools.mcp_handler.stop_mcp_adapter", side_effect=raise_error
+    ):
         await mcp_handler.stop_all_adapters()
 
     # Should complete without raising despite error
@@ -219,7 +238,9 @@ async def test_stop_all_adapters_pooled_adapter_error():
     async def raise_error(adapter):
         raise Exception("pool stop failed")
 
-    with patch("src.services.tools.mcp_handler.stop_mcp_adapter", side_effect=raise_error):
+    with patch(
+        "src.services.tools.mcp_handler.stop_mcp_adapter", side_effect=raise_error
+    ):
         await mcp_handler.stop_all_adapters()
 
     # Pool should be cleared even after error
@@ -227,6 +248,7 @@ async def test_stop_all_adapters_pooled_adapter_error():
 
 
 # ─── get_databricks_workspace_host ────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_get_databricks_workspace_host_success():
@@ -241,10 +263,17 @@ async def test_get_databricks_workspace_host_success():
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
     # Patch the imports used inside the function
-    with patch.dict(sys.modules, {
-        "src.services.databricks.workspace.service": MagicMock(DatabricksService=MagicMock(return_value=mock_service)),
-        "src.db.session": MagicMock(request_scoped_session=MagicMock(return_value=mock_session))
-    }):
+    with patch.dict(
+        sys.modules,
+        {
+            "src.services.databricks.workspace.service": MagicMock(
+                DatabricksService=MagicMock(return_value=mock_service)
+            ),
+            "src.db.session": MagicMock(
+                request_scoped_session=MagicMock(return_value=mock_session)
+            ),
+        },
+    ):
         host, error = await mcp_handler.get_databricks_workspace_host()
 
     assert error is None
@@ -262,10 +291,17 @@ async def test_get_databricks_workspace_host_http_prefix():
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch.dict(sys.modules, {
-        "src.services.databricks.workspace.service": MagicMock(DatabricksService=MagicMock(return_value=mock_service)),
-        "src.db.session": MagicMock(request_scoped_session=MagicMock(return_value=mock_session))
-    }):
+    with patch.dict(
+        sys.modules,
+        {
+            "src.services.databricks.workspace.service": MagicMock(
+                DatabricksService=MagicMock(return_value=mock_service)
+            ),
+            "src.db.session": MagicMock(
+                request_scoped_session=MagicMock(return_value=mock_session)
+            ),
+        },
+    ):
         host, error = await mcp_handler.get_databricks_workspace_host()
 
     assert error is None
@@ -283,10 +319,17 @@ async def test_get_databricks_workspace_host_no_url():
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch.dict(sys.modules, {
-        "src.services.databricks.workspace.service": MagicMock(DatabricksService=MagicMock(return_value=mock_service)),
-        "src.db.session": MagicMock(request_scoped_session=MagicMock(return_value=mock_session))
-    }):
+    with patch.dict(
+        sys.modules,
+        {
+            "src.services.databricks.workspace.service": MagicMock(
+                DatabricksService=MagicMock(return_value=mock_service)
+            ),
+            "src.db.session": MagicMock(
+                request_scoped_session=MagicMock(return_value=mock_session)
+            ),
+        },
+    ):
         host, error = await mcp_handler.get_databricks_workspace_host()
 
     assert host is None
@@ -295,9 +338,14 @@ async def test_get_databricks_workspace_host_no_url():
 
 @pytest.mark.asyncio
 async def test_get_databricks_workspace_host_exception():
-    with patch.dict(sys.modules, {
-        "src.db.session": MagicMock(request_scoped_session=MagicMock(side_effect=Exception("session error")))
-    }):
+    with patch.dict(
+        sys.modules,
+        {
+            "src.db.session": MagicMock(
+                request_scoped_session=MagicMock(side_effect=Exception("session error"))
+            )
+        },
+    ):
         host, error = await mcp_handler.get_databricks_workspace_host()
 
     assert host is None
@@ -306,10 +354,13 @@ async def test_get_databricks_workspace_host_exception():
 
 # ─── call_databricks_api ──────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_call_databricks_api_auth_error():
-    with patch("src.services.tools.mcp_handler.get_databricks_auth_headers",
-               new=AsyncMock(return_value=(None, "auth failed"))):
+    with patch(
+        "src.services.tools.mcp_handler.get_databricks_auth_headers",
+        new=AsyncMock(return_value=(None, "auth failed")),
+    ):
         result = await mcp_handler.call_databricks_api("/api/test")
 
     assert "error" in result
@@ -317,8 +368,10 @@ async def test_call_databricks_api_auth_error():
 
 @pytest.mark.asyncio
 async def test_call_databricks_api_no_headers():
-    with patch("src.services.tools.mcp_handler.get_databricks_auth_headers",
-               new=AsyncMock(return_value=(None, None))):
+    with patch(
+        "src.services.tools.mcp_handler.get_databricks_auth_headers",
+        new=AsyncMock(return_value=(None, None)),
+    ):
         result = await mcp_handler.call_databricks_api("/api/test")
 
     assert "error" in result
@@ -326,16 +379,21 @@ async def test_call_databricks_api_no_headers():
 
 @pytest.mark.asyncio
 async def test_call_databricks_api_host_error():
-    with patch("src.services.tools.mcp_handler.get_databricks_auth_headers",
-               new=AsyncMock(return_value=({"Authorization": "Bearer tok"}, None))):
-        with patch("src.services.tools.mcp_handler.get_databricks_workspace_host",
-                   new=AsyncMock(return_value=(None, "host error"))):
+    with patch(
+        "src.services.tools.mcp_handler.get_databricks_auth_headers",
+        new=AsyncMock(return_value=({"Authorization": "Bearer tok"}, None)),
+    ):
+        with patch(
+            "src.services.tools.mcp_handler.get_databricks_workspace_host",
+            new=AsyncMock(return_value=(None, "host error")),
+        ):
             result = await mcp_handler.call_databricks_api("/api/test")
 
     assert "error" in result
 
 
 # ─── stop_mcp_adapter ─────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_stop_mcp_adapter_none():
@@ -387,6 +445,7 @@ async def test_stop_mcp_adapter_stop_exception():
 
 # ─── wrap_mcp_tool ────────────────────────────────────────────────────────────
 
+
 def test_wrap_mcp_tool_standard():
     tool = MagicMock()
     tool.name = "standard_tool"
@@ -417,7 +476,10 @@ def test_wrap_mcp_tool_standard_event_loop_fallback():
 
     wrapped = mcp_handler.wrap_mcp_tool(tool)
 
-    with patch("src.services.tools.mcp_handler.run_in_separate_process", new=AsyncMock(return_value="process_result")):
+    with patch(
+        "src.services.tools.mcp_handler.run_in_separate_process",
+        new=AsyncMock(return_value="process_result"),
+    ):
         result = wrapped._run()
     assert result == "process_result"
 
@@ -454,7 +516,10 @@ def test_wrap_mcp_tool_genie_tool_fallback_to_process():
 
     wrapped = mcp_handler.wrap_mcp_tool(tool)
 
-    with patch("src.services.tools.mcp_handler.run_in_separate_process", new=AsyncMock(return_value="process result")):
+    with patch(
+        "src.services.tools.mcp_handler.run_in_separate_process",
+        new=AsyncMock(return_value="process result"),
+    ):
         result = wrapped._run(space_id="s1", content="hello")
     assert result == "process result"
 
@@ -467,8 +532,14 @@ def test_wrap_mcp_tool_genie_fallback_process_starts_error():
 
     wrapped = mcp_handler.wrap_mcp_tool(tool)
 
-    with patch("src.services.tools.mcp_handler.run_in_separate_process", new=AsyncMock(return_value="Error: something")):
-        with patch("src.services.tools.mcp_handler.call_databricks_api", new=AsyncMock(return_value={"data": "ok"})):
+    with patch(
+        "src.services.tools.mcp_handler.run_in_separate_process",
+        new=AsyncMock(return_value="Error: something"),
+    ):
+        with patch(
+            "src.services.tools.mcp_handler.call_databricks_api",
+            new=AsyncMock(return_value={"data": "ok"}),
+        ):
             result = wrapped._run(space_id="s1", conversation_id="c1", content="hello")
     # Should return api result
     assert result is not None
@@ -482,12 +553,16 @@ def test_wrap_mcp_tool_genie_all_approaches_fail():
 
     wrapped = mcp_handler.wrap_mcp_tool(tool)
 
-    with patch("src.services.tools.mcp_handler.run_in_separate_process", new=AsyncMock(side_effect=Exception("process fail"))):
+    with patch(
+        "src.services.tools.mcp_handler.run_in_separate_process",
+        new=AsyncMock(side_effect=Exception("process fail")),
+    ):
         result = wrapped._run(space_id="s1")
     assert "Error" in result
 
 
 # ─── create_kasal_tool_from_mcp ──────────────────────────────────────────────
+
 
 def test_create_kasal_tool_from_mcp_with_properties():
     mcp_tool_dict = {
@@ -497,8 +572,8 @@ def test_create_kasal_tool_from_mcp_with_properties():
             "properties": {
                 "param1": {"description": "First param", "type": "string"},
             },
-            "required": ["param1"]
-        }
+            "required": ["param1"],
+        },
     }
 
     mock_tool = MagicMock()
@@ -508,7 +583,7 @@ def test_create_kasal_tool_from_mcp_with_properties():
         "properties": {
             "param1": {"description": "First param"},
         },
-        "required": ["param1"]
+        "required": ["param1"],
     }
 
     mock_module = MagicMock()
@@ -551,7 +626,7 @@ def test_create_kasal_tool_from_mcp_optional_fields():
         "properties": {
             "opt_param": {"description": "Optional param"},
         },
-        "required": []
+        "required": [],
     }
 
     mock_module = MagicMock()

@@ -11,10 +11,12 @@ Covers:
 - set_crew_reference_on_memory
 - restore_storage_directory
 """
+
 import os
 import sys
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 os.environ.setdefault("DATABASE_TYPE", "sqlite")
 os.environ.setdefault("SQLITE_DB_PATH", ":memory:")
@@ -53,11 +55,13 @@ for _mod_name, _mock_obj in _MODULES_TO_MOCK.items():
     sys.modules[_mod_name] = _mock_obj
 
 # Set up crewai.utilities.paths mock
-_crewai_mock.utilities.paths.db_storage_path = MagicMock(return_value="/tmp/test_storage")
+_crewai_mock.utilities.paths.db_storage_path = MagicMock(
+    return_value="/tmp/test_storage"
+)
 
-from src.services.memory.crew_memory import CrewMemoryService
-from src.services.memory.backend_factory import DatabricksIndexValidationError
 from src.schemas.memory_backend import MemoryBackendType
+from src.services.memory.backend_factory import DatabricksIndexValidationError
+from src.services.memory.crew_memory import CrewMemoryService
 
 for _mod_name, _original in _originals.items():
     if _original is None:
@@ -198,11 +202,15 @@ class TestSetupStorageDirectory:
 
     def _do_setup_storage(self, service, crew_id, backend_config, mock_path):
         """Helper that patches the crewai paths import properly."""
-        with patch("src.services.memory.crew_memory.Path") as MockPath, \
-             patch("src.services.memory.crew_memory.db_storage_path",
-                   return_value="/tmp/test", create=True), \
-             patch.dict("sys.modules", {
-             }):
+        with (
+            patch("src.services.memory.crew_memory.Path") as MockPath,
+            patch(
+                "src.services.memory.crew_memory.db_storage_path",
+                return_value="/tmp/test",
+                create=True,
+            ),
+            patch.dict("sys.modules", {}),
+        ):
             MockPath.return_value = mock_path
             service.setup_storage_directory(crew_id, backend_config)
 
@@ -218,7 +226,9 @@ class TestSetupStorageDirectory:
         """
         service = CrewMemoryService({"group_id": "g1"})
         with patch.dict(os.environ, {"KASAL_MEMORY_DIR": "/tmp/kasal_mem_test"}):
-            service.setup_storage_directory("my_crew_id", {"backend_type": "databricks"})
+            service.setup_storage_directory(
+                "my_crew_id", {"backend_type": "databricks"}
+            )
             value = os.environ.get("CREWAI_STORAGE_DIR")
 
         assert value == "/tmp/kasal_mem_test/kasal_default_g1"
@@ -242,7 +252,9 @@ class TestSetupStorageDirectory:
         assert value == "/tmp/kasal_mem_test/kasal_default_g1"
         assert "my_crew_id" not in value
 
-    def _setup_default(self, config, crew_id="my_crew_id", mem_root="/tmp/kasal_mem_test"):
+    def _setup_default(
+        self, config, crew_id="my_crew_id", mem_root="/tmp/kasal_mem_test"
+    ):
         """Run setup_storage_directory for the default backend; returns the dir.
 
         Pins ``KASAL_MEMORY_DIR`` so the absolute store path is deterministic.
@@ -252,16 +264,19 @@ class TestSetupStorageDirectory:
         mock_path.exists.return_value = False
         mock_path.absolute.return_value = mock_path
 
-        with patch.dict(os.environ, {"KASAL_MEMORY_DIR": mem_root}), \
-             patch("src.services.memory.crew_memory.Path") as MockPath:
+        with (
+            patch.dict(os.environ, {"KASAL_MEMORY_DIR": mem_root}),
+            patch("src.services.memory.crew_memory.Path") as MockPath,
+        ):
             MockPath.return_value = mock_path
-            with patch.dict("sys.modules", {
-            }):
+            with patch.dict("sys.modules", {}):
                 service.setup_storage_directory(crew_id, {"backend_type": "default"})
                 # Capture INSIDE the patch.dict block — it reverts os.environ
                 # (including CREWAI_STORAGE_DIR) when the context exits.
                 value = os.environ.get("CREWAI_STORAGE_DIR")
-                assert value is not None, "setup_storage_directory did not set CREWAI_STORAGE_DIR"
+                assert (
+                    value is not None
+                ), "setup_storage_directory did not set CREWAI_STORAGE_DIR"
                 return value
 
     def test_sets_default_storage_dir(self):
@@ -272,7 +287,9 @@ class TestSetupStorageDirectory:
 
     def test_default_dir_under_known_root_not_source_tree(self):
         """The store lives under KASAL_MEMORY_DIR (deterministic), not CWD."""
-        result = self._setup_default({"group_id": "grp"}, mem_root="/tmp/custom_kasal_root")
+        result = self._setup_default(
+            {"group_id": "grp"}, mem_root="/tmp/custom_kasal_root"
+        )
         assert result == "/tmp/custom_kasal_root/kasal_default_grp"
 
     def test_default_dir_scoped_by_group_id_not_crew_id(self):
@@ -301,7 +318,11 @@ class TestSetupStorageDirectory:
         workspace = self._setup_default({"group_id": "grp"})
         os.environ.pop("CREWAI_STORAGE_DIR", None)
         session = self._setup_default(
-            {"group_id": "grp", "session_id": "chat-sess-1", "memory_workspace_scope": False}
+            {
+                "group_id": "grp",
+                "session_id": "chat-sess-1",
+                "memory_workspace_scope": False,
+            }
         )
         assert workspace == session
         assert os.path.basename(session) == "kasal_default_grp"
@@ -338,9 +359,10 @@ class TestSetupStorageDirectory:
 
         with patch("src.services.memory.crew_memory.Path") as MockPath:
             MockPath.return_value = mock_path
-            with patch.dict("sys.modules", {
-            }):
-                service.setup_storage_directory("crew_1", {"backend_type": "databricks"})
+            with patch.dict("sys.modules", {}):
+                service.setup_storage_directory(
+                    "crew_1", {"backend_type": "databricks"}
+                )
 
         assert service._original_storage_dir == "original_value"
 
@@ -356,9 +378,10 @@ class TestSetupStorageDirectory:
 
         with patch("src.services.memory.crew_memory.Path") as MockPath:
             MockPath.return_value = mock_path
-            with patch.dict("sys.modules", {
-            }):
-                service.setup_storage_directory("crew_1", {"backend_type": "databricks"})
+            with patch.dict("sys.modules", {}):
+                service.setup_storage_directory(
+                    "crew_1", {"backend_type": "databricks"}
+                )
 
     def test_handles_iterdir_exception(self):
         service = CrewMemoryService({})
@@ -369,9 +392,10 @@ class TestSetupStorageDirectory:
 
         with patch("src.services.memory.crew_memory.Path") as MockPath:
             MockPath.return_value = mock_path
-            with patch.dict("sys.modules", {
-            }):
-                service.setup_storage_directory("crew_1", {"backend_type": "databricks"})
+            with patch.dict("sys.modules", {}):
+                service.setup_storage_directory(
+                    "crew_1", {"backend_type": "databricks"}
+                )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -475,13 +499,16 @@ class TestCreateMemoryBackends:
             "error_type": "missing_index",
         }
 
-        with patch(
-            "src.services.memory.crew_memory.MemoryBackendFactory.create_unified_storage",
-            new_callable=AsyncMock,
-            side_effect=DatabricksIndexValidationError("err", validation_result),
-        ), patch.object(
-            service, "_emit_index_validation_trace", new_callable=AsyncMock
-        ) as mock_emit:
+        with (
+            patch(
+                "src.services.memory.crew_memory.MemoryBackendFactory.create_unified_storage",
+                new_callable=AsyncMock,
+                side_effect=DatabricksIndexValidationError("err", validation_result),
+            ),
+            patch.object(
+                service, "_emit_index_validation_trace", new_callable=AsyncMock
+            ) as mock_emit,
+        ):
             with pytest.raises(DatabricksIndexValidationError):
                 await service.create_memory_backends(
                     memory_backend_config=memory_backend_config,
@@ -506,6 +533,7 @@ class TestConfigureCrewMemoryComponents:
     def _make_memory_config(self, backend_type_str):
         """Create a MemoryBackendConfig-like MagicMock for the given type."""
         from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
+
         cfg = MagicMock()
         cfg.backend_type = MemoryBackendType(backend_type_str)
         cfg.cognitive_config = None
@@ -523,6 +551,7 @@ class TestConfigureCrewMemoryComponents:
     def test_disables_memory_when_default_no_embedder(self):
         # DEFAULT backend with no embedder and no OPENAI_API_KEY → memory=False
         import os
+
         os.environ.pop("OPENAI_API_KEY", None)
         service = CrewMemoryService({})
         crew_kwargs = {}
@@ -530,7 +559,11 @@ class TestConfigureCrewMemoryComponents:
 
         with patch.dict("sys.modules", self._crewai_memory_mocks()):
             result = service.configure_crew_memory_components(
-                crew_kwargs, memory_config, storage=None, crew_id="crew_1", custom_embedder=None
+                crew_kwargs,
+                memory_config,
+                storage=None,
+                crew_id="crew_1",
+                custom_embedder=None,
             )
 
         assert result.get("memory") is False
@@ -544,7 +577,11 @@ class TestConfigureCrewMemoryComponents:
 
         with patch.dict("sys.modules", self._crewai_memory_mocks()):
             result = service.configure_crew_memory_components(
-                crew_kwargs, memory_config, storage=None, crew_id="crew_1", custom_embedder=custom_embedder
+                crew_kwargs,
+                memory_config,
+                storage=None,
+                crew_id="crew_1",
+                custom_embedder=custom_embedder,
             )
 
         # Memory should be set (not False) since we have an embedder
@@ -598,7 +635,9 @@ class TestConfigureCrewMemoryComponents:
         mock_storage = MagicMock()
 
         mocks = self._crewai_memory_mocks()
-        mocks["src.services.memory.engine"].Memory.side_effect = RuntimeError("Memory build failed")
+        mocks["src.services.memory.engine"].Memory.side_effect = RuntimeError(
+            "Memory build failed"
+        )
         with patch.dict("sys.modules", mocks):
             result = service.configure_crew_memory_components(
                 crew_kwargs, memory_config, storage=mock_storage, crew_id="crew_1"
@@ -612,6 +651,7 @@ class TestConfigureCrewMemoryComponents:
         crew_kwargs = {"embedder": MagicMock()}
 
         from src.schemas.memory_backend import MemoryBackendType as MBT
+
         memory_config = self._make_memory_config("databricks")
         memory_config.backend_type = MBT.DATABRICKS
 
@@ -643,7 +683,9 @@ class TestAttachMemoryTraceContext:
         mock_crew._long_term_memory = None
         mock_crew._entity_memory = None
 
-        service.attach_memory_trace_context(mock_crew, {"backend_type": "databricks"}, {})
+        service.attach_memory_trace_context(
+            mock_crew, {"backend_type": "databricks"}, {}
+        )
 
         # trace_context should have been set on storage
         assert hasattr(mock_storage, "trace_context")
@@ -662,7 +704,9 @@ class TestAttachMemoryTraceContext:
         service = CrewMemoryService({"execution_id": "job_1"})
         # Pass something that will throw when accessing attributes
         broken_crew = MagicMock()
-        broken_crew._short_term_memory.storage.trace_context.__set__ = MagicMock(side_effect=Exception("fail"))
+        broken_crew._short_term_memory.storage.trace_context.__set__ = MagicMock(
+            side_effect=Exception("fail")
+        )
 
         # Should not raise
         service.attach_memory_trace_context(broken_crew, {}, {})
@@ -906,9 +950,7 @@ class TestEmitIndexValidationTraceOtherType:
         with patch("src.db.session.request_scoped_session") as mock_session:
             mock_session_instance = AsyncMock()
             mock_session.return_value.__aenter__.return_value = mock_session_instance
-            with patch(
-                "src.services.trace.ExecutionTraceService"
-            ) as MockTraceService:
+            with patch("src.services.trace.ExecutionTraceService") as MockTraceService:
                 mock_trace_service = MagicMock()
                 mock_trace_service.create_trace = AsyncMock()
                 MockTraceService.return_value = mock_trace_service

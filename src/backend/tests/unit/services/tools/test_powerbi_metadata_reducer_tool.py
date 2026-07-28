@@ -1,9 +1,10 @@
 """Unit tests for PowerBIMetadataReducerTool."""
 
 import json
-import pytest
 from contextlib import asynccontextmanager
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.tools.powerbi_metadata_reducer_tool import (
     PowerBIMetadataReducerTool,
@@ -30,21 +31,45 @@ def _make_model_context():
         "tables": [
             {
                 "name": "Sales",
-                "columns": [{"name": "Revenue"}, {"name": "Quantity"}, {"name": "DateKey"}],
+                "columns": [
+                    {"name": "Revenue"},
+                    {"name": "Quantity"},
+                    {"name": "DateKey"},
+                ],
                 "measures": [
-                    {"name": "Total Revenue", "expression": "SUM(Sales[Revenue])", "table": "Sales"},
-                    {"name": "Total Quantity", "expression": "SUM(Sales[Quantity])", "table": "Sales"},
-                    {"name": "Avg Revenue", "expression": "DIVIDE([Total Revenue], [Total Quantity])", "table": "Sales"},
+                    {
+                        "name": "Total Revenue",
+                        "expression": "SUM(Sales[Revenue])",
+                        "table": "Sales",
+                    },
+                    {
+                        "name": "Total Quantity",
+                        "expression": "SUM(Sales[Quantity])",
+                        "table": "Sales",
+                    },
+                    {
+                        "name": "Avg Revenue",
+                        "expression": "DIVIDE([Total Revenue], [Total Quantity])",
+                        "table": "Sales",
+                    },
                 ],
             },
             {
                 "name": "Geography",
-                "columns": [{"name": "Country"}, {"name": "Region"}, {"name": "CountryKey"}],
+                "columns": [
+                    {"name": "Country"},
+                    {"name": "Region"},
+                    {"name": "CountryKey"},
+                ],
                 "measures": [],
             },
             {
                 "name": "Products",
-                "columns": [{"name": "Category"}, {"name": "Subcategory"}, {"name": "ProductKey"}],
+                "columns": [
+                    {"name": "Category"},
+                    {"name": "Subcategory"},
+                    {"name": "ProductKey"},
+                ],
                 "measures": [],
             },
             {
@@ -54,7 +79,11 @@ def _make_model_context():
             },
             {
                 "name": "Customers",
-                "columns": [{"name": "Customer ID"}, {"name": "Name"}, {"name": "Segment"}],
+                "columns": [
+                    {"name": "Customer ID"},
+                    {"name": "Name"},
+                    {"name": "Segment"},
+                ],
                 "measures": [],
             },
             {
@@ -64,23 +93,66 @@ def _make_model_context():
             },
         ],
         "measures": [
-            {"name": "Total Revenue", "expression": "SUM(Sales[Revenue])", "table": "Sales"},
-            {"name": "Total Quantity", "expression": "SUM(Sales[Quantity])", "table": "Sales"},
-            {"name": "Avg Revenue", "expression": "DIVIDE([Total Revenue], [Total Quantity])", "table": "Sales"},
+            {
+                "name": "Total Revenue",
+                "expression": "SUM(Sales[Revenue])",
+                "table": "Sales",
+            },
+            {
+                "name": "Total Quantity",
+                "expression": "SUM(Sales[Quantity])",
+                "table": "Sales",
+            },
+            {
+                "name": "Avg Revenue",
+                "expression": "DIVIDE([Total Revenue], [Total Quantity])",
+                "table": "Sales",
+            },
         ],
         "relationships": [
-            {"from_table": "Sales", "from_column": "CountryKey", "to_table": "Geography", "to_column": "CountryKey"},
-            {"from_table": "Sales", "from_column": "ProductKey", "to_table": "Products", "to_column": "ProductKey"},
-            {"from_table": "Sales", "from_column": "DateKey", "to_table": "Dates", "to_column": "DateKey"},
-            {"from_table": "Sales", "from_column": "CustomerKey", "to_table": "Customers", "to_column": "CustomerKey"},
+            {
+                "from_table": "Sales",
+                "from_column": "CountryKey",
+                "to_table": "Geography",
+                "to_column": "CountryKey",
+            },
+            {
+                "from_table": "Sales",
+                "from_column": "ProductKey",
+                "to_table": "Products",
+                "to_column": "ProductKey",
+            },
+            {
+                "from_table": "Sales",
+                "from_column": "DateKey",
+                "to_table": "Dates",
+                "to_column": "DateKey",
+            },
+            {
+                "from_table": "Sales",
+                "from_column": "CustomerKey",
+                "to_table": "Customers",
+                "to_column": "CustomerKey",
+            },
         ],
         "sample_data": {
-            "Geography[Country]": [{"Country": "Austria"}, {"Country": "Germany"}, {"Country": "Italy"}],
+            "Geography[Country]": [
+                {"Country": "Austria"},
+                {"Country": "Germany"},
+                {"Country": "Italy"},
+            ],
             "Geography[Region]": [{"Region": "DACH"}, {"Region": "Southern Europe"}],
-            "Products[Category]": [{"Category": "Electronics"}, {"Category": "Clothing"}],
+            "Products[Category]": [
+                {"Category": "Electronics"},
+                {"Category": "Clothing"},
+            ],
         },
         "slicers": [
-            {"table": "Geography", "column": "Country", "values": ["Austria", "Germany", "Italy"]},
+            {
+                "table": "Geography",
+                "column": "Country",
+                "values": ["Austria", "Germany", "Italy"],
+            },
         ],
         "columns": [],
         "default_filters": {},
@@ -279,11 +351,13 @@ class TestLLMSelection:
         )
         ctx = _make_model_context()
 
-        llm_content = json.dumps({
-            "tables": ["Sales", "Geography"],
-            "measures": ["Total Revenue"],
-            "reasoning": "test reasoning",
-        })
+        llm_content = json.dumps(
+            {
+                "tables": ["Sales", "Geography"],
+                "measures": ["Total Revenue"],
+                "reasoning": "test reasoning",
+            }
+        )
 
         mock_completion = AsyncMock(return_value=llm_content)
 
@@ -524,17 +598,32 @@ def _make_cached_metadata():
     """Create a realistic cached metadata dict (as stored by the Fetcher)."""
     return {
         "measures": [
-            {"name": "Total Revenue", "expression": "SUM(Sales[Revenue])", "table": "Sales"},
+            {
+                "name": "Total Revenue",
+                "expression": "SUM(Sales[Revenue])",
+                "table": "Sales",
+            },
         ],
         "relationships": [
-            {"from_table": "Sales", "from_column": "CountryKey", "to_table": "Geography", "to_column": "CountryKey"},
+            {
+                "from_table": "Sales",
+                "from_column": "CountryKey",
+                "to_table": "Geography",
+                "to_column": "CountryKey",
+            },
         ],
         "schema": {
             "tables": [
                 {
                     "name": "Sales",
                     "columns": [{"name": "Revenue"}, {"name": "Quantity"}],
-                    "measures": [{"name": "Total Revenue", "expression": "SUM(Sales[Revenue])", "table": "Sales"}],
+                    "measures": [
+                        {
+                            "name": "Total Revenue",
+                            "expression": "SUM(Sales[Revenue])",
+                            "table": "Sales",
+                        }
+                    ],
                 },
                 {
                     "name": "Geography",
@@ -565,10 +654,14 @@ class TestCacheFallback:
         )
 
         mock_cache_service = MagicMock()
-        mock_cache_service.get_cached_metadata = AsyncMock(return_value=_make_cached_metadata())
+        mock_cache_service.get_cached_metadata = AsyncMock(
+            return_value=_make_cached_metadata()
+        )
 
         with patch.object(
-            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_cache_service)
+            ToolSessionProvider,
+            "cache_service",
+            _mock_cache_service_ctx(mock_cache_service),
         ):
             tool._run(user_question="test")
 
@@ -589,10 +682,14 @@ class TestCacheFallback:
         )
 
         mock_cache_service = MagicMock()
-        mock_cache_service.get_cached_metadata = AsyncMock(return_value=_make_cached_metadata())
+        mock_cache_service.get_cached_metadata = AsyncMock(
+            return_value=_make_cached_metadata()
+        )
 
         with patch.object(
-            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_cache_service)
+            ToolSessionProvider,
+            "cache_service",
+            _mock_cache_service_ctx(mock_cache_service),
         ):
             result = tool._run(user_question="total revenue by country")
 
@@ -613,10 +710,14 @@ class TestCacheFallback:
         )
 
         mock_cache_service = MagicMock()
-        mock_cache_service.get_cached_metadata = AsyncMock(return_value=_make_cached_metadata())
+        mock_cache_service.get_cached_metadata = AsyncMock(
+            return_value=_make_cached_metadata()
+        )
 
         with patch.object(
-            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_cache_service)
+            ToolSessionProvider,
+            "cache_service",
+            _mock_cache_service_ctx(mock_cache_service),
         ):
             result = tool._run(user_question="total revenue by country")
 
@@ -640,7 +741,9 @@ class TestCacheFallback:
         mock_cache_service.get_cached_metadata = AsyncMock(return_value=None)
 
         with patch.object(
-            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_cache_service)
+            ToolSessionProvider,
+            "cache_service",
+            _mock_cache_service_ctx(mock_cache_service),
         ):
             result = tool._run(user_question="test")
 
@@ -684,7 +787,9 @@ class TestCacheSaving:
         mock_cache_service.save_metadata = AsyncMock(return_value=None)
 
         with patch.object(
-            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_cache_service)
+            ToolSessionProvider,
+            "cache_service",
+            _mock_cache_service_ctx(mock_cache_service),
         ):
             result = tool._run(
                 model_context_json=json.dumps(ctx),
@@ -710,7 +815,9 @@ class TestCacheSaving:
         mock_cache_service.save_metadata = AsyncMock(side_effect=Exception("DB down"))
 
         with patch.object(
-            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_cache_service)
+            ToolSessionProvider,
+            "cache_service",
+            _mock_cache_service_ctx(mock_cache_service),
         ):
             result = tool._run(
                 model_context_json=json.dumps(ctx),
@@ -792,8 +899,10 @@ class TestEnrichmentDataMerge:
     def test_enriches_table_purpose(self):
         tables = [{"name": "Sales"}]
         counts = PowerBIMetadataReducerTool._merge_enrichment_data(
-            tables, [], [],
-            {"tables": {"Sales": {"purpose": "Fact table for sales transactions"}}}
+            tables,
+            [],
+            [],
+            {"tables": {"Sales": {"purpose": "Fact table for sales transactions"}}},
         )
         assert tables[0]["purpose"] == "Fact table for sales transactions"
         assert counts["tables"] == 1
@@ -801,16 +910,17 @@ class TestEnrichmentDataMerge:
     def test_does_not_overwrite_existing_purpose(self):
         tables = [{"name": "Sales", "purpose": "existing purpose"}]
         PowerBIMetadataReducerTool._merge_enrichment_data(
-            tables, [], [],
-            {"tables": {"Sales": {"purpose": "new purpose"}}}
+            tables, [], [], {"tables": {"Sales": {"purpose": "new purpose"}}}
         )
         assert tables[0]["purpose"] == "existing purpose"
 
     def test_enriches_measure_synonyms(self):
         measures = [{"name": "Total Revenue"}]
         PowerBIMetadataReducerTool._merge_enrichment_data(
-            [], measures, [],
-            {"measures": {"Total Revenue": {"synonyms": ["Revenue", "Sales Total"]}}}
+            [],
+            measures,
+            [],
+            {"measures": {"Total Revenue": {"synonyms": ["Revenue", "Sales Total"]}}},
         )
         assert "Revenue" in measures[0]["synonyms"]
         assert "Sales Total" in measures[0]["synonyms"]
@@ -818,8 +928,10 @@ class TestEnrichmentDataMerge:
     def test_appends_new_synonyms_without_duplicates(self):
         measures = [{"name": "Total Revenue", "synonyms": ["Revenue"]}]
         PowerBIMetadataReducerTool._merge_enrichment_data(
-            [], measures, [],
-            {"measures": {"Total Revenue": {"synonyms": ["Revenue", "Sales Total"]}}}
+            [],
+            measures,
+            [],
+            {"measures": {"Total Revenue": {"synonyms": ["Revenue", "Sales Total"]}}},
         )
         assert measures[0]["synonyms"].count("Revenue") == 1
         assert "Sales Total" in measures[0]["synonyms"]
@@ -827,8 +939,17 @@ class TestEnrichmentDataMerge:
     def test_enriches_columns_in_tables(self):
         tables = [{"name": "Sales", "columns": [{"name": "Revenue"}]}]
         PowerBIMetadataReducerTool._merge_enrichment_data(
-            tables, [], [],
-            {"columns": {"Sales[Revenue]": {"description": "Revenue column", "synonyms": ["Income"]}}}
+            tables,
+            [],
+            [],
+            {
+                "columns": {
+                    "Sales[Revenue]": {
+                        "description": "Revenue column",
+                        "synonyms": ["Income"],
+                    }
+                }
+            },
         )
         col = tables[0]["columns"][0]
         assert col.get("description") == "Revenue column"
@@ -837,8 +958,7 @@ class TestEnrichmentDataMerge:
     def test_ignores_unknown_table_in_enrichment(self):
         tables = [{"name": "Sales"}]
         counts = PowerBIMetadataReducerTool._merge_enrichment_data(
-            tables, [], [],
-            {"tables": {"UnknownTable": {"purpose": "ignored"}}}
+            tables, [], [], {"tables": {"UnknownTable": {"purpose": "ignored"}}}
         )
         assert counts["tables"] == 0
 
@@ -857,7 +977,9 @@ class TestEnrichmentDataMerge:
         parsed = json.loads(result)
         # Enrichment is applied; if Sales is kept, check for purpose
         assert "error" not in parsed
-        sales_table = next((t for t in parsed.get("tables", []) if t["name"] == "Sales"), None)
+        sales_table = next(
+            (t for t in parsed.get("tables", []) if t["name"] == "Sales"), None
+        )
         if sales_table is not None:
             assert sales_table.get("purpose") == "Main fact table"
 
@@ -950,9 +1072,19 @@ def _make_model_context_string_cols():
         "tables": [
             {
                 "name": "Sales",
-                "columns": ["Revenue", "Quantity", "DateKey", "CountryKey", "ProductKey"],
+                "columns": [
+                    "Revenue",
+                    "Quantity",
+                    "DateKey",
+                    "CountryKey",
+                    "ProductKey",
+                ],
                 "measures": [
-                    {"name": "Total Revenue", "expression": "SUM(Sales[Revenue])", "table": "Sales"},
+                    {
+                        "name": "Total Revenue",
+                        "expression": "SUM(Sales[Revenue])",
+                        "table": "Sales",
+                    },
                 ],
             },
             {
@@ -962,10 +1094,19 @@ def _make_model_context_string_cols():
             },
         ],
         "measures": [
-            {"name": "Total Revenue", "expression": "SUM(Sales[Revenue])", "table": "Sales"},
+            {
+                "name": "Total Revenue",
+                "expression": "SUM(Sales[Revenue])",
+                "table": "Sales",
+            },
         ],
         "relationships": [
-            {"from_table": "Sales", "from_column": "CountryKey", "to_table": "Geography", "to_column": "CountryKey"},
+            {
+                "from_table": "Sales",
+                "from_column": "CountryKey",
+                "to_table": "Geography",
+                "to_column": "CountryKey",
+            },
         ],
         "sample_data": {},
         "slicers": [],
@@ -1083,9 +1224,7 @@ class TestParseModelContextEdgeCases:
             raise Exception("Cache explosion")
             yield  # pragma: no cover
 
-        with patch.object(
-            ToolSessionProvider, "cache_service", _exploding_ctx
-        ):
+        with patch.object(ToolSessionProvider, "cache_service", _exploding_ctx):
             result = tool._run(user_question="revenue")
 
         parsed = json.loads(result)
@@ -1111,6 +1250,7 @@ class TestRunAsyncInSyncContext:
     def test_raises_on_coro_exception(self):
         """Exceptions from the coroutine propagate out."""
         import pytest
+
         from src.services.tools.powerbi_metadata_reducer_tool import (
             _run_async_in_sync_context,
         )

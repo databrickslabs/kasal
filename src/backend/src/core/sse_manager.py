@@ -5,14 +5,14 @@ This module manages SSE connections and provides methods to broadcast
 execution updates, traces, and other real-time events to connected clients.
 """
 
-from typing import Dict, List, Set, Optional, Any, AsyncGenerator, Tuple
-from collections import deque
-from datetime import datetime
-from uuid import UUID
 import asyncio
 import json
 import os
 import threading
+from collections import deque
+from datetime import datetime
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set, Tuple
+from uuid import UUID
 
 from src.core.logger import LoggerManager
 
@@ -56,6 +56,7 @@ class _SSEEncoder(json.JSONEncoder):
             return obj.isoformat()
         return super().default(obj)
 
+
 logger = LoggerManager.get_instance().system
 
 
@@ -67,7 +68,7 @@ class SSEEvent:
         data: Any,
         event: Optional[str] = None,
         id: Optional[str] = None,
-        retry: Optional[int] = None
+        retry: Optional[int] = None,
     ):
         self.data = data
         self.event = event
@@ -99,11 +100,11 @@ class SSEEvent:
             data_str = str(self.data)
 
         # SSE requires data to be on separate lines prefixed with "data: "
-        for line in data_str.split('\n'):
+        for line in data_str.split("\n"):
             lines.append(f"data: {line}")
 
         # SSE events must end with two newlines
-        return '\n'.join(lines) + '\n\n'
+        return "\n".join(lines) + "\n\n"
 
 
 class SSEConnectionManager:
@@ -225,15 +226,15 @@ class SSEConnectionManager:
                     queue.put_nowait(event)
                     sent_count += 1
                 except asyncio.QueueFull:
-                    logger.warning(
-                        f"Event queue full for job {job_id}, dropping event"
-                    )
+                    logger.warning(f"Event queue full for job {job_id}, dropping event")
                 except Exception as e:
                     logger.error(f"Error broadcasting to queue: {e}")
 
         # Also broadcast to all "stream-all" subscribers
         # This ensures cross-browser synchronization
-        all_stream_keys = [key for key in self.job_queues.keys() if key.startswith('all_groups_')]
+        all_stream_keys = [
+            key for key in self.job_queues.keys() if key.startswith("all_groups_")
+        ]
         for stream_key in all_stream_keys:
             if stream_key in self.job_queues:
                 queues = list(self.job_queues[stream_key])
@@ -280,14 +281,11 @@ class SSEConnectionManager:
             "total_connections": self.connection_count,
             "active_jobs": list(self.job_queues.keys()),
             "connections_per_job": {
-                job_id: len(queues)
-                for job_id, queues in self.job_queues.items()
-            }
+                job_id: len(queues) for job_id, queues in self.job_queues.items()
+            },
         }
 
-    def get_replay_events(
-        self, job_id: str, last_event_id: int
-    ) -> List[SSEEvent]:
+    def get_replay_events(self, job_id: str, last_event_id: int) -> List[SSEEvent]:
         """
         Return buffered events after *last_event_id* for replay on reconnect.
 
@@ -430,7 +428,9 @@ async def event_stream_generator(
             # Check timeout
             elapsed = (datetime.now() - start_time).total_seconds()
             if elapsed > timeout:
-                logger.info(f"[SSE_STREAM] Stream timeout | job={job_id} | elapsed={elapsed:.0f}s")
+                logger.info(
+                    f"[SSE_STREAM] Stream timeout | job={job_id} | elapsed={elapsed:.0f}s"
+                )
                 break
 
             # Send keep-alive comment if the stream has been idle too long.
@@ -462,9 +462,11 @@ async def event_stream_generator(
                 last_activity = datetime.now()
 
                 # If this is a completion event, close per-job streams only.
-                if not job_id.startswith('all_groups_') and isinstance(event.data, dict):
-                    status = event.data.get('status')
-                    if status in ['completed', 'failed', 'stopped']:
+                if not job_id.startswith("all_groups_") and isinstance(
+                    event.data, dict
+                ):
+                    status = event.data.get("status")
+                    if status in ["completed", "failed", "stopped"]:
                         logger.info(
                             f"[SSE_STREAM] Job finished | job={job_id} | status={status}"
                         )

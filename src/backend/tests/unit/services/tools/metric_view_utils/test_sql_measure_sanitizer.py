@@ -1,6 +1,10 @@
 """Tests for the P5 SQL measure sanitizer."""
+
 from src.services.tools.metric_view_utils.sql_measure_sanitizer import (
-    sanitize_measure_sql, strip_nullif_one, detect_self_division, coalesce_wrap_base,
+    coalesce_wrap_base,
+    detect_self_division,
+    sanitize_measure_sql,
+    strip_nullif_one,
 )
 
 
@@ -32,7 +36,9 @@ class TestSelfDivision:
 
 class TestCoalesceWrap:
     def test_wraps_bare_sum(self):
-        assert coalesce_wrap_base("SUM(source.sales)") == "SUM(COALESCE(source.sales, 0))"
+        assert (
+            coalesce_wrap_base("SUM(source.sales)") == "SUM(COALESCE(source.sales, 0))"
+        )
 
     def test_skips_already_wrapped(self):
         s = "SUM(COALESCE(source.sales, 0))"
@@ -45,18 +51,22 @@ class TestCoalesceWrap:
 
 class TestSanitizeMeasureSql:
     def test_base_measure_coalesce_and_noop_strip(self):
-        sql, note = sanitize_measure_sql("SUM(source.sales) / NULLIF(1, 0)", is_base=True)
+        sql, note = sanitize_measure_sql(
+            "SUM(source.sales) / NULLIF(1, 0)", is_base=True
+        )
         assert sql == "SUM(COALESCE(source.sales, 0))"
         assert note is None
 
     def test_self_division_flagged(self):
         sql, note = sanitize_measure_sql(
-            "SUM(source.x) / NULLIF(SUM(source.x), 0)", is_base=False)
+            "SUM(source.x) / NULLIF(SUM(source.x), 0)", is_base=False
+        )
         assert note and "self-division" in note
 
     def test_non_base_not_coalesced(self):
         sql, _ = sanitize_measure_sql(
-            "SUM(source.a) / NULLIF(SUM(source.b), 0)", is_base=False)
+            "SUM(source.a) / NULLIF(SUM(source.b), 0)", is_base=False
+        )
         assert "COALESCE" not in sql
 
     def test_none_safe(self):
@@ -76,6 +86,7 @@ class TestDetectSilentWrong:
         from src.services.tools.metric_view_utils.sql_measure_sanitizer import (
             detect_silent_wrong,
         )
+
         return detect_silent_wrong(sql)
 
     def test_empty_ratio_flagged(self):
@@ -98,21 +109,30 @@ class TestDetectSilentWrong:
         assert self._D("SUM(source.kbi_value)") is None
 
     def test_clean_filtered_aggregate_ok(self):
-        assert self._D(
-            "SUM(source.kbi_value) FILTER (WHERE bic_chversion = '0000' "
-            "AND fis_code IN ('DCC3', 'DCC1', 'DCCE'))") is None
+        assert (
+            self._D(
+                "SUM(source.kbi_value) FILTER (WHERE bic_chversion = '0000' "
+                "AND fis_code IN ('DCC3', 'DCC1', 'DCCE'))"
+            )
+            is None
+        )
 
     def test_clean_ratio_ok(self):
         assert self._D("SUM(source.a) / NULLIF(SUM(source.b), 0)") is None
 
     def test_clean_subtraction_ok(self):
-        assert self._D(
-            "(SUM(source.value) FILTER (WHERE fis_code_parent IN ('DCD2','DHF2'))) "
-            "- (SUM(source.value) FILTER (WHERE fis_code_parent IN ('DHHX')))") is None
+        assert (
+            self._D(
+                "(SUM(source.value) FILTER (WHERE fis_code_parent IN ('DCD2','DHF2'))) "
+                "- (SUM(source.value) FILTER (WHERE fis_code_parent IN ('DHHX')))"
+            )
+            is None
+        )
 
     def test_measure_composition_ok(self):
-        assert self._D(
-            "MEASURE(rpet_flake_gram) * MEASURE(sales_pet) / 1000000") is None
+        assert (
+            self._D("MEASURE(rpet_flake_gram) * MEASURE(sales_pet) / 1000000") is None
+        )
 
 
 class TestLostDaxComponent:
@@ -122,15 +142,16 @@ class TestLostDaxComponent:
         from src.services.tools.metric_view_utils.sql_measure_sanitizer import (
             detect_lost_dax_component,
         )
+
         return detect_lost_dax_component(dax, sql)
 
     def test_prior_year_dropped_flagged(self):
-        dax = 'CALCULATE(SUM(t[nsr]), SAMEPERIODLASTYEAR(cal[date_id]))'
+        dax = "CALCULATE(SUM(t[nsr]), SAMEPERIODLASTYEAR(cal[date_id]))"
         sql = "SUM(source.nsr) FILTER (WHERE bic_chversion = '0000')"
         assert self._L(dax, sql)  # PY shift not in SQL -> flagged
 
     def test_prior_year_with_window_not_flagged(self):
-        dax = 'CALCULATE(SUM(t[nsr]), SAMEPERIODLASTYEAR(cal[date_id]))'
+        dax = "CALCULATE(SUM(t[nsr]), SAMEPERIODLASTYEAR(cal[date_id]))"
         sql = "SUM(source.nsr) OVER (ORDER BY fiscper)"
         assert self._L(dax, sql) is None  # has a window -> faithful enough
 
@@ -140,7 +161,7 @@ class TestLostDaxComponent:
         assert self._L(dax, sql)  # DIVIDE in DAX, no / in SQL
 
     def test_ratio_present_not_flagged(self):
-        dax = 'DIVIDE(SUM(t[a]), SUM(t[b]))'
+        dax = "DIVIDE(SUM(t[a]), SUM(t[b]))"
         sql = "SUM(source.a) / NULLIF(SUM(source.b), 0)"
         assert self._L(dax, sql) is None
 
@@ -164,12 +185,12 @@ class TestLostDaxComponent:
     def test_additive_subtraction_collapse_flagged(self):
         # cost_to_supply: DAX is `a - b` (two CALCULATE blocks), SQL emitted only a.
         dax = (
-            'var std = CALCULATE([F_Start_date]) '
+            "var std = CALCULATE([F_Start_date]) "
             'var a = CALCULATE(SUMX(FILTER(FT_BPC003, FT_BPC003[bic_chversion]="0000" '
             '&& FT_BPC003[fis_code_parent] IN {"DCD2","DHF2"}), FT_BPC003[value])) '
             'var b = CALCULATE(SUMX(FILTER(FT_BPC003, FT_BPC003[bic_chversion]="0000" '
             '&& FT_BPC003[fis_code_parent] IN {"DHHX"}), FT_BPC003[value])) '
-            'return a - b'
+            "return a - b"
         )
         sql = "SUM(source.value) FILTER (WHERE bic_chversion = '0000' AND fis_code_parent IN ('DCD2', 'DHF2'))"
         assert self._L(dax, sql)  # -b term dropped -> flagged
@@ -179,7 +200,7 @@ class TestLostDaxComponent:
         dax = (
             'var a = CALCULATE(SUMX(FILTER(Fact_CO012, Fact_CO012[bic_chversion]="0000"), Fact_CO012[net_sales_revenue])) '
             'var b = CALCULATE(SUMX(FILTER(Fact_CO012, Fact_CO012[bic_chversion]="0000"), Fact_CO012[other])) '
-            'return a + b'
+            "return a + b"
         )
         sql = "SUM(source.net_sales_revenue) FILTER (WHERE bic_chversion = '0000')"
         assert self._L(dax, sql)  # +b term dropped -> flagged
@@ -203,25 +224,25 @@ class TestLostDaxComponent:
 
     def test_share_of_total_all_collapsed_flagged(self):
         # DIVIDE([M], CALCULATE([M], ALL(dim))) with no window -> num==denom -> 1.0
-        dax = 'DIVIDE([Sales], CALCULATE([Sales], ALL(dim_product[category])))'
+        dax = "DIVIDE([Sales], CALCULATE([Sales], ALL(dim_product[category])))"
         sql = "SUM(source.amount) / NULLIF(SUM(source.amount), 0)"
         assert self._L(dax, sql)
 
     def test_share_of_total_allselected_collapsed_flagged(self):
-        dax = 'DIVIDE([KBI_Actual], CALCULATE([KBI_Actual], ALLSELECTED(Serve[sms])))'
+        dax = "DIVIDE([KBI_Actual], CALCULATE([KBI_Actual], ALLSELECTED(Serve[sms])))"
         sql = "SUM(source.kbi) FILTER (WHERE x='0000') / NULLIF(SUM(source.kbi) FILTER (WHERE x='0000'), 0)"
         assert self._L(dax, sql)
 
     def test_share_of_total_with_window_not_flagged(self):
         # Correct translation: denominator is a coarser-LOD window measure.
-        dax = 'DIVIDE([Sales], CALCULATE([Sales], ALL(dim_product[category])))'
+        dax = "DIVIDE([Sales], CALCULATE([Sales], ALL(dim_product[category])))"
         sql = "MEASURE(sales) / MEASURE(sales_all_category)"
         assert self._L(dax, sql) is None
 
     def test_distinct_filter_ratio_not_flagged_as_share(self):
         # A legit different-filter ratio (Bug B's correct output) must NOT be
         # mistaken for a share-of-total collapse — sides differ, no ALL().
-        dax = 'DIVIDE(CALCULATE([M], p1), CALCULATE([M], p2))'
+        dax = "DIVIDE(CALCULATE([M], p1), CALCULATE([M], p2))"
         sql = "SUM(source.v) FILTER (WHERE x = 'A') / NULLIF(SUM(source.v) FILTER (WHERE x = 'B'), 0)"
         assert self._L(dax, sql) is None
 
@@ -233,6 +254,7 @@ class TestDanglingMultiLetterVar:
         from src.services.tools.metric_view_utils.sql_measure_sanitizer import (
             detect_silent_wrong,
         )
+
         return detect_silent_wrong(sql)
 
     def test_res1_flagged(self):

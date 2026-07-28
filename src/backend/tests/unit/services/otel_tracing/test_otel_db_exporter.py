@@ -14,28 +14,27 @@ from types import SimpleNamespace
 from unittest.mock import (
     AsyncMock,
     MagicMock,
-    patch,
-    call,
     PropertyMock,
+    call,
+    patch,
 )
 from uuid import UUID
 
 import pytest
-
-from src.services.otel_tracing.db_exporter import (
-    UUIDEncoder,
-    _span_to_hex,
-    _extract_event_type,
-    _extract_event_source,
-    _extract_event_context,
-    _safe_json_parse,
-    _extract_output,
-    _extract_trace_metadata,
-    SPAN_NAME_MAP,
-    KasalDBSpanExporter,
-)
 from opentelemetry.sdk.trace.export import SpanExportResult
 
+from src.services.otel_tracing.db_exporter import (
+    SPAN_NAME_MAP,
+    KasalDBSpanExporter,
+    UUIDEncoder,
+    _extract_event_context,
+    _extract_event_source,
+    _extract_event_type,
+    _extract_output,
+    _extract_trace_metadata,
+    _safe_json_parse,
+    _span_to_hex,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -92,9 +91,7 @@ def _make_readable_span(
     span.name = name
     span.attributes = attributes
     span.context = _make_span_context(span_id=span_id, trace_id=trace_id)
-    span.parent = (
-        SimpleNamespace(span_id=parent_span_id) if parent_span_id else None
-    )
+    span.parent = SimpleNamespace(span_id=parent_span_id) if parent_span_id else None
     span.status = _make_status(status_code_name) if has_status else None
     span.start_time = start_time
     span.end_time = end_time
@@ -232,27 +229,19 @@ class TestExtractEventSource:
     """Tests for _extract_event_source with all attribute fallbacks."""
 
     def test_crewai_agent_role(self):
-        span = _make_readable_span(
-            attributes={"crewai.agent.role": "Researcher"}
-        )
+        span = _make_readable_span(attributes={"crewai.agent.role": "Researcher"})
         assert _extract_event_source(span) == "Researcher"
 
     def test_kasal_agent_name(self):
-        span = _make_readable_span(
-            attributes={"kasal.agent_name": "DataAnalyst"}
-        )
+        span = _make_readable_span(attributes={"kasal.agent_name": "DataAnalyst"})
         assert _extract_event_source(span) == "DataAnalyst"
 
     def test_agent_role_attribute(self):
-        span = _make_readable_span(
-            attributes={"agent.role": "Writer"}
-        )
+        span = _make_readable_span(attributes={"agent.role": "Writer"})
         assert _extract_event_source(span) == "Writer"
 
     def test_graph_node_id(self):
-        span = _make_readable_span(
-            attributes={"graph.node.id": "node-42"}
-        )
+        span = _make_readable_span(attributes={"graph.node.id": "node-42"})
         assert _extract_event_source(span) == "node-42"
 
     def test_crew_in_name(self):
@@ -306,23 +295,17 @@ class TestExtractEventContext:
 
     def test_truncation_to_500_chars(self):
         long_desc = "A" * 800
-        span = _make_readable_span(
-            attributes={"crewai.task.description": long_desc}
-        )
+        span = _make_readable_span(attributes={"crewai.task.description": long_desc})
         result = _extract_event_context(span)
         assert len(result) == 500
         assert result == "A" * 500
 
     def test_kasal_task_name(self):
-        span = _make_readable_span(
-            attributes={"kasal.task_name": "my_task"}
-        )
+        span = _make_readable_span(attributes={"kasal.task_name": "my_task"})
         assert _extract_event_context(span) == "my_task"
 
     def test_task_description(self):
-        span = _make_readable_span(
-            attributes={"task.description": "Do something"}
-        )
+        span = _make_readable_span(attributes={"task.description": "Do something"})
         assert _extract_event_context(span) == "Do something"
 
     def test_formatted_description(self):
@@ -332,21 +315,15 @@ class TestExtractEventContext:
         assert _extract_event_context(span) == "Formatted task"
 
     def test_tool_name_fallback(self):
-        span = _make_readable_span(
-            attributes={"tool.name": "SearchTool"}
-        )
+        span = _make_readable_span(attributes={"tool.name": "SearchTool"})
         assert _extract_event_context(span) == "tool:SearchTool"
 
     def test_crewai_tool_name_fallback(self):
-        span = _make_readable_span(
-            attributes={"crewai.tool.name": "WebSearch"}
-        )
+        span = _make_readable_span(attributes={"crewai.tool.name": "WebSearch"})
         assert _extract_event_context(span) == "tool:WebSearch"
 
     def test_kasal_tool_name_fallback(self):
-        span = _make_readable_span(
-            attributes={"kasal.tool_name": "MyTool"}
-        )
+        span = _make_readable_span(attributes={"kasal.tool_name": "MyTool"})
         assert _extract_event_context(span) == "tool:MyTool"
 
     def test_span_name_fallback(self):
@@ -374,9 +351,7 @@ class TestExtractEventContext:
     def test_formatted_description_truncated_in_event_context(self):
         """formatted_description is truncated to 500 in _extract_event_context."""
         long_val = "B" * 700
-        span = _make_readable_span(
-            attributes={"formatted_description": long_val}
-        )
+        span = _make_readable_span(attributes={"formatted_description": long_val})
         result = _extract_event_context(span)
         assert len(result) == 500
 
@@ -394,7 +369,7 @@ class TestSafeJsonParse:
         assert result == {"key": "value"}
 
     def test_valid_json_list(self):
-        result = _safe_json_parse('[1, 2, 3]')
+        result = _safe_json_parse("[1, 2, 3]")
         assert result == [1, 2, 3]
 
     def test_invalid_json_string(self):
@@ -433,23 +408,17 @@ class TestExtractOutput:
     """Tests for _extract_output with all attribute branches."""
 
     def test_kasal_output_content(self):
-        span = _make_readable_span(
-            attributes={"kasal.output_content": "result data"}
-        )
+        span = _make_readable_span(attributes={"kasal.output_content": "result data"})
         result = _extract_output(span)
         assert result["content"] == "result data"
 
     def test_output_value_fallback(self):
-        span = _make_readable_span(
-            attributes={"output.value": "output val"}
-        )
+        span = _make_readable_span(attributes={"output.value": "output val"})
         result = _extract_output(span)
         assert result["content"] == "output val"
 
     def test_crewai_output_fallback(self):
-        span = _make_readable_span(
-            attributes={"crewai.output": "crewai result"}
-        )
+        span = _make_readable_span(attributes={"crewai.output": "crewai result"})
         result = _extract_output(span)
         assert result["content"] == "crewai result"
 
@@ -465,9 +434,7 @@ class TestExtractOutput:
         assert result["content"] == "kasal_wins"
 
     def test_input_value(self):
-        span = _make_readable_span(
-            attributes={"input.value": "my input"}
-        )
+        span = _make_readable_span(attributes={"input.value": "my input"})
         result = _extract_output(span)
         assert result["input"] == "my input"
 
@@ -490,24 +457,18 @@ class TestExtractOutput:
         assert "duration_ms" not in result
 
     def test_tool_name(self):
-        span = _make_readable_span(
-            attributes={"tool.name": "SearchTool"}
-        )
+        span = _make_readable_span(attributes={"tool.name": "SearchTool"})
         result = _extract_output(span)
         assert result["tool_name"] == "SearchTool"
 
     def test_tool_description_truncated_to_300(self):
         long_desc = "D" * 500
-        span = _make_readable_span(
-            attributes={"tool.description": long_desc}
-        )
+        span = _make_readable_span(attributes={"tool.description": long_desc})
         result = _extract_output(span)
         assert len(result["tool_description"]) == 300
 
     def test_tool_description_short(self):
-        span = _make_readable_span(
-            attributes={"tool.description": "Short desc"}
-        )
+        span = _make_readable_span(attributes={"tool.description": "Short desc"})
         result = _extract_output(span)
         assert result["tool_description"] == "Short desc"
 
@@ -570,9 +531,7 @@ class TestExtractOutput:
 
     def test_memory_field_value_zero_is_included(self):
         """A value of 0 should still be included (val is not None)."""
-        span = _make_readable_span(
-            attributes={"long_term_memory.save_time_ms": 0}
-        )
+        span = _make_readable_span(attributes={"long_term_memory.save_time_ms": 0})
         result = _extract_output(span)
         assert result["save_time_ms"] == 0
 
@@ -597,9 +556,7 @@ class TestExtractTraceMetadata:
         assert result["another"] == 42
 
     def test_kasal_extra_none_value_skipped(self):
-        span = _make_readable_span(
-            attributes={"kasal.extra.nope": None}
-        )
+        span = _make_readable_span(attributes={"kasal.extra.nope": None})
         result = _extract_trace_metadata(span)
         assert "nope" not in result
 
@@ -632,67 +589,49 @@ class TestExtractTraceMetadata:
         assert result["crew_id"] == "from-extra"
 
     def test_openinference_span_kind(self):
-        span = _make_readable_span(
-            attributes={"openinference.span.kind": "AGENT"}
-        )
+        span = _make_readable_span(attributes={"openinference.span.kind": "AGENT"})
         result = _extract_trace_metadata(span)
         assert result["span_kind"] == "AGENT"
 
     def test_graph_node_parent_id(self):
-        span = _make_readable_span(
-            attributes={"graph.node.parent_id": "parent-node-1"}
-        )
+        span = _make_readable_span(attributes={"graph.node.parent_id": "parent-node-1"})
         result = _extract_trace_metadata(span)
         assert result["parent_agent_role"] == "parent-node-1"
 
     def test_tool_parameters_json(self):
-        span = _make_readable_span(
-            attributes={"tool.parameters": '{"param1": "val1"}'}
-        )
+        span = _make_readable_span(attributes={"tool.parameters": '{"param1": "val1"}'})
         result = _extract_trace_metadata(span)
         assert result["tool_parameters"] == {"param1": "val1"}
 
     def test_tool_parameters_non_json(self):
-        span = _make_readable_span(
-            attributes={"tool.parameters": "plain text"}
-        )
+        span = _make_readable_span(attributes={"tool.parameters": "plain text"})
         result = _extract_trace_metadata(span)
         assert result["tool_parameters"] == "plain text"
 
     def test_crew_agents_json(self):
-        span = _make_readable_span(
-            attributes={"crew_agents": '["agent1", "agent2"]'}
-        )
+        span = _make_readable_span(attributes={"crew_agents": '["agent1", "agent2"]'})
         result = _extract_trace_metadata(span)
         assert result["crew_agents"] == ["agent1", "agent2"]
 
     def test_crew_tasks_json(self):
-        span = _make_readable_span(
-            attributes={"crew_tasks": '["task1"]'}
-        )
+        span = _make_readable_span(attributes={"crew_tasks": '["task1"]'})
         result = _extract_trace_metadata(span)
         assert result["crew_tasks"] == ["task1"]
 
     def test_crew_inputs_json(self):
-        span = _make_readable_span(
-            attributes={"crew_inputs": '{"topic": "AI"}'}
-        )
+        span = _make_readable_span(attributes={"crew_inputs": '{"topic": "AI"}'})
         result = _extract_trace_metadata(span)
         assert result["crew_inputs"] == {"topic": "AI"}
 
     def test_flow_inputs_json(self):
-        span = _make_readable_span(
-            attributes={"flow_inputs": '{"step": 1}'}
-        )
+        span = _make_readable_span(attributes={"flow_inputs": '{"step": 1}'})
         result = _extract_trace_metadata(span)
         assert result["flow_inputs"] == {"step": 1}
 
     def test_formatted_description_not_truncated(self):
         """CRITICAL: formatted_description must NOT be truncated in metadata."""
         long_val = "X" * 2000
-        span = _make_readable_span(
-            attributes={"formatted_description": long_val}
-        )
+        span = _make_readable_span(attributes={"formatted_description": long_val})
         result = _extract_trace_metadata(span)
         assert result["formatted_description"] == long_val
         assert len(result["formatted_description"]) == 2000
@@ -700,9 +639,7 @@ class TestExtractTraceMetadata:
     def test_formatted_expected_output_not_truncated(self):
         """CRITICAL: formatted_expected_output must NOT be truncated in metadata."""
         long_val = "Y" * 1800
-        span = _make_readable_span(
-            attributes={"formatted_expected_output": long_val}
-        )
+        span = _make_readable_span(attributes={"formatted_expected_output": long_val})
         result = _extract_trace_metadata(span)
         assert result["formatted_expected_output"] == long_val
         assert len(result["formatted_expected_output"]) == 1800
@@ -806,10 +743,14 @@ class TestKasalDBSpanExporterExport:
 
     def _make_exporter(self):
         """Create an exporter with all init dependencies mocked out."""
-        with patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor") as mock_exec_cls, \
-             patch("sqlalchemy.orm.sessionmaker", create=True), \
-             patch("sqlalchemy.create_engine", create=True), \
-             patch("src.config.settings.settings") as mock_settings:
+        with (
+            patch(
+                "src.services.otel_tracing.db_exporter.ThreadPoolExecutor"
+            ) as mock_exec_cls,
+            patch("sqlalchemy.orm.sessionmaker", create=True),
+            patch("sqlalchemy.create_engine", create=True),
+            patch("src.config.settings.settings") as mock_settings,
+        ):
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///:memory:"
             mock_executor = MagicMock()
             mock_exec_cls.return_value = mock_executor
@@ -894,10 +835,12 @@ class TestSpanToRecord:
     """Tests for the _span_to_record method."""
 
     def _make_exporter(self, group_context=None):
-        with patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor"), \
-             patch("sqlalchemy.orm.sessionmaker", create=True), \
-             patch("sqlalchemy.create_engine", create=True), \
-             patch("src.config.settings.settings") as mock_settings:
+        with (
+            patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor"),
+            patch("sqlalchemy.orm.sessionmaker", create=True),
+            patch("sqlalchemy.create_engine", create=True),
+            patch("src.config.settings.settings") as mock_settings,
+        ):
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///:memory:"
             exporter = KasalDBSpanExporter(
                 job_id="job-abc",
@@ -1051,7 +994,9 @@ class TestWriteBatch:
         defaults.update(overrides)
         return defaults
 
-    def _mock_write_batch(self, exporter, records, mock_trace_cls=None, mock_logger=None):
+    def _mock_write_batch(
+        self, exporter, records, mock_trace_cls=None, mock_logger=None
+    ):
         """Run _write_batch with mocked request_scoped_session and create_and_run_loop.
 
         Instead of actually running an event loop, we execute the async
@@ -1110,7 +1055,9 @@ class TestWriteBatch:
         records = [self._make_record()]
 
         mock_trace_cls = MagicMock(return_value=MagicMock())
-        mock_session = self._mock_write_batch(exporter, records, mock_trace_cls=mock_trace_cls)
+        mock_session = self._mock_write_batch(
+            exporter, records, mock_trace_cls=mock_trace_cls
+        )
 
         mock_session.add.assert_called_once()
         mock_session.commit.assert_awaited_once()
@@ -1135,21 +1082,26 @@ class TestWriteBatch:
             finally:
                 loop.close()
 
-        with patch(
-            "src.db.session.request_scoped_session",
-            return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=mock_session),
-                __aexit__=AsyncMock(return_value=False),
+        with (
+            patch(
+                "src.db.session.request_scoped_session",
+                return_value=AsyncMock(
+                    __aenter__=AsyncMock(return_value=mock_session),
+                    __aexit__=AsyncMock(return_value=False),
+                ),
             ),
-        ), patch(
-            "src.utils.asyncio_utils.create_and_run_loop",
-            side_effect=fake_create_and_run_loop,
-        ), patch(
-            "src.models.execution_trace.ExecutionTrace",
-            mock_trace_cls,
-        ), patch(
-            "src.services.otel_tracing.db_exporter.logger",
-            mock_logger,
+            patch(
+                "src.utils.asyncio_utils.create_and_run_loop",
+                side_effect=fake_create_and_run_loop,
+            ),
+            patch(
+                "src.models.execution_trace.ExecutionTrace",
+                mock_trace_cls,
+            ),
+            patch(
+                "src.services.otel_tracing.db_exporter.logger",
+                mock_logger,
+            ),
         ):
             exporter._write_batch(records)
 
@@ -1162,7 +1114,9 @@ class TestWriteBatch:
 
         mock_trace_instance = MagicMock()
         mock_trace_cls = MagicMock(return_value=mock_trace_instance)
-        mock_session = self._mock_write_batch(exporter, records, mock_trace_cls=mock_trace_cls)
+        mock_session = self._mock_write_batch(
+            exporter, records, mock_trace_cls=mock_trace_cls
+        )
 
         mock_trace_cls.assert_called_once()
         call_kwargs = mock_trace_cls.call_args.kwargs
@@ -1226,7 +1180,9 @@ class TestWriteBatch:
             return MagicMock()
 
         mock_trace_cls = MagicMock(side_effect=trace_side_effect)
-        mock_session = self._mock_write_batch(exporter, records, mock_trace_cls=mock_trace_cls)
+        mock_session = self._mock_write_batch(
+            exporter, records, mock_trace_cls=mock_trace_cls
+        )
 
         mock_session.commit.assert_awaited_once()
 
@@ -1245,10 +1201,12 @@ class TestWriteBatch:
     def test_write_batch_record_fields_passed_correctly(self):
         """Verify all record fields are correctly passed to ExecutionTrace."""
         exporter = self._make_exporter()
-        records = [self._make_record(
-            group_id="grp-1",
-            group_email="user@example.com",
-        )]
+        records = [
+            self._make_record(
+                group_id="grp-1",
+                group_email="user@example.com",
+            )
+        ]
 
         mock_trace_cls = MagicMock(return_value=MagicMock())
         self._mock_write_batch(exporter, records, mock_trace_cls=mock_trace_cls)
@@ -1292,10 +1250,14 @@ class TestShutdown:
     """Tests for the shutdown() method."""
 
     def _make_exporter(self):
-        with patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor") as mock_exec_cls, \
-             patch("sqlalchemy.orm.sessionmaker", create=True), \
-             patch("sqlalchemy.create_engine", create=True), \
-             patch("src.config.settings.settings") as mock_settings:
+        with (
+            patch(
+                "src.services.otel_tracing.db_exporter.ThreadPoolExecutor"
+            ) as mock_exec_cls,
+            patch("sqlalchemy.orm.sessionmaker", create=True),
+            patch("sqlalchemy.create_engine", create=True),
+            patch("src.config.settings.settings") as mock_settings,
+        ):
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///:memory:"
             exporter = KasalDBSpanExporter(job_id="job-shutdown")
         return exporter
@@ -1332,9 +1294,7 @@ class TestShutdown:
 
         # The executor.shutdown is called inside the _do_shutdown thread
         # with wait=True and cancel_futures=False
-        mock_executor.shutdown.assert_called_once_with(
-            wait=True, cancel_futures=False
-        )
+        mock_executor.shutdown.assert_called_once_with(wait=True, cancel_futures=False)
 
     def test_shutdown_timeout(self):
         """Verify that the 10-second timeout mechanism works: if the thread
@@ -1394,10 +1354,12 @@ class TestForceFlush:
     """Tests for the force_flush() method."""
 
     def _make_exporter(self):
-        with patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor"), \
-             patch("sqlalchemy.orm.sessionmaker", create=True), \
-             patch("sqlalchemy.create_engine", create=True), \
-             patch("src.config.settings.settings") as mock_settings:
+        with (
+            patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor"),
+            patch("sqlalchemy.orm.sessionmaker", create=True),
+            patch("sqlalchemy.create_engine", create=True),
+            patch("src.config.settings.settings") as mock_settings,
+        ):
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///:memory:"
             exporter = KasalDBSpanExporter(job_id="job-flush")
         return exporter
@@ -1434,7 +1396,9 @@ class TestSpanNameMap:
     def test_known_entries(self):
         assert SPAN_NAME_MAP["CrewAI.crew.kickoff"] == "crew_started"
         assert SPAN_NAME_MAP["kasal.flow.started"] == "flow_started"
-        assert SPAN_NAME_MAP["kasal.hitl.feedback_requested"] == "hitl_feedback_requested"
+        assert (
+            SPAN_NAME_MAP["kasal.hitl.feedback_requested"] == "hitl_feedback_requested"
+        )
 
     def test_all_crewai_entries_present(self):
         expected_crewai = [
@@ -1514,17 +1478,13 @@ class TestExtractEventContextEdgeCases:
 
     def test_kasal_task_name_truncation(self):
         long_val = "Z" * 600
-        span = _make_readable_span(
-            attributes={"kasal.task_name": long_val}
-        )
+        span = _make_readable_span(attributes={"kasal.task_name": long_val})
         result = _extract_event_context(span)
         assert len(result) == 500
 
     def test_task_description_truncation(self):
         long_val = "W" * 600
-        span = _make_readable_span(
-            attributes={"task.description": long_val}
-        )
+        span = _make_readable_span(attributes={"task.description": long_val})
         result = _extract_event_context(span)
         assert len(result) == 500
 
@@ -1545,17 +1505,13 @@ class TestExtractOutputEdgeCases:
 
     def test_output_value_without_kasal_output(self):
         """output.value used when kasal.output_content is not present."""
-        span = _make_readable_span(
-            attributes={"output.value": "from instrumentor"}
-        )
+        span = _make_readable_span(attributes={"output.value": "from instrumentor"})
         result = _extract_output(span)
         assert result["content"] == "from instrumentor"
 
     def test_crewai_output_lowest_priority(self):
         """crewai.output only used when others are absent."""
-        span = _make_readable_span(
-            attributes={"crewai.output": "crew result"}
-        )
+        span = _make_readable_span(attributes={"crewai.output": "crew result"})
         result = _extract_output(span)
         assert result["content"] == "crew result"
 
@@ -1582,9 +1538,7 @@ class TestExtractOutputEdgeCases:
         assert result["agent_role"] == "Analyst"
 
     def test_no_extra_data_when_no_kasal_extra(self):
-        span = _make_readable_span(
-            attributes={"kasal.output_content": "data"}
-        )
+        span = _make_readable_span(attributes={"kasal.output_content": "data"})
         result = _extract_output(span)
         assert "extra_data" not in result
 
@@ -1610,16 +1564,12 @@ class TestExtractTraceMetadataEdgeCases:
 
     def test_tool_parameters_not_string(self):
         """Non-string tool.parameters passed through _safe_json_parse."""
-        span = _make_readable_span(
-            attributes={"tool.parameters": {"already": "dict"}}
-        )
+        span = _make_readable_span(attributes={"tool.parameters": {"already": "dict"}})
         result = _extract_trace_metadata(span)
         assert result["tool_parameters"] == {"already": "dict"}
 
     def test_crew_agents_non_json(self):
-        span = _make_readable_span(
-            attributes={"crew_agents": "not json"}
-        )
+        span = _make_readable_span(attributes={"crew_agents": "not json"})
         result = _extract_trace_metadata(span)
         assert result["crew_agents"] == "not json"
 
@@ -1632,9 +1582,7 @@ class TestExtractTraceMetadataEdgeCases:
     def test_formatted_description_1500_chars_not_truncated(self):
         """Verify strings > 1500 chars are NOT truncated."""
         val = "M" * 1500
-        span = _make_readable_span(
-            attributes={"formatted_description": val}
-        )
+        span = _make_readable_span(attributes={"formatted_description": val})
         result = _extract_trace_metadata(span)
         assert len(result["formatted_description"]) == 1500
         assert result["formatted_description"] == val
@@ -1642,9 +1590,7 @@ class TestExtractTraceMetadataEdgeCases:
     def test_formatted_expected_output_1500_chars_not_truncated(self):
         """Verify strings > 1500 chars are NOT truncated."""
         val = "N" * 1500
-        span = _make_readable_span(
-            attributes={"formatted_expected_output": val}
-        )
+        span = _make_readable_span(attributes={"formatted_expected_output": val})
         result = _extract_trace_metadata(span)
         assert len(result["formatted_expected_output"]) == 1500
         assert result["formatted_expected_output"] == val
@@ -1671,9 +1617,7 @@ class TestExtractTraceMetadataEdgeCases:
 
     def test_kasal_extra_with_zero_value_included(self):
         """Zero is a valid value (not None), so it should be included."""
-        span = _make_readable_span(
-            attributes={"kasal.extra.count": 0}
-        )
+        span = _make_readable_span(attributes={"kasal.extra.count": 0})
         result = _extract_trace_metadata(span)
         assert result["count"] == 0
 
@@ -1687,10 +1631,14 @@ class TestExportIntegration:
     """Integration tests exercising the full export pipeline."""
 
     def _make_exporter(self, group_context=None):
-        with patch("src.services.otel_tracing.db_exporter.ThreadPoolExecutor") as mock_exec_cls, \
-             patch("sqlalchemy.ext.asyncio.async_sessionmaker", create=True), \
-             patch("sqlalchemy.ext.asyncio.create_async_engine", create=True), \
-             patch("src.config.settings.settings") as mock_settings:
+        with (
+            patch(
+                "src.services.otel_tracing.db_exporter.ThreadPoolExecutor"
+            ) as mock_exec_cls,
+            patch("sqlalchemy.ext.asyncio.async_sessionmaker", create=True),
+            patch("sqlalchemy.ext.asyncio.create_async_engine", create=True),
+            patch("src.config.settings.settings") as mock_settings,
+        ):
             mock_settings.DATABASE_URI = "sqlite+aiosqlite:///:memory:"
             exporter = KasalDBSpanExporter(
                 job_id="integration-job",
@@ -1788,6 +1736,7 @@ class TestForceFlush:
 
     def test_force_flush_returns_false_on_timeout(self):
         import concurrent.futures as cf
+
         exporter = self._exporter()
         barrier_future = MagicMock()
         barrier_future.result.side_effect = cf.TimeoutError()
@@ -1807,11 +1756,13 @@ class TestForceFlush:
     def test_force_flush_real_pool_drains_pending_work(self):
         """End-to-end: a slow queued write completes before force_flush returns."""
         import threading
+
         exporter = KasalDBSpanExporter("job-ff-real", max_workers=1)
         done = threading.Event()
 
         def slow_write():
             import time
+
             time.sleep(0.2)
             done.set()
 
@@ -1827,12 +1778,22 @@ class TestBatchProcessorWiring:
 
     def test_crew_executor_uses_batch_processor_for_db_exporter(self):
         import inspect
+
         import src.services.agent_builder.process_executor as m
+
         src_text = inspect.getsource(m)
-        assert "BatchSpanProcessor(\n                            KasalDBSpanExporter(" in src_text
+        assert (
+            "BatchSpanProcessor(\n                            KasalDBSpanExporter("
+            in src_text
+        )
 
     def test_flow_executor_uses_batch_processor_for_db_exporter(self):
         import inspect
+
         import src.services.flow_builder.process_executor as m
+
         src_text = inspect.getsource(m)
-        assert "BatchSpanProcessor(\n                            KasalDBSpanExporter(" in src_text
+        assert (
+            "BatchSpanProcessor(\n                            KasalDBSpanExporter("
+            in src_text
+        )

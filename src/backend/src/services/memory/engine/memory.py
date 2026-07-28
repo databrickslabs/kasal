@@ -42,6 +42,7 @@ from src.core.events.types import (
     MemorySaveFailedEvent,
     MemorySaveStartedEvent,
 )
+
 from .analyze import MemoryAnalysis
 from .types import MemoryRecord, ScopeInfo
 
@@ -160,8 +161,10 @@ class InMemoryStorage(StorageBackend):
         return records
 
     def _in_scope(self, record: MemoryRecord, scope: str | None) -> bool:
-        return scope is None or record.scope == scope or record.scope.startswith(
-            scope.rstrip("/") + "/"
+        return (
+            scope is None
+            or record.scope == scope
+            or record.scope.startswith(scope.rstrip("/") + "/")
         )
 
     def search(
@@ -188,7 +191,9 @@ class InMemoryStorage(StorageBackend):
         return records[offset : offset + limit]
 
     def list_scopes(self, path: str = "/") -> list[str]:
-        return sorted({r.scope for r in self._records.values() if self._in_scope(r, path)})
+        return sorted(
+            {r.scope for r in self._records.values() if self._in_scope(r, path)}
+        )
 
     def list_categories(self, path: str = "/") -> list[str]:
         categories: set[str] = set()
@@ -236,7 +241,9 @@ class InMemoryStorage(StorageBackend):
             self._records.clear()
         else:
             self._records = {
-                rid: r for rid, r in self._records.items() if not self._in_scope(r, scope)
+                rid: r
+                for rid, r in self._records.items()
+                if not self._in_scope(r, scope)
             }
 
 
@@ -290,7 +297,9 @@ class Memory(BaseModel):
             )
         return self._pool
 
-    def _submit_save(self, func: Callable[..., Any], *args: Any) -> concurrent.futures.Future:
+    def _submit_save(
+        self, func: Callable[..., Any], *args: Any
+    ) -> concurrent.futures.Future:
         # copy_context: ambient event_context (and kasal's ContextVars)
         # propagate into the save thread — kills the memory-event patch.
         context = contextvars.copy_context()
@@ -309,8 +318,15 @@ class Memory(BaseModel):
         root_scope: str | None = None,
     ) -> MemoryRecord | None:
         records = self.remember_many(
-            [content], scope, categories, metadata, importance, source, private,
-            agent_role, root_scope,
+            [content],
+            scope,
+            categories,
+            metadata,
+            importance,
+            source,
+            private,
+            agent_role,
+            root_scope,
         )
         return records[0] if records else None
 
@@ -330,8 +346,16 @@ class Memory(BaseModel):
             return []
         effective_root = root_scope if root_scope is not None else self.root_scope
         future = self._submit_save(
-            self._save_batch, contents, scope, categories, metadata,
-            importance, source, private, agent_role, effective_root,
+            self._save_batch,
+            contents,
+            scope,
+            categories,
+            metadata,
+            importance,
+            source,
+            private,
+            agent_role,
+            effective_root,
         )
         return future.result()
 
@@ -382,7 +406,9 @@ class Memory(BaseModel):
             event_bus.emit(
                 self,
                 MemorySaveStartedEvent(
-                    value=content, metadata=metadata, agent_role=agent_role,
+                    value=content,
+                    metadata=metadata,
+                    agent_role=agent_role,
                     source_type="unified_memory",
                 ),
             )
@@ -436,8 +462,10 @@ class Memory(BaseModel):
                 event_bus.emit(
                     self,
                     MemorySaveFailedEvent(
-                        value=record.content, metadata=record.metadata,
-                        agent_role=agent_role, error=str(e),
+                        value=record.content,
+                        metadata=record.metadata,
+                        agent_role=agent_role,
+                        error=str(e),
                         source_type="unified_memory",
                     ),
                 )
@@ -477,21 +505,28 @@ class Memory(BaseModel):
         event_bus.emit(
             self,
             MemoryQueryStartedEvent(
-                query=query, limit=limit, score_threshold=score_threshold,
+                query=query,
+                limit=limit,
+                score_threshold=score_threshold,
                 source_type="unified_memory",
             ),
         )
         try:
             results = self.storage.search(
-                query, limit=limit, scope=scope or self.root_scope,
+                query,
+                limit=limit,
+                scope=scope or self.root_scope,
                 score_threshold=score_threshold,
             )
         except Exception as e:
             event_bus.emit(
                 self,
                 MemoryQueryFailedEvent(
-                    query=query, limit=limit, score_threshold=score_threshold,
-                    error=str(e), source_type="unified_memory",
+                    query=query,
+                    limit=limit,
+                    score_threshold=score_threshold,
+                    error=str(e),
+                    source_type="unified_memory",
                 ),
             )
             raise
@@ -540,8 +575,12 @@ class Memory(BaseModel):
         importance: float | None = None,
     ) -> MemoryRecord | None:
         return self.storage.update(
-            record_id, content=content, scope=scope, categories=categories,
-            metadata=metadata, importance=importance,
+            record_id,
+            content=content,
+            scope=scope,
+            categories=categories,
+            metadata=metadata,
+            importance=importance,
         )
 
     def reset(self, scope: str | None = None) -> None:

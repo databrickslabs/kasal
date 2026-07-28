@@ -8,23 +8,23 @@ Generates DAX measures from YAML KPI definitions with support for:
 - Dependency tree building for calculated measures
 """
 
-import re
 import logging
+import re
 from typing import List, Optional, Set
 
-from ...base.models import KPI, KPIDefinition, DAXMeasure
-
-# Helper modules for DAX generation (import directly to avoid circular imports)
-from .helpers.dax_aggregations import detect_and_build_aggregation
-from .helpers.dax_syntax_converter import DaxSyntaxConverter
-from .helpers.dax_context import DAXBaseKBIContext, DAXKBIContextCache
+from ...base.models import KPI, DAXMeasure, KPIDefinition
+from ...common.transformers.currency import CurrencyConverter
+from ...common.transformers.formula import KBIDependencyResolver, KbiFormulaParser
+from ...common.transformers.uom import UnitOfMeasureConverter
 
 # Common translators and transformers
 from ...common.translators.filters import FilterResolver
 from ...common.translators.formula import FormulaTranslator
-from ...common.transformers.formula import KbiFormulaParser, KBIDependencyResolver
-from ...common.transformers.currency import CurrencyConverter
-from ...common.transformers.uom import UnitOfMeasureConverter
+
+# Helper modules for DAX generation (import directly to avoid circular imports)
+from .helpers.dax_aggregations import detect_and_build_aggregation
+from .helpers.dax_context import DAXBaseKBIContext, DAXKBIContextCache
+from .helpers.dax_syntax_converter import DaxSyntaxConverter
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,9 @@ class DAXGenerator:
 
         # Formula parsing and dependency resolution
         self._formula_parser: KbiFormulaParser = KbiFormulaParser()
-        self._dependency_resolver: KBIDependencyResolver = KBIDependencyResolver(self._formula_parser)
+        self._dependency_resolver: KBIDependencyResolver = KBIDependencyResolver(
+            self._formula_parser
+        )
 
         # Currency and UOM converters
         self.currency_converter = CurrencyConverter()
@@ -55,21 +57,24 @@ class DAXGenerator:
         measure_name = self.formula_translator.create_measure_name(kpi, definition)
 
         # Parse formula to handle CASE WHEN and other complex expressions
-        parsed_formula = self.formula_parser.parse_formula(kpi.formula, kpi.source_table or 'Table')
+        parsed_formula = self.formula_parser.parse_formula(
+            kpi.formula, kpi.source_table or "Table"
+        )
 
         # Create KPI definition dict for enhanced aggregation system
         kbi_dict = {
-            'formula': parsed_formula,
-            'source_table': kpi.source_table,
-            'aggregation_type': kpi.aggregation_type,
-            'weight_column': kpi.weight_column,
-            'target_column': kpi.target_column,
-            'percentile': kpi.percentile,
-            'exceptions': kpi.exceptions or [],
-            'display_sign': kpi.display_sign,
-            'exception_aggregation': kpi.exception_aggregation,
-            'fields_for_exception_aggregation': kpi.fields_for_exception_aggregation or [],
-            'fields_for_constant_selection': kpi.fields_for_constant_selection or []
+            "formula": parsed_formula,
+            "source_table": kpi.source_table,
+            "aggregation_type": kpi.aggregation_type,
+            "weight_column": kpi.weight_column,
+            "target_column": kpi.target_column,
+            "percentile": kpi.percentile,
+            "exceptions": kpi.exceptions or [],
+            "display_sign": kpi.display_sign,
+            "exception_aggregation": kpi.exception_aggregation,
+            "fields_for_exception_aggregation": kpi.fields_for_exception_aggregation
+            or [],
+            "fields_for_constant_selection": kpi.fields_for_constant_selection or [],
         }
 
         # Use enhanced aggregation system to build base formula
@@ -79,18 +84,26 @@ class DAXGenerator:
         resolved_filters = self.filter_resolver.resolve_filters(kpi, definition)
 
         # Add filters and constant selection to the formula
-        dax_formula = self._add_filters_to_dax(base_dax_formula, resolved_filters, kpi.source_table or 'Table', kpi)
+        dax_formula = self._add_filters_to_dax(
+            base_dax_formula, resolved_filters, kpi.source_table or "Table", kpi
+        )
 
         # Apply currency conversion if needed
         if self.currency_converter.should_convert_currency(kpi):
-            currency_type, currency_value = self.currency_converter.get_kbi_currency_recursive(kpi)
+            currency_type, currency_value = (
+                self.currency_converter.get_kbi_currency_recursive(kpi)
+            )
             if currency_type and currency_value and kpi.target_currency:
                 dax_formula = self.currency_converter.generate_dax_conversion(
                     value_expression=dax_formula,
-                    source_currency=currency_value if currency_type == "fixed" else None,
+                    source_currency=(
+                        currency_value if currency_type == "fixed" else None
+                    ),
                     target_currency=kpi.target_currency,
                     currency_type=currency_type,
-                    currency_column=currency_value if currency_type == "dynamic" else None
+                    currency_column=(
+                        currency_value if currency_type == "dynamic" else None
+                    ),
                 )
 
         # Apply UOM conversion if needed
@@ -103,14 +116,14 @@ class DAXGenerator:
                     source_unit=uom_value if uom_type == "fixed" else None,
                     target_unit=kpi.target_uom,
                     uom_type=uom_type,
-                    uom_column=uom_value if uom_type == "dynamic" else None
+                    uom_column=uom_value if uom_type == "dynamic" else None,
                 )
 
         return DAXMeasure(
             name=measure_name,
             description=kpi.description or f"Measure for {measure_name}",
             dax_formula=dax_formula,
-            original_kbi=kpi
+            original_kbi=kpi,
         )
 
     def convert_filter_to_dax(self, filter_condition: str, table_name: str) -> str:
@@ -128,64 +141,78 @@ class DAXGenerator:
 
         # Step 1: Fix NOT IN patterns
         not_in_pattern = r"(\w+)\s+NOT\s+IN\s*\(([^)]+)\)"
+
         def fix_not_in(match):
             column = match.group(1)
             values = match.group(2).replace("'", '"')
             return f"NOT {table_name}[{column}] IN {{{values}}}"
+
         result = re.sub(not_in_pattern, fix_not_in, result)
 
         # Step 2: Fix regular IN patterns
         in_pattern = r"(\w+)\s+IN\s*\(([^)]+)\)"
+
         def fix_in(match):
             column = match.group(1)
             values = match.group(2).replace("'", '"')
             return f"{table_name}[{column}] IN {{{values}}}"
+
         result = re.sub(in_pattern, fix_in, result)
 
         # Step 3: Fix BETWEEN patterns
         between_pattern = r"(\w+)\s+BETWEEN\s+'?([^'\s]+)'?\s+AND\s+'?([^'\s]+)'?"
+
         def fix_between(match):
             column = match.group(1)
             val1 = match.group(2)
             val2 = match.group(3)
-            return f"({table_name}[{column}] >= \"{val1}\" && {table_name}[{column}] <= \"{val2}\")"
+            return f'({table_name}[{column}] >= "{val1}" && {table_name}[{column}] <= "{val2}")'
+
         result = re.sub(between_pattern, fix_between, result)
 
         # Step 4: Fix simple equality patterns
         equality_pattern = r"(\w+)\s*=\s*'([^']+)'"
+
         def fix_equality(match):
             column = match.group(1)
             value = match.group(2)
-            return f"{table_name}[{column}] = \"{value}\""
+            return f'{table_name}[{column}] = "{value}"'
+
         result = re.sub(equality_pattern, fix_equality, result)
 
         # Step 5: Fix simple equality patterns with double quotes
         equality_pattern_double = r"(\w+)\s*=\s*\"([^\"]+)\""
+
         def fix_equality_double(match):
             column = match.group(1)
             value = match.group(2)
-            return f"{table_name}[{column}] = \"{value}\""
+            return f'{table_name}[{column}] = "{value}"'
+
         result = re.sub(equality_pattern_double, fix_equality_double, result)
 
         # Step 6: Fix simple equality patterns without quotes (numbers)
         equality_pattern_number = r"(\w+)\s*=\s*([0-9]+(?:\.[0-9]+)?)"
+
         def fix_equality_number(match):
             column = match.group(1)
             value = match.group(2)
             return f"{table_name}[{column}] = {value}"
+
         result = re.sub(equality_pattern_number, fix_equality_number, result)
 
         # Step 7: Convert SQL operators to DAX operators
-        result = result.replace(' AND ', ' && ')
-        result = result.replace(' OR ', ' || ')
+        result = result.replace(" AND ", " && ")
+        result = result.replace(" OR ", " || ")
 
         # Step 8: Convert NULL to BLANK() for DAX compatibility
         # Handle various NULL comparison patterns
-        result = re.sub(r'\bNULL\b', 'BLANK()', result)
+        result = re.sub(r"\bNULL\b", "BLANK()", result)
 
         return result
 
-    def _add_filters_to_dax(self, base_dax_formula: str, filters: List[str], table_name: str, kpi = None) -> str:
+    def _add_filters_to_dax(
+        self, base_dax_formula: str, filters: List[str], table_name: str, kpi=None
+    ) -> str:
         """Add filters and constant selection to a DAX formula using CALCULATE and FILTER functions."""
         filter_functions = []
 
@@ -196,7 +223,9 @@ class DAXGenerator:
                 dax_condition = self.convert_filter_to_dax(filter_condition, table_name)
 
                 # Wrap each condition in a FILTER function
-                filter_function = f"FILTER(\n        {table_name},\n        {dax_condition}\n    )"
+                filter_function = (
+                    f"FILTER(\n        {table_name},\n        {dax_condition}\n    )"
+                )
                 filter_functions.append(filter_function)
 
         # Add constant selection REMOVEFILTERS
@@ -219,27 +248,31 @@ class DAXGenerator:
         issues = []
 
         # Check for balanced parentheses
-        open_parens = dax_formula.count('(')
-        close_parens = dax_formula.count(')')
+        open_parens = dax_formula.count("(")
+        close_parens = dax_formula.count(")")
         if open_parens != close_parens:
-            issues.append(f"Unbalanced parentheses: {open_parens} open, {close_parens} close")
+            issues.append(
+                f"Unbalanced parentheses: {open_parens} open, {close_parens} close"
+            )
 
         # Check for invalid NOT IN syntax
         if "NOT IN" in dax_formula:
-            issues.append("Contains invalid 'NOT IN' syntax - should use 'NOT(column IN {})'")
+            issues.append(
+                "Contains invalid 'NOT IN' syntax - should use 'NOT(column IN {})'"
+            )
 
         # Check for raw AND operations outside FILTER functions
         if " AND " in dax_formula and "FILTER(" not in dax_formula:
             issues.append("Contains raw AND operations outside FILTER functions")
 
         # Check for basic DAX function syntax
-        dax_functions = ['CALCULATE', 'SUM', 'COUNT', 'AVERAGE', 'MAX', 'MIN', 'FILTER']
+        dax_functions = ["CALCULATE", "SUM", "COUNT", "AVERAGE", "MAX", "MIN", "FILTER"]
         has_dax_function = any(func in dax_formula.upper() for func in dax_functions)
         if not has_dax_function:
             issues.append("No recognized DAX functions found")
 
         # Check for table references
-        if '[' in dax_formula and ']' in dax_formula:
+        if "[" in dax_formula and "]" in dax_formula:
             # Good - has column references
             pass
         else:
@@ -275,9 +308,7 @@ class DAXGenerator:
             self._build_kbi_dependency_tree(kpi)
 
     def _build_kbi_dependency_tree(
-        self,
-        kbi: KPI,
-        parent_kbis: Optional[List[KPI]] = None
+        self, kbi: KPI, parent_kbis: Optional[List[KPI]] = None
     ) -> None:
         """
         Recursively build KBI dependency tree and track base KBI contexts

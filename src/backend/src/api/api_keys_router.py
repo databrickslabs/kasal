@@ -3,9 +3,8 @@ from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, status
 
-from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
-
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 from src.core.permissions import check_role_in_context
 from src.schemas.api_key import ApiKeyCreate, ApiKeyResponse, ApiKeyUpdate
 from src.services.settings.api_keys import ApiKeysService

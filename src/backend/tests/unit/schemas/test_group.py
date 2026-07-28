@@ -3,25 +3,27 @@ Comprehensive unit tests for group schemas.
 
 Tests all Pydantic models for group management API.
 """
-import pytest
+
 from datetime import datetime
+
+import pytest
 from pydantic import ValidationError
 
+from src.models.enums import GroupStatus, GroupUserRole, GroupUserStatus
 from src.schemas.group import (
     GroupBase,
-    GroupCreateRequest,
-    GroupUpdateRequest,
     GroupCreate,
-    GroupUpdate,
+    GroupCreateRequest,
     GroupResponse,
-    GroupWithRoleResponse,
+    GroupStatsResponse,
+    GroupUpdate,
+    GroupUpdateRequest,
     GroupUserBase,
     GroupUserCreateRequest,
-    GroupUserUpdateRequest,
     GroupUserResponse,
-    GroupStatsResponse
+    GroupUserUpdateRequest,
+    GroupWithRoleResponse,
 )
-from src.models.enums import GroupStatus, GroupUserRole, GroupUserStatus
 
 
 class TestGroupBase:
@@ -30,17 +32,14 @@ class TestGroupBase:
     def test_group_base_minimal(self):
         """Test GroupBase with minimal data."""
         group = GroupBase(name="Test Group")
-        
+
         assert group.name == "Test Group"
         assert group.description is None
 
     def test_group_base_full(self):
         """Test GroupBase with full data."""
-        group = GroupBase(
-            name="Test Group",
-            description="Test description"
-        )
-        
+        group = GroupBase(name="Test Group", description="Test description")
+
         assert group.name == "Test Group"
         assert group.description == "Test description"
 
@@ -49,11 +48,11 @@ class TestGroupBase:
         # Test empty name
         with pytest.raises(ValidationError):
             GroupBase(name="")
-        
+
         # Test too long name
         with pytest.raises(ValidationError):
             GroupBase(name="x" * 256)
-        
+
         # Test valid name
         group = GroupBase(name="x" * 255)
         assert group.name == "x" * 255
@@ -63,7 +62,7 @@ class TestGroupBase:
         # Test too long description
         with pytest.raises(ValidationError):
             GroupBase(name="Test", description="x" * 1001)
-        
+
         # Test valid description
         group = GroupBase(name="Test", description="x" * 1000)
         assert group.description == "x" * 1000
@@ -79,17 +78,14 @@ class TestGroupCreateRequest:
     def test_group_create_request_minimal(self):
         """Test GroupCreateRequest with minimal data."""
         request = GroupCreateRequest(name="Test Group")
-        
+
         assert request.name == "Test Group"
         assert request.description is None
 
     def test_group_create_request_full(self):
         """Test GroupCreateRequest with full data."""
-        request = GroupCreateRequest(
-            name="Test Group",
-            description="Test description"
-        )
-        
+        request = GroupCreateRequest(name="Test Group", description="Test description")
+
         assert request.name == "Test Group"
         assert request.description == "Test description"
 
@@ -100,7 +96,7 @@ class TestGroupUpdateRequest:
     def test_group_update_request_all_optional(self):
         """Test GroupUpdateRequest with all fields optional."""
         request = GroupUpdateRequest()
-        
+
         assert request.name is None
         assert request.description is None
         assert request.status is None
@@ -108,7 +104,7 @@ class TestGroupUpdateRequest:
     def test_group_update_request_partial(self):
         """Test GroupUpdateRequest with partial data."""
         request = GroupUpdateRequest(name="Updated Name")
-        
+
         assert request.name == "Updated Name"
         assert request.description is None
         assert request.status is None
@@ -118,7 +114,7 @@ class TestGroupUpdateRequest:
         request = GroupUpdateRequest(
             name="Updated Name",
             description="Updated description",
-            status=GroupStatus.SUSPENDED
+            status=GroupStatus.SUSPENDED,
         )
 
         assert request.name == "Updated Name"
@@ -130,7 +126,7 @@ class TestGroupUpdateRequest:
         # Test empty name
         with pytest.raises(ValidationError):
             GroupUpdateRequest(name="")
-        
+
         # Test too long name
         with pytest.raises(ValidationError):
             GroupUpdateRequest(name="x" * 256)
@@ -165,9 +161,9 @@ class TestGroupResponse:
             auto_created=False,
             created_at=now,
             updated_at=now,
-            user_count=5
+            user_count=5,
         )
-        
+
         assert response.name == "Test Group"
         assert response.id == "group-123"
         assert response.status == GroupStatus.ACTIVE
@@ -189,9 +185,9 @@ class TestGroupResponse:
             created_by_email="test@example.com",
             created_at=now,
             updated_at=now,
-            user_count=10
+            user_count=10,
         )
-        
+
         assert response.name == "Test Group"
         assert response.description == "Test description"
         assert response.id == "group-123"
@@ -204,9 +200,9 @@ class TestGroupResponse:
 
     def test_group_response_config(self):
         """Test GroupResponse model config."""
-        assert hasattr(GroupResponse, 'model_config')
+        assert hasattr(GroupResponse, "model_config")
         # ConfigDict creates a dict, not an object with attributes
-        assert GroupResponse.model_config['from_attributes'] is True
+        assert GroupResponse.model_config["from_attributes"] is True
 
 
 class TestGroupWithRoleResponse:
@@ -226,9 +222,9 @@ class TestGroupWithRoleResponse:
             auto_created=False,
             created_at=now,
             updated_at=now,
-            user_count=5
+            user_count=5,
         )
-        
+
         assert response.user_role is None
 
     def test_group_with_role_response_with_role(self):
@@ -242,9 +238,9 @@ class TestGroupWithRoleResponse:
             created_at=now,
             updated_at=now,
             user_count=5,
-            user_role=GroupUserRole.ADMIN
+            user_role=GroupUserRole.ADMIN,
         )
-        
+
         assert response.user_role == GroupUserRole.ADMIN
 
 
@@ -254,17 +250,14 @@ class TestGroupUserBase:
     def test_group_user_base_defaults(self):
         """Test GroupUserBase with default values."""
         user = GroupUserBase()
-        
+
         assert user.role == GroupUserRole.OPERATOR
         assert user.status == GroupUserStatus.ACTIVE
 
     def test_group_user_base_custom_values(self):
         """Test GroupUserBase with custom values."""
-        user = GroupUserBase(
-            role=GroupUserRole.ADMIN,
-            status=GroupUserStatus.INACTIVE
-        )
-        
+        user = GroupUserBase(role=GroupUserRole.ADMIN, status=GroupUserStatus.INACTIVE)
+
         assert user.role == GroupUserRole.ADMIN
         assert user.status == GroupUserStatus.INACTIVE
 
@@ -275,17 +268,16 @@ class TestGroupUserCreateRequest:
     def test_group_user_create_request_minimal(self):
         """Test GroupUserCreateRequest with minimal data."""
         request = GroupUserCreateRequest(user_email="test@example.com")
-        
+
         assert request.user_email == "test@example.com"
         assert request.role == GroupUserRole.OPERATOR
 
     def test_group_user_create_request_full(self):
         """Test GroupUserCreateRequest with full data."""
         request = GroupUserCreateRequest(
-            user_email="test@example.com",
-            role=GroupUserRole.ADMIN
+            user_email="test@example.com", role=GroupUserRole.ADMIN
         )
-        
+
         assert request.user_email == "test@example.com"
         assert request.role == GroupUserRole.ADMIN
 
@@ -294,7 +286,7 @@ class TestGroupUserCreateRequest:
         # Test invalid email
         with pytest.raises(ValidationError):
             GroupUserCreateRequest(user_email="invalid-email")
-        
+
         # Test valid email
         request = GroupUserCreateRequest(user_email="valid@example.com")
         assert request.user_email == "valid@example.com"
@@ -306,24 +298,23 @@ class TestGroupUserUpdateRequest:
     def test_group_user_update_request_all_optional(self):
         """Test GroupUserUpdateRequest with all fields optional."""
         request = GroupUserUpdateRequest()
-        
+
         assert request.role is None
         assert request.status is None
 
     def test_group_user_update_request_partial(self):
         """Test GroupUserUpdateRequest with partial data."""
         request = GroupUserUpdateRequest(role=GroupUserRole.EDITOR)
-        
+
         assert request.role == GroupUserRole.EDITOR
         assert request.status is None
 
     def test_group_user_update_request_full(self):
         """Test GroupUserUpdateRequest with full data."""
         request = GroupUserUpdateRequest(
-            role=GroupUserRole.ADMIN,
-            status=GroupUserStatus.INACTIVE
+            role=GroupUserRole.ADMIN, status=GroupUserStatus.INACTIVE
         )
-        
+
         assert request.role == GroupUserRole.ADMIN
         assert request.status == GroupUserStatus.INACTIVE
 
@@ -346,9 +337,9 @@ class TestGroupUserResponse:
             joined_at=now,
             auto_created=False,
             created_at=now,
-            updated_at=now
+            updated_at=now,
         )
-        
+
         assert response.id == "user-123"
         assert response.group_id == "group-123"
         assert response.user_id == "user-456"
@@ -373,16 +364,16 @@ class TestGroupUserResponse:
             created_at=now,
             updated_at=now,
             role=GroupUserRole.ADMIN,
-            status=GroupUserStatus.INACTIVE
+            status=GroupUserStatus.INACTIVE,
         )
-        
+
         assert response.role == GroupUserRole.ADMIN
         assert response.status == GroupUserStatus.INACTIVE
 
     def test_group_user_response_role_migration(self):
         """Test GroupUserResponse role migration validator."""
         now = datetime.now()
-        
+
         # Test legacy role mapping
         response = GroupUserResponse(
             id="user-123",
@@ -393,9 +384,9 @@ class TestGroupUserResponse:
             auto_created=False,
             created_at=now,
             updated_at=now,
-            role="manager"  # Legacy role
+            role="manager",  # Legacy role
         )
-        
+
         assert response.role == "editor"  # Should be migrated
 
     def test_group_user_response_role_migration_all_mappings(self):
@@ -409,16 +400,12 @@ class TestGroupUserResponse:
             "joined_at": now,
             "auto_created": False,
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
-        
+
         # Test all legacy mappings
-        mappings = {
-            "manager": "editor",
-            "user": "operator",
-            "viewer": "operator"
-        }
-        
+        mappings = {"manager": "editor", "user": "operator", "viewer": "operator"}
+
         for legacy_role, expected_role in mappings.items():
             response = GroupUserResponse(**base_data, role=legacy_role)
             assert response.role == expected_role
@@ -435,16 +422,16 @@ class TestGroupUserResponse:
             auto_created=False,
             created_at=now,
             updated_at=now,
-            role=GroupUserRole.ADMIN  # Valid enum role
+            role=GroupUserRole.ADMIN,  # Valid enum role
         )
 
         assert response.role == GroupUserRole.ADMIN  # Should remain unchanged
 
     def test_group_user_response_config(self):
         """Test GroupUserResponse model config."""
-        assert hasattr(GroupUserResponse, 'model_config')
+        assert hasattr(GroupUserResponse, "model_config")
         # ConfigDict creates a dict, not an object with attributes
-        assert GroupUserResponse.model_config['from_attributes'] is True
+        assert GroupUserResponse.model_config["from_attributes"] is True
 
 
 class TestGroupStatsResponse:
@@ -458,9 +445,9 @@ class TestGroupStatsResponse:
             auto_created_groups=5,
             manual_groups=5,
             total_users=50,
-            active_users=45
+            active_users=45,
         )
-        
+
         assert stats.total_groups == 10
         assert stats.active_groups == 8
         assert stats.auto_created_groups == 5
@@ -476,9 +463,9 @@ class TestGroupStatsResponse:
             auto_created_groups=0,
             manual_groups=0,
             total_users=0,
-            active_users=0
+            active_users=0,
         )
-        
+
         assert stats.total_groups == 0
         assert stats.active_groups == 0
         assert stats.auto_created_groups == 0
@@ -488,6 +475,6 @@ class TestGroupStatsResponse:
 
     def test_group_stats_response_config(self):
         """Test GroupStatsResponse model config."""
-        assert hasattr(GroupStatsResponse, 'model_config')
+        assert hasattr(GroupStatsResponse, "model_config")
         # ConfigDict creates a dict, not an object with attributes
-        assert GroupStatsResponse.model_config['from_attributes'] is True
+        assert GroupStatsResponse.model_config["from_attributes"] is True

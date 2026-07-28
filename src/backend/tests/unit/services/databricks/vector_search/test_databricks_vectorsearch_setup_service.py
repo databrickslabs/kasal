@@ -4,30 +4,39 @@ Unit tests for DatabricksVectorSearchSetupService.
 Tests one-click Databricks Vector Search setup including endpoint creation,
 index creation with retry logic, configuration saving, and error handling.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
-from types import SimpleNamespace
-from datetime import datetime
 
-from src.services.databricks.vector_search.setup import DatabricksVectorSearchSetupService
+from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
+import pytest
+
 from src.schemas.databricks_vector_endpoint import (
     EndpointCreate,
-    EndpointResponse,
     EndpointInfo,
-    EndpointType,
+    EndpointResponse,
     EndpointState,
+    EndpointType,
 )
-from src.schemas.databricks_vector_index import IndexCreate, IndexResponse, IndexInfo, IndexState
+from src.schemas.databricks_vector_index import (
+    IndexCreate,
+    IndexInfo,
+    IndexResponse,
+    IndexState,
+)
 from src.schemas.memory_backend import (
     DatabricksMemoryConfig,
-    MemoryBackendType,
     MemoryBackendCreate,
+    MemoryBackendType,
 )
-
+from src.services.databricks.vector_search.setup import (
+    DatabricksVectorSearchSetupService,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def service():
@@ -60,14 +69,16 @@ def _endpoint_response(success=True, name="ep", message="ok", error=None):
     """Helper to build an EndpointResponse."""
     return EndpointResponse(
         success=success,
-        endpoint=EndpointInfo(
-            name=name,
-            endpoint_type=EndpointType.STANDARD,
-            state=EndpointState.PROVISIONING,
-            ready=False,
-        )
-        if success
-        else None,
+        endpoint=(
+            EndpointInfo(
+                name=name,
+                endpoint_type=EndpointType.STANDARD,
+                state=EndpointState.PROVISIONING,
+                ready=False,
+            )
+            if success
+            else None
+        ),
         message=message,
         error=error,
     )
@@ -77,14 +88,16 @@ def _index_response(success=True, name="idx", message="ok"):
     """Helper to build an IndexResponse."""
     return IndexResponse(
         success=success,
-        index=IndexInfo(
-            name=name,
-            endpoint_name="ep",
-            state=IndexState.READY if success else IndexState.FAILED,
-            ready=success,
-        )
-        if success
-        else None,
+        index=(
+            IndexInfo(
+                name=name,
+                endpoint_name="ep",
+                state=IndexState.READY if success else IndexState.FAILED,
+                ready=success,
+            )
+            if success
+            else None
+        ),
         message=message,
     )
 
@@ -92,6 +105,7 @@ def _index_response(success=True, name="idx", message="ok"):
 # ---------------------------------------------------------------------------
 # Tests: __init__
 # ---------------------------------------------------------------------------
+
 
 class TestInit:
     """Test service initialisation."""
@@ -110,14 +124,19 @@ class TestInit:
 # Tests: one_click_databricks_setup -- happy path
 # ---------------------------------------------------------------------------
 
+
 class TestOneClickSetupHappyPath:
     """Tests for a successful end-to-end one-click setup without group_id."""
 
     @pytest.mark.asyncio
     async def test_full_success_no_group_id(self, service):
         """All endpoints and indexes created successfully, no config saved."""
-        ep_resp = _endpoint_response(success=True, name="ep", message="Endpoint ep created successfully")
-        idx_resp = _index_response(success=True, name="ml.agents.idx", message="Index created successfully")
+        ep_resp = _endpoint_response(
+            success=True, name="ep", message="Endpoint ep created successfully"
+        )
+        idx_resp = _index_response(
+            success=True, name="ml.agents.idx", message="Index created successfully"
+        )
 
         with (
             patch(
@@ -191,6 +210,7 @@ class TestOneClickSetupHappyPath:
 # Tests: one_click_databricks_setup -- endpoint failures
 # ---------------------------------------------------------------------------
 
+
 class TestEndpointCreationFailures:
     """Tests for endpoint creation failures."""
 
@@ -198,7 +218,9 @@ class TestEndpointCreationFailures:
     async def test_memory_endpoint_failure_raises_and_returns_error(self, service):
         """When memory endpoint fails, setup returns error."""
         ep_resp = _endpoint_response(
-            success=False, message="Failed to create memory endpoint: auth error", error="auth error"
+            success=False,
+            message="Failed to create memory endpoint: auth error",
+            error="auth error",
         )
 
         with (
@@ -225,7 +247,9 @@ class TestEndpointCreationFailures:
     async def test_doc_endpoint_failure_continues(self, service):
         """When doc endpoint fails, setup continues with memory endpoint only."""
         memory_ep_resp = _endpoint_response(success=True, message="ok")
-        doc_ep_resp = _endpoint_response(success=False, message="Failed", error="quota exceeded")
+        doc_ep_resp = _endpoint_response(
+            success=False, message="Failed", error="quota exceeded"
+        )
         idx_resp = _index_response(success=True, message="ok")
 
         call_count = 0
@@ -298,6 +322,7 @@ class TestEndpointCreationFailures:
 # Tests: one_click_databricks_setup -- index creation with retry
 # ---------------------------------------------------------------------------
 
+
 class TestIndexCreationRetry:
     """Tests for index creation retry logic inside one_click_databricks_setup."""
 
@@ -313,14 +338,18 @@ class TestIndexCreationRetry:
             patch(
                 "src.services.databricks.vector_search.setup.DatabricksVectorIndexRepository"
             ) as MockIdxRepo,
-            patch("src.services.databricks.vector_search.setup.asyncio") as mock_asyncio,
+            patch(
+                "src.services.databricks.vector_search.setup.asyncio"
+            ) as mock_asyncio,
         ):
             mock_ep = AsyncMock()
             mock_ep.create_endpoint.return_value = ep_resp
             MockEpRepo.return_value = mock_ep
 
             mock_idx = AsyncMock()
-            mock_idx.create_index.side_effect = Exception("Index already exists in catalog")
+            mock_idx.create_index.side_effect = Exception(
+                "Index already exists in catalog"
+            )
             MockIdxRepo.return_value = mock_idx
 
             mock_asyncio.sleep = AsyncMock()
@@ -358,7 +387,9 @@ class TestIndexCreationRetry:
             patch(
                 "src.services.databricks.vector_search.setup.DatabricksVectorIndexRepository"
             ) as MockIdxRepo,
-            patch("src.services.databricks.vector_search.setup.asyncio") as mock_asyncio,
+            patch(
+                "src.services.databricks.vector_search.setup.asyncio"
+            ) as mock_asyncio,
         ):
             mock_ep = AsyncMock()
             mock_ep.create_endpoint.return_value = ep_resp
@@ -401,7 +432,9 @@ class TestIndexCreationRetry:
             patch(
                 "src.services.databricks.vector_search.setup.DatabricksVectorIndexRepository"
             ) as MockIdxRepo,
-            patch("src.services.databricks.vector_search.setup.asyncio") as mock_asyncio,
+            patch(
+                "src.services.databricks.vector_search.setup.asyncio"
+            ) as mock_asyncio,
         ):
             mock_ep = AsyncMock()
             mock_ep.create_endpoint.return_value = ep_resp
@@ -445,7 +478,9 @@ class TestIndexCreationRetry:
             patch(
                 "src.services.databricks.vector_search.setup.DatabricksVectorIndexRepository"
             ) as MockIdxRepo,
-            patch("src.services.databricks.vector_search.setup.asyncio") as mock_asyncio,
+            patch(
+                "src.services.databricks.vector_search.setup.asyncio"
+            ) as mock_asyncio,
         ):
             mock_ep = AsyncMock()
             mock_ep.create_endpoint.return_value = ep_resp
@@ -483,7 +518,9 @@ class TestIndexCreationRetry:
             patch(
                 "src.services.databricks.vector_search.setup.DatabricksVectorIndexRepository"
             ) as MockIdxRepo,
-            patch("src.services.databricks.vector_search.setup.asyncio") as mock_asyncio,
+            patch(
+                "src.services.databricks.vector_search.setup.asyncio"
+            ) as mock_asyncio,
         ):
             mock_ep = AsyncMock()
             mock_ep.create_endpoint.return_value = ep_resp
@@ -516,7 +553,9 @@ class TestIndexCreationRetry:
             patch(
                 "src.services.databricks.vector_search.setup.DatabricksVectorIndexRepository"
             ) as MockIdxRepo,
-            patch("src.services.databricks.vector_search.setup.asyncio") as mock_asyncio,
+            patch(
+                "src.services.databricks.vector_search.setup.asyncio"
+            ) as mock_asyncio,
         ):
             mock_ep = AsyncMock()
             mock_ep.create_endpoint.return_value = ep_resp
@@ -553,7 +592,9 @@ class TestIndexCreationRetry:
             patch(
                 "src.services.databricks.vector_search.setup.DatabricksVectorIndexRepository"
             ) as MockIdxRepo,
-            patch("src.services.databricks.vector_search.setup.asyncio") as mock_asyncio,
+            patch(
+                "src.services.databricks.vector_search.setup.asyncio"
+            ) as mock_asyncio,
         ):
             mock_ep = AsyncMock()
             mock_ep.create_endpoint.return_value = ep_resp
@@ -634,7 +675,9 @@ class TestIndexCreationRetry:
             patch(
                 "src.services.databricks.vector_search.setup.DatabricksVectorIndexRepository"
             ) as MockIdxRepo,
-            patch("src.services.databricks.vector_search.setup.asyncio") as mock_asyncio,
+            patch(
+                "src.services.databricks.vector_search.setup.asyncio"
+            ) as mock_asyncio,
         ):
             mock_ep = AsyncMock()
             mock_ep.create_endpoint.return_value = ep_resp
@@ -660,6 +703,7 @@ class TestIndexCreationRetry:
 # ---------------------------------------------------------------------------
 # Tests: one_click_databricks_setup -- config / model_dump
 # ---------------------------------------------------------------------------
+
 
 class TestConfigGeneration:
     """Tests that the config dict is properly generated."""
@@ -743,6 +787,7 @@ class TestConfigGeneration:
 # ---------------------------------------------------------------------------
 # Tests: one_click_databricks_setup -- saving configuration with group_id
 # ---------------------------------------------------------------------------
+
 
 class TestConfigSaving:
     """Tests for saving configuration when group_id and session are provided."""
@@ -845,7 +890,10 @@ class TestConfigSaving:
                 "src.repositories.memory_backend_repository.MemoryBackendRepository"
             ) as MockMBRepo:
                 mock_mb_repo_inst = AsyncMock()
-                mock_mb_repo_inst.get_by_group_id.return_value = [disabled_config_1, disabled_config_2]
+                mock_mb_repo_inst.get_by_group_id.return_value = [
+                    disabled_config_1,
+                    disabled_config_2,
+                ]
                 MockMBRepo.return_value = mock_mb_repo_inst
 
                 result = await svc.one_click_databricks_setup(
@@ -984,7 +1032,9 @@ class TestConfigSaving:
                 "src.repositories.memory_backend_repository.MemoryBackendRepository"
             ) as MockMBRepo:
                 mock_mb_repo_inst = AsyncMock()
-                mock_mb_repo_inst.get_by_group_id.side_effect = Exception("DB connection lost")
+                mock_mb_repo_inst.get_by_group_id.side_effect = Exception(
+                    "DB connection lost"
+                )
                 MockMBRepo.return_value = mock_mb_repo_inst
 
                 result = await svc.one_click_databricks_setup(
@@ -1061,6 +1111,7 @@ class TestConfigSaving:
 # Tests: one_click_databricks_setup -- top-level exception handling
 # ---------------------------------------------------------------------------
 
+
 class TestTopLevelExceptionHandling:
     """Tests for the outermost try/except in one_click_databricks_setup."""
 
@@ -1084,6 +1135,7 @@ class TestTopLevelExceptionHandling:
 # ---------------------------------------------------------------------------
 # Tests: one_click_databricks_setup -- user_token propagation
 # ---------------------------------------------------------------------------
+
 
 class TestUserTokenPropagation:
     """Tests that user_token is forwarded to repositories."""
@@ -1116,7 +1168,11 @@ class TestUserTokenPropagation:
             )
 
         for c in mock_ep.create_endpoint.call_args_list:
-            assert c[0][1] == "my-secret-token" or c.kwargs.get("user_token") == "my-secret-token" or c[0][-1] == "my-secret-token"
+            assert (
+                c[0][1] == "my-secret-token"
+                or c.kwargs.get("user_token") == "my-secret-token"
+                or c[0][-1] == "my-secret-token"
+            )
 
     @pytest.mark.asyncio
     async def test_user_token_forwarded_to_index_repo(self, service):
@@ -1152,6 +1208,7 @@ class TestUserTokenPropagation:
 # ---------------------------------------------------------------------------
 # Tests: one_click_databricks_setup -- default parameters
 # ---------------------------------------------------------------------------
+
 
 class TestDefaultParameters:
     """Tests for default parameter values."""
@@ -1192,6 +1249,7 @@ class TestDefaultParameters:
 # Tests: one_click_databricks_setup -- index names contain catalog.schema
 # ---------------------------------------------------------------------------
 
+
 class TestIndexNaming:
     """Tests that index names use catalog.schema prefix."""
 
@@ -1230,12 +1288,15 @@ class TestIndexNaming:
             )
 
         for req in captured_requests:
-            assert req.name.startswith("mycat.mysch."), f"Index name {req.name} does not start with mycat.mysch."
+            assert req.name.startswith(
+                "mycat.mysch."
+            ), f"Index name {req.name} does not start with mycat.mysch."
 
 
 # ---------------------------------------------------------------------------
 # Tests: document index conditional creation
 # ---------------------------------------------------------------------------
+
 
 class TestDocumentIndexConditional:
     """Test that document index is only created when document endpoint succeeds."""
@@ -1275,6 +1336,7 @@ class TestDocumentIndexConditional:
 # Tests: endpoint type
 # ---------------------------------------------------------------------------
 
+
 class TestEndpointType:
     """Tests that endpoints are created with correct type."""
 
@@ -1312,12 +1374,16 @@ class TestEndpointType:
 
         assert len(captured_ep_requests) == 2
         for req in captured_ep_requests:
-            assert req.endpoint_type == "STANDARD" or req.endpoint_type == EndpointType.STANDARD
+            assert (
+                req.endpoint_type == "STANDARD"
+                or req.endpoint_type == EndpointType.STANDARD
+            )
 
 
 # ---------------------------------------------------------------------------
 # Tests: workspace_url propagation
 # ---------------------------------------------------------------------------
+
 
 class TestWorkspaceUrlPropagation:
     """Tests that workspace_url is passed correctly to repository constructors."""
@@ -1355,6 +1421,7 @@ class TestWorkspaceUrlPropagation:
 # ---------------------------------------------------------------------------
 # Tests: embedding_dimension propagation
 # ---------------------------------------------------------------------------
+
 
 class TestEmbeddingDimensionPropagation:
     """Tests that embedding_dimension flows into IndexCreate requests."""
@@ -1399,6 +1466,7 @@ class TestEmbeddingDimensionPropagation:
 # ---------------------------------------------------------------------------
 # Tests: mixed existing configs
 # ---------------------------------------------------------------------------
+
 
 class TestMixedExistingConfigs:
     """Tests for groups with a mix of active and disabled existing configs."""
@@ -1464,6 +1532,7 @@ class TestMixedExistingConfigs:
 # Tests: no existing configs
 # ---------------------------------------------------------------------------
 
+
 class TestNoExistingConfigs:
     """Tests for groups with no existing configs."""
 
@@ -1521,6 +1590,7 @@ class TestNoExistingConfigs:
 # ---------------------------------------------------------------------------
 # Tests: user_token logging paths
 # ---------------------------------------------------------------------------
+
 
 class TestUserTokenLogging:
     """Tests for user_token logging branches."""
@@ -1588,6 +1658,7 @@ class TestUserTokenLogging:
 # Tests: schema integration
 # ---------------------------------------------------------------------------
 
+
 class TestSchemaIntegration:
     """Tests that DatabricksIndexSchemas.get_schema is called correctly."""
 
@@ -1616,7 +1687,10 @@ class TestSchemaIntegration:
             mock_idx.create_index.return_value = idx_resp
             MockIdxRepo.return_value = mock_idx
 
-            MockSchemas.get_schema.return_value = {"id": "string", "embedding": "array<float>"}
+            MockSchemas.get_schema.return_value = {
+                "id": "string",
+                "embedding": "array<float>",
+            }
 
             result = await service.one_click_databricks_setup(
                 workspace_url="https://example.com",
@@ -1630,6 +1704,7 @@ class TestSchemaIntegration:
 # ---------------------------------------------------------------------------
 # Tests: document_index in config
 # ---------------------------------------------------------------------------
+
 
 class TestDocumentIndexInConfig:
     """Tests for document_index presence in the resulting config."""
@@ -1707,11 +1782,14 @@ class TestDocumentIndexInConfig:
 # Tests: IndexCreate request fields
 # ---------------------------------------------------------------------------
 
+
 class TestIndexCreateRequestFields:
     """Tests that IndexCreate requests have correct primary_key and embedding_vector_column."""
 
     @pytest.mark.asyncio
-    async def test_index_create_has_correct_primary_key_and_embedding_col(self, service):
+    async def test_index_create_has_correct_primary_key_and_embedding_col(
+        self, service
+    ):
         """Each IndexCreate should have primary_key='id' and embedding_vector_column='embedding'."""
         ep_resp = _endpoint_response(success=True, message="ok")
         idx_resp = _index_response(success=True, message="ok")
@@ -1752,6 +1830,7 @@ class TestIndexCreateRequestFields:
 # ---------------------------------------------------------------------------
 # Tests: doc endpoint error format
 # ---------------------------------------------------------------------------
+
 
 class TestDocEndpointErrorFormat:
     """Tests the error recording format when document endpoint fails."""

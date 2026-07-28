@@ -10,16 +10,16 @@ Tests cover:
 - Error handling and edge cases
 """
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime, timezone
 from typing import List, Optional
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from sqlalchemy.ext.asyncio import AsyncSession
+import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.models.execution_history import ErrorTrace, ExecutionHistory, TaskStatus
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
-from src.models.execution_history import ExecutionHistory, TaskStatus, ErrorTrace
 
 
 class TestExecutionHistoryRepositoryInit:
@@ -54,11 +54,13 @@ class TestGetExecutionHistory:
         return ExecutionHistoryRepository(mock_session)
 
     @pytest.mark.asyncio
-    async def test_get_execution_history_with_group_filtering(self, repository, mock_session):
+    async def test_get_execution_history_with_group_filtering(
+        self, repository, mock_session
+    ):
         """Test getting execution history with group filtering."""
         mock_executions = [
-            MagicMock(id=1, job_id='job-1', group_id='group-1'),
-            MagicMock(id=2, job_id='job-2', group_id='group-1')
+            MagicMock(id=1, job_id="job-1", group_id="group-1"),
+            MagicMock(id=2, job_id="job-2", group_id="group-1"),
         ]
 
         # Mock count result
@@ -69,12 +71,12 @@ class TestGetExecutionHistory:
         mock_exec_result = MagicMock()
         mock_exec_result.scalars.return_value.all.return_value = mock_executions
 
-        mock_session.execute = AsyncMock(side_effect=[mock_count_result, mock_exec_result])
+        mock_session.execute = AsyncMock(
+            side_effect=[mock_count_result, mock_exec_result]
+        )
 
         runs, total = await repository.get_execution_history(
-            limit=50,
-            offset=0,
-            group_ids=['group-1']
+            limit=50, offset=0, group_ids=["group-1"]
         )
 
         assert len(runs) == 2
@@ -82,12 +84,14 @@ class TestGetExecutionHistory:
         assert mock_session.execute.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_get_execution_history_without_group_filtering(self, repository, mock_session):
+    async def test_get_execution_history_without_group_filtering(
+        self, repository, mock_session
+    ):
         """Test getting execution history without group filtering (admin access)."""
         mock_executions = [
-            MagicMock(id=1, job_id='job-1'),
-            MagicMock(id=2, job_id='job-2'),
-            MagicMock(id=3, job_id='job-3')
+            MagicMock(id=1, job_id="job-1"),
+            MagicMock(id=2, job_id="job-2"),
+            MagicMock(id=3, job_id="job-3"),
         ]
 
         mock_count_result = MagicMock()
@@ -96,7 +100,9 @@ class TestGetExecutionHistory:
         mock_exec_result = MagicMock()
         mock_exec_result.scalars.return_value.all.return_value = mock_executions
 
-        mock_session.execute = AsyncMock(side_effect=[mock_count_result, mock_exec_result])
+        mock_session.execute = AsyncMock(
+            side_effect=[mock_count_result, mock_exec_result]
+        )
 
         runs, total = await repository.get_execution_history(limit=50, offset=0)
 
@@ -106,7 +112,7 @@ class TestGetExecutionHistory:
     @pytest.mark.asyncio
     async def test_get_execution_history_pagination(self, repository, mock_session):
         """Test pagination in get_execution_history."""
-        mock_executions = [MagicMock(id=3, job_id='job-3')]
+        mock_executions = [MagicMock(id=3, job_id="job-3")]
 
         mock_count_result = MagicMock()
         mock_count_result.scalar.return_value = 10
@@ -114,7 +120,9 @@ class TestGetExecutionHistory:
         mock_exec_result = MagicMock()
         mock_exec_result.scalars.return_value.all.return_value = mock_executions
 
-        mock_session.execute = AsyncMock(side_effect=[mock_count_result, mock_exec_result])
+        mock_session.execute = AsyncMock(
+            side_effect=[mock_count_result, mock_exec_result]
+        )
 
         runs, total = await repository.get_execution_history(limit=1, offset=2)
 
@@ -130,7 +138,9 @@ class TestGetExecutionHistory:
             await repo.get_execution_history()
 
     @pytest.mark.asyncio
-    async def test_get_execution_history_empty_group_ids(self, repository, mock_session):
+    async def test_get_execution_history_empty_group_ids(
+        self, repository, mock_session
+    ):
         """Test with empty group_ids list (should not filter)."""
         mock_executions = [MagicMock(id=1)]
 
@@ -140,7 +150,9 @@ class TestGetExecutionHistory:
         mock_exec_result = MagicMock()
         mock_exec_result.scalars.return_value.all.return_value = mock_executions
 
-        mock_session.execute = AsyncMock(side_effect=[mock_count_result, mock_exec_result])
+        mock_session.execute = AsyncMock(
+            side_effect=[mock_count_result, mock_exec_result]
+        )
 
         runs, total = await repository.get_execution_history(group_ids=[])
 
@@ -165,7 +177,7 @@ class TestGetExecutionById:
     @pytest.mark.asyncio
     async def test_get_execution_by_id_found(self, repository, mock_session):
         """Test getting execution by ID when found."""
-        mock_execution = MagicMock(id=1, job_id='job-1')
+        mock_execution = MagicMock(id=1, job_id="job-1")
         mock_result = MagicMock()
         mock_result.scalars.return_value.first.return_value = mock_execution
         mock_session.execute = AsyncMock(return_value=mock_result)
@@ -187,14 +199,16 @@ class TestGetExecutionById:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_execution_by_id_with_group_filter(self, repository, mock_session):
+    async def test_get_execution_by_id_with_group_filter(
+        self, repository, mock_session
+    ):
         """Test getting execution by ID with group filtering."""
-        mock_execution = MagicMock(id=1, job_id='job-1', group_id='group-1')
+        mock_execution = MagicMock(id=1, job_id="job-1", group_id="group-1")
         mock_result = MagicMock()
         mock_result.scalars.return_value.first.return_value = mock_execution
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.get_execution_by_id(1, group_ids=['group-1'])
+        result = await repository.get_execution_by_id(1, group_ids=["group-1"])
 
         assert result == mock_execution
 
@@ -225,39 +239,49 @@ class TestGetExecutionByJobId:
     @pytest.mark.asyncio
     async def test_get_execution_by_job_id_found(self, repository, mock_session):
         """Test getting execution by job_id when found."""
-        mock_execution = MagicMock(id=1, job_id='job-123')
+        mock_execution = MagicMock(id=1, job_id="job-123")
         mock_result = MagicMock()
         mock_result.scalars.return_value.first.return_value = mock_execution
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.get_execution_by_job_id('job-123')
+        result = await repository.get_execution_by_job_id("job-123")
 
         assert result == mock_execution
-        assert result.job_id == 'job-123'
+        assert result.job_id == "job-123"
 
     @pytest.mark.asyncio
-    async def test_get_execution_by_job_id_with_group_filter(self, repository, mock_session):
+    async def test_get_execution_by_job_id_with_group_filter(
+        self, repository, mock_session
+    ):
         """Test getting execution by job_id with group filtering."""
-        mock_execution = MagicMock(id=1, job_id='job-123', group_id='group-1')
+        mock_execution = MagicMock(id=1, job_id="job-123", group_id="group-1")
         mock_result = MagicMock()
         mock_result.scalars.return_value.first.return_value = mock_execution
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.get_execution_by_job_id('job-123', group_ids=['group-1'])
+        result = await repository.get_execution_by_job_id(
+            "job-123", group_ids=["group-1"]
+        )
 
         assert result == mock_execution
 
     @pytest.mark.asyncio
-    async def test_get_execution_summary_excludes_blob_columns(self, repository, mock_session):
+    async def test_get_execution_summary_excludes_blob_columns(
+        self, repository, mock_session
+    ):
         """Perf regression (W2.2): the polling-path summary lookup must select
         only scalar columns — never the result/inputs/partial_results/
         checkpoint_data JSON blobs the full-row variant drags per poll."""
-        mock_row = MagicMock(id=1, job_id='job-123', group_id='group-1', status='RUNNING')
+        mock_row = MagicMock(
+            id=1, job_id="job-123", group_id="group-1", status="RUNNING"
+        )
         mock_result = MagicMock()
         mock_result.first.return_value = mock_row
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.get_execution_summary_by_job_id('job-123', group_ids=['group-1'])
+        result = await repository.get_execution_summary_by_job_id(
+            "job-123", group_ids=["group-1"]
+        )
 
         assert result == mock_row
         stmt = mock_session.execute.call_args[0][0]
@@ -333,7 +357,9 @@ class TestCheckExecutionExists:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_check_execution_exists_applies_group_filter(self, repository, mock_session):
+    async def test_check_execution_exists_applies_group_filter(
+        self, repository, mock_session
+    ):
         """With group_ids the existence query filters by group_id (tenant isolation)."""
         mock_result = MagicMock()
         mock_result.scalar.return_value = 0
@@ -346,7 +372,9 @@ class TestCheckExecutionExists:
         assert "group_id" in str(stmt), "existence check must be scoped by group_id"
 
     @pytest.mark.asyncio
-    async def test_check_execution_exists_no_group_filter_when_none(self, repository, mock_session):
+    async def test_check_execution_exists_no_group_filter_when_none(
+        self, repository, mock_session
+    ):
         """Without group_ids the query is unfiltered (system/back-compat path)."""
         mock_result = MagicMock()
         mock_result.scalar.return_value = 1
@@ -380,7 +408,7 @@ class TestDeleteExecution:
     @pytest.mark.asyncio
     async def test_delete_execution_success(self, repository, mock_session):
         """Test successful execution deletion."""
-        mock_execution = MagicMock(id=1, job_id='job-123')
+        mock_execution = MagicMock(id=1, job_id="job-123")
         mock_find_result = MagicMock()
         mock_find_result.scalars.return_value.first.return_value = mock_execution
 
@@ -388,20 +416,22 @@ class TestDeleteExecution:
         mock_error_delete_result = MagicMock(rowcount=1)
         mock_run_delete_result = MagicMock(rowcount=1)
 
-        mock_session.execute = AsyncMock(side_effect=[
-            mock_find_result,
-            mock_task_delete_result,
-            mock_error_delete_result,
-            mock_run_delete_result
-        ])
+        mock_session.execute = AsyncMock(
+            side_effect=[
+                mock_find_result,
+                mock_task_delete_result,
+                mock_error_delete_result,
+                mock_run_delete_result,
+            ]
+        )
 
         result = await repository.delete_execution(1)
 
         assert result is not None
-        assert result['execution_id'] == 1
-        assert result['job_id'] == 'job-123'
-        assert result['task_status_count'] == 2
-        assert result['error_trace_count'] == 1
+        assert result["execution_id"] == 1
+        assert result["job_id"] == "job-123"
+        assert result["task_status_count"] == 2
+        assert result["error_trace_count"] == 1
         mock_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
@@ -435,7 +465,7 @@ class TestDeleteExecutionByJobId:
     @pytest.mark.asyncio
     async def test_delete_by_job_id_success(self, repository, mock_session):
         """Test successful deletion by job_id."""
-        mock_execution = MagicMock(id=1, job_id='job-123')
+        mock_execution = MagicMock(id=1, job_id="job-123")
         mock_find_result = MagicMock()
         mock_find_result.scalars.return_value.first.return_value = mock_execution
 
@@ -443,17 +473,19 @@ class TestDeleteExecutionByJobId:
         mock_error_delete_result = MagicMock(rowcount=0)
         mock_run_delete_result = MagicMock(rowcount=1)
 
-        mock_session.execute = AsyncMock(side_effect=[
-            mock_find_result,
-            mock_task_delete_result,
-            mock_error_delete_result,
-            mock_run_delete_result
-        ])
+        mock_session.execute = AsyncMock(
+            side_effect=[
+                mock_find_result,
+                mock_task_delete_result,
+                mock_error_delete_result,
+                mock_run_delete_result,
+            ]
+        )
 
-        result = await repository.delete_execution_by_job_id('job-123')
+        result = await repository.delete_execution_by_job_id("job-123")
 
         assert result is not None
-        assert result['job_id'] == 'job-123'
+        assert result["job_id"] == "job-123"
 
 
 class TestDeleteAllExecutions:
@@ -477,7 +509,7 @@ class TestDeleteAllExecutions:
         """Test deleting all executions for specific groups."""
         # Mock finding executions for the group
         mock_exec_result = MagicMock()
-        mock_exec_result.fetchall.return_value = [(1, 'job-1'), (2, 'job-2')]
+        mock_exec_result.fetchall.return_value = [(1, "job-1"), (2, "job-2")]
 
         mock_task_delete_result = MagicMock(rowcount=5)
         mock_error_delete_result = MagicMock(rowcount=2)
@@ -488,21 +520,23 @@ class TestDeleteAllExecutions:
         # job_id), delete LLMUsageBilling, then delete ExecutionHistory. The FK
         # children are cleared before the run rows so the delete never violates
         # a constraint; their results are unused (run_count = len(execution_ids)).
-        mock_session.execute = AsyncMock(side_effect=[
-            mock_exec_result,
-            mock_task_delete_result,
-            mock_error_delete_result,
-            MagicMock(),  # delete ExecutionTrace by run_id
-            MagicMock(),  # delete ExecutionTrace by job_id
-            MagicMock(),  # delete LLMUsageBilling
-            mock_run_delete_result,  # delete ExecutionHistory
-        ])
+        mock_session.execute = AsyncMock(
+            side_effect=[
+                mock_exec_result,
+                mock_task_delete_result,
+                mock_error_delete_result,
+                MagicMock(),  # delete ExecutionTrace by run_id
+                MagicMock(),  # delete ExecutionTrace by job_id
+                MagicMock(),  # delete LLMUsageBilling
+                mock_run_delete_result,  # delete ExecutionHistory
+            ]
+        )
 
-        result = await repository.delete_all_executions(group_ids=['group-1'])
+        result = await repository.delete_all_executions(group_ids=["group-1"])
 
-        assert result['run_count'] == 2
-        assert result['task_status_count'] == 5
-        assert result['error_trace_count'] == 2
+        assert result["run_count"] == 2
+        assert result["task_status_count"] == 5
+        assert result["error_trace_count"] == 2
 
     @pytest.mark.asyncio
     async def test_delete_all_without_group_filter(self, repository, mock_session):
@@ -518,19 +552,21 @@ class TestDeleteAllExecutions:
         # LLMUsageBilling, count ExecutionHistory, then delete ExecutionHistory.
         # FK children are cleared before the run rows; run_count comes from the
         # count select, not the delete rowcount.
-        mock_session.execute = AsyncMock(side_effect=[
-            mock_task_delete_result,
-            mock_error_delete_result,
-            MagicMock(),  # delete ExecutionTrace
-            MagicMock(),  # delete LLMUsageBilling
-            mock_count_result,
-            mock_run_delete_result,  # delete ExecutionHistory
-        ])
+        mock_session.execute = AsyncMock(
+            side_effect=[
+                mock_task_delete_result,
+                mock_error_delete_result,
+                MagicMock(),  # delete ExecutionTrace
+                MagicMock(),  # delete LLMUsageBilling
+                mock_count_result,
+                mock_run_delete_result,  # delete ExecutionHistory
+            ]
+        )
 
         result = await repository.delete_all_executions()
 
-        assert result['run_count'] == 5
-        assert result['task_status_count'] == 10
+        assert result["run_count"] == 5
+        assert result["task_status_count"] == 10
 
     @pytest.mark.asyncio
     async def test_delete_all_empty_result(self, repository, mock_session):
@@ -540,11 +576,11 @@ class TestDeleteAllExecutions:
 
         mock_session.execute = AsyncMock(return_value=mock_exec_result)
 
-        result = await repository.delete_all_executions(group_ids=['empty-group'])
+        result = await repository.delete_all_executions(group_ids=["empty-group"])
 
-        assert result['run_count'] == 0
-        assert result['task_status_count'] == 0
-        assert result['error_trace_count'] == 0
+        assert result["run_count"] == 0
+        assert result["task_status_count"] == 0
+        assert result["error_trace_count"] == 0
 
 
 class TestUpdateMlflowEvaluationRunId:
@@ -571,10 +607,12 @@ class TestUpdateMlflowEvaluationRunId:
         mock_result.scalar_one_or_none.return_value = mock_execution
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.update_mlflow_evaluation_run_id('job-123', 'mlflow-run-456')
+        result = await repository.update_mlflow_evaluation_run_id(
+            "job-123", "mlflow-run-456"
+        )
 
         assert result is True
-        assert mock_execution.mlflow_evaluation_run_id == 'mlflow-run-456'
+        assert mock_execution.mlflow_evaluation_run_id == "mlflow-run-456"
         mock_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
@@ -584,7 +622,9 @@ class TestUpdateMlflowEvaluationRunId:
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.update_mlflow_evaluation_run_id('non-existent', 'mlflow-run')
+        result = await repository.update_mlflow_evaluation_run_id(
+            "non-existent", "mlflow-run"
+        )
 
         assert result is False
 
@@ -593,7 +633,9 @@ class TestUpdateMlflowEvaluationRunId:
         """Test error handling during update."""
         mock_session.execute = AsyncMock(side_effect=Exception("Database error"))
 
-        result = await repository.update_mlflow_evaluation_run_id('job-123', 'mlflow-run')
+        result = await repository.update_mlflow_evaluation_run_id(
+            "job-123", "mlflow-run"
+        )
 
         assert result is False
 
@@ -617,41 +659,42 @@ class TestGetCheckpointsForFlow:
     async def test_get_checkpoints_success(self, repository, mock_session):
         """Test getting checkpoints for a flow."""
         mock_checkpoints = [
-            MagicMock(id=1, flow_uuid='uuid-1', checkpoint_status='active'),
-            MagicMock(id=2, flow_uuid='uuid-2', checkpoint_status='active')
+            MagicMock(id=1, flow_uuid="uuid-1", checkpoint_status="active"),
+            MagicMock(id=2, flow_uuid="uuid-2", checkpoint_status="active"),
         ]
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = mock_checkpoints
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.get_checkpoints_for_flow('flow-123')
+        result = await repository.get_checkpoints_for_flow("flow-123")
 
         assert len(result) == 2
-        assert result[0].flow_uuid == 'uuid-1'
+        assert result[0].flow_uuid == "uuid-1"
 
     @pytest.mark.asyncio
     async def test_get_checkpoints_with_group_filter(self, repository, mock_session):
         """Test getting checkpoints with group filtering."""
-        mock_checkpoints = [MagicMock(id=1, flow_uuid='uuid-1')]
+        mock_checkpoints = [MagicMock(id=1, flow_uuid="uuid-1")]
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = mock_checkpoints
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.get_checkpoints_for_flow('flow-123', group_id='group-1')
+        result = await repository.get_checkpoints_for_flow(
+            "flow-123", group_id="group-1"
+        )
 
         assert len(result) == 1
 
     @pytest.mark.asyncio
     async def test_get_checkpoints_with_status_filter(self, repository, mock_session):
         """Test getting checkpoints with status filtering."""
-        mock_checkpoints = [MagicMock(id=1, checkpoint_status='resumed')]
+        mock_checkpoints = [MagicMock(id=1, checkpoint_status="resumed")]
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = mock_checkpoints
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         result = await repository.get_checkpoints_for_flow(
-            'flow-123',
-            status_filter='resumed'
+            "flow-123", status_filter="resumed"
         )
 
         assert len(result) == 1
@@ -660,15 +703,17 @@ class TestGetCheckpointsForFlow:
     async def test_get_checkpoints_no_filter(self, repository, mock_session):
         """Test getting all checkpoints without status filter."""
         mock_checkpoints = [
-            MagicMock(checkpoint_status='active'),
-            MagicMock(checkpoint_status='resumed'),
-            MagicMock(checkpoint_status='expired')
+            MagicMock(checkpoint_status="active"),
+            MagicMock(checkpoint_status="resumed"),
+            MagicMock(checkpoint_status="expired"),
         ]
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = mock_checkpoints
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.get_checkpoints_for_flow('flow-123', status_filter=None)
+        result = await repository.get_checkpoints_for_flow(
+            "flow-123", status_filter=None
+        )
 
         assert len(result) == 3
 
@@ -697,10 +742,10 @@ class TestUpdateCheckpointStatus:
         mock_result.scalar_one_or_none.return_value = mock_execution
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.update_checkpoint_status(1, 'resumed')
+        result = await repository.update_checkpoint_status(1, "resumed")
 
         assert result is True
-        assert mock_execution.checkpoint_status == 'resumed'
+        assert mock_execution.checkpoint_status == "resumed"
         mock_session.flush.assert_called_once()
 
     @pytest.mark.asyncio
@@ -711,7 +756,9 @@ class TestUpdateCheckpointStatus:
         mock_result.scalar_one_or_none.return_value = mock_execution
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.update_checkpoint_status(1, 'expired', group_id='group-1')
+        result = await repository.update_checkpoint_status(
+            1, "expired", group_id="group-1"
+        )
 
         assert result is True
 
@@ -722,7 +769,7 @@ class TestUpdateCheckpointStatus:
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.update_checkpoint_status(999, 'resumed')
+        result = await repository.update_checkpoint_status(999, "resumed")
 
         assert result is False
 
@@ -753,15 +800,15 @@ class TestSetCheckpointInfo:
 
         result = await repository.set_checkpoint_info(
             execution_id=1,
-            flow_uuid='flow-uuid-123',
-            checkpoint_status='active',
-            checkpoint_method='method_name'
+            flow_uuid="flow-uuid-123",
+            checkpoint_status="active",
+            checkpoint_method="method_name",
         )
 
         assert result is True
-        assert mock_execution.flow_uuid == 'flow-uuid-123'
-        assert mock_execution.checkpoint_status == 'active'
-        assert mock_execution.checkpoint_method == 'method_name'
+        assert mock_execution.flow_uuid == "flow-uuid-123"
+        assert mock_execution.checkpoint_status == "active"
+        assert mock_execution.checkpoint_method == "method_name"
 
     @pytest.mark.asyncio
     async def test_set_checkpoint_info_not_found(self, repository, mock_session):
@@ -770,7 +817,7 @@ class TestSetCheckpointInfo:
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.set_checkpoint_info(999, 'flow-uuid')
+        result = await repository.set_checkpoint_info(999, "flow-uuid")
 
         assert result is False
 
@@ -801,26 +848,24 @@ class TestAddCrewCheckpoint:
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         result = await repository.add_crew_checkpoint(
-            job_id='job-123',
-            crew_node_id='node-1',
-            crew_name='Research Crew',
+            job_id="job-123",
+            crew_node_id="node-1",
+            crew_name="Research Crew",
             sequence=1,
-            status='completed',
-            output_preview='First 500 chars...',
-            completed_at='2024-01-01T12:00:00Z'
+            status="completed",
+            output_preview="First 500 chars...",
+            completed_at="2024-01-01T12:00:00Z",
         )
 
         assert result is True
         assert mock_execution.checkpoint_data is not None
-        assert len(mock_execution.checkpoint_data['crew_checkpoints']) == 1
+        assert len(mock_execution.checkpoint_data["crew_checkpoints"]) == 1
 
     @pytest.mark.asyncio
     async def test_add_crew_checkpoint_existing(self, repository, mock_session):
         """Test adding additional crew checkpoint."""
         existing_checkpoint = {
-            'crew_checkpoints': [
-                {'crew_node_id': 'node-1', 'sequence': 1}
-            ]
+            "crew_checkpoints": [{"crew_node_id": "node-1", "sequence": 1}]
         }
         mock_execution = MagicMock()
         mock_execution.checkpoint_data = existing_checkpoint
@@ -829,17 +874,17 @@ class TestAddCrewCheckpoint:
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         result = await repository.add_crew_checkpoint(
-            job_id='job-123',
-            crew_node_id='node-2',
-            crew_name='Analysis Crew',
+            job_id="job-123",
+            crew_node_id="node-2",
+            crew_name="Analysis Crew",
             sequence=2,
-            status='completed',
-            output_preview='Output...',
-            completed_at='2024-01-01T12:01:00Z'
+            status="completed",
+            output_preview="Output...",
+            completed_at="2024-01-01T12:01:00Z",
         )
 
         assert result is True
-        assert len(mock_execution.checkpoint_data['crew_checkpoints']) == 2
+        assert len(mock_execution.checkpoint_data["crew_checkpoints"]) == 2
 
     @pytest.mark.asyncio
     async def test_add_crew_checkpoint_not_found(self, repository, mock_session):
@@ -849,13 +894,13 @@ class TestAddCrewCheckpoint:
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         result = await repository.add_crew_checkpoint(
-            job_id='non-existent',
-            crew_node_id='node-1',
-            crew_name='Crew',
+            job_id="non-existent",
+            crew_node_id="node-1",
+            crew_name="Crew",
             sequence=1,
-            status='completed',
-            output_preview='',
-            completed_at='2024-01-01T12:00:00Z'
+            status="completed",
+            output_preview="",
+            completed_at="2024-01-01T12:00:00Z",
         )
 
         assert result is False
@@ -869,21 +914,21 @@ class TestAddCrewCheckpoint:
         mock_result.scalar_one_or_none.return_value = mock_execution
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        long_output = 'x' * 1000
+        long_output = "x" * 1000
 
         await repository.add_crew_checkpoint(
-            job_id='job-123',
-            crew_node_id='node-1',
-            crew_name='Crew',
+            job_id="job-123",
+            crew_node_id="node-1",
+            crew_name="Crew",
             sequence=1,
-            status='completed',
+            status="completed",
             output_preview=long_output,
-            completed_at='2024-01-01T12:00:00Z'
+            completed_at="2024-01-01T12:00:00Z",
         )
 
         # Verify output was truncated
-        checkpoint = mock_execution.checkpoint_data['crew_checkpoints'][0]
-        assert len(checkpoint['output_preview']) == 500
+        checkpoint = mock_execution.checkpoint_data["crew_checkpoints"][0]
+        assert len(checkpoint["output_preview"]) == 500
 
 
 class TestGetCrewCheckpoints:
@@ -905,19 +950,19 @@ class TestGetCrewCheckpoints:
     async def test_get_crew_checkpoints_success(self, repository, mock_session):
         """Test getting crew checkpoints."""
         checkpoints = [
-            {'crew_node_id': 'node-1', 'sequence': 1},
-            {'crew_node_id': 'node-2', 'sequence': 2}
+            {"crew_node_id": "node-1", "sequence": 1},
+            {"crew_node_id": "node-2", "sequence": 2},
         ]
         mock_execution = MagicMock()
-        mock_execution.checkpoint_data = {'crew_checkpoints': checkpoints}
+        mock_execution.checkpoint_data = {"crew_checkpoints": checkpoints}
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = mock_execution
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.get_crew_checkpoints('job-123')
+        result = await repository.get_crew_checkpoints("job-123")
 
         assert len(result) == 2
-        assert result[0]['crew_node_id'] == 'node-1'
+        assert result[0]["crew_node_id"] == "node-1"
 
     @pytest.mark.asyncio
     async def test_get_crew_checkpoints_empty(self, repository, mock_session):
@@ -928,7 +973,7 @@ class TestGetCrewCheckpoints:
         mock_result.scalar_one_or_none.return_value = mock_execution
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.get_crew_checkpoints('job-123')
+        result = await repository.get_crew_checkpoints("job-123")
 
         assert result == []
 
@@ -939,12 +984,14 @@ class TestGetCrewCheckpoints:
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.get_crew_checkpoints('non-existent')
+        result = await repository.get_crew_checkpoints("non-existent")
 
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_get_crew_checkpoints_no_checkpoint_data(self, repository, mock_session):
+    async def test_get_crew_checkpoints_no_checkpoint_data(
+        self, repository, mock_session
+    ):
         """Test getting checkpoints when checkpoint_data is None."""
         mock_execution = MagicMock()
         mock_execution.checkpoint_data = None
@@ -952,7 +999,7 @@ class TestGetCrewCheckpoints:
         mock_result.scalar_one_or_none.return_value = mock_execution
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        result = await repository.get_crew_checkpoints('job-123')
+        result = await repository.get_crew_checkpoints("job-123")
 
         assert result == []
 
@@ -978,8 +1025,12 @@ class TestErrorHandling:
         """Test rollback on deletion error with commit=True."""
         # Create mock that will fail
         mock_find_result = MagicMock()
-        mock_find_result.scalars.return_value.first.return_value = MagicMock(id=1, job_id='job-1')
-        mock_session.execute = AsyncMock(side_effect=[mock_find_result, Exception("DB Error")])
+        mock_find_result.scalars.return_value.first.return_value = MagicMock(
+            id=1, job_id="job-1"
+        )
+        mock_session.execute = AsyncMock(
+            side_effect=[mock_find_result, Exception("DB Error")]
+        )
 
         repo = ExecutionHistoryRepository(mock_session)
 
@@ -994,14 +1045,16 @@ class TestErrorHandling:
         mock_session.execute = AsyncMock(side_effect=Exception("Query failed"))
 
         with pytest.raises(Exception):
-            await repository.get_checkpoints_for_flow('flow-123')
+            await repository.get_checkpoints_for_flow("flow-123")
 
     @pytest.mark.asyncio
-    async def test_update_checkpoint_status_error_handling(self, repository, mock_session):
+    async def test_update_checkpoint_status_error_handling(
+        self, repository, mock_session
+    ):
         """Test error handling in update_checkpoint_status."""
         mock_session.execute = AsyncMock(side_effect=Exception("Update failed"))
 
-        result = await repository.update_checkpoint_status(1, 'resumed')
+        result = await repository.update_checkpoint_status(1, "resumed")
 
         assert result is False
 
@@ -1010,7 +1063,7 @@ class TestErrorHandling:
         """Test error handling in set_checkpoint_info."""
         mock_session.execute = AsyncMock(side_effect=Exception("DB error"))
 
-        result = await repository.set_checkpoint_info(1, 'uuid')
+        result = await repository.set_checkpoint_info(1, "uuid")
 
         assert result is False
 
@@ -1020,7 +1073,7 @@ class TestErrorHandling:
         mock_session.execute = AsyncMock(side_effect=Exception("Insert failed"))
 
         result = await repository.add_crew_checkpoint(
-            'job-123', 'node-1', 'Crew', 1, 'completed', '', '2024-01-01'
+            "job-123", "node-1", "Crew", 1, "completed", "", "2024-01-01"
         )
 
         assert result is False
@@ -1030,7 +1083,7 @@ class TestErrorHandling:
         """Test error handling in get_crew_checkpoints."""
         mock_session.execute = AsyncMock(side_effect=Exception("Query failed"))
 
-        result = await repository.get_crew_checkpoints('job-123')
+        result = await repository.get_crew_checkpoints("job-123")
 
         assert result == []
 
@@ -1052,15 +1105,17 @@ class TestDeleteOlderThan:
         return ExecutionHistoryRepository(mock_session)
 
     @pytest.mark.asyncio
-    async def test_delete_older_than_with_matching_records(self, repository, mock_session):
+    async def test_delete_older_than_with_matching_records(
+        self, repository, mock_session
+    ):
         """Test deleting records older than cutoff date."""
         cutoff = datetime(2025, 1, 1)
 
         # Mock: select returns executions to delete
         mock_fetch_result = MagicMock()
         mock_fetch_result.fetchall.return_value = [
-            (1, 'job-1'),
-            (2, 'job-2'),
+            (1, "job-1"),
+            (2, "job-2"),
         ]
 
         # Mock: delete task_status returns rowcount
@@ -1075,25 +1130,29 @@ class TestDeleteOlderThan:
         mock_run_result = MagicMock()
         mock_run_result.rowcount = 2
 
-        mock_session.execute = AsyncMock(side_effect=[
-            mock_fetch_result,        # select execution ids
-            mock_task_status_result,  # delete taskstatus
-            mock_error_trace_result,  # delete errortrace
-            mock_run_result,          # delete executionhistory
-        ])
+        mock_session.execute = AsyncMock(
+            side_effect=[
+                mock_fetch_result,  # select execution ids
+                mock_task_status_result,  # delete taskstatus
+                mock_error_trace_result,  # delete errortrace
+                mock_run_result,  # delete executionhistory
+            ]
+        )
 
         result = await repository.delete_older_than(cutoff)
 
         assert result == {
-            'executionhistory': 2,
-            'taskstatus': 3,
-            'errortrace': 1,
+            "executionhistory": 2,
+            "taskstatus": 3,
+            "errortrace": 1,
         }
         mock_session.flush.assert_called_once()
         assert mock_session.execute.call_count == 4
 
     @pytest.mark.asyncio
-    async def test_delete_older_than_no_matching_records(self, repository, mock_session):
+    async def test_delete_older_than_no_matching_records(
+        self, repository, mock_session
+    ):
         """Test when no records match the cutoff date."""
         cutoff = datetime(2020, 1, 1)
 
@@ -1105,9 +1164,9 @@ class TestDeleteOlderThan:
         result = await repository.delete_older_than(cutoff)
 
         assert result == {
-            'executionhistory': 0,
-            'taskstatus': 0,
-            'errortrace': 0,
+            "executionhistory": 0,
+            "taskstatus": 0,
+            "errortrace": 0,
         }
         # Only the initial select should be called
         mock_session.execute.assert_called_once()
@@ -1122,7 +1181,9 @@ class TestDeleteOlderThan:
             await repo.delete_older_than(datetime(2025, 1, 1))
 
     @pytest.mark.asyncio
-    async def test_delete_older_than_database_error_propagates(self, repository, mock_session):
+    async def test_delete_older_than_database_error_propagates(
+        self, repository, mock_session
+    ):
         """Test that database errors are propagated."""
         mock_session.execute = AsyncMock(side_effect=Exception("DB connection lost"))
 

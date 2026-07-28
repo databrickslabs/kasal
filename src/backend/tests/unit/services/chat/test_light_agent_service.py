@@ -7,6 +7,7 @@ The light path composes the EXISTING public ``CrewMemoryService`` building block
 agent, so ``Agent.kickoff_async`` auto-recalls and persists. Memory is ON by
 default; the chat "No memory" toggle arrives as ``agent_spec['memory'] is False``.
 """
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -35,37 +36,48 @@ def _patches(*, disabled_config=False, storage=MagicMock(), sets_memory=True):
     kept the whole test file green while chat memory was dead.
     """
     mem_service = MagicMock()
-    mem_service.fetch_memory_backend_config = AsyncMock(return_value={"backend_type": "databricks"})
+    mem_service.fetch_memory_backend_config = AsyncMock(
+        return_value={"backend_type": "databricks"}
+    )
     mem_service.generate_crew_id = MagicMock(return_value="g1_crew_abcd1234")
     mem_service.setup_storage_directory = MagicMock()
     mem_service.create_unified_storage = AsyncMock(return_value=storage)
     mem_service.resolve_memory_llm_override = AsyncMock(return_value=None)
 
     def _configure(crew_kwargs, *a, **k):
-        crew_kwargs["memory"] = MagicMock(name="UnifiedMemory") if sets_memory else False
+        crew_kwargs["memory"] = (
+            MagicMock(name="UnifiedMemory") if sets_memory else False
+        )
         return crew_kwargs
+
     mem_service.configure_crew_memory_components = MagicMock(side_effect=_configure)
 
     cfg_builder = MagicMock()
-    cfg_builder.check_memory_disabled_by_backend_config = MagicMock(return_value=disabled_config)
+    cfg_builder.check_memory_disabled_by_backend_config = MagicMock(
+        return_value=disabled_config
+    )
 
     embedder_builder = MagicMock()
     embedder_builder.configure_embedder = AsyncMock(
         side_effect=lambda ck: (ck, MagicMock(name="embedder"), None)
     )
 
-    return patch.multiple(
-        "src.services.memory.crew_memory",
-        CrewMemoryService=MagicMock(return_value=mem_service),
-    ), patch(
-        "src.services.execution.config.crew_config_builder.CrewConfigBuilder",
-        MagicMock(return_value=cfg_builder),
-    ), patch(
-        "src.services.execution.config.embedder_config_builder.EmbedderConfigBuilder",
-        MagicMock(return_value=embedder_builder),
-    ), patch(
-        "src.schemas.memory_backend.MemoryBackendConfig", MagicMock()
-    ), mem_service
+    return (
+        patch.multiple(
+            "src.services.memory.crew_memory",
+            CrewMemoryService=MagicMock(return_value=mem_service),
+        ),
+        patch(
+            "src.services.execution.config.crew_config_builder.CrewConfigBuilder",
+            MagicMock(return_value=cfg_builder),
+        ),
+        patch(
+            "src.services.execution.config.embedder_config_builder.EmbedderConfigBuilder",
+            MagicMock(return_value=embedder_builder),
+        ),
+        patch("src.schemas.memory_backend.MemoryBackendConfig", MagicMock()),
+        mem_service,
+    )
 
 
 @pytest.mark.asyncio
@@ -86,12 +98,19 @@ async def test_attach_memory_returns_the_memory_it_built():
     """
     from src.services.execution.runtime.agent import Agent
 
-    agent = Agent(role="Assistant", goal="g", backstory="b")   # the REAL class
+    agent = Agent(role="Assistant", goal="g", backstory="b")  # the REAL class
     p_service, p_cfg, p_emb, p_mbc, mem_service = _patches()
     logs = []
     with p_service, p_cfg, p_emb, p_mbc:
         memory = await LightAgentService()._attach_memory(
-            agent, {"role": "Assistant"}, _config(), None, "g1", "hi", "exec-1", logs.append
+            agent,
+            {"role": "Assistant"},
+            _config(),
+            None,
+            "g1",
+            "hi",
+            "exec-1",
+            logs.append,
         )
     assert memory is not None and memory not in (True, False)
     mem_service.configure_crew_memory_components.assert_called_once()
@@ -118,7 +137,14 @@ async def test_attach_memory_skipped_when_agent_memory_disabled():
     logs = []
     with p_service, p_cfg, p_emb, p_mbc:
         await LightAgentService()._attach_memory(
-            agent, {"role": "Assistant", "memory": False}, _config(), None, "g1", "hi", "exec-1", logs.append
+            agent,
+            {"role": "Assistant", "memory": False},
+            _config(),
+            None,
+            "g1",
+            "hi",
+            "exec-1",
+            logs.append,
         )
     assert agent.memory is None
     mem_service.fetch_memory_backend_config.assert_not_called()
@@ -134,7 +160,14 @@ async def test_attach_memory_noop_for_disabled_configuration():
     logs = []
     with p_service, p_cfg, p_emb, p_mbc:
         await LightAgentService()._attach_memory(
-            agent, {"role": "Assistant"}, _config(), None, "g1", "hi", "exec-1", logs.append
+            agent,
+            {"role": "Assistant"},
+            _config(),
+            None,
+            "g1",
+            "hi",
+            "exec-1",
+            logs.append,
         )
     assert agent.memory is None
     mem_service.create_unified_storage.assert_not_called()
@@ -147,12 +180,21 @@ async def test_attach_memory_best_effort_on_failure():
     memory-less and the chat still answers."""
     agent = SimpleNamespace(memory=None, id="aid-1")
     p_service, p_cfg, p_emb, p_mbc, mem_service = _patches()
-    mem_service.fetch_memory_backend_config = AsyncMock(side_effect=RuntimeError("db down"))
+    mem_service.fetch_memory_backend_config = AsyncMock(
+        side_effect=RuntimeError("db down")
+    )
     logs = []
     with p_service, p_cfg, p_emb, p_mbc:
         # Must not raise.
         await LightAgentService()._attach_memory(
-            agent, {"role": "Assistant"}, _config(), None, "g1", "hi", "exec-1", logs.append
+            agent,
+            {"role": "Assistant"},
+            _config(),
+            None,
+            "g1",
+            "hi",
+            "exec-1",
+            logs.append,
         )
     assert agent.memory is None
 
@@ -167,6 +209,7 @@ def _msg(mtype, content):
 
 def _history_patches(messages):
     """Patch request_scoped_session + ChatHistoryRepository to return ``messages``."""
+
     @asynccontextmanager
     async def _fake_session():
         yield MagicMock(name="db_session")
@@ -196,7 +239,7 @@ async def test_preamble_builds_transcript_excluding_current_turn():
         _msg("assistant", "Thinking..."),
         _msg("assistant", "[ui-card]"),
         _msg("assistant", "Hello Ada Lovelace! Nice to meet you."),
-        _msg("user", "who am i"),            # <- current turn (last user)
+        _msg("user", "who am i"),  # <- current turn (last user)
         _msg("assistant", "Thinking..."),
     ]
     p_sess, p_repo = _history_patches(messages)
@@ -207,7 +250,7 @@ async def test_preamble_builds_transcript_excluding_current_turn():
         )
     assert "User: my name is ada lovelace" in out
     assert "Assistant: Hello Ada Lovelace! Nice to meet you." in out
-    assert "who am i" not in out          # current turn excluded
+    assert "who am i" not in out  # current turn excluded
     assert "Thinking..." not in out and "[ui-card]" not in out
 
 
@@ -220,7 +263,7 @@ async def test_preamble_keeps_user_facts_when_bloated_by_assistant_output():
     for i in range(12):
         messages.append(_msg("assistant", f"{big} deck {i}"))
         messages.append(_msg("user", f"make slide {i}"))
-    messages.append(_msg("user", "what is my name"))   # current turn
+    messages.append(_msg("user", "what is my name"))  # current turn
     messages.append(_msg("assistant", "Thinking..."))
 
     p_sess, p_repo = _history_patches(messages)
@@ -252,6 +295,7 @@ async def test_preamble_empty_without_session_id():
 @pytest.mark.asyncio
 async def test_preamble_best_effort_on_repo_failure():
     """A history-fetch failure never breaks the chat — returns ''."""
+
     @asynccontextmanager
     async def _fake_session():
         yield MagicMock()
@@ -259,9 +303,12 @@ async def test_preamble_best_effort_on_repo_failure():
     repo = MagicMock()
     repo.get_by_session_and_group = AsyncMock(side_effect=RuntimeError("db down"))
     config, ctx = _cfg_ctx()
-    with patch("src.db.session.request_scoped_session", _fake_session), patch(
-        "src.repositories.chat_history_repository.ChatHistoryRepository",
-        MagicMock(return_value=repo),
+    with (
+        patch("src.db.session.request_scoped_session", _fake_session),
+        patch(
+            "src.repositories.chat_history_repository.ChatHistoryRepository",
+            MagicMock(return_value=repo),
+        ),
     ):
         out = await LightAgentService()._conversation_preamble(
             config, ctx, "g1", lambda *_: None
@@ -272,7 +319,10 @@ async def test_preamble_best_effort_on_repo_failure():
 @pytest.mark.asyncio
 async def test_preamble_empty_when_no_prior_turns():
     """First message of a session → only the current user row exists → no preamble."""
-    messages = [_msg("user", "my name is ada lovelace"), _msg("assistant", "Thinking...")]
+    messages = [
+        _msg("user", "my name is ada lovelace"),
+        _msg("assistant", "Thinking..."),
+    ]
     p_sess, p_repo = _history_patches(messages)
     config, ctx = _cfg_ctx()
     with p_sess, p_repo:
@@ -413,8 +463,9 @@ def test_resolve_group_id_handles_missing_group_context():
 
 def _evt(**kw):
     """A bus event with the given identity fields (others default to None)."""
-    defaults = dict(agent_id=None, agent=None, from_agent=None, agent_role=None,
-                    tool_name="t")
+    defaults = dict(
+        agent_id=None, agent=None, from_agent=None, agent_role=None, tool_name="t"
+    )
     defaults.update(kw)
     return SimpleNamespace(**defaults)
 
@@ -422,11 +473,22 @@ def _evt(**kw):
 _SENTINEL_AGENT = SimpleNamespace(id="aid-1", role="Assistant")
 
 
-def _match(event, source, *, agent=_SENTINEL_AGENT, agent_id="aid-1",
-           role_lower="assistant", agent_llm=None):
+def _match(
+    event,
+    source,
+    *,
+    agent=_SENTINEL_AGENT,
+    agent_id="aid-1",
+    role_lower="assistant",
+    agent_llm=None,
+):
     return LightAgentService._event_matches_run(
-        event, source, agent=agent, agent_id=agent_id,
-        role_lower=role_lower, agent_llm=agent_llm,
+        event,
+        source,
+        agent=agent,
+        agent_id=agent_id,
+        role_lower=role_lower,
+        agent_llm=agent_llm,
     )
 
 
@@ -510,18 +572,21 @@ async def test_trace_writer_reuses_one_session_for_the_whole_run():
     opens: list = []
     captured: list = []
 
-    with patch("src.db.session.get_isolated_db_session", _fake_isolated_session(opens)), \
-         patch("src.services.trace.ExecutionTraceService",
-               _capture_trace_service(captured)):
+    with (
+        patch("src.db.session.get_isolated_db_session", _fake_isolated_session(opens)),
+        patch(
+            "src.services.trace.ExecutionTraceService", _capture_trace_service(captured)
+        ),
+    ):
         writer = _RunTraceWriter()
         await writer.persist({"job_id": "j1", "event_type": "tool_usage"})
         await writer.persist({"job_id": "j1", "event_type": "llm_call"})
         await writer.persist({"job_id": "j1", "event_type": "response_run"})
         await writer.close()
 
-    assert len(opens) == 1                      # one connection for the run
+    assert len(opens) == 1  # one connection for the run
     assert len({s for (s, _, _) in captured}) == 1  # all writes on that session
-    assert opens[0].commit.await_count == 3     # each event still committed
+    assert opens[0].commit.await_count == 3  # each event still committed
 
 
 @pytest.mark.asyncio
@@ -531,9 +596,12 @@ async def test_trace_writer_verifies_parent_once_and_carries_run_id():
     opens: list = []
     captured: list = []
 
-    with patch("src.db.session.get_isolated_db_session", _fake_isolated_session(opens)), \
-         patch("src.services.trace.ExecutionTraceService",
-               _capture_trace_service(captured)):
+    with (
+        patch("src.db.session.get_isolated_db_session", _fake_isolated_session(opens)),
+        patch(
+            "src.services.trace.ExecutionTraceService", _capture_trace_service(captured)
+        ),
+    ):
         writer = _RunTraceWriter()
         await writer.persist({"job_id": "j1", "event_type": "tool_usage"})
         await writer.persist({"job_id": "j1", "event_type": "llm_call"})
@@ -551,17 +619,21 @@ async def test_trace_writer_drops_poisoned_session_and_reopens():
     opens: list = []
     captured: list = []
 
-    with patch("src.db.session.get_isolated_db_session", _fake_isolated_session(opens)), \
-         patch("src.services.trace.ExecutionTraceService",
-               _capture_trace_service(captured, fail_first=True)):
+    with (
+        patch("src.db.session.get_isolated_db_session", _fake_isolated_session(opens)),
+        patch(
+            "src.services.trace.ExecutionTraceService",
+            _capture_trace_service(captured, fail_first=True),
+        ),
+    ):
         writer = _RunTraceWriter()
         # Must not raise — a lost trace never fails the run.
         await writer.persist({"job_id": "j1", "event_type": "tool_usage"})
         await writer.persist({"job_id": "j1", "event_type": "llm_call"})
         await writer.close()
 
-    assert len(opens) == 2                     # poisoned session was replaced
-    opens[0].rollback.assert_awaited()         # first write rolled back
+    assert len(opens) == 2  # poisoned session was replaced
+    opens[0].rollback.assert_awaited()  # first write rolled back
     assert [v for (_, v, _) in captured] == [True]  # re-verified after reopen
 
 
@@ -630,7 +702,9 @@ async def test_summary_is_applied_when_the_lookup_succeeds():
     ]
     p_sess, p_repo = _history_patches(messages)
 
-    record = SimpleNamespace(context_summary="Earlier: fruit talk.", context_summary_upto=old)
+    record = SimpleNamespace(
+        context_summary="Earlier: fruit talk.", context_summary_upto=old
+    )
     repo = MagicMock()
     repo.get_by_id_and_group = AsyncMock(return_value=record)
     p_session_repo = patch(
@@ -644,5 +718,5 @@ async def test_summary_is_applied_when_the_lookup_succeeds():
             config, ctx, "g1", lambda *_: None
         )
 
-    assert "pears" not in out          # represented by the summary, not verbatim
+    assert "pears" not in out  # represented by the summary, not verbatim
     assert "User: my name is ada lovelace" in out

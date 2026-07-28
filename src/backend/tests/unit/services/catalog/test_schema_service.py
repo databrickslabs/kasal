@@ -4,37 +4,62 @@ Unit tests for SchemaService.
 Tests the functionality of schema management service including
 CRUD operations and JSON validation.
 """
-import pytest
+
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
-from typing import Dict, Any
-
-from src.core.exceptions import KasalError, NotFoundError, ConflictError, BadRequestError
-from pydantic import Field
-
-from src.services.catalog.schemas import SchemaService
-from src.repositories.schema_repository import SchemaRepository
-from src.schemas.schema import SchemaCreate, SchemaUpdate, SchemaResponse, SchemaListResponse
-
+from typing import Any, Dict
 
 # Helper to call instance method for JSON validation since implementation uses instance methods
+from unittest.mock import AsyncMock
 from unittest.mock import AsyncMock as _AsyncMockForHelper
+from unittest.mock import MagicMock, patch
+
+import pytest
+from pydantic import Field
+
+from src.core.exceptions import (
+    BadRequestError,
+    ConflictError,
+    KasalError,
+    NotFoundError,
+)
+from src.repositories.schema_repository import SchemaRepository
+from src.schemas.schema import (
+    SchemaCreate,
+    SchemaListResponse,
+    SchemaResponse,
+    SchemaUpdate,
+)
+from src.services.catalog.schemas import SchemaService
+
 
 def _validate_with_instance(data):
     svc = SchemaService(repository=_AsyncMockForHelper(spec=SchemaRepository))
     return svc._validate_json_fields(data)
 
+
 # Mock schema model
 class MockSchema:
-    def __init__(self, id=1, name="test_schema", description="Test Description",
-                 schema_type="data_model", schema_definition=None, field_descriptions=None,
-                 keywords=None, tools=None, example_data=None):
+    def __init__(
+        self,
+        id=1,
+        name="test_schema",
+        description="Test Description",
+        schema_type="data_model",
+        schema_definition=None,
+        field_descriptions=None,
+        keywords=None,
+        tools=None,
+        example_data=None,
+    ):
         self.id = id
         self.name = name
         self.description = description
         self.schema_type = schema_type
-        self.schema_definition = schema_definition or {"type": "object", "properties": {}}
+        self.schema_definition = schema_definition or {
+            "type": "object",
+            "properties": {},
+        }
         self.field_descriptions = field_descriptions or {}
         self.keywords = keywords or []
         self.tools = tools or []
@@ -63,11 +88,14 @@ def sample_schema_data():
         "name": "test_schema",
         "description": "Test Description",
         "schema_type": "data_model",
-        "schema_definition": {"type": "object", "properties": {"field1": {"type": "string"}}},
+        "schema_definition": {
+            "type": "object",
+            "properties": {"field1": {"type": "string"}},
+        },
         "field_descriptions": {"field1": "A test field"},
         "keywords": ["test", "example"],
         "tools": ["tool1", "tool2"],
-        "example_data": {"field1": "example value"}
+        "example_data": {"field1": "example value"},
     }
 
 
@@ -112,7 +140,9 @@ class TestSchemaService:
         assert len(result.schemas) == 0
 
     @pytest.mark.asyncio
-    async def test_get_schema_by_name_success(self, schema_service, mock_repository, mock_schema):
+    async def test_get_schema_by_name_success(
+        self, schema_service, mock_repository, mock_schema
+    ):
         """Test successful retrieval of schema by name."""
         # Setup mocks
         mock_repository.find_by_name.return_value = mock_schema
@@ -157,7 +187,9 @@ class TestSchemaService:
         mock_repository.find_by_type.assert_called_once_with("data_model")
 
     @pytest.mark.asyncio
-    async def test_create_schema_success(self, schema_service, mock_repository, sample_schema_data, mock_schema):
+    async def test_create_schema_success(
+        self, schema_service, mock_repository, sample_schema_data, mock_schema
+    ):
         """Test successful schema creation."""
         # Setup mocks
         mock_repository.find_by_name.return_value = None  # No existing schema
@@ -176,7 +208,9 @@ class TestSchemaService:
         mock_repository.create.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_create_schema_duplicate_name(self, schema_service, mock_repository, sample_schema_data, mock_schema):
+    async def test_create_schema_duplicate_name(
+        self, schema_service, mock_repository, sample_schema_data, mock_schema
+    ):
         """Test schema creation with duplicate name."""
         # Setup mocks
         mock_repository.find_by_name.return_value = mock_schema  # Existing schema
@@ -193,7 +227,9 @@ class TestSchemaService:
         mock_repository.find_by_name.assert_called_once_with("test_schema")
 
     @pytest.mark.asyncio
-    async def test_create_schema_with_legacy_json(self, schema_service, mock_repository, mock_schema):
+    async def test_create_schema_with_legacy_json(
+        self, schema_service, mock_repository, mock_schema
+    ):
         """Test schema creation with legacy schema_json field."""
         # Setup mocks
         mock_repository.find_by_name.return_value = None
@@ -205,7 +241,7 @@ class TestSchemaService:
             "description": "Test Description",
             "schema_type": "data_model",
             "schema_definition": {"type": "object"},
-            "legacy_schema_json": {"type": "object", "properties": {}}
+            "legacy_schema_json": {"type": "object", "properties": {}},
         }
         schema_create = SchemaCreate(**schema_data)
 
@@ -217,24 +253,28 @@ class TestSchemaService:
         mock_repository.create.assert_called_once()
         # Verify legacy_schema_json was removed from the call
         create_call_args = mock_repository.create.call_args[0][0]
-        assert 'legacy_schema_json' not in create_call_args
+        assert "legacy_schema_json" not in create_call_args
 
     @pytest.mark.asyncio
-    @patch('src.services.catalog.schemas.SchemaService._validate_json_fields')
-    async def test_create_schema_json_validation_error(self, mock_validate, schema_service, mock_repository):
+    @patch("src.services.catalog.schemas.SchemaService._validate_json_fields")
+    async def test_create_schema_json_validation_error(
+        self, mock_validate, schema_service, mock_repository
+    ):
         """Test schema creation with JSON validation error."""
         # Setup mocks
         mock_repository.find_by_name.return_value = None
 
         # Mock validation to raise ValueError
-        mock_validate.side_effect = ValueError("Schema definition contains invalid JSON")
+        mock_validate.side_effect = ValueError(
+            "Schema definition contains invalid JSON"
+        )
 
         # Create valid schema data (Pydantic will validate it)
         schema_data = {
             "name": "test_schema",
             "description": "Test Description",
             "schema_type": "data_model",
-            "schema_definition": {"type": "object"}
+            "schema_definition": {"type": "object"},
         }
         schema_create = SchemaCreate(**schema_data)
 
@@ -246,7 +286,9 @@ class TestSchemaService:
         assert "Invalid JSON format" in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_create_schema_repository_error(self, schema_service, mock_repository, sample_schema_data):
+    async def test_create_schema_repository_error(
+        self, schema_service, mock_repository, sample_schema_data
+    ):
         """Test schema creation with repository error."""
         # Setup mocks
         mock_repository.find_by_name.return_value = None
@@ -263,12 +305,16 @@ class TestSchemaService:
         assert "Error creating schema" in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_update_schema_success(self, schema_service, mock_repository, mock_schema):
+    async def test_update_schema_success(
+        self, schema_service, mock_repository, mock_schema
+    ):
         """Test successful schema update."""
         # Setup mocks
         mock_repository.find_by_name.return_value = mock_schema
 
-        updated_schema = MockSchema(id=1, name="test_schema", description="Updated Description")
+        updated_schema = MockSchema(
+            id=1, name="test_schema", description="Updated Description"
+        )
         mock_repository.update.return_value = updated_schema
 
         # Create update data
@@ -300,7 +346,9 @@ class TestSchemaService:
         assert "not found" in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_update_schema_with_schema_json_mapping(self, schema_service, mock_repository, mock_schema):
+    async def test_update_schema_with_schema_json_mapping(
+        self, schema_service, mock_repository, mock_schema
+    ):
         """Test schema update with schema_json to schema_definition mapping."""
         # Setup mocks
         mock_repository.find_by_name.return_value = mock_schema
@@ -308,12 +356,15 @@ class TestSchemaService:
 
         # Create a custom update class to simulate schema_json field
         class TestSchemaUpdate(SchemaUpdate):
-            test_schema_json: Dict[str, Any] = Field(None, alias='schema_json')
+            test_schema_json: Dict[str, Any] = Field(None, alias="schema_json")
 
         # Create update data with schema_json but no schema_definition
         update_data = {
             "description": "Updated Description",
-            "schema_json": {"type": "object", "properties": {"new_field": {"type": "string"}}}
+            "schema_json": {
+                "type": "object",
+                "properties": {"new_field": {"type": "string"}},
+            },
         }
         schema_update = TestSchemaUpdate(**update_data)
 
@@ -325,11 +376,13 @@ class TestSchemaService:
         mock_repository.update.assert_called_once()
         # Verify schema_json was mapped to schema_definition
         update_call_args = mock_repository.update.call_args[0][1]
-        assert 'schema_definition' in update_call_args
-        assert 'schema_json' not in update_call_args
+        assert "schema_definition" in update_call_args
+        assert "schema_json" not in update_call_args
 
     @pytest.mark.asyncio
-    async def test_update_schema_with_legacy_json_removal(self, schema_service, mock_repository, mock_schema):
+    async def test_update_schema_with_legacy_json_removal(
+        self, schema_service, mock_repository, mock_schema
+    ):
         """Test schema update with legacy_schema_json field removal."""
         # Setup mocks
         mock_repository.find_by_name.return_value = mock_schema
@@ -338,7 +391,7 @@ class TestSchemaService:
         # Create update data with legacy field
         update_data = {
             "description": "Updated Description",
-            "legacy_schema_json": {"type": "object"}
+            "legacy_schema_json": {"type": "object"},
         }
         schema_update = SchemaUpdate(**update_data)
 
@@ -350,22 +403,26 @@ class TestSchemaService:
         mock_repository.update.assert_called_once()
         # Verify legacy_schema_json was removed
         update_call_args = mock_repository.update.call_args[0][1]
-        assert 'legacy_schema_json' not in update_call_args
+        assert "legacy_schema_json" not in update_call_args
 
     @pytest.mark.asyncio
-    @patch('src.services.catalog.schemas.SchemaService._validate_json_fields')
-    async def test_update_schema_json_validation_error(self, mock_validate, schema_service, mock_repository, mock_schema):
+    @patch("src.services.catalog.schemas.SchemaService._validate_json_fields")
+    async def test_update_schema_json_validation_error(
+        self, mock_validate, schema_service, mock_repository, mock_schema
+    ):
         """Test schema update with JSON validation error."""
         # Setup mocks
         mock_repository.find_by_name.return_value = mock_schema
 
         # Mock validation to raise ValueError
-        mock_validate.side_effect = ValueError("Schema definition contains invalid JSON")
+        mock_validate.side_effect = ValueError(
+            "Schema definition contains invalid JSON"
+        )
 
         # Create valid update data (Pydantic will validate it)
         update_data = {
             "description": "Updated Description",
-            "schema_definition": {"type": "object"}
+            "schema_definition": {"type": "object"},
         }
         schema_update = SchemaUpdate(**update_data)
 
@@ -377,7 +434,9 @@ class TestSchemaService:
         assert "Invalid JSON format" in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_update_schema_repository_error(self, schema_service, mock_repository, mock_schema):
+    async def test_update_schema_repository_error(
+        self, schema_service, mock_repository, mock_schema
+    ):
         """Test schema update with repository error."""
         # Setup mocks
         mock_repository.find_by_name.return_value = mock_schema
@@ -394,7 +453,9 @@ class TestSchemaService:
         assert "Error updating schema" in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_delete_schema_success(self, schema_service, mock_repository, mock_schema):
+    async def test_delete_schema_success(
+        self, schema_service, mock_repository, mock_schema
+    ):
         """Test successful schema deletion."""
         # Setup mocks
         mock_repository.find_by_name.return_value = mock_schema
@@ -428,7 +489,7 @@ class TestSchemaService:
             "field_descriptions": '{"field1": "Description"}',
             "example_data": '{"field1": "value"}',
             "keywords": '["keyword1", "keyword2"]',
-            "tools": '["tool1", "tool2"]'
+            "tools": '["tool1", "tool2"]',
         }
 
         # Execute - should not raise exception
@@ -448,7 +509,7 @@ class TestSchemaService:
             "field_descriptions": {"field1": "Description"},
             "example_data": {"field1": "value"},
             "keywords": ["keyword1", "keyword2"],
-            "tools": ["tool1", "tool2"]
+            "tools": ["tool1", "tool2"],
         }
 
         # Execute - should not raise exception
@@ -477,7 +538,7 @@ class TestSchemaService:
         """Test JSON validation with array field conversion after string parsing."""
         data = {
             "keywords": '["valid", "list"]',  # Valid JSON string, should parse then remain
-            "tools": {"not": "a_list"}  # Invalid type, should convert to empty list
+            "tools": {"not": "a_list"},  # Invalid type, should convert to empty list
         }
 
         # Execute - should parse JSON strings then convert invalid types to empty lists
@@ -489,9 +550,7 @@ class TestSchemaService:
 
     def test_validate_json_fields_invalid_object_type(self):
         """Test JSON validation with invalid object types."""
-        data = {
-            "schema_definition": ["not", "an", "object"]  # Should be dict
-        }
+        data = {"schema_definition": ["not", "an", "object"]}  # Should be dict
 
         # Execute and verify exception
         with pytest.raises(ValueError) as exc_info:
@@ -501,9 +560,7 @@ class TestSchemaService:
 
     def test_validate_json_fields_empty_schema_definition(self):
         """Test JSON validation with empty schema definition."""
-        data = {
-            "schema_definition": {}
-        }
+        data = {"schema_definition": {}}
 
         # Execute and verify exception (now that the bug is fixed)
         with pytest.raises(ValueError) as exc_info:
@@ -518,7 +575,7 @@ class TestSchemaService:
             "field_descriptions": None,
             "example_data": None,
             "keywords": None,
-            "tools": None
+            "tools": None,
         }
 
         # Execute - should not raise exception
@@ -536,7 +593,7 @@ class TestSchemaService:
         data = {
             "schema_definition": {"type": "object", "properties": {}},  # Valid
             "field_descriptions": '{"field1": "desc"',  # Invalid JSON
-            "keywords": ["valid", "list"]  # Valid
+            "keywords": ["valid", "list"],  # Valid
         }
 
         # Execute and verify exception for the invalid field
@@ -547,9 +604,7 @@ class TestSchemaService:
 
     def test_validate_json_fields_field_descriptions_invalid_type(self):
         """Test JSON validation with field_descriptions as invalid type."""
-        data = {
-            "field_descriptions": ["not", "a", "dict"]
-        }
+        data = {"field_descriptions": ["not", "a", "dict"]}
 
         # Execute and verify exception
         with pytest.raises(ValueError) as exc_info:
@@ -559,9 +614,7 @@ class TestSchemaService:
 
     def test_validate_json_fields_example_data_valid_dict(self):
         """Test JSON validation with example_data as valid dict."""
-        data = {
-            "example_data": {"field1": "value1", "field2": 123}
-        }
+        data = {"example_data": {"field1": "value1", "field2": 123}}
 
         # Execute - should not raise exception
         _validate_with_instance(data)
@@ -578,14 +631,20 @@ class TestSchemaService:
             "field_descriptions": '{"field1": "desc"}',
             "example_data": '{"example": "value"}',
             "keywords": '["key1", "key2"]',
-            "tools": '["tool1"]'
+            "tools": '["tool1"]',
         }
 
         # Execute - should not raise exception
         _validate_with_instance(data)
 
         # Verify all fields were processed
-        for field in ["schema_definition", "field_descriptions", "example_data", "keywords", "tools"]:
+        for field in [
+            "schema_definition",
+            "field_descriptions",
+            "example_data",
+            "keywords",
+            "tools",
+        ]:
             assert field in data
             assert data[field] is not None
 
@@ -606,16 +665,17 @@ class TestSchemaService:
 
         # Use monkey patching to temporarily modify json_fields to exclude schema_definition
         import src.services.catalog.schemas as schema_service_module
+
         original_validate = schema_service_module.SchemaService._validate_json_fields
 
         @staticmethod
         def patched_validate_json_fields(data):
             # Remove schema_definition from json_fields to bypass loop validation
             json_fields = {
-                'field_descriptions': 'Field descriptions',
-                'example_data': 'Example data',
-                'keywords': 'Keywords',
-                'tools': 'Tools'
+                "field_descriptions": "Field descriptions",
+                "example_data": "Example data",
+                "keywords": "Keywords",
+                "tools": "Tools",
             }
 
             for field, label in json_fields.items():
@@ -628,23 +688,25 @@ class TestSchemaService:
                         except json.JSONDecodeError as e:
                             raise ValueError(f"{label} contains invalid JSON: {str(e)}")
 
-                    if field in ['keywords', 'tools'] and data[field] is not None:
+                    if field in ["keywords", "tools"] and data[field] is not None:
                         if not isinstance(data[field], list):
                             data[field] = []
 
-                    if field in ['field_descriptions'] and data[field] is not None:
+                    if field in ["field_descriptions"] and data[field] is not None:
                         if not isinstance(data[field], dict):
                             raise ValueError(f"{label} must be a valid JSON object")
 
             # Now execute the final validation check (lines 275-277)
-            if 'schema_definition' in data and data['schema_definition'] is not None:
-                if not isinstance(data['schema_definition'], dict):
+            if "schema_definition" in data and data["schema_definition"] is not None:
+                if not isinstance(data["schema_definition"], dict):
                     raise ValueError("Schema definition must be a valid JSON object")
-                if not data['schema_definition']:
+                if not data["schema_definition"]:
                     raise ValueError("Schema definition cannot be empty")
 
         # Apply patch
-        schema_service_module.SchemaService._validate_json_fields = patched_validate_json_fields
+        schema_service_module.SchemaService._validate_json_fields = (
+            patched_validate_json_fields
+        )
 
         try:
             data = {"schema_definition": []}  # Non-dict value to trigger line 277
@@ -652,10 +714,14 @@ class TestSchemaService:
             with pytest.raises(ValueError) as exc_info:
                 SchemaService._validate_json_fields(data)
 
-            assert "Schema definition must be a valid JSON object" in str(exc_info.value)
+            assert "Schema definition must be a valid JSON object" in str(
+                exc_info.value
+            )
         finally:
             # Restore original method
-            schema_service_module.SchemaService._validate_json_fields = original_validate
+            schema_service_module.SchemaService._validate_json_fields = (
+                original_validate
+            )
 
     def test_validate_json_fields_line_277_coverage_bypass_loop(self):
         """Test line 277 by modifying the method to bypass the loop validation."""
@@ -666,10 +732,10 @@ class TestSchemaService:
             def modified_validate_json_fields(data):
                 # Only process other fields in the loop, skip schema_definition
                 json_fields = {
-                    'field_descriptions': 'Field descriptions',
-                    'example_data': 'Example data',
-                    'keywords': 'Keywords',
-                    'tools': 'Tools'
+                    "field_descriptions": "Field descriptions",
+                    "example_data": "Example data",
+                    "keywords": "Keywords",
+                    "tools": "Tools",
                 }
 
                 for field, label in json_fields.items():
@@ -680,21 +746,28 @@ class TestSchemaService:
                             try:
                                 data[field] = json.loads(value)
                             except json.JSONDecodeError as e:
-                                raise ValueError(f"{label} contains invalid JSON: {str(e)}")
+                                raise ValueError(
+                                    f"{label} contains invalid JSON: {str(e)}"
+                                )
 
-                        if field in ['keywords', 'tools'] and data[field] is not None:
+                        if field in ["keywords", "tools"] and data[field] is not None:
                             if not isinstance(data[field], list):
                                 data[field] = []
 
-                        if field in ['field_descriptions'] and data[field] is not None:
+                        if field in ["field_descriptions"] and data[field] is not None:
                             if not isinstance(data[field], dict):
                                 raise ValueError(f"{label} must be a valid JSON object")
 
                 # Now the final validation (this is where line 277 is tested)
-                if 'schema_definition' in data and data['schema_definition'] is not None:
-                    if not isinstance(data['schema_definition'], dict):
-                        raise ValueError("Schema definition must be a valid JSON object")
-                    if not data['schema_definition']:
+                if (
+                    "schema_definition" in data
+                    and data["schema_definition"] is not None
+                ):
+                    if not isinstance(data["schema_definition"], dict):
+                        raise ValueError(
+                            "Schema definition must be a valid JSON object"
+                        )
+                    if not data["schema_definition"]:
                         raise ValueError("Schema definition cannot be empty")
 
             return staticmethod(modified_validate_json_fields)
@@ -710,7 +783,9 @@ class TestSchemaService:
             with pytest.raises(ValueError) as exc_info:
                 SchemaService._validate_json_fields(data)
 
-            assert "Schema definition must be a valid JSON object" in str(exc_info.value)
+            assert "Schema definition must be a valid JSON object" in str(
+                exc_info.value
+            )
 
         finally:
             # Restore original method
@@ -722,16 +797,17 @@ class TestSchemaService:
 
         # Use monkey patching to bypass the loop check for schema_definition
         import src.services.catalog.schemas as schema_service_module
+
         original_validate = schema_service_module.SchemaService._validate_json_fields
 
         @staticmethod
         def patched_validate_json_fields(data):
             # Remove schema_definition from json_fields to bypass loop validation
             json_fields = {
-                'field_descriptions': 'Field descriptions',
-                'example_data': 'Example data',
-                'keywords': 'Keywords',
-                'tools': 'Tools'
+                "field_descriptions": "Field descriptions",
+                "example_data": "Example data",
+                "keywords": "Keywords",
+                "tools": "Tools",
             }
 
             for field, label in json_fields.items():
@@ -744,23 +820,25 @@ class TestSchemaService:
                         except json.JSONDecodeError as e:
                             raise ValueError(f"{label} contains invalid JSON: {str(e)}")
 
-                    if field in ['keywords', 'tools'] and data[field] is not None:
+                    if field in ["keywords", "tools"] and data[field] is not None:
                         if not isinstance(data[field], list):
                             data[field] = []
 
-                    if field in ['field_descriptions'] and data[field] is not None:
+                    if field in ["field_descriptions"] and data[field] is not None:
                         if not isinstance(data[field], dict):
                             raise ValueError(f"{label} must be a valid JSON object")
 
             # Now execute the final validation check (lines 275-279)
-            if 'schema_definition' in data and data['schema_definition'] is not None:
-                if not isinstance(data['schema_definition'], dict):
+            if "schema_definition" in data and data["schema_definition"] is not None:
+                if not isinstance(data["schema_definition"], dict):
                     raise ValueError("Schema definition must be a valid JSON object")
-                if not data['schema_definition']:
+                if not data["schema_definition"]:
                     raise ValueError("Schema definition cannot be empty")
 
         # Apply patch
-        schema_service_module.SchemaService._validate_json_fields = patched_validate_json_fields
+        schema_service_module.SchemaService._validate_json_fields = (
+            patched_validate_json_fields
+        )
 
         try:
             data = {"schema_definition": {}}  # Empty dict to trigger line 279
@@ -771,7 +849,9 @@ class TestSchemaService:
             assert "Schema definition cannot be empty" in str(exc_info.value)
         finally:
             # Restore original method
-            schema_service_module.SchemaService._validate_json_fields = original_validate
+            schema_service_module.SchemaService._validate_json_fields = (
+                original_validate
+            )
 
     def test_validate_json_fields_line_277_coverage_bypass_loop(self):
         """Test line 277 by modifying the method to bypass the loop validation."""
@@ -782,10 +862,10 @@ class TestSchemaService:
             def modified_validate_json_fields(data):
                 # Only process other fields in the loop, skip schema_definition
                 json_fields = {
-                    'field_descriptions': 'Field descriptions',
-                    'example_data': 'Example data',
-                    'keywords': 'Keywords',
-                    'tools': 'Tools'
+                    "field_descriptions": "Field descriptions",
+                    "example_data": "Example data",
+                    "keywords": "Keywords",
+                    "tools": "Tools",
                 }
 
                 for field, label in json_fields.items():
@@ -796,21 +876,28 @@ class TestSchemaService:
                             try:
                                 data[field] = json.loads(value)
                             except json.JSONDecodeError as e:
-                                raise ValueError(f"{label} contains invalid JSON: {str(e)}")
+                                raise ValueError(
+                                    f"{label} contains invalid JSON: {str(e)}"
+                                )
 
-                        if field in ['keywords', 'tools'] and data[field] is not None:
+                        if field in ["keywords", "tools"] and data[field] is not None:
                             if not isinstance(data[field], list):
                                 data[field] = []
 
-                        if field in ['field_descriptions'] and data[field] is not None:
+                        if field in ["field_descriptions"] and data[field] is not None:
                             if not isinstance(data[field], dict):
                                 raise ValueError(f"{label} must be a valid JSON object")
 
                 # Now the final validation (this is where line 277 is tested)
-                if 'schema_definition' in data and data['schema_definition'] is not None:
-                    if not isinstance(data['schema_definition'], dict):
-                        raise ValueError("Schema definition must be a valid JSON object")
-                    if not data['schema_definition']:
+                if (
+                    "schema_definition" in data
+                    and data["schema_definition"] is not None
+                ):
+                    if not isinstance(data["schema_definition"], dict):
+                        raise ValueError(
+                            "Schema definition must be a valid JSON object"
+                        )
+                    if not data["schema_definition"]:
                         raise ValueError("Schema definition cannot be empty")
 
             return staticmethod(modified_validate_json_fields)
@@ -826,7 +913,9 @@ class TestSchemaService:
             with pytest.raises(ValueError) as exc_info:
                 SchemaService._validate_json_fields(data)
 
-            assert "Schema definition must be a valid JSON object" in str(exc_info.value)
+            assert "Schema definition must be a valid JSON object" in str(
+                exc_info.value
+            )
 
         finally:
             # Restore original method

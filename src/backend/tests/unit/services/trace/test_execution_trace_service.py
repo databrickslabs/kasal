@@ -5,15 +5,16 @@ Covers all public methods, branches, error paths, and group-check variants.
 Target: >=90% coverage of src/services/execution_trace_service.py.
 """
 
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
-from sqlalchemy.exc import SQLAlchemyError
 
+import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_trace_obj(**overrides):
     """Create a SimpleNamespace that looks like an ExecutionTrace ORM object."""
@@ -64,6 +65,7 @@ def _make_group_context(group_ids=None, email="test@example.com"):
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def mock_session():
     session = AsyncMock()
@@ -89,14 +91,18 @@ def service(mock_session, mock_trace_repo, mock_history_repo):
     Build an ExecutionTraceService with mocked repositories injected
     by patching the constructors so that __init__ uses our mocks.
     """
-    with patch(
-        "src.services.trace.service.ExecutionTraceRepository",
-        return_value=mock_trace_repo,
-    ), patch(
-        "src.services.trace.service.ExecutionHistoryRepository",
-        return_value=mock_history_repo,
+    with (
+        patch(
+            "src.services.trace.service.ExecutionTraceRepository",
+            return_value=mock_trace_repo,
+        ),
+        patch(
+            "src.services.trace.service.ExecutionHistoryRepository",
+            return_value=mock_history_repo,
+        ),
     ):
         from src.services.trace import ExecutionTraceService
+
         svc = ExecutionTraceService(mock_session)
     return svc
 
@@ -124,7 +130,9 @@ class TestGetTracesByRunId:
         assert result is not None
         assert result.run_id == 10
         assert len(result.traces) == 1
-        mock_history_repo.get_execution_by_id.assert_awaited_once_with(10, group_ids=["grp-1"])
+        mock_history_repo.get_execution_by_id.assert_awaited_once_with(
+            10, group_ids=["grp-1"]
+        )
 
     @pytest.mark.asyncio
     async def test_returns_none_when_execution_not_found(
@@ -145,7 +153,9 @@ class TestGetTracesByRunId:
 
         trace_missing = _make_trace_obj(job_id=None)
         trace_present = _make_trace_obj(id=2, job_id="job-xyz")
-        mock_trace_repo.get_by_run_id = AsyncMock(return_value=[trace_missing, trace_present])
+        mock_trace_repo.get_by_run_id = AsyncMock(
+            return_value=[trace_missing, trace_present]
+        )
 
         ctx = _make_group_context()
         result = await service.get_traces_by_run_id(group_context=ctx, run_id=10)
@@ -164,12 +174,12 @@ class TestGetTracesByRunId:
 
         result = await service.get_traces_by_run_id(group_context=None, run_id=10)
         assert result is not None
-        mock_history_repo.get_execution_by_id.assert_awaited_once_with(10, group_ids=None)
+        mock_history_repo.get_execution_by_id.assert_awaited_once_with(
+            10, group_ids=None
+        )
 
     @pytest.mark.asyncio
-    async def test_sqlalchemy_error_propagates(
-        self, service, mock_history_repo
-    ):
+    async def test_sqlalchemy_error_propagates(self, service, mock_history_repo):
         mock_history_repo.get_execution_by_id = AsyncMock(
             side_effect=SQLAlchemyError("db boom")
         )
@@ -177,9 +187,7 @@ class TestGetTracesByRunId:
             await service.get_traces_by_run_id(group_context=None, run_id=10)
 
     @pytest.mark.asyncio
-    async def test_generic_exception_propagates(
-        self, service, mock_history_repo
-    ):
+    async def test_generic_exception_propagates(self, service, mock_history_repo):
         mock_history_repo.get_execution_by_id = AsyncMock(
             side_effect=RuntimeError("unexpected")
         )
@@ -203,9 +211,7 @@ class TestGetTracesByRunId:
         assert trace.job_id == "job-xyz"
 
     @pytest.mark.asyncio
-    async def test_empty_traces_list(
-        self, service, mock_history_repo, mock_trace_repo
-    ):
+    async def test_empty_traces_list(self, service, mock_history_repo, mock_trace_repo):
         execution = _make_execution_obj()
         mock_history_repo.get_execution_by_id = AsyncMock(return_value=execution)
         mock_trace_repo.get_by_run_id = AsyncMock(return_value=[])
@@ -225,7 +231,9 @@ class TestGetTracesByJobId:
         self, service, mock_history_repo, mock_trace_repo
     ):
         execution = _make_execution_obj(id=10)
-        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(return_value=execution)
+        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(
+            return_value=execution
+        )
 
         trace = _make_trace_obj()
         mock_trace_repo.get_by_job_id = AsyncMock(return_value=[trace])
@@ -244,7 +252,9 @@ class TestGetTracesByJobId:
         self, service, mock_history_repo, mock_trace_repo
     ):
         execution = _make_execution_obj(id=10)
-        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(return_value=execution)
+        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(
+            return_value=execution
+        )
 
         # First call (get_by_job_id) returns empty, second (get_by_run_id) returns data
         mock_trace_repo.get_by_job_id = AsyncMock(return_value=[])
@@ -267,12 +277,17 @@ class TestGetTracesByJobId:
         """Perf regression (W2.1): pollers pass since_id so each poll reads only
         NEW traces instead of re-reading the run's whole trace set."""
         execution = _make_execution_obj(id=10)
-        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(return_value=execution)
+        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(
+            return_value=execution
+        )
         mock_trace_repo.get_by_job_id = AsyncMock(return_value=[_make_trace_obj()])
 
         result = await service.get_traces_by_job_id(
-            group_context=_make_group_context(), job_id="job-abc-123",
-            limit=50, offset=0, since_id=41,
+            group_context=_make_group_context(),
+            job_id="job-abc-123",
+            limit=50,
+            offset=0,
+            since_id=41,
         )
 
         assert result is not None
@@ -285,12 +300,16 @@ class TestGetTracesByJobId:
         """With a cursor, 'no new traces' is the NORMAL poll result — the
         legacy run_id fallback query must not fire on every empty tick."""
         execution = _make_execution_obj(id=10)
-        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(return_value=execution)
+        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(
+            return_value=execution
+        )
         mock_trace_repo.get_by_job_id = AsyncMock(return_value=[])
         mock_trace_repo.get_by_run_id = AsyncMock(return_value=[])
 
         result = await service.get_traces_by_job_id(
-            group_context=None, job_id="job-abc-123", since_id=99,
+            group_context=None,
+            job_id="job-abc-123",
+            since_id=99,
         )
 
         assert result is not None
@@ -315,7 +334,9 @@ class TestGetTracesByJobId:
     ):
         """Perf (W2.4): the states endpoints fetch only lifecycle events."""
         execution = _make_execution_obj(id=10)
-        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(return_value=execution)
+        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(
+            return_value=execution
+        )
         mock_trace_repo.get_state_events_by_job_id = AsyncMock(
             return_value=[_make_trace_obj(event_type="task_started")]
         )
@@ -338,7 +359,8 @@ class TestGetTracesByJobId:
         mock_history_repo.get_execution_summary_by_job_id = AsyncMock(return_value=None)
 
         result = await service.get_state_events_by_job_id(
-            group_context=_make_group_context(), job_id="missing",
+            group_context=_make_group_context(),
+            job_id="missing",
             event_types=["task_started"],
         )
         assert result is None
@@ -349,18 +371,20 @@ class TestGetTracesByJobId:
     ):
         """Authorized but no lifecycle events → empty list (endpoint returns {})."""
         execution = _make_execution_obj(id=10)
-        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(return_value=execution)
+        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(
+            return_value=execution
+        )
         mock_trace_repo.get_state_events_by_job_id = AsyncMock(return_value=[])
 
         result = await service.get_state_events_by_job_id(
-            group_context=None, job_id="job-abc-123", event_types=["task_started"],
+            group_context=None,
+            job_id="job-abc-123",
+            event_types=["task_started"],
         )
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_returns_none_access_denied(
-        self, service, mock_history_repo
-    ):
+    async def test_returns_none_access_denied(self, service, mock_history_repo):
         """Execution exists but user does not have group access."""
         # With group filter -> None (no access)
         # Without group filter -> found (exists for another group)
@@ -378,7 +402,9 @@ class TestGetTracesByJobId:
         self, service, mock_history_repo, mock_trace_repo
     ):
         execution = _make_execution_obj()
-        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(return_value=execution)
+        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(
+            return_value=execution
+        )
         mock_trace_repo.get_by_job_id = AsyncMock(return_value=[])
         mock_trace_repo.get_by_run_id = AsyncMock(return_value=[])
 
@@ -391,28 +417,20 @@ class TestGetTracesByJobId:
         )
 
     @pytest.mark.asyncio
-    async def test_sqlalchemy_error_propagates(
-        self, service, mock_history_repo
-    ):
+    async def test_sqlalchemy_error_propagates(self, service, mock_history_repo):
         mock_history_repo.get_execution_summary_by_job_id = AsyncMock(
             side_effect=SQLAlchemyError("db error")
         )
         with pytest.raises(SQLAlchemyError):
-            await service.get_traces_by_job_id(
-                group_context=None, job_id="job-abc-123"
-            )
+            await service.get_traces_by_job_id(group_context=None, job_id="job-abc-123")
 
     @pytest.mark.asyncio
-    async def test_generic_exception_propagates(
-        self, service, mock_history_repo
-    ):
+    async def test_generic_exception_propagates(self, service, mock_history_repo):
         mock_history_repo.get_execution_summary_by_job_id = AsyncMock(
             side_effect=RuntimeError("oops")
         )
         with pytest.raises(RuntimeError):
-            await service.get_traces_by_job_id(
-                group_context=None, job_id="job-abc-123"
-            )
+            await service.get_traces_by_job_id(group_context=None, job_id="job-abc-123")
 
     @pytest.mark.asyncio
     async def test_fallback_traces_with_job_id_already_set(
@@ -420,7 +438,9 @@ class TestGetTracesByJobId:
     ):
         """Fallback traces that already have job_id set should not be overwritten."""
         execution = _make_execution_obj(id=10)
-        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(return_value=execution)
+        mock_history_repo.get_execution_summary_by_job_id = AsyncMock(
+            return_value=execution
+        )
 
         mock_trace_repo.get_by_job_id = AsyncMock(return_value=[])
         fallback_trace = _make_trace_obj(job_id="existing-job")
@@ -468,9 +488,7 @@ class TestGetAllTraces:
 
     @pytest.mark.asyncio
     async def test_generic_exception_propagates(self, service, mock_trace_repo):
-        mock_trace_repo.get_all_traces = AsyncMock(
-            side_effect=ValueError("bad")
-        )
+        mock_trace_repo.get_all_traces = AsyncMock(side_effect=ValueError("bad"))
         with pytest.raises(ValueError):
             await service.get_all_traces()
 
@@ -572,17 +590,13 @@ class TestGetTraceById:
 
     @pytest.mark.asyncio
     async def test_sqlalchemy_error_propagates(self, service, mock_trace_repo):
-        mock_trace_repo.get_by_id = AsyncMock(
-            side_effect=SQLAlchemyError("db")
-        )
+        mock_trace_repo.get_by_id = AsyncMock(side_effect=SQLAlchemyError("db"))
         with pytest.raises(SQLAlchemyError):
             await service.get_trace_by_id(1)
 
     @pytest.mark.asyncio
     async def test_generic_exception_propagates(self, service, mock_trace_repo):
-        mock_trace_repo.get_by_id = AsyncMock(
-            side_effect=RuntimeError("oops")
-        )
+        mock_trace_repo.get_by_id = AsyncMock(side_effect=RuntimeError("oops"))
         with pytest.raises(RuntimeError):
             await service.get_trace_by_id(1)
 
@@ -608,9 +622,7 @@ class TestGetTraceByIdWithGroupCheck:
         assert result.id == 1
 
     @pytest.mark.asyncio
-    async def test_returns_none_when_trace_not_found(
-        self, service, mock_trace_repo
-    ):
+    async def test_returns_none_when_trace_not_found(self, service, mock_trace_repo):
         mock_trace_repo.get_by_id = AsyncMock(return_value=None)
 
         ctx = _make_group_context()
@@ -630,9 +642,7 @@ class TestGetTraceByIdWithGroupCheck:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_returns_trace_when_no_job_id(
-        self, service, mock_trace_repo
-    ):
+    async def test_returns_trace_when_no_job_id(self, service, mock_trace_repo):
         """Trace without job_id skips group check and returns the trace."""
         trace = _make_trace_obj(id=1, job_id=None)
         mock_trace_repo.get_by_id = AsyncMock(return_value=trace)
@@ -642,9 +652,7 @@ class TestGetTraceByIdWithGroupCheck:
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_returns_trace_when_no_group_context(
-        self, service, mock_trace_repo
-    ):
+    async def test_returns_trace_when_no_group_context(self, service, mock_trace_repo):
         """Trace with job_id but no group context skips group check."""
         trace = _make_trace_obj(id=1, job_id="j1")
         mock_trace_repo.get_by_id = AsyncMock(return_value=trace)
@@ -655,9 +663,7 @@ class TestGetTraceByIdWithGroupCheck:
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_returns_trace_when_group_ids_empty(
-        self, service, mock_trace_repo
-    ):
+    async def test_returns_trace_when_group_ids_empty(self, service, mock_trace_repo):
         """Empty group_ids list skips group check."""
         trace = _make_trace_obj(id=1, job_id="j1")
         mock_trace_repo.get_by_id = AsyncMock(return_value=trace)
@@ -668,28 +674,16 @@ class TestGetTraceByIdWithGroupCheck:
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_sqlalchemy_error_propagates(
-        self, service, mock_trace_repo
-    ):
-        mock_trace_repo.get_by_id = AsyncMock(
-            side_effect=SQLAlchemyError("db")
-        )
+    async def test_sqlalchemy_error_propagates(self, service, mock_trace_repo):
+        mock_trace_repo.get_by_id = AsyncMock(side_effect=SQLAlchemyError("db"))
         with pytest.raises(SQLAlchemyError):
-            await service.get_trace_by_id_with_group_check(
-                1, _make_group_context()
-            )
+            await service.get_trace_by_id_with_group_check(1, _make_group_context())
 
     @pytest.mark.asyncio
-    async def test_generic_exception_propagates(
-        self, service, mock_trace_repo
-    ):
-        mock_trace_repo.get_by_id = AsyncMock(
-            side_effect=RuntimeError("fail")
-        )
+    async def test_generic_exception_propagates(self, service, mock_trace_repo):
+        mock_trace_repo.get_by_id = AsyncMock(side_effect=RuntimeError("fail"))
         with pytest.raises(RuntimeError):
-            await service.get_trace_by_id_with_group_check(
-                1, _make_group_context()
-            )
+            await service.get_trace_by_id_with_group_check(1, _make_group_context())
 
 
 # =========================================================================
@@ -698,16 +692,13 @@ class TestGetTraceByIdWithGroupCheck:
 class TestCreateTrace:
 
     @pytest.mark.asyncio
-    async def test_creates_trace_and_broadcasts_sse(
-        self, service, mock_trace_repo
-    ):
+    async def test_creates_trace_and_broadcasts_sse(self, service, mock_trace_repo):
         created = _make_trace_obj(id=7, job_id="j1", event_type="task_started")
         mock_trace_repo.create = AsyncMock(return_value=created)
 
-        with patch(
-            "src.services.trace.service.sse_manager"
-        ) as mock_sse, patch.dict(
-            "os.environ", {}, clear=False
+        with (
+            patch("src.services.trace.service.sse_manager") as mock_sse,
+            patch.dict("os.environ", {}, clear=False),
         ):
             mock_sse.get_statistics.return_value = {
                 "total_connections": 1,
@@ -744,16 +735,13 @@ class TestCreateTrace:
         )
 
     @pytest.mark.asyncio
-    async def test_skips_sse_in_subprocess_mode(
-        self, service, mock_trace_repo
-    ):
+    async def test_skips_sse_in_subprocess_mode(self, service, mock_trace_repo):
         created = _make_trace_obj(id=8, job_id="j1")
         mock_trace_repo.create = AsyncMock(return_value=created)
 
-        with patch(
-            "src.services.trace.service.sse_manager"
-        ) as mock_sse, patch.dict(
-            "os.environ", {"CREW_SUBPROCESS_MODE": "true"}, clear=False
+        with (
+            patch("src.services.trace.service.sse_manager") as mock_sse,
+            patch.dict("os.environ", {"CREW_SUBPROCESS_MODE": "true"}, clear=False),
         ):
             # Pre-configure broadcast_to_job as AsyncMock so we can assert on it
             mock_sse.broadcast_to_job = AsyncMock()
@@ -769,10 +757,9 @@ class TestCreateTrace:
         created = _make_trace_obj(id=9, job_id="j1")
         mock_trace_repo.create = AsyncMock(return_value=created)
 
-        with patch(
-            "src.services.trace.service.sse_manager"
-        ) as mock_sse, patch.dict(
-            "os.environ", {}, clear=False
+        with (
+            patch("src.services.trace.service.sse_manager") as mock_sse,
+            patch.dict("os.environ", {}, clear=False),
         ):
             mock_sse.get_statistics.return_value = {
                 "total_connections": 0,
@@ -786,16 +773,13 @@ class TestCreateTrace:
             assert result.id == 9
 
     @pytest.mark.asyncio
-    async def test_no_job_id_skips_sse(
-        self, service, mock_trace_repo
-    ):
+    async def test_no_job_id_skips_sse(self, service, mock_trace_repo):
         created = _make_trace_obj(id=10, job_id=None)
         mock_trace_repo.create = AsyncMock(return_value=created)
 
-        with patch(
-            "src.services.trace.service.sse_manager"
-        ) as mock_sse, patch.dict(
-            "os.environ", {}, clear=False
+        with (
+            patch("src.services.trace.service.sse_manager") as mock_sse,
+            patch.dict("os.environ", {}, clear=False),
         ):
             # Pre-configure broadcast_to_job as AsyncMock so we can assert on it
             mock_sse.broadcast_to_job = AsyncMock()
@@ -805,9 +789,7 @@ class TestCreateTrace:
             mock_sse.broadcast_to_job.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_value_error_propagates(
-        self, service, mock_trace_repo
-    ):
+    async def test_value_error_propagates(self, service, mock_trace_repo):
         mock_trace_repo.create = AsyncMock(
             side_effect=ValueError("Job xyz does not exist")
         )
@@ -815,29 +797,19 @@ class TestCreateTrace:
             await service.create_trace({"job_id": "xyz"})
 
     @pytest.mark.asyncio
-    async def test_sqlalchemy_error_propagates(
-        self, service, mock_trace_repo
-    ):
-        mock_trace_repo.create = AsyncMock(
-            side_effect=SQLAlchemyError("db err")
-        )
+    async def test_sqlalchemy_error_propagates(self, service, mock_trace_repo):
+        mock_trace_repo.create = AsyncMock(side_effect=SQLAlchemyError("db err"))
         with pytest.raises(SQLAlchemyError):
             await service.create_trace({"job_id": "j1"})
 
     @pytest.mark.asyncio
-    async def test_generic_exception_propagates(
-        self, service, mock_trace_repo
-    ):
-        mock_trace_repo.create = AsyncMock(
-            side_effect=RuntimeError("boom")
-        )
+    async def test_generic_exception_propagates(self, service, mock_trace_repo):
+        mock_trace_repo.create = AsyncMock(side_effect=RuntimeError("boom"))
         with pytest.raises(RuntimeError):
             await service.create_trace({"job_id": "j1"})
 
     @pytest.mark.asyncio
-    async def test_default_event_type_unknown(
-        self, service, mock_trace_repo
-    ):
+    async def test_default_event_type_unknown(self, service, mock_trace_repo):
         """When event_type not provided, it defaults to 'unknown' in the log."""
         created = _make_trace_obj(id=11, job_id=None, event_type="unknown")
         mock_trace_repo.create = AsyncMock(return_value=created)
@@ -863,15 +835,11 @@ class TestCreateTraceWithGroup:
         mock_trace_repo.create = AsyncMock(return_value=created)
 
         ctx = _make_group_context()
-        result = await service.create_trace_with_group(
-            {"job_id": "j1"}, ctx
-        )
+        result = await service.create_trace_with_group({"job_id": "j1"}, ctx)
         assert result.id == 20
 
     @pytest.mark.asyncio
-    async def test_raises_when_not_authorized(
-        self, service, mock_history_repo
-    ):
+    async def test_raises_when_not_authorized(self, service, mock_history_repo):
         mock_history_repo.get_execution_by_job_id = AsyncMock(return_value=None)
 
         ctx = _make_group_context()
@@ -879,9 +847,7 @@ class TestCreateTraceWithGroup:
             await service.create_trace_with_group({"job_id": "j1"}, ctx)
 
     @pytest.mark.asyncio
-    async def test_creates_when_no_job_id(
-        self, service, mock_trace_repo
-    ):
+    async def test_creates_when_no_job_id(self, service, mock_trace_repo):
         """When job_id is not in trace_data, no group check is done."""
         created = _make_trace_obj(id=21, job_id=None)
         mock_trace_repo.create = AsyncMock(return_value=created)
@@ -891,9 +857,7 @@ class TestCreateTraceWithGroup:
         assert result.id == 21
 
     @pytest.mark.asyncio
-    async def test_creates_when_job_id_empty_string(
-        self, service, mock_trace_repo
-    ):
+    async def test_creates_when_job_id_empty_string(self, service, mock_trace_repo):
         """Empty string job_id should skip group check."""
         created = _make_trace_obj(id=22, job_id="")
         mock_trace_repo.create = AsyncMock(return_value=created)
@@ -903,49 +867,33 @@ class TestCreateTraceWithGroup:
         assert result.id == 22
 
     @pytest.mark.asyncio
-    async def test_creates_when_no_group_context(
-        self, service, mock_trace_repo
-    ):
+    async def test_creates_when_no_group_context(self, service, mock_trace_repo):
         """No group context should skip authorization."""
         created = _make_trace_obj(id=23)
         mock_trace_repo.create = AsyncMock(return_value=created)
 
-        result = await service.create_trace_with_group(
-            {"job_id": "j1"}, None
-        )
+        result = await service.create_trace_with_group({"job_id": "j1"}, None)
         assert result.id == 23
 
     @pytest.mark.asyncio
-    async def test_creates_when_group_ids_empty(
-        self, service, mock_trace_repo
-    ):
+    async def test_creates_when_group_ids_empty(self, service, mock_trace_repo):
         """Empty group_ids list should skip authorization."""
         created = _make_trace_obj(id=24)
         mock_trace_repo.create = AsyncMock(return_value=created)
 
         ctx = _make_group_context(group_ids=[])
-        result = await service.create_trace_with_group(
-            {"job_id": "j1"}, ctx
-        )
+        result = await service.create_trace_with_group({"job_id": "j1"}, ctx)
         assert result.id == 24
 
     @pytest.mark.asyncio
-    async def test_sqlalchemy_error_propagates(
-        self, service, mock_trace_repo
-    ):
-        mock_trace_repo.create = AsyncMock(
-            side_effect=SQLAlchemyError("db")
-        )
+    async def test_sqlalchemy_error_propagates(self, service, mock_trace_repo):
+        mock_trace_repo.create = AsyncMock(side_effect=SQLAlchemyError("db"))
         with pytest.raises(SQLAlchemyError):
             await service.create_trace_with_group({}, _make_group_context())
 
     @pytest.mark.asyncio
-    async def test_generic_exception_propagates(
-        self, service, mock_trace_repo
-    ):
-        mock_trace_repo.create = AsyncMock(
-            side_effect=RuntimeError("nope")
-        )
+    async def test_generic_exception_propagates(self, service, mock_trace_repo):
+        mock_trace_repo.create = AsyncMock(side_effect=RuntimeError("nope"))
         with pytest.raises(RuntimeError):
             await service.create_trace_with_group({}, _make_group_context())
 
@@ -975,17 +923,13 @@ class TestDeleteTrace:
 
     @pytest.mark.asyncio
     async def test_sqlalchemy_error_propagates(self, service, mock_trace_repo):
-        mock_trace_repo.get_by_id = AsyncMock(
-            side_effect=SQLAlchemyError("db")
-        )
+        mock_trace_repo.get_by_id = AsyncMock(side_effect=SQLAlchemyError("db"))
         with pytest.raises(SQLAlchemyError):
             await service.delete_trace(1)
 
     @pytest.mark.asyncio
     async def test_generic_exception_propagates(self, service, mock_trace_repo):
-        mock_trace_repo.get_by_id = AsyncMock(
-            side_effect=RuntimeError("err")
-        )
+        mock_trace_repo.get_by_id = AsyncMock(side_effect=RuntimeError("err"))
         with pytest.raises(RuntimeError):
             await service.delete_trace(1)
 
@@ -1012,14 +956,10 @@ class TestDeleteTraceWithGroupCheck:
         assert result.deleted_traces == 1
 
     @pytest.mark.asyncio
-    async def test_returns_none_when_not_found(
-        self, service, mock_trace_repo
-    ):
+    async def test_returns_none_when_not_found(self, service, mock_trace_repo):
         mock_trace_repo.get_by_id = AsyncMock(return_value=None)
 
-        result = await service.delete_trace_with_group_check(
-            999, _make_group_context()
-        )
+        result = await service.delete_trace_with_group_check(999, _make_group_context())
         assert result is None
 
     @pytest.mark.asyncio
@@ -1035,9 +975,7 @@ class TestDeleteTraceWithGroupCheck:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_deletes_when_no_job_id_on_trace(
-        self, service, mock_trace_repo
-    ):
+    async def test_deletes_when_no_job_id_on_trace(self, service, mock_trace_repo):
         """Trace without job_id skips group check, proceeds to delete."""
         trace = _make_trace_obj(id=5, job_id=None)
         mock_trace_repo.get_by_id = AsyncMock(return_value=trace)
@@ -1048,9 +986,7 @@ class TestDeleteTraceWithGroupCheck:
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_deletes_when_no_group_context(
-        self, service, mock_trace_repo
-    ):
+    async def test_deletes_when_no_group_context(self, service, mock_trace_repo):
         """No group_context skips auth check."""
         trace = _make_trace_obj(id=5, job_id="j1")
         mock_trace_repo.get_by_id = AsyncMock(return_value=trace)
@@ -1062,9 +998,7 @@ class TestDeleteTraceWithGroupCheck:
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_deletes_when_group_ids_empty(
-        self, service, mock_trace_repo
-    ):
+    async def test_deletes_when_group_ids_empty(self, service, mock_trace_repo):
         trace = _make_trace_obj(id=5, job_id="j1")
         mock_trace_repo.get_by_id = AsyncMock(return_value=trace)
         mock_trace_repo.delete_by_id = AsyncMock(return_value=1)
@@ -1075,28 +1009,16 @@ class TestDeleteTraceWithGroupCheck:
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_sqlalchemy_error_propagates(
-        self, service, mock_trace_repo
-    ):
-        mock_trace_repo.get_by_id = AsyncMock(
-            side_effect=SQLAlchemyError("db")
-        )
+    async def test_sqlalchemy_error_propagates(self, service, mock_trace_repo):
+        mock_trace_repo.get_by_id = AsyncMock(side_effect=SQLAlchemyError("db"))
         with pytest.raises(SQLAlchemyError):
-            await service.delete_trace_with_group_check(
-                1, _make_group_context()
-            )
+            await service.delete_trace_with_group_check(1, _make_group_context())
 
     @pytest.mark.asyncio
-    async def test_generic_exception_propagates(
-        self, service, mock_trace_repo
-    ):
-        mock_trace_repo.get_by_id = AsyncMock(
-            side_effect=RuntimeError("fail")
-        )
+    async def test_generic_exception_propagates(self, service, mock_trace_repo):
+        mock_trace_repo.get_by_id = AsyncMock(side_effect=RuntimeError("fail"))
         with pytest.raises(RuntimeError):
-            await service.delete_trace_with_group_check(
-                1, _make_group_context()
-            )
+            await service.delete_trace_with_group_check(1, _make_group_context())
 
 
 # =========================================================================
@@ -1121,17 +1043,13 @@ class TestDeleteTracesByRunId:
 
     @pytest.mark.asyncio
     async def test_sqlalchemy_error_propagates(self, service, mock_trace_repo):
-        mock_trace_repo.delete_by_run_id = AsyncMock(
-            side_effect=SQLAlchemyError("db")
-        )
+        mock_trace_repo.delete_by_run_id = AsyncMock(side_effect=SQLAlchemyError("db"))
         with pytest.raises(SQLAlchemyError):
             await service.delete_traces_by_run_id(10)
 
     @pytest.mark.asyncio
     async def test_generic_exception_propagates(self, service, mock_trace_repo):
-        mock_trace_repo.delete_by_run_id = AsyncMock(
-            side_effect=RuntimeError("err")
-        )
+        mock_trace_repo.delete_by_run_id = AsyncMock(side_effect=RuntimeError("err"))
         with pytest.raises(RuntimeError):
             await service.delete_traces_by_run_id(10)
 
@@ -1155,20 +1073,19 @@ class TestDeleteTracesByRunIdWithGroupCheck:
         assert result.deleted_traces == 2
 
     @pytest.mark.asyncio
-    async def test_returns_zero_when_not_authorized(
-        self, service, mock_history_repo
-    ):
+    async def test_returns_zero_when_not_authorized(self, service, mock_history_repo):
         mock_history_repo.get_execution_by_id = AsyncMock(return_value=None)
 
         ctx = _make_group_context()
         result = await service.delete_traces_by_run_id_with_group_check(10, ctx)
         assert result.deleted_traces == 0
-        assert "not authorized" in result.message.lower() or "not found" in result.message.lower()
+        assert (
+            "not authorized" in result.message.lower()
+            or "not found" in result.message.lower()
+        )
 
     @pytest.mark.asyncio
-    async def test_deletes_when_no_group_context(
-        self, service, mock_trace_repo
-    ):
+    async def test_deletes_when_no_group_context(self, service, mock_trace_repo):
         """No group context skips authorization, proceeds to delete."""
         mock_trace_repo.delete_by_run_id = AsyncMock(return_value=1)
 
@@ -1176,9 +1093,7 @@ class TestDeleteTracesByRunIdWithGroupCheck:
         assert result.deleted_traces == 1
 
     @pytest.mark.asyncio
-    async def test_deletes_when_group_ids_empty(
-        self, service, mock_trace_repo
-    ):
+    async def test_deletes_when_group_ids_empty(self, service, mock_trace_repo):
         mock_trace_repo.delete_by_run_id = AsyncMock(return_value=1)
 
         ctx = _make_group_context(group_ids=[])
@@ -1186,9 +1101,7 @@ class TestDeleteTracesByRunIdWithGroupCheck:
         assert result.deleted_traces == 1
 
     @pytest.mark.asyncio
-    async def test_sqlalchemy_error_propagates(
-        self, service, mock_history_repo
-    ):
+    async def test_sqlalchemy_error_propagates(self, service, mock_history_repo):
         mock_history_repo.get_execution_by_id = AsyncMock(
             side_effect=SQLAlchemyError("db")
         )
@@ -1198,9 +1111,7 @@ class TestDeleteTracesByRunIdWithGroupCheck:
             )
 
     @pytest.mark.asyncio
-    async def test_generic_exception_propagates(
-        self, service, mock_history_repo
-    ):
+    async def test_generic_exception_propagates(self, service, mock_history_repo):
         mock_history_repo.get_execution_by_id = AsyncMock(
             side_effect=RuntimeError("err")
         )
@@ -1232,17 +1143,13 @@ class TestDeleteTracesByJobId:
 
     @pytest.mark.asyncio
     async def test_sqlalchemy_error_propagates(self, service, mock_trace_repo):
-        mock_trace_repo.delete_by_job_id = AsyncMock(
-            side_effect=SQLAlchemyError("db")
-        )
+        mock_trace_repo.delete_by_job_id = AsyncMock(side_effect=SQLAlchemyError("db"))
         with pytest.raises(SQLAlchemyError):
             await service.delete_traces_by_job_id("j1")
 
     @pytest.mark.asyncio
     async def test_generic_exception_propagates(self, service, mock_trace_repo):
-        mock_trace_repo.delete_by_job_id = AsyncMock(
-            side_effect=RuntimeError("fail")
-        )
+        mock_trace_repo.delete_by_job_id = AsyncMock(side_effect=RuntimeError("fail"))
         with pytest.raises(RuntimeError):
             await service.delete_traces_by_job_id("j1")
 
@@ -1266,29 +1173,26 @@ class TestDeleteTracesByJobIdWithGroupCheck:
         assert result.deleted_traces == 3
 
     @pytest.mark.asyncio
-    async def test_returns_zero_when_not_authorized(
-        self, service, mock_history_repo
-    ):
+    async def test_returns_zero_when_not_authorized(self, service, mock_history_repo):
         mock_history_repo.get_execution_by_job_id = AsyncMock(return_value=None)
 
         ctx = _make_group_context()
         result = await service.delete_traces_by_job_id_with_group_check("j1", ctx)
         assert result.deleted_traces == 0
-        assert "not found" in result.message.lower() or "not authorized" in result.message.lower()
+        assert (
+            "not found" in result.message.lower()
+            or "not authorized" in result.message.lower()
+        )
 
     @pytest.mark.asyncio
-    async def test_deletes_when_no_group_context(
-        self, service, mock_trace_repo
-    ):
+    async def test_deletes_when_no_group_context(self, service, mock_trace_repo):
         mock_trace_repo.delete_by_job_id = AsyncMock(return_value=2)
 
         result = await service.delete_traces_by_job_id_with_group_check("j1", None)
         assert result.deleted_traces == 2
 
     @pytest.mark.asyncio
-    async def test_deletes_when_group_ids_empty(
-        self, service, mock_trace_repo
-    ):
+    async def test_deletes_when_group_ids_empty(self, service, mock_trace_repo):
         mock_trace_repo.delete_by_job_id = AsyncMock(return_value=2)
 
         ctx = _make_group_context(group_ids=[])
@@ -1296,9 +1200,7 @@ class TestDeleteTracesByJobIdWithGroupCheck:
         assert result.deleted_traces == 2
 
     @pytest.mark.asyncio
-    async def test_sqlalchemy_error_propagates(
-        self, service, mock_history_repo
-    ):
+    async def test_sqlalchemy_error_propagates(self, service, mock_history_repo):
         mock_history_repo.get_execution_by_job_id = AsyncMock(
             side_effect=SQLAlchemyError("db")
         )
@@ -1308,9 +1210,7 @@ class TestDeleteTracesByJobIdWithGroupCheck:
             )
 
     @pytest.mark.asyncio
-    async def test_generic_exception_propagates(
-        self, service, mock_history_repo
-    ):
+    async def test_generic_exception_propagates(self, service, mock_history_repo):
         mock_history_repo.get_execution_by_job_id = AsyncMock(
             side_effect=RuntimeError("err")
         )
@@ -1342,17 +1242,13 @@ class TestDeleteAllTraces:
 
     @pytest.mark.asyncio
     async def test_sqlalchemy_error_propagates(self, service, mock_trace_repo):
-        mock_trace_repo.delete_all = AsyncMock(
-            side_effect=SQLAlchemyError("db")
-        )
+        mock_trace_repo.delete_all = AsyncMock(side_effect=SQLAlchemyError("db"))
         with pytest.raises(SQLAlchemyError):
             await service.delete_all_traces()
 
     @pytest.mark.asyncio
     async def test_generic_exception_propagates(self, service, mock_trace_repo):
-        mock_trace_repo.delete_all = AsyncMock(
-            side_effect=RuntimeError("fail")
-        )
+        mock_trace_repo.delete_all = AsyncMock(side_effect=RuntimeError("fail"))
         with pytest.raises(RuntimeError):
             await service.delete_all_traces()
 
@@ -1363,9 +1259,7 @@ class TestDeleteAllTraces:
 class TestDeleteAllTracesForGroup:
 
     @pytest.mark.asyncio
-    async def test_deletes_for_group(
-        self, service, mock_history_repo, mock_trace_repo
-    ):
+    async def test_deletes_for_group(self, service, mock_history_repo, mock_trace_repo):
         exec1 = _make_execution_obj(id=1, job_id="j1")
         exec2 = _make_execution_obj(id=2, job_id="j2")
         mock_history_repo.get_all_executions_for_groups = AsyncMock(
@@ -1396,12 +1290,8 @@ class TestDeleteAllTracesForGroup:
         assert result.deleted_traces == 0
 
     @pytest.mark.asyncio
-    async def test_returns_zero_when_no_executions(
-        self, service, mock_history_repo
-    ):
-        mock_history_repo.get_all_executions_for_groups = AsyncMock(
-            return_value=[]
-        )
+    async def test_returns_zero_when_no_executions(self, service, mock_history_repo):
+        mock_history_repo.get_all_executions_for_groups = AsyncMock(return_value=[])
         ctx = _make_group_context()
         result = await service.delete_all_traces_for_group(ctx)
         assert result.deleted_traces == 0
@@ -1425,9 +1315,7 @@ class TestDeleteAllTracesForGroup:
         mock_trace_repo.delete_by_job_id.assert_awaited_once_with("j2")
 
     @pytest.mark.asyncio
-    async def test_sqlalchemy_error_propagates(
-        self, service, mock_history_repo
-    ):
+    async def test_sqlalchemy_error_propagates(self, service, mock_history_repo):
         mock_history_repo.get_all_executions_for_groups = AsyncMock(
             side_effect=SQLAlchemyError("db")
         )
@@ -1435,9 +1323,7 @@ class TestDeleteAllTracesForGroup:
             await service.delete_all_traces_for_group(_make_group_context())
 
     @pytest.mark.asyncio
-    async def test_generic_exception_propagates(
-        self, service, mock_history_repo
-    ):
+    async def test_generic_exception_propagates(self, service, mock_history_repo):
         mock_history_repo.get_all_executions_for_groups = AsyncMock(
             side_effect=RuntimeError("fail")
         )
@@ -1451,12 +1337,14 @@ class TestDeleteAllTracesForGroup:
 class TestInit:
 
     def test_service_initializes_repositories(self, mock_session):
-        with patch(
-            "src.services.trace.service.ExecutionTraceRepository"
-        ) as mock_tr_cls, patch(
-            "src.services.trace.service.ExecutionHistoryRepository"
-        ) as mock_hr_cls:
+        with (
+            patch("src.services.trace.service.ExecutionTraceRepository") as mock_tr_cls,
+            patch(
+                "src.services.trace.service.ExecutionHistoryRepository"
+            ) as mock_hr_cls,
+        ):
             from src.services.trace import ExecutionTraceService
+
             svc = ExecutionTraceService(mock_session)
 
             mock_tr_cls.assert_called_once_with(mock_session)

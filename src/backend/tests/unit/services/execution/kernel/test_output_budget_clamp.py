@@ -85,13 +85,22 @@ class TestSharedEstimator:
         omitted them, which is part of why the old clamp needed a fudge factor."""
         llm = LLM(model="x", api_key="k")
         msgs = _messages(400)
-        tools = [{"type": "function", "function": {"name": "f", "parameters": {"x": "y" * 400}}}]
+        tools = [
+            {
+                "type": "function",
+                "function": {"name": "f", "parameters": {"x": "y" * 400}},
+            }
+        ]
         assert llm._estimate_tokens(msgs, tools) > llm._estimate_tokens(msgs)
 
     def test_tool_calls_and_outputs_are_counted(self):
         llm = LLM(model="x", api_key="k")
         conversation = [
-            {"role": "assistant", "content": "", "tool_calls": [{"id": "1", "x": "y" * 400}]},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "1", "x": "y" * 400}],
+            },
             {"role": "tool", "content": "z" * 400},
         ]
         assert llm._estimate_tokens(conversation) > 150

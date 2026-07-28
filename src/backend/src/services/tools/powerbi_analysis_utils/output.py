@@ -8,19 +8,18 @@ movement: every method still reads ``self`` exactly as it did in the single
 import asyncio
 import base64
 import contextvars
-import logging
 import json
+import logging
 import re
-from typing import Any, Optional, Type, Dict, List
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from typing import Any, Dict, List, Optional, Type
+
+import httpx
+from pydantic import BaseModel, Field, PrivateAttr
 
 from src.services.tools.base import BaseTool
-from pydantic import BaseModel, Field, PrivateAttr
-import httpx
-
 from src.services.tools.tool_session_provider import ToolSessionProvider
-
 
 
 class PowerBIOutputMixin:
@@ -58,13 +57,17 @@ class PowerBIOutputMixin:
             # Show retry attempts if there were multiple
             dax_attempts = results.get("dax_attempts", [])
             if len(dax_attempts) > 1:
-                output.append(f"**Attempts**: {len(dax_attempts)} (successful on attempt {len(dax_attempts)})\n")
+                output.append(
+                    f"**Attempts**: {len(dax_attempts)} (successful on attempt {len(dax_attempts)})\n"
+                )
                 output.append("\n### Retry History\n")
                 for att in dax_attempts[:-1]:  # Show all failed attempts
                     output.append(f"**Attempt {att['attempt']}**: ❌ Failed")
-                    if att.get('error'):
+                    if att.get("error"):
                         output.append(f"  - Error: {att['error'][:100]}...")
-                output.append(f"**Attempt {dax_attempts[-1]['attempt']}**: ✅ Success\n")
+                output.append(
+                    f"**Attempt {dax_attempts[-1]['attempt']}**: ✅ Success\n"
+                )
 
             output.append("```dax")
             output.append(results["generated_dax"])
@@ -75,15 +78,25 @@ class PowerBIOutputMixin:
         output.append("## Execution Results\n")
 
         if exec_result.get("success"):
-            output.append(f"✅ **Success** - {exec_result.get('row_count', 0)} rows returned\n")
+            output.append(
+                f"✅ **Success** - {exec_result.get('row_count', 0)} rows returned\n"
+            )
 
             # Show data as table
             data = exec_result.get("data", [])
             if data:
-                columns = exec_result.get("columns", list(data[0].keys()) if data else [])
+                columns = exec_result.get(
+                    "columns", list(data[0].keys()) if data else []
+                )
 
                 # Table header
-                output.append("| " + " | ".join(str(c).replace("[", "").replace("]", "") for c in columns) + " |")
+                output.append(
+                    "| "
+                    + " | ".join(
+                        str(c).replace("[", "").replace("]", "") for c in columns
+                    )
+                    + " |"
+                )
                 output.append("| " + " | ".join(["---"] * len(columns)) + " |")
 
                 # Table rows (limit to 20)
@@ -109,7 +122,7 @@ class PowerBIOutputMixin:
                 if report_name not in report_refs:
                     report_refs[report_name] = {
                         "report_url": ref.get("report_url", ""),
-                        "pages": {}
+                        "pages": {},
                     }
 
                 page_name = ref.get("page_name")
@@ -122,20 +135,26 @@ class PowerBIOutputMixin:
                         report_refs[report_name]["pages"][page_name] = {
                             "page_url": page_url,
                             "measures": [],
-                            "visual_types": set()
+                            "visual_types": set(),
                         }
-                    report_refs[report_name]["pages"][page_name]["measures"].append(measure)
+                    report_refs[report_name]["pages"][page_name]["measures"].append(
+                        measure
+                    )
                     if visual_type:
-                        report_refs[report_name]["pages"][page_name]["visual_types"].add(visual_type)
+                        report_refs[report_name]["pages"][page_name][
+                            "visual_types"
+                        ].add(visual_type)
                 else:
                     # No page info - store at report level
                     if "_no_page_" not in report_refs[report_name]["pages"]:
                         report_refs[report_name]["pages"]["_no_page_"] = {
                             "page_url": None,
                             "measures": [],
-                            "visual_types": set()
+                            "visual_types": set(),
                         }
-                    report_refs[report_name]["pages"]["_no_page_"]["measures"].append(measure)
+                    report_refs[report_name]["pages"]["_no_page_"]["measures"].append(
+                        measure
+                    )
 
             # Format output
             for report_name, report_data in report_refs.items():
@@ -147,7 +166,9 @@ class PowerBIOutputMixin:
                     if page_name == "_no_page_":
                         # Measures without page-level detail
                         unique_measures = list(set(page_data["measures"]))
-                        output.append(f"- Measures in report: {', '.join(unique_measures)}")
+                        output.append(
+                            f"- Measures in report: {', '.join(unique_measures)}"
+                        )
                     else:
                         page_url = page_data["page_url"]
                         unique_measures = list(set(page_data["measures"]))
@@ -156,6 +177,8 @@ class PowerBIOutputMixin:
                         output.append(f"- **📄 {page_name}**: [Open Page]({page_url})")
                         output.append(f"  - Measures: {', '.join(unique_measures)}")
                         if visual_types:
-                            output.append(f"  - Visual types: {', '.join(visual_types)}")
+                            output.append(
+                                f"  - Visual types: {', '.join(visual_types)}"
+                            )
 
         return "\n".join(output)

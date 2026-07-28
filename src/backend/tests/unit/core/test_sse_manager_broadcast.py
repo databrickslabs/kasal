@@ -1,24 +1,27 @@
 """
 Extended unit tests for SSE manager to improve coverage.
 """
+
 import asyncio
-import pytest
 from datetime import datetime
 from unittest.mock import MagicMock, patch
+from uuid import UUID
+
+import pytest
 
 from src.core.sse_manager import (
-    _SSEEncoder,
-    SSEEvent,
     SSEConnectionManager,
+    SSEEvent,
+    _SSEEncoder,
     event_stream_generator,
 )
-from uuid import UUID
 
 
 class TestSSEEncoder:
     def test_encodes_uuid(self):
         """_SSEEncoder serializes UUID to string."""
         import json
+
         uid = UUID("12345678-1234-5678-1234-567812345678")
         result = json.dumps(uid, cls=_SSEEncoder)
         assert "12345678" in result
@@ -26,6 +29,7 @@ class TestSSEEncoder:
     def test_encodes_datetime(self):
         """_SSEEncoder serializes datetime to ISO string."""
         import json
+
         dt = datetime(2025, 1, 15, 10, 30, 0)
         result = json.dumps(dt, cls=_SSEEncoder)
         assert "2025" in result
@@ -33,6 +37,7 @@ class TestSSEEncoder:
     def test_raises_for_unknown_type(self):
         """_SSEEncoder raises TypeError for unknown types."""
         import json
+
         with pytest.raises(TypeError):
             json.dumps(object(), cls=_SSEEncoder)
 
@@ -243,7 +248,9 @@ class TestEventStreamGenerator:
         from src.core.sse_manager import sse_manager
 
         events = []
-        gen = event_stream_generator("test-job-1234", timeout=1, heartbeat_interval=9999)
+        gen = event_stream_generator(
+            "test-job-1234", timeout=1, heartbeat_interval=9999
+        )
         # Just collect the first few events
         async for chunk in gen:
             events.append(chunk)

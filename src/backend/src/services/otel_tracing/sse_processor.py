@@ -27,9 +27,7 @@ class KasalSSESpanProcessor(SpanProcessor):
 
     def __init__(self, job_id: str):
         self._job_id = job_id
-        self._is_subprocess = (
-            os.environ.get("CREW_SUBPROCESS_MODE") == "true"
-        )
+        self._is_subprocess = os.environ.get("CREW_SUBPROCESS_MODE") == "true"
 
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
         pass  # No action needed on start
@@ -40,9 +38,7 @@ class KasalSSESpanProcessor(SpanProcessor):
 
         try:
             attrs = dict(span.attributes) if span.attributes else {}
-            event_type = str(
-                attrs.get("kasal.event_type", "")
-            )
+            event_type = str(attrs.get("kasal.event_type", ""))
 
             # Also check span name mapping for auto-instrumented spans
             if not event_type or event_type not in _SSE_EVENT_TYPES:
@@ -69,9 +65,7 @@ class KasalSSESpanProcessor(SpanProcessor):
                 or attrs.get("crewai.agent.role", "")
             )
             crew_name = str(attrs.get("kasal.extra.crew_name", ""))
-            frontend_task_id = str(
-                attrs.get("kasal.extra.frontend_task_id", "")
-            )
+            frontend_task_id = str(attrs.get("kasal.extra.frontend_task_id", ""))
 
             sse_data = {
                 "job_id": self._job_id,
@@ -88,8 +82,9 @@ class KasalSSESpanProcessor(SpanProcessor):
             }
 
             # Import SSE manager and broadcast
-            from src.core.sse_manager import SSEEvent, sse_manager
             import asyncio
+
+            from src.core.sse_manager import SSEEvent, sse_manager
 
             event = SSEEvent(
                 data=sse_data,
@@ -100,17 +95,13 @@ class KasalSSESpanProcessor(SpanProcessor):
             # Best-effort async broadcast
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(
-                    sse_manager.broadcast_to_job(self._job_id, event)
-                )
+                loop.create_task(sse_manager.broadcast_to_job(self._job_id, event))
             except RuntimeError:
                 # No running loop — run synchronously in a thread
                 import concurrent.futures
 
                 def _broadcast():
-                    asyncio.run(
-                        sse_manager.broadcast_to_job(self._job_id, event)
-                    )
+                    asyncio.run(sse_manager.broadcast_to_job(self._job_id, event))
 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
                     ex.submit(_broadcast)
@@ -120,9 +111,7 @@ class KasalSSESpanProcessor(SpanProcessor):
             )
 
         except Exception as e:
-            logger.warning(
-                f"[OTel-SSE][{self._job_id}] SSE broadcast error: {e}"
-            )
+            logger.warning(f"[OTel-SSE][{self._job_id}] SSE broadcast error: {e}")
 
     def shutdown(self) -> None:
         pass

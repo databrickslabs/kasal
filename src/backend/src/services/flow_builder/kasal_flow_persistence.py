@@ -15,6 +15,7 @@ a short-lived dedicated thread + event loop. This avoids ``asyncio.run`` deadloc
 build a loop-correct, Lakebase-aware engine for that thread — the same mechanism
 crew threads already rely on.
 """
+
 import asyncio
 import json
 import logging
@@ -22,8 +23,9 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
-from src.services.flow_builder.runtime import FlowPersistence
 from pydantic import BaseModel
+
+from src.services.flow_builder.runtime import FlowPersistence
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +97,9 @@ class KasalFlowPersistence(FlowPersistence):
             async with async_session_factory() as session:
                 conn = await session.connection()
                 await conn.run_sync(
-                    lambda sync_conn: FlowState.__table__.create(sync_conn, checkfirst=True)
+                    lambda sync_conn: FlowState.__table__.create(
+                        sync_conn, checkfirst=True
+                    )
                 )
                 await session.commit()
 
@@ -103,7 +107,9 @@ class KasalFlowPersistence(FlowPersistence):
             _run_async(_init)
             _table_ensured = True
 
-    def _execute_with_retry(self, coro_factory: Callable[[], Any], *, attempts: int = 5) -> Any:
+    def _execute_with_retry(
+        self, coro_factory: Callable[[], Any], *, attempts: int = 5
+    ) -> Any:
         """Run a DB coroutine via the thread bridge, tolerating SQLite contention.
 
         Mirrors the app's retry_db_operation philosophy: a busy SQLite file ("database
@@ -123,7 +129,9 @@ class KasalFlowPersistence(FlowPersistence):
                     try:
                         self.init_db()
                     except Exception as init_err:  # noqa: BLE001
-                        logger.warning(f"[KasalFlowPersistence] lazy init_db failed: {init_err}")
+                        logger.warning(
+                            f"[KasalFlowPersistence] lazy init_db failed: {init_err}"
+                        )
                     continue
                 if "database is locked" in message or "database is busy" in message:
                     time.sleep(delay)

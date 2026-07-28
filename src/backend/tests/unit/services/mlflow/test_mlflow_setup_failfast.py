@@ -3,8 +3,9 @@
 the import inside the subprocess spawn→kickoff critical path."""
 
 import builtins
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from src.services.otel_tracing.mlflow_setup import configure_mlflow_in_subprocess
 

@@ -5,13 +5,18 @@ Extracts measures from Power BI datasets via REST API
 
 import logging
 import re
-import requests
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
-from ...base.connectors import BaseInboundConnector, InboundConnectorMetadata, ConnectorType
+import requests
+
+from ...base.connectors import (
+    BaseInboundConnector,
+    ConnectorType,
+    InboundConnectorMetadata,
+)
 from ...base.models import KPI
-from .dax_parser import DAXExpressionParser
 from .authentication import AadService
+from .dax_parser import DAXExpressionParser
 
 
 class PowerBIConnector(BaseInboundConnector):
@@ -71,7 +76,7 @@ class PowerBIConnector(BaseInboundConnector):
         use_database: bool = False,
         use_system_schema: bool = True,
         info_table_name: str = "Info Measures",
-        **kwargs
+        **kwargs,
     ):
         """
         Initialize Power BI connector.
@@ -124,9 +129,13 @@ class PowerBIConnector(BaseInboundConnector):
         self.logger.info(f"[POWERBI CONNECTOR DEBUG] Initializing with:")
         self.logger.info(f"[POWERBI CONNECTOR DEBUG]   tenant_id: '{tenant_id}'")
         self.logger.info(f"[POWERBI CONNECTOR DEBUG]   client_id: '{client_id}'")
-        self.logger.info(f"[POWERBI CONNECTOR DEBUG]   client_secret length: {len(client_secret) if client_secret else 0}")
+        self.logger.info(
+            f"[POWERBI CONNECTOR DEBUG]   client_secret length: {len(client_secret) if client_secret else 0}"
+        )
         self.logger.info(f"[POWERBI CONNECTOR DEBUG]   auth_method: '{auth_method}'")
-        self.logger.info(f"[POWERBI CONNECTOR DEBUG]   username: '{username or '(from env)' if username_env else 'None'}'")
+        self.logger.info(
+            f"[POWERBI CONNECTOR DEBUG]   username: '{username or '(from env)' if username_env else 'None'}'"
+        )
         self.aad_service = AadService(
             client_id=client_id,
             client_secret=client_secret,
@@ -191,15 +200,17 @@ class PowerBIConnector(BaseInboundConnector):
 
         headers = {
             "Authorization": f"Bearer {self._access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         body = {
             "queries": [{"query": dax_query}],
-            "serializerSettings": {"includeNulls": True}
+            "serializerSettings": {"includeNulls": True},
         }
 
-        self.logger.info(f"Executing DAX query against dataset {self.semantic_model_id}")
+        self.logger.info(
+            f"Executing DAX query against dataset {self.semantic_model_id}"
+        )
         response = requests.post(url, headers=headers, json=body, timeout=60)
 
         if response.status_code == 200:
@@ -242,8 +253,11 @@ class PowerBIConnector(BaseInboundConnector):
 
         # Filter out system measures like __Default measure
         filtered_rows = [
-            row for row in rows
-            if not row.get('[Measure Name]', row.get('Measure Name', '')).startswith('__')
+            row
+            for row in rows
+            if not row.get("[Measure Name]", row.get("Measure Name", "")).startswith(
+                "__"
+            )
         ]
 
         self.logger.info(
@@ -304,67 +318,73 @@ class PowerBIConnector(BaseInboundConnector):
         if self.use_system_schema:
             rows = self._extract_measures_from_system_schema()
             # System schema uses different column names
-            name_col = '[Measure Name]'
-            name_col_alt = 'Measure Name'
-            table_col = '[Table]'
-            table_col_alt = 'Table'
-            desc_col = '[Description]'
-            desc_col_alt = 'Description'
-            expr_col = '[Expression]'
-            expr_col_alt = 'Expression'
+            name_col = "[Measure Name]"
+            name_col_alt = "Measure Name"
+            table_col = "[Table]"
+            table_col_alt = "Table"
+            desc_col = "[Description]"
+            desc_col_alt = "Description"
+            expr_col = "[Expression]"
+            expr_col_alt = "Expression"
         else:
             rows = self._extract_measures_from_info_table()
             # Info table uses bracketed column names
-            name_col = '[Name]'
-            name_col_alt = 'Name'
-            table_col = '[Table]'
-            table_col_alt = 'Table'
-            desc_col = '[Description]'
-            desc_col_alt = 'Description'
-            expr_col = '[Expression]'
-            expr_col_alt = 'Expression'
+            name_col = "[Name]"
+            name_col_alt = "Name"
+            table_col = "[Table]"
+            table_col_alt = "Table"
+            desc_col = "[Description]"
+            desc_col_alt = "Description"
+            expr_col = "[Expression]"
+            expr_col_alt = "Expression"
 
         # Helper to get value from row with fallback column name
         def get_value(row: Dict, col: str, alt_col: str, default: Any = None) -> Any:
             return row.get(col, row.get(alt_col, default))
 
         # Build list of all measure names for advanced parsing
-        measures_list = [get_value(row, name_col, name_col_alt, '') for row in rows]
+        measures_list = [get_value(row, name_col, name_col_alt, "") for row in rows]
 
         # Parse and convert to KPI
         kpis = []
         for row in rows:
             # Skip hidden measures if requested (only applicable for Info Table mode)
             if not self.use_system_schema and not include_hidden:
-                if row.get('[IsHidden]', False):
+                if row.get("[IsHidden]", False):
                     continue
 
             # Get measure name
-            measure_name = get_value(row, name_col, name_col_alt, '')
+            measure_name = get_value(row, name_col, name_col_alt, "")
 
             # Apply filter pattern
             if filter_pattern and not re.match(filter_pattern, measure_name):
                 continue
 
             # Parse DAX expression using ADVANCED mode
-            expression = get_value(row, expr_col, expr_col_alt, '')
+            expression = get_value(row, expr_col, expr_col_alt, "")
             parsed = self.dax_parser.parse_advanced(expression, measures_list)
 
             # Log transpilation info
-            if parsed['is_transpilable'] and parsed['transpiled_sql']:
-                self.logger.debug(f"Measure '{measure_name}' transpiled to SQL: {parsed['transpiled_sql']}")
-            elif not parsed['is_transpilable']:
-                self.logger.debug(f"Measure '{measure_name}' not transpilable: {parsed['transpilability_reason']}")
+            if parsed["is_transpilable"] and parsed["transpiled_sql"]:
+                self.logger.debug(
+                    f"Measure '{measure_name}' transpiled to SQL: {parsed['transpiled_sql']}"
+                )
+            elif not parsed["is_transpilable"]:
+                self.logger.debug(
+                    f"Measure '{measure_name}' not transpilable: {parsed['transpilability_reason']}"
+                )
 
             # Generate technical name
-            technical_name = measure_name.lower().replace(' ', '_').replace('-', '_')
+            technical_name = measure_name.lower().replace(" ", "_").replace("-", "_")
 
             # PowerBI measures don't have separate filters - they're embedded in the DAX expression
             # Filters would only come from YAML-based definitions
             filters = []
 
             # Determine source table
-            source_table = parsed['source_table'] or get_value(row, table_col, table_col_alt)
+            source_table = parsed["source_table"] or get_value(
+                row, table_col, table_col_alt
+            )
 
             # Get description
             description = get_value(row, desc_col, desc_col_alt) or measure_name
@@ -372,23 +392,23 @@ class PowerBIConnector(BaseInboundConnector):
             # Create KPI with additional metadata from advanced parsing
             kpi = KPI(
                 technical_name=technical_name,
-                formula=parsed['base_formula'],
+                formula=parsed["base_formula"],
                 description=description,
                 source_table=source_table,
-                aggregation_type=parsed['aggregation_type'],
+                aggregation_type=parsed["aggregation_type"],
                 display_sign=1,
                 filters=filters,
-                apply_structures=[]
+                apply_structures=[],
             )
 
             # Store advanced parsing metadata as additional attributes (optional)
             # This allows access to transpiled SQL, tokens, signature, etc.
             kpi._advanced_parsing = {
-                'transpiled_sql': parsed['transpiled_sql'],
-                'is_transpilable': parsed['is_transpilable'],
-                'signature': parsed['generic_signature'],
-                'tokens_count': len(parsed['tokens']),
-                'functions_used': [f.value for f in parsed['functions']],
+                "transpiled_sql": parsed["transpiled_sql"],
+                "is_transpilable": parsed["is_transpilable"],
+                "signature": parsed["generic_signature"],
+                "tokens_count": len(parsed["tokens"]),
+                "functions_used": [f.value for f in parsed["functions"]],
             }
 
             kpis.append(kpi)
@@ -416,5 +436,5 @@ class PowerBIConnector(BaseInboundConnector):
             additional_info={
                 "info_table_name": self.info_table_name,
                 "group_id": self.group_id,
-            }
+            },
         )

@@ -12,12 +12,13 @@ Strategy:
 """
 
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.services.tools.powerbi_semantic_model_dax_tool import (
-    PowerBISemanticModelDaxTool,
     PowerBISemanticModelDaxSchema,
+    PowerBISemanticModelDaxTool,
     _dax_quote_table,
     _run_async_in_sync_context,
 )
@@ -45,6 +46,7 @@ def _mock_conversion_repo_ctx(mock_repo):
 
     return _ctx
 
+
 # ---------------------------------------------------------------------------
 # Shared constants
 # ---------------------------------------------------------------------------
@@ -56,25 +58,44 @@ CLIENT_ID = "client-11111111-aaaa-bbbb-cccc-222222222222"
 CLIENT_SECRET = "s3cr3t"
 ACCESS_TOKEN = "ey.fake.access.token"
 
-SAMPLE_MODEL_CONTEXT = json.dumps({
-    "workspace_id": WS_ID,
-    "dataset_id": DS_ID,
-    "measures": [
-        {"name": "Total Revenue", "expression": "SUM(Sales[Amount])", "table": "Sales"},
-        {"name": "Total Units", "expression": "SUM(Sales[Quantity])", "table": "Sales"},
-        {"name": "Profit Margin", "expression": "DIVIDE([Total Revenue], [Costs])", "table": "Sales"},
-    ],
-    "tables": [
-        {"name": "Sales", "columns": ["Amount", "Region", "DateKey"]},
-        {"name": "Dim_Date", "columns": ["DateKey", "Year", "Month"]},
-    ],
-    "relationships": [
-        {"from_table": "Sales", "from_column": "DateKey", "to_table": "Dim_Date", "to_column": "DateKey"}
-    ],
-    "sample_data": {"Sales[Region]": [{"Region": "North"}, {"Region": "South"}]},
-    "slicers": [],
-    "default_filters": {},
-})
+SAMPLE_MODEL_CONTEXT = json.dumps(
+    {
+        "workspace_id": WS_ID,
+        "dataset_id": DS_ID,
+        "measures": [
+            {
+                "name": "Total Revenue",
+                "expression": "SUM(Sales[Amount])",
+                "table": "Sales",
+            },
+            {
+                "name": "Total Units",
+                "expression": "SUM(Sales[Quantity])",
+                "table": "Sales",
+            },
+            {
+                "name": "Profit Margin",
+                "expression": "DIVIDE([Total Revenue], [Costs])",
+                "table": "Sales",
+            },
+        ],
+        "tables": [
+            {"name": "Sales", "columns": ["Amount", "Region", "DateKey"]},
+            {"name": "Dim_Date", "columns": ["DateKey", "Year", "Month"]},
+        ],
+        "relationships": [
+            {
+                "from_table": "Sales",
+                "from_column": "DateKey",
+                "to_table": "Dim_Date",
+                "to_column": "DateKey",
+            }
+        ],
+        "sample_data": {"Sales[Region]": [{"Region": "North"}, {"Region": "South"}]},
+        "slicers": [],
+        "default_filters": {},
+    }
+)
 
 
 def _make_tool(**kwargs):
@@ -91,6 +112,7 @@ def _make_tool(**kwargs):
 # ===========================================================================
 # Module-level helpers
 # ===========================================================================
+
 
 class TestDaxQuoteTable:
     def test_no_spaces_no_quotes(self):
@@ -113,11 +135,13 @@ class TestRunAsyncInSyncContextDax:
     def test_simple_return(self):
         async def coro():
             return "value"
+
         assert _run_async_in_sync_context(coro()) == "value"
 
     def test_exception_propagated(self):
         async def coro():
             raise RuntimeError("oops")
+
         with pytest.raises(RuntimeError, match="oops"):
             _run_async_in_sync_context(coro())
 
@@ -125,6 +149,7 @@ class TestRunAsyncInSyncContextDax:
 # ===========================================================================
 # Schema tests
 # ===========================================================================
+
 
 class TestPowerBISemanticModelDaxSchema:
     def test_all_fields_optional(self):
@@ -144,9 +169,18 @@ class TestPowerBISemanticModelDaxSchema:
         # Connection / auth / LLM plumbing is injected at tool-construction
         # time from tool_configs — it must never be an LLM-fillable field.
         forbidden = {
-            "workspace_id", "dataset_id", "tenant_id", "client_id",
-            "client_secret", "username", "password", "auth_method",
-            "access_token", "llm_workspace_url", "llm_token", "llm_model",
+            "workspace_id",
+            "dataset_id",
+            "tenant_id",
+            "client_id",
+            "client_secret",
+            "username",
+            "password",
+            "auth_method",
+            "access_token",
+            "llm_workspace_url",
+            "llm_token",
+            "llm_model",
         }
         assert not forbidden & set(PowerBISemanticModelDaxSchema.model_fields)
 
@@ -165,7 +199,9 @@ class TestPowerBISemanticModelDaxSchema:
         assert schema.reference_dax == "EVALUATE Sales"
 
     def test_context_knowledge_field(self):
-        schema = PowerBISemanticModelDaxSchema(context_knowledge="Complete CGR = full pipeline")
+        schema = PowerBISemanticModelDaxSchema(
+            context_knowledge="Complete CGR = full pipeline"
+        )
         assert schema.context_knowledge == "Complete CGR = full pipeline"
 
     def test_max_dax_retries_default(self):
@@ -180,6 +216,7 @@ class TestPowerBISemanticModelDaxSchema:
 # ===========================================================================
 # Initialisation tests
 # ===========================================================================
+
 
 class TestPowerBISemanticModelDaxToolInit:
     def test_tool_name(self):
@@ -232,6 +269,7 @@ class TestPowerBISemanticModelDaxToolInit:
 # _is_placeholder_value tests
 # ===========================================================================
 
+
 class TestIsPlaceholderValueDax:
     def setup_method(self):
         self.tool = PowerBISemanticModelDaxTool()
@@ -243,7 +281,10 @@ class TestIsPlaceholderValueDax:
         assert self.tool._is_placeholder_value(42) is False
 
     def test_all_digit_guid_is_placeholder(self):
-        assert self.tool._is_placeholder_value("12345678-1234-1234-1234-123456789012") is True
+        assert (
+            self.tool._is_placeholder_value("12345678-1234-1234-1234-123456789012")
+            is True
+        )
 
     def test_your_here_pattern(self):
         assert self.tool._is_placeholder_value("your_workspace_here") is True
@@ -264,12 +305,16 @@ class TestIsPlaceholderValueDax:
         assert self.tool._is_placeholder_value("https://example.com") is True
 
     def test_https_your_prefix(self):
-        assert self.tool._is_placeholder_value("https://your-workspace.databricks.com") is True
+        assert (
+            self.tool._is_placeholder_value("https://your-workspace.databricks.com")
+            is True
+        )
 
 
 # ===========================================================================
 # _run validation tests
 # ===========================================================================
+
 
 class TestRunValidationDax:
     def test_missing_question_returns_error(self):
@@ -308,13 +353,16 @@ class TestRunValidationDax:
 
     def test_sp_auth_accepted(self):
         tool = PowerBISemanticModelDaxTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
             user_question="Revenue?",
-            tenant_id=TENANT_ID, client_id=CLIENT_ID, client_secret=CLIENT_SECRET,
+            tenant_id=TENANT_ID,
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
         )
         with patch(
             "src.services.tools.powerbi_semantic_model_dax_tool._run_async_in_sync_context",
-            return_value="pipeline result"
+            return_value="pipeline result",
         ):
             result = tool._run()
         assert result == "pipeline result"
@@ -323,7 +371,7 @@ class TestRunValidationDax:
         tool = _make_tool()
         with patch(
             "src.services.tools.powerbi_semantic_model_dax_tool._run_async_in_sync_context",
-            return_value="oauth result"
+            return_value="oauth result",
         ):
             result = tool._run()
         assert result == "oauth result"
@@ -332,7 +380,7 @@ class TestRunValidationDax:
         tool = _make_tool()
         with patch(
             "src.services.tools.powerbi_semantic_model_dax_tool._run_async_in_sync_context",
-            return_value="ok"
+            return_value="ok",
         ):
             result = tool._run(workspace_id="your_workspace_here")
         # Default workspace is used; pipeline runs
@@ -342,7 +390,7 @@ class TestRunValidationDax:
         tool = _make_tool()
         with patch(
             "src.services.tools.powerbi_semantic_model_dax_tool._run_async_in_sync_context",
-            side_effect=Exception("network failure")
+            side_effect=Exception("network failure"),
         ):
             result = tool._run()
         assert "error" in result.lower() or "network failure" in result.lower()
@@ -352,11 +400,13 @@ class TestRunValidationDax:
 # Config merging tests
 # ===========================================================================
 
+
 class TestConfigMergingDax:
     def test_default_question_takes_precedence_over_kwarg(self):
         """Default config question should override runtime kwarg question."""
         tool = PowerBISemanticModelDaxTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
             access_token=ACCESS_TOKEN,
             user_question="preconfigured question",
         )
@@ -372,7 +422,8 @@ class TestConfigMergingDax:
     def test_context_enrichment_from_kwargs_preferred(self):
         """When kwargs have context data, they take precedence."""
         tool = PowerBISemanticModelDaxTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
             access_token=ACCESS_TOKEN,
             user_question="test",
             business_mappings={"default": "expr"},
@@ -383,6 +434,7 @@ class TestConfigMergingDax:
 # ===========================================================================
 # _extract_measures_from_dax tests
 # ===========================================================================
+
 
 class TestExtractMeasuresFromDaxTool:
     def setup_method(self):
@@ -415,15 +467,14 @@ class TestExtractMeasuresFromDaxTool:
         assert result == []
 
     def test_empty_measures_list(self):
-        result = self.tool._extract_measures_from_dax(
-            "EVALUATE {[Total Revenue]}", []
-        )
+        result = self.tool._extract_measures_from_dax("EVALUATE {[Total Revenue]}", [])
         assert result == []
 
 
 # ===========================================================================
 # _format_output tests
 # ===========================================================================
+
 
 class TestFormatOutputDax:
     def setup_method(self):
@@ -434,7 +485,12 @@ class TestFormatOutputDax:
             "dataset_id": DS_ID,
             "model_context": {"measures": [], "tables": [], "relationships": []},
             "generated_dax": None,
-            "dax_execution": {"success": False, "data": [], "row_count": 0, "error": None},
+            "dax_execution": {
+                "success": False,
+                "data": [],
+                "row_count": 0,
+                "error": None,
+            },
             "visual_references": [],
             "errors": [],
             "dax_attempts": [],
@@ -527,8 +583,20 @@ class TestFormatOutputDax:
             **self.base_results,
             "generated_dax": "EVALUATE Sales",
             "dax_attempts": [
-                {"attempt": 1, "dax": "bad", "success": False, "error": "error1", "row_count": 0},
-                {"attempt": 2, "dax": "EVALUATE Sales", "success": True, "error": None, "row_count": 5},
+                {
+                    "attempt": 1,
+                    "dax": "bad",
+                    "success": False,
+                    "error": "error1",
+                    "row_count": 0,
+                },
+                {
+                    "attempt": 2,
+                    "dax": "EVALUATE Sales",
+                    "success": True,
+                    "error": None,
+                    "row_count": 5,
+                },
             ],
         }
         result = self.tool._format_output(results, "markdown")
@@ -555,12 +623,13 @@ class TestFormatOutputDax:
 # Integration: _run with mocked async pipeline
 # ===========================================================================
 
+
 class TestRunIntegrationDax:
     def test_with_model_context_and_mocked_pipeline(self):
         tool = _make_tool()
         with patch(
             "src.services.tools.powerbi_semantic_model_dax_tool._run_async_in_sync_context",
-            return_value="pipeline result"
+            return_value="pipeline result",
         ):
             result = tool._run(model_context_json=SAMPLE_MODEL_CONTEXT)
         assert result == "pipeline result"
@@ -569,7 +638,7 @@ class TestRunIntegrationDax:
         tool = _make_tool()
         with patch(
             "src.services.tools.powerbi_semantic_model_dax_tool._run_async_in_sync_context",
-            return_value="ran despite bad context"
+            return_value="ran despite bad context",
         ):
             result = tool._run(model_context_json="{invalid json{{")
         # Should reach the pipeline (JSON parsing is done inside async pipeline)
@@ -580,25 +649,34 @@ class TestRunIntegrationDax:
         mock_service = MagicMock()
         mock_service.get_cached_metadata = AsyncMock(return_value=None)
 
-        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)), \
-             patch(
+        with (
+            patch.object(
+                ToolSessionProvider,
+                "cache_service",
+                _mock_cache_service_ctx(mock_service),
+            ),
+            patch(
                 "src.services.tools.powerbi_semantic_model_dax_tool._run_async_in_sync_context",
-                return_value="no context result"
-             ):
+                return_value="no context result",
+            ),
+        ):
             tool = _make_tool()
             result = tool._run()
         assert isinstance(result, str)
 
     def test_sa_auth_accepted(self):
         tool = PowerBISemanticModelDaxTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
             user_question="test?",
-            tenant_id=TENANT_ID, client_id=CLIENT_ID,
-            username="svc@example.com", password="pass",
+            tenant_id=TENANT_ID,
+            client_id=CLIENT_ID,
+            username="svc@example.com",
+            password="pass",
         )
         with patch(
             "src.services.tools.powerbi_semantic_model_dax_tool._run_async_in_sync_context",
-            return_value="sa result"
+            return_value="sa result",
         ):
             result = tool._run()
         assert result == "sa result"
@@ -616,8 +694,10 @@ class TestResolvModelContext:
 
     def setup_method(self):
         self.tool = PowerBISemanticModelDaxTool(
-            workspace_id=WS_ID, dataset_id=DS_ID, access_token=ACCESS_TOKEN,
-            user_question="test?"
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            access_token=ACCESS_TOKEN,
+            user_question="test?",
         )
 
     def _run(self, coro):
@@ -647,7 +727,9 @@ class TestResolvModelContext:
         mock_service = MagicMock()
         mock_service.get_cached_metadata = AsyncMock(return_value=None)
 
-        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
+        with patch.object(
+            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)
+        ):
             result = self._run(self.tool._resolve_model_context(config))
         # With no cache and empty context, should return None
         assert result is None
@@ -659,7 +741,13 @@ class TestResolvModelContext:
             "dataset_id": DS_ID,
         }
         cached = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "relationships": [],
             "schema": {
                 "tables": [{"name": "Sales", "columns": ["Amount"]}],
@@ -673,7 +761,9 @@ class TestResolvModelContext:
         # First call = reduced cache (miss), second call = full cache (hit)
         mock_service.get_cached_metadata = AsyncMock(side_effect=[None, cached])
 
-        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
+        with patch.object(
+            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)
+        ):
             result = self._run(self.tool._resolve_model_context(config))
         assert result is not None
         assert "_source" in result
@@ -692,11 +782,14 @@ class TestExecuteDaxQuery:
         resp = MagicMock()
         resp.status_code = status
         resp.json.return_value = body or {
-            "results": [{"tables": [{"rows": [{"[Region]": "North", "[Revenue]": 100}]}]}]
+            "results": [
+                {"tables": [{"rows": [{"[Region]": "North", "[Revenue]": 100}]}]}
+            ]
         }
         resp.text = json.dumps(body or {})
         if status >= 400:
             import httpx
+
             resp.raise_for_status.side_effect = httpx.HTTPStatusError(
                 f"HTTP {status}", request=MagicMock(), response=resp
             )
@@ -707,12 +800,16 @@ class TestExecuteDaxQuery:
     def test_successful_execution(self):
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
             mock_client.post = AsyncMock(return_value=self._mock_response())
 
             result = self._run(
-                self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales")
+                self.tool._execute_dax_query(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"
+                )
             )
 
         assert result["success"] is True
@@ -721,12 +818,16 @@ class TestExecuteDaxQuery:
     def test_http_error_returns_error(self):
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
             mock_client.post = AsyncMock(return_value=self._mock_response(status=401))
 
             result = self._run(
-                self.tool._execute_dax_query(WS_ID, DS_ID, "bad-token", "EVALUATE Sales")
+                self.tool._execute_dax_query(
+                    WS_ID, DS_ID, "bad-token", "EVALUATE Sales"
+                )
             )
 
         assert result["success"] is False
@@ -735,12 +836,16 @@ class TestExecuteDaxQuery:
     def test_network_exception_returns_error(self):
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
             mock_client.post = AsyncMock(side_effect=Exception("Connection refused"))
 
             result = self._run(
-                self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales")
+                self.tool._execute_dax_query(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"
+                )
             )
 
         assert result["success"] is False
@@ -750,12 +855,16 @@ class TestExecuteDaxQuery:
         body = {"error": {"message": "Invalid DAX syntax"}}
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
             mock_client.post = AsyncMock(return_value=self._mock_response(body=body))
 
             result = self._run(
-                self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE bad_dax")
+                self.tool._execute_dax_query(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE bad_dax"
+                )
             )
 
         assert result["success"] is False
@@ -765,12 +874,16 @@ class TestExecuteDaxQuery:
         body = {"results": [{"tables": [{"rows": []}]}]}
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client_cls.return_value.__aenter__ = AsyncMock(
+                return_value=mock_client
+            )
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
             mock_client.post = AsyncMock(return_value=self._mock_response(body=body))
 
             result = self._run(
-                self.tool._execute_dax_query(WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales")
+                self.tool._execute_dax_query(
+                    WS_ID, DS_ID, ACCESS_TOKEN, "EVALUATE Sales"
+                )
             )
 
         assert result["success"] is True
@@ -782,8 +895,10 @@ class TestExecuteDaxPipelineAsync:
 
     def setup_method(self):
         self.tool = PowerBISemanticModelDaxTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
-            access_token=ACCESS_TOKEN, user_question="test?"
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            access_token=ACCESS_TOKEN,
+            user_question="test?",
         )
 
     def _run(self, coro):
@@ -797,7 +912,9 @@ class TestExecuteDaxPipelineAsync:
             "access_token": ACCESS_TOKEN,
             "output_format": "markdown",
         }
-        with patch.object(self.tool, "_get_access_token", side_effect=Exception("Auth failed")):
+        with patch.object(
+            self.tool, "_get_access_token", side_effect=Exception("Auth failed")
+        ):
             result = self._run(self.tool._execute_dax_pipeline(config))
         assert "auth" in result.lower() or "error" in result.lower()
 
@@ -808,14 +925,22 @@ class TestExecuteDaxPipelineAsync:
             "dataset_id": DS_ID,
             "output_format": "markdown",
         }
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(self.tool, "_resolve_model_context", return_value=None):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(self.tool, "_resolve_model_context", return_value=None),
+        ):
             result = self._run(self.tool._execute_dax_pipeline(config))
         assert "error" in result.lower() or "model" in result.lower()
 
     def test_with_model_context_and_dax_success(self):
         model_ctx = {
-            "measures": [{"name": "Total Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Total Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "tables": [{"name": "Sales", "columns": ["Amount"]}],
             "relationships": [],
             "slicers": [],
@@ -840,11 +965,16 @@ class TestExecuteDaxPipelineAsync:
             "include_visual_references": False,
         }
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(self.tool, "_resolve_model_context", return_value=model_ctx), \
-             patch.object(self.tool, "_generate_dax_with_llm",
-                          return_value="EVALUATE {[Total Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value=exec_result):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(self.tool, "_resolve_model_context", return_value=model_ctx),
+            patch.object(
+                self.tool,
+                "_generate_dax_with_llm",
+                return_value="EVALUATE {[Total Revenue]}",
+            ),
+            patch.object(self.tool, "_execute_dax_query", return_value=exec_result),
+        ):
             result = self._run(self.tool._execute_dax_pipeline(config))
 
         assert "Total Revenue" in result or "100" in result or "Success" in result
@@ -867,8 +997,10 @@ class TestExecuteDaxPipelineAsync:
             "include_visual_references": False,
         }
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(self.tool, "_resolve_model_context", return_value=model_ctx):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(self.tool, "_resolve_model_context", return_value=model_ctx),
+        ):
             result = self._run(self.tool._execute_dax_pipeline(config))
 
         parsed = json.loads(result)
@@ -886,7 +1018,13 @@ class TestExecuteDaxPipelineAsync:
             "default_filters": {},
             "dataset_id": DS_ID,
         }
-        exec_result = {"success": True, "data": [], "row_count": 0, "columns": [], "error": None}
+        exec_result = {
+            "success": True,
+            "data": [],
+            "row_count": 0,
+            "columns": [],
+            "error": None,
+        }
 
         config = {
             "user_question": "Revenue?",
@@ -898,16 +1036,26 @@ class TestExecuteDaxPipelineAsync:
             # List-format active_filters (UI format)
             "active_filters": [
                 {"table": "Sales", "column": "BU", "value": "Italy"},
-                {"table": "Sales", "column": "BU", "value": "Germany"},  # Same column — multi-value
+                {
+                    "table": "Sales",
+                    "column": "BU",
+                    "value": "Germany",
+                },  # Same column — multi-value
             ],
         }
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(self.tool, "_resolve_model_context", return_value=model_ctx), \
-             patch.object(self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"), \
-             patch.object(self.tool, "_execute_dax_query", return_value=exec_result), \
-             patch.object(self.tool, "_save_to_conversion_history", return_value=None), \
-             patch("src.services.tools.powerbi_semantic_model_dax_tool.DaxRagRetriever") as mock_rag:
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(self.tool, "_resolve_model_context", return_value=model_ctx),
+            patch.object(
+                self.tool, "_generate_dax_with_llm", return_value="EVALUATE {[Revenue]}"
+            ),
+            patch.object(self.tool, "_execute_dax_query", return_value=exec_result),
+            patch.object(self.tool, "_save_to_conversion_history", return_value=None),
+            patch(
+                "src.services.tools.powerbi_semantic_model_dax_tool.DaxRagRetriever"
+            ) as mock_rag,
+        ):
             mock_rag_instance = MagicMock()
             mock_rag_instance.retrieve = AsyncMock(return_value=[])
             mock_rag_instance.store = AsyncMock(return_value=None)
@@ -938,8 +1086,10 @@ class TestExecuteDaxPipelineAsync:
             "active_filters": "invalid_type",  # Not dict or list
         }
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(self.tool, "_resolve_model_context", return_value=model_ctx):
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(self.tool, "_resolve_model_context", return_value=model_ctx),
+        ):
             result = self._run(self.tool._execute_dax_pipeline(config))
 
         assert isinstance(result, str)
@@ -957,14 +1107,20 @@ class TestGenerateDaxFilterCondition:
 
     def test_not_null_filter(self):
         result = self.tool._generate_dax_filter_condition("Sales[Region]", "NOT NULL")
-        assert "NOT" in result.upper() or "BLANK" in result.upper() or isinstance(result, str)
+        assert (
+            "NOT" in result.upper()
+            or "BLANK" in result.upper()
+            or isinstance(result, str)
+        )
 
     def test_equality_filter(self):
         result = self.tool._generate_dax_filter_condition("Sales[BU]", "= 'Italy'")
         assert isinstance(result, str)
 
     def test_in_filter(self):
-        result = self.tool._generate_dax_filter_condition("Sales[Status]", "IN ('A', 'B')")
+        result = self.tool._generate_dax_filter_condition(
+            "Sales[Status]", "IN ('A', 'B')"
+        )
         assert isinstance(result, str)
 
 
@@ -975,6 +1131,7 @@ class TestGenerateDaxFilterCondition:
 # ===========================================================================
 # _parse_context_dict tests
 # ===========================================================================
+
 
 class TestParseContextDict:
     """Tests for the static _parse_context_dict method."""
@@ -1025,64 +1182,83 @@ class TestParseContextDict:
 # _validate_dax_references tests
 # ===========================================================================
 
+
 class TestValidateDaxReferences:
     """Tests for _validate_dax_references static method."""
 
     def test_valid_dax_no_table_refs(self):
         dax = "EVALUATE {[Total Revenue]}"
         model_context = {"tables": [{"name": "Sales"}]}
-        result = PowerBISemanticModelDaxTool._validate_dax_references(dax, model_context)
+        result = PowerBISemanticModelDaxTool._validate_dax_references(
+            dax, model_context
+        )
         assert result is None
 
     def test_valid_dax_with_known_table(self):
-        dax = "EVALUATE SUMMARIZECOLUMNS(Sales[Region], \"Rev\", [Revenue])"
+        dax = 'EVALUATE SUMMARIZECOLUMNS(Sales[Region], "Rev", [Revenue])'
         model_context = {"tables": [{"name": "Sales"}]}
-        result = PowerBISemanticModelDaxTool._validate_dax_references(dax, model_context)
+        result = PowerBISemanticModelDaxTool._validate_dax_references(
+            dax, model_context
+        )
         assert result is None
 
     def test_unknown_table_returns_error(self):
-        dax = "EVALUATE SUMMARIZECOLUMNS(UnknownTable[Col], \"Rev\", [Revenue])"
+        dax = 'EVALUATE SUMMARIZECOLUMNS(UnknownTable[Col], "Rev", [Revenue])'
         model_context = {"tables": [{"name": "Sales"}]}
-        result = PowerBISemanticModelDaxTool._validate_dax_references(dax, model_context)
+        result = PowerBISemanticModelDaxTool._validate_dax_references(
+            dax, model_context
+        )
         assert result is not None
         assert "UnknownTable" in result
 
     def test_quoted_table_references_checked(self):
         dax = "EVALUATE SUMMARIZECOLUMNS('My Sales'[Region])"
         model_context = {"tables": [{"name": "My Sales"}]}
-        result = PowerBISemanticModelDaxTool._validate_dax_references(dax, model_context)
+        result = PowerBISemanticModelDaxTool._validate_dax_references(
+            dax, model_context
+        )
         assert result is None
 
     def test_quoted_unknown_table_returns_error(self):
         dax = "EVALUATE SUMMARIZECOLUMNS('Unknown Table'[Col])"
         model_context = {"tables": [{"name": "Sales"}]}
-        result = PowerBISemanticModelDaxTool._validate_dax_references(dax, model_context)
+        result = PowerBISemanticModelDaxTool._validate_dax_references(
+            dax, model_context
+        )
         assert result is not None
         assert "Unknown Table" in result
 
     def test_dax_functions_not_treated_as_tables(self):
-        dax = "EVALUATE FILTER(VALUES(Sales[Region]), Sales[Region] = \"North\")"
+        dax = 'EVALUATE FILTER(VALUES(Sales[Region]), Sales[Region] = "North")'
         model_context = {"tables": [{"name": "Sales"}]}
-        result = PowerBISemanticModelDaxTool._validate_dax_references(dax, model_context)
+        result = PowerBISemanticModelDaxTool._validate_dax_references(
+            dax, model_context
+        )
         assert result is None
 
     def test_empty_tables_list_checks_all_refs(self):
         dax = "EVALUATE SUMMARIZECOLUMNS(SomeTable[Col])"
         model_context = {"tables": []}
-        result = PowerBISemanticModelDaxTool._validate_dax_references(dax, model_context)
+        result = PowerBISemanticModelDaxTool._validate_dax_references(
+            dax, model_context
+        )
         assert result is not None
 
     def test_calculatetable_empty_first_arg_returns_error(self):
-        dax = "EVALUATE CALCULATETABLE(, Sales[Region] = \"North\")"
+        dax = 'EVALUATE CALCULATETABLE(, Sales[Region] = "North")'
         model_context = {"tables": [{"name": "Sales"}]}
-        result = PowerBISemanticModelDaxTool._validate_dax_references(dax, model_context)
+        result = PowerBISemanticModelDaxTool._validate_dax_references(
+            dax, model_context
+        )
         assert result is not None
         assert "CALCULATETABLE" in result
 
     def test_no_tables_in_model_context_key(self):
         dax = "EVALUATE {[Revenue]}"
         model_context = {}  # No 'tables' key
-        result = PowerBISemanticModelDaxTool._validate_dax_references(dax, model_context)
+        result = PowerBISemanticModelDaxTool._validate_dax_references(
+            dax, model_context
+        )
         assert result is None  # No refs to validate
 
 
@@ -1090,50 +1266,62 @@ class TestValidateDaxReferences:
 # _validate_dax_completeness tests
 # ===========================================================================
 
+
 class TestValidateDaxCompleteness:
     """Tests for _validate_dax_completeness static method."""
 
     def test_simple_dax_no_filters_needed(self):
-        dax = "EVALUATE SUMMARIZECOLUMNS(\"Revenue\", [Total Revenue])"
+        dax = 'EVALUATE SUMMARIZECOLUMNS("Revenue", [Total Revenue])'
         question = "What is total revenue?"
         model_context = {"tables": [], "sample_data": {}}
-        result = PowerBISemanticModelDaxTool._validate_dax_completeness(dax, question, model_context)
+        result = PowerBISemanticModelDaxTool._validate_dax_completeness(
+            dax, question, model_context
+        )
         assert result is None  # No specific filter terms in question
 
     def test_value_from_sample_data_found_in_dax(self):
-        dax = "EVALUATE CALCULATETABLE(SUMMARIZECOLUMNS(\"R\", [Rev]), dim_country[BU] = \"Italy\")"
+        dax = 'EVALUATE CALCULATETABLE(SUMMARIZECOLUMNS("R", [Rev]), dim_country[BU] = "Italy")'
         question = "What is revenue for Italy?"
         model_context = {
             "tables": [],
             "sample_data": {
-                "dim_country[BU]": {"type": "categorical", "sample_values": ["Italy", "Germany"]}
-            }
+                "dim_country[BU]": {
+                    "type": "categorical",
+                    "sample_values": ["Italy", "Germany"],
+                }
+            },
         }
-        result = PowerBISemanticModelDaxTool._validate_dax_completeness(dax, question, model_context)
+        result = PowerBISemanticModelDaxTool._validate_dax_completeness(
+            dax, question, model_context
+        )
         assert result is None  # "italy" IS in dax (dim_country appears)
 
     def test_multiple_missing_filters_returns_error(self):
-        dax = "EVALUATE SUMMARIZECOLUMNS(\"Revenue\", [Total Revenue])"
+        dax = 'EVALUATE SUMMARIZECOLUMNS("Revenue", [Total Revenue])'
         question = "What is revenue for Italy and Germany?"
         model_context = {
             "tables": [],
             "sample_data": {
                 "dim_country[BU]": {
                     "type": "categorical",
-                    "sample_values": ["Italy", "Germany", "France"]
+                    "sample_values": ["Italy", "Germany", "France"],
                 }
-            }
+            },
         }
-        result = PowerBISemanticModelDaxTool._validate_dax_completeness(dax, question, model_context)
+        result = PowerBISemanticModelDaxTool._validate_dax_completeness(
+            dax, question, model_context
+        )
         # Both "Italy" and "Germany" are mentioned but not in dax (dim_country not referenced)
         # Whether it triggers depends on the threshold (>=2 missing)
         assert result is None or isinstance(result, str)
 
     def test_numeric_filter_week_in_question(self):
-        dax = "EVALUATE SUMMARIZECOLUMNS(\"Revenue\", [Rev])"
+        dax = 'EVALUATE SUMMARIZECOLUMNS("Revenue", [Rev])'
         question = "What is revenue for week 3?"
         model_context = {"tables": [], "sample_data": {}}
-        result = PowerBISemanticModelDaxTool._validate_dax_completeness(dax, question, model_context)
+        result = PowerBISemanticModelDaxTool._validate_dax_completeness(
+            dax, question, model_context
+        )
         # One missing filter (numeric, week 3) — below threshold of 2
         assert result is None or isinstance(result, str)
 
@@ -1142,6 +1330,7 @@ class TestValidateDaxCompleteness:
 # _extract_dax_from_llm_response tests (DAX tool version)
 # ===========================================================================
 
+
 class TestExtractDaxFromLlmResponseDaxTool:
     """Tests for _extract_dax_from_llm_response on the DAX tool."""
 
@@ -1149,13 +1338,13 @@ class TestExtractDaxFromLlmResponseDaxTool:
         self.tool = PowerBISemanticModelDaxTool()
 
     def test_plain_evaluate_extracted(self):
-        content = "EVALUATE\nSUMMARIZECOLUMNS(\n    \"Result\", [Total Revenue]\n)"
+        content = 'EVALUATE\nSUMMARIZECOLUMNS(\n    "Result", [Total Revenue]\n)'
         result = self.tool._extract_dax_from_llm_response(content)
         assert "EVALUATE" in result
         assert "SUMMARIZECOLUMNS" in result
 
     def test_markdown_code_block_stripped(self):
-        content = "```dax\nEVALUATE\nSUMMARIZECOLUMNS(\"R\", [M])\n```"
+        content = '```dax\nEVALUATE\nSUMMARIZECOLUMNS("R", [M])\n```'
         result = self.tool._extract_dax_from_llm_response(content)
         assert "```" not in result
 
@@ -1171,7 +1360,7 @@ class TestExtractDaxFromLlmResponseDaxTool:
         assert result == "" or isinstance(result, str)
 
     def test_explanation_after_query_removed(self):
-        content = "EVALUATE\nCALCULATETABLE(\n    SUMMARIZECOLUMNS(\"R\", [M]),\n    T[C] = 1\n)\n**Key Changes:**\n1. Fixed something"
+        content = 'EVALUATE\nCALCULATETABLE(\n    SUMMARIZECOLUMNS("R", [M]),\n    T[C] = 1\n)\n**Key Changes:**\n1. Fixed something'
         result = self.tool._extract_dax_from_llm_response(content)
         assert "EVALUATE" in result
 
@@ -1180,6 +1369,7 @@ class TestExtractDaxFromLlmResponseDaxTool:
 # _auto_wrap_with_report_filters tests (DAX tool version)
 # ===========================================================================
 
+
 class TestAutoWrapWithReportFiltersDaxTool:
     """Tests for _auto_wrap_with_report_filters on the DAX tool."""
 
@@ -1187,30 +1377,30 @@ class TestAutoWrapWithReportFiltersDaxTool:
         self.tool = PowerBISemanticModelDaxTool()
 
     def test_no_filters_returns_original(self):
-        dax = "EVALUATE SUMMARIZECOLUMNS(\"R\", [M])"
+        dax = 'EVALUATE SUMMARIZECOLUMNS("R", [M])'
         result = self.tool._auto_wrap_with_report_filters(dax, {})
         assert result == dax
 
     def test_empty_active_filters_returns_original(self):
-        dax = "EVALUATE\nSUMMARIZECOLUMNS(\"R\", [M])"
+        dax = 'EVALUATE\nSUMMARIZECOLUMNS("R", [M])'
         result = self.tool._auto_wrap_with_report_filters(dax, {"active_filters": {}})
         assert result == dax
 
     def test_filter_added_wraps_in_calculatetable(self):
-        dax = "EVALUATE\nSUMMARIZECOLUMNS(\"R\", [M])"
+        dax = 'EVALUATE\nSUMMARIZECOLUMNS("R", [M])'
         config = {"active_filters": {"Sales[Region]": "NOT NULL"}}
         result = self.tool._auto_wrap_with_report_filters(dax, config)
         assert "CALCULATETABLE" in result
 
     def test_filter_already_in_dax_skipped(self):
-        dax = "EVALUATE\nCALCULATETABLE(\n    SUMMARIZECOLUMNS(\"R\", [M]),\n    Sales[Region] = \"North\"\n)"
+        dax = 'EVALUATE\nCALCULATETABLE(\n    SUMMARIZECOLUMNS("R", [M]),\n    Sales[Region] = "North"\n)'
         config = {"active_filters": {"Sales[Region]": "NOT NULL"}}
         result = self.tool._auto_wrap_with_report_filters(dax, config)
         # Sales[Region] is already in dax — should be skipped
         assert isinstance(result, str)
 
     def test_already_calculatetable_merges(self):
-        dax = "EVALUATE\nCALCULATETABLE(\n    SUMMARIZECOLUMNS(\"R\", [M]),\n    X[Y] = 1\n)"
+        dax = 'EVALUATE\nCALCULATETABLE(\n    SUMMARIZECOLUMNS("R", [M]),\n    X[Y] = 1\n)'
         config = {"active_filters": {"NewTable[Z]": "= 'val'"}}
         result = self.tool._auto_wrap_with_report_filters(dax, config)
         assert "CALCULATETABLE" in result
@@ -1219,6 +1409,7 @@ class TestAutoWrapWithReportFiltersDaxTool:
 # ===========================================================================
 # _generate_dax_filter_condition extended tests (DAX tool)
 # ===========================================================================
+
 
 class TestGenerateDaxFilterConditionExtended:
     """Extended tests for _generate_dax_filter_condition."""
@@ -1232,7 +1423,9 @@ class TestGenerateDaxFilterConditionExtended:
         assert "FALSE" in result
 
     def test_not_starts_with_returns_left(self):
-        result = self.tool._generate_dax_filter_condition("Sales[Code]", "NOT STARTS WITH '7'")
+        result = self.tool._generate_dax_filter_condition(
+            "Sales[Code]", "NOT STARTS WITH '7'"
+        )
         assert "LEFT" in result
         assert "7" in result
 
@@ -1256,6 +1449,7 @@ class TestGenerateDaxFilterConditionExtended:
 # ===========================================================================
 # _build_enriched_semantic_context tests (DAX tool version)
 # ===========================================================================
+
 
 class TestBuildEnrichedSemanticContextDaxTool:
     """Tests for _build_enriched_semantic_context on the DAX tool."""
@@ -1293,7 +1487,12 @@ class TestBuildEnrichedSemanticContextDaxTool:
             "tables": [{"name": "Sales"}, {"name": "Date"}],
             "measures": [],
             "relationships": [
-                {"from_table": "Sales", "from_column": "DateKey", "to_table": "Date", "to_column": "DateKey"}
+                {
+                    "from_table": "Sales",
+                    "from_column": "DateKey",
+                    "to_table": "Date",
+                    "to_column": "DateKey",
+                }
             ],
         }
         result = self.tool._build_enriched_semantic_context(model_context, {})
@@ -1305,8 +1504,11 @@ class TestBuildEnrichedSemanticContextDaxTool:
             "measures": [],
             "relationships": [],
             "sample_data": {
-                "Sales[Region]": {"type": "categorical", "sample_values": ["North", "South"]}
-            }
+                "Sales[Region]": {
+                    "type": "categorical",
+                    "sample_values": ["North", "South"],
+                }
+            },
         }
         result = self.tool._build_enriched_semantic_context(model_context, {})
         assert "SAMPLE VALUES" in result
@@ -1335,10 +1537,10 @@ class TestBuildEnrichedSemanticContextDaxTool:
 
     def test_rag_examples_included(self):
         model_context = {"tables": [], "measures": [], "relationships": []}
-        rag_examples = [
-            {"question": "What is revenue?", "dax": "EVALUATE {[Revenue]}"}
-        ]
-        result = self.tool._build_enriched_semantic_context(model_context, {}, rag_examples=rag_examples)
+        rag_examples = [{"question": "What is revenue?", "dax": "EVALUATE {[Revenue]}"}]
+        result = self.tool._build_enriched_semantic_context(
+            model_context, {}, rag_examples=rag_examples
+        )
         assert "What is revenue?" in result or "EVALUATE" in result
 
     def test_table_with_spaces_quoted(self):
@@ -1352,7 +1554,13 @@ class TestBuildEnrichedSemanticContextDaxTool:
 
     def test_column_types_shown(self):
         model_context = {
-            "tables": [{"name": "Sales", "columns": ["Amount"], "column_types": {"Amount": "Decimal"}}],
+            "tables": [
+                {
+                    "name": "Sales",
+                    "columns": ["Amount"],
+                    "column_types": {"Amount": "Decimal"},
+                }
+            ],
             "measures": [],
             "relationships": [],
         }
@@ -1371,6 +1579,7 @@ class TestBuildEnrichedSemanticContextDaxTool:
 # _generate_deterministic_dax fallback tests (DAX tool version 2)
 # ===========================================================================
 
+
 class TestGenerateSimpleDaxDaxTool:
     """Tests for _generate_deterministic_dax on the DAX tool (fallback generation)."""
 
@@ -1378,7 +1587,9 @@ class TestGenerateSimpleDaxDaxTool:
         self.tool = PowerBISemanticModelDaxTool()
 
     def test_no_measures_returns_none(self):
-        result = self.tool._generate_deterministic_dax("revenue?", {"measures": [], "tables": []})
+        result = self.tool._generate_deterministic_dax(
+            "revenue?", {"measures": [], "tables": []}
+        )
         assert result is None
 
     def test_returns_evaluate_query(self):
@@ -1400,7 +1611,9 @@ class TestGenerateSimpleDaxDaxTool:
             "tables": [{"name": "Sales"}, {"name": "Customers"}],
             "relationships": [],
         }
-        result = self.tool._generate_deterministic_dax("how many customers?", model_context, {})
+        result = self.tool._generate_deterministic_dax(
+            "how many customers?", model_context, {}
+        )
         assert result is not None
         assert "EVALUATE" in result
 
@@ -1410,13 +1623,16 @@ class TestGenerateSimpleDaxDaxTool:
             "tables": [{"name": "SomeTable"}],
             "relationships": [],
         }
-        result = self.tool._generate_deterministic_dax("unrelated question xyz", model_context, {})
+        result = self.tool._generate_deterministic_dax(
+            "unrelated question xyz", model_context, {}
+        )
         assert result is not None
 
 
 # ===========================================================================
 # _generate_deterministic_dax tests
 # ===========================================================================
+
 
 class TestGenerateDeterministicDax:
     """Tests for _generate_deterministic_dax."""
@@ -1432,7 +1648,13 @@ class TestGenerateDeterministicDax:
 
     def test_generates_evaluate_with_measure(self):
         model_context = {
-            "measures": [{"name": "Revenue", "table": "Sales", "expression": "SUM(Sales[Amount])"}],
+            "measures": [
+                {
+                    "name": "Revenue",
+                    "table": "Sales",
+                    "expression": "SUM(Sales[Amount])",
+                }
+            ],
             "tables": [{"name": "Sales", "columns": ["Amount"]}],
             "relationships": [],
         }
@@ -1447,7 +1669,9 @@ class TestGenerateDeterministicDax:
             "relationships": [],
         }
         config = {"active_filters": {"Sales[Region]": "= 'Italy'"}}
-        result = self.tool._generate_deterministic_dax("revenue?", model_context, config)
+        result = self.tool._generate_deterministic_dax(
+            "revenue?", model_context, config
+        )
         assert result is not None
 
     def test_groupby_columns_used_from_question(self):
@@ -1466,6 +1690,7 @@ class TestGenerateDeterministicDax:
 # _patch_dax_with_active_filters tests
 # ===========================================================================
 
+
 class TestPatchDaxWithActiveFilters:
     """Tests for _patch_dax_with_active_filters."""
 
@@ -1473,12 +1698,12 @@ class TestPatchDaxWithActiveFilters:
         self.tool = PowerBISemanticModelDaxTool()
 
     def test_no_active_filters_returns_original(self):
-        dax = "EVALUATE SUMMARIZECOLUMNS(\"R\", [M])"
+        dax = 'EVALUATE SUMMARIZECOLUMNS("R", [M])'
         result = self.tool._patch_dax_with_active_filters(dax, {}, {})
         assert result == dax
 
     def test_filter_added_to_summarizecolumns(self):
-        dax = "EVALUATE\nSUMMARIZECOLUMNS(\n    \"R\", [M]\n)"
+        dax = 'EVALUATE\nSUMMARIZECOLUMNS(\n    "R", [M]\n)'
         config = {"active_filters": {"Sales[Region]": "= 'Italy'"}}
         model_context = {"tables": [{"name": "Sales"}]}
         result = self.tool._patch_dax_with_active_filters(dax, config, model_context)
@@ -1486,13 +1711,16 @@ class TestPatchDaxWithActiveFilters:
         assert "Italy" in result or "TREATAS" in result or "FILTER" in result
 
     def test_empty_dax_returns_as_is(self):
-        result = self.tool._patch_dax_with_active_filters("", {"active_filters": {"T[C]": "v"}}, {})
+        result = self.tool._patch_dax_with_active_filters(
+            "", {"active_filters": {"T[C]": "v"}}, {}
+        )
         assert isinstance(result, str)
 
 
 # ===========================================================================
 # _save_to_conversion_history tests (fail-open)
 # ===========================================================================
+
 
 class TestSaveToConversionHistory:
     """Tests that _save_to_conversion_history is fail-open."""
@@ -1505,10 +1733,21 @@ class TestSaveToConversionHistory:
 
     def test_does_not_raise_on_import_error(self):
         """Should swallow errors and not propagate."""
-        results = {"user_question": "test?", "generated_dax": "EVALUATE Sales", "dax_execution": {}, "errors": []}
+        results = {
+            "user_question": "test?",
+            "generated_dax": "EVALUATE Sales",
+            "dax_execution": {},
+            "errors": [],
+        }
         config = {"workspace_id": WS_ID, "dataset_id": DS_ID}
 
-        with patch.dict("sys.modules", {"src.schemas.conversion": None, "src.repositories.conversion_repository": None}):
+        with patch.dict(
+            "sys.modules",
+            {
+                "src.schemas.conversion": None,
+                "src.repositories.conversion_repository": None,
+            },
+        ):
             # Should not raise
             try:
                 self._run(self.tool._save_to_conversion_history(results, config, []))
@@ -1516,7 +1755,12 @@ class TestSaveToConversionHistory:
                 pass  # Fail-open is acceptable
 
     def test_does_not_raise_on_success(self):
-        results = {"user_question": "test?", "generated_dax": "EVALUATE Sales", "dax_execution": {}, "errors": []}
+        results = {
+            "user_question": "test?",
+            "generated_dax": "EVALUATE Sales",
+            "dax_execution": {},
+            "errors": [],
+        }
         config = {}
         mock_repo = MagicMock()
         mock_repo.create = AsyncMock(return_value=MagicMock(id=42))
@@ -1526,12 +1770,21 @@ class TestSaveToConversionHistory:
         mock_schema_mod = MagicMock()
         mock_schema_mod.ConversionHistoryCreate = MagicMock(return_value=MagicMock())
 
-        with patch.dict("sys.modules", {
-            "src.schemas.conversion": mock_schema_mod,
-        }):
-            with patch.object(ToolSessionProvider, "conversion_repo", _mock_conversion_repo_ctx(mock_repo)):
+        with patch.dict(
+            "sys.modules",
+            {
+                "src.schemas.conversion": mock_schema_mod,
+            },
+        ):
+            with patch.object(
+                ToolSessionProvider,
+                "conversion_repo",
+                _mock_conversion_repo_ctx(mock_repo),
+            ):
                 try:
-                    self._run(self.tool._save_to_conversion_history(results, config, []))
+                    self._run(
+                        self.tool._save_to_conversion_history(results, config, [])
+                    )
                 except Exception:
                     pass  # Fail-open is OK
 
@@ -1539,6 +1792,7 @@ class TestSaveToConversionHistory:
 # ===========================================================================
 # _build_example_dax tests
 # ===========================================================================
+
 
 class TestBuildExampleDax:
     """Tests for _build_example_dax."""
@@ -1568,7 +1822,12 @@ class TestBuildExampleDax:
                 {"name": "Date", "columns": ["DateKey", "Year", "Month"]},
             ],
             "relationships": [
-                {"from_table": "Sales", "from_column": "DateKey", "to_table": "Date", "to_column": "DateKey"}
+                {
+                    "from_table": "Sales",
+                    "from_column": "DateKey",
+                    "to_table": "Date",
+                    "to_column": "DateKey",
+                }
             ],
         }
         result = self.tool._build_example_dax(model_context)
@@ -1579,6 +1838,7 @@ class TestBuildExampleDax:
 # ===========================================================================
 # _generate_dax_with_llm tests (with LLM credentials)
 # ===========================================================================
+
 
 class TestGenerateDaxWithLlm:
     """Tests for _generate_dax_with_llm with LLM credentials configured."""
@@ -1638,7 +1898,13 @@ class TestGenerateDaxWithLlm:
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
         mock_response.json.return_value = {
-            "choices": [{"message": {"content": "EVALUATE\nSUMMARIZECOLUMNS(\n    \"Revenue\", [Revenue]\n)"}}]
+            "choices": [
+                {
+                    "message": {
+                        "content": 'EVALUATE\nSUMMARIZECOLUMNS(\n    "Revenue", [Revenue]\n)'
+                    }
+                }
+            ]
         }
 
         mock_client = MagicMock()
@@ -1646,7 +1912,10 @@ class TestGenerateDaxWithLlm:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             with patch.object(self.tool, "_emit_llm_trace"):
                 result = self._run(
                     self.tool._generate_dax_with_llm("revenue?", model_context, config)
@@ -1664,20 +1933,26 @@ class TestGenerateDaxWithLlm:
         config = self._make_config()
 
         import httpx as _httpx
+
         err_response = MagicMock()
         err_response.status_code = 400
 
         ok_response = MagicMock()
         ok_response.raise_for_status = MagicMock()
         ok_response.json.return_value = {
-            "choices": [{"message": {"content": "EVALUATE\nSUMMARIZECOLUMNS(\"R\", [Revenue])"}}]
+            "choices": [
+                {"message": {"content": 'EVALUATE\nSUMMARIZECOLUMNS("R", [Revenue])'}}
+            ]
         }
 
         call_count = [0]
+
         async def post_side(*args, **kwargs):
             if call_count[0] == 0:
                 call_count[0] += 1
-                raise _httpx.HTTPStatusError("400", request=MagicMock(), response=err_response)
+                raise _httpx.HTTPStatusError(
+                    "400", request=MagicMock(), response=err_response
+                )
             return ok_response
 
         mock_client = MagicMock()
@@ -1685,7 +1960,10 @@ class TestGenerateDaxWithLlm:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=post_side)
 
-        with patch("src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             with patch.object(self.tool, "_emit_llm_trace"):
                 result = self._run(
                     self.tool._generate_dax_with_llm("revenue?", model_context, config)
@@ -1706,7 +1984,10 @@ class TestGenerateDaxWithLlm:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             with patch.object(self.tool, "_emit_llm_trace"):
                 result = self._run(
                     self.tool._generate_dax_with_llm("revenue?", model_context, config)
@@ -1734,7 +2015,10 @@ class TestGenerateDaxWithLlm:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             with patch.object(self.tool, "_emit_llm_trace"):
                 result = self._run(
                     self.tool._generate_dax_with_llm("revenue?", model_context, config)
@@ -1747,6 +2031,7 @@ class TestGenerateDaxWithLlm:
 # ===========================================================================
 # _generate_dax_with_self_correction tests
 # ===========================================================================
+
 
 class TestGenerateDaxWithSelfCorrectionDaxTool:
     """Tests for _generate_dax_with_self_correction on the DAX tool."""
@@ -1769,7 +2054,9 @@ class TestGenerateDaxWithSelfCorrectionDaxTool:
 
     def test_no_llm_credentials_returns_none(self):
         config = {}  # No LLM credentials
-        previous = [{"attempt": 1, "dax": "bad dax", "success": False, "error": "error"}]
+        previous = [
+            {"attempt": 1, "dax": "bad dax", "success": False, "error": "error"}
+        ]
         result = self._run(
             self.tool._generate_dax_with_self_correction(
                 "revenue?", {"measures": [], "tables": []}, config, previous
@@ -1784,9 +2071,13 @@ class TestGenerateDaxWithSelfCorrectionDaxTool:
             "relationships": [],
         }
         config = self._make_config()
-        previous = [{"attempt": 1, "dax": "bad dax", "success": False, "error": "syntax error"}]
+        previous = [
+            {"attempt": 1, "dax": "bad dax", "success": False, "error": "syntax error"}
+        ]
 
-        mock_completion = AsyncMock(return_value="EVALUATE\nSUMMARIZECOLUMNS(\"R\", [Revenue])")
+        mock_completion = AsyncMock(
+            return_value='EVALUATE\nSUMMARIZECOLUMNS("R", [Revenue])'
+        )
 
         with patch("src.services.llm.manager.LLMManager.completion", mock_completion):
             result = self._run(
@@ -1799,7 +2090,11 @@ class TestGenerateDaxWithSelfCorrectionDaxTool:
         assert "EVALUATE" in result
 
     def test_network_error_returns_none(self):
-        model_context = {"measures": [{"name": "Rev", "table": "Sales"}], "tables": [{"name": "Sales"}], "relationships": []}
+        model_context = {
+            "measures": [{"name": "Rev", "table": "Sales"}],
+            "tables": [{"name": "Sales"}],
+            "relationships": [],
+        }
         config = self._make_config()
         previous = [{"attempt": 1, "dax": "bad", "success": False, "error": "err"}]
 
@@ -1808,7 +2103,10 @@ class TestGenerateDaxWithSelfCorrectionDaxTool:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._generate_dax_with_self_correction(
                     "revenue?", model_context, config, previous
@@ -1828,16 +2126,18 @@ class TestGenerateDaxWithSelfCorrectionDaxTool:
         previous = [
             {
                 "attempt": 1,
-                "dax": "EVALUATE\nSUMMARIZECOLUMNS(\n    TREATAS({\"Italy\"}, dim_country[BU]),\n    \"R\", [Revenue]\n)",
+                "dax": 'EVALUATE\nSUMMARIZECOLUMNS(\n    TREATAS({"Italy"}, dim_country[BU]),\n    "R", [Revenue]\n)',
                 "success": False,
-                "error": "schema error"
+                "error": "schema error",
             }
         ]
 
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
         mock_response.json.return_value = {
-            "choices": [{"message": {"content": "EVALUATE\nSUMMARIZECOLUMNS(\"R\", [Revenue])"}}]
+            "choices": [
+                {"message": {"content": 'EVALUATE\nSUMMARIZECOLUMNS("R", [Revenue])'}}
+            ]
         }
 
         mock_client = MagicMock()
@@ -1845,7 +2145,10 @@ class TestGenerateDaxWithSelfCorrectionDaxTool:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._generate_dax_with_self_correction(
                     "revenue for Italy?", model_context, config, previous
@@ -1862,10 +2165,10 @@ class TestGenerateDaxWithSelfCorrectionDaxTool:
 
 import base64 as _base64
 
-
 # ===========================================================================
 # _build_example_dax tests
 # ===========================================================================
+
 
 class TestBuildExampleDax:
     """Tests for _build_example_dax."""
@@ -1874,12 +2177,20 @@ class TestBuildExampleDax:
         self.tool = PowerBISemanticModelDaxTool()
 
     def test_no_measures_returns_empty(self):
-        model_context = {"measures": [], "tables": [{"name": "Sales"}], "relationships": []}
+        model_context = {
+            "measures": [],
+            "tables": [{"name": "Sales"}],
+            "relationships": [],
+        }
         result = self.tool._build_example_dax(model_context)
         assert result == ""
 
     def test_no_tables_returns_empty(self):
-        model_context = {"measures": [{"name": "Revenue", "table": "Sales"}], "tables": [], "relationships": []}
+        model_context = {
+            "measures": [{"name": "Revenue", "table": "Sales"}],
+            "tables": [],
+            "relationships": [],
+        }
         result = self.tool._build_example_dax(model_context)
         assert result == ""
 
@@ -1901,7 +2212,12 @@ class TestBuildExampleDax:
                 {"name": "Date", "columns": ["DateKey", "Year"]},
             ],
             "relationships": [
-                {"from_table": "Sales", "from_column": "DateKey", "to_table": "Date", "to_column": "DateKey"}
+                {
+                    "from_table": "Sales",
+                    "from_column": "DateKey",
+                    "to_table": "Date",
+                    "to_column": "DateKey",
+                }
             ],
         }
         result = self.tool._build_example_dax(model_context)
@@ -1913,13 +2229,16 @@ class TestBuildExampleDax:
 # _resolve_model_context — additional async tests
 # ===========================================================================
 
+
 class TestResolveModelContextAdditional:
     """Additional async tests for _resolve_model_context."""
 
     def setup_method(self):
         self.tool = PowerBISemanticModelDaxTool(
-            workspace_id=WS_ID, dataset_id=DS_ID, access_token=ACCESS_TOKEN,
-            user_question="test?"
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            access_token=ACCESS_TOKEN,
+            user_question="test?",
         )
 
     def _run(self, coro):
@@ -1940,11 +2259,16 @@ class TestResolveModelContextAdditional:
         mock_service = MagicMock()
         mock_service.get_cached_metadata = AsyncMock(return_value=reduced_cached)
 
-        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
+        with patch.object(
+            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)
+        ):
             result = self._run(self.tool._resolve_model_context(config))
 
         assert result is not None
-        assert result.get("_source") in ("REDUCED_CACHE", "FULL_CACHE", "AGENT_JSON") or result is not None
+        assert (
+            result.get("_source") in ("REDUCED_CACHE", "FULL_CACHE", "AGENT_JSON")
+            or result is not None
+        )
 
     def test_invalid_json_in_model_context_json_falls_through(self):
         """Bad JSON in model_context_json triggers cache fallback."""
@@ -1957,7 +2281,9 @@ class TestResolveModelContextAdditional:
         mock_service = MagicMock()
         mock_service.get_cached_metadata = AsyncMock(return_value=None)
 
-        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
+        with patch.object(
+            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)
+        ):
             result = self._run(self.tool._resolve_model_context(config))
 
         assert result is None
@@ -1992,13 +2318,12 @@ class TestResolveModelContextAdditional:
 # _fetch_full_cache_tables tests
 # ===========================================================================
 
+
 class TestFetchFullCacheTables:
     """Tests for _fetch_full_cache_tables."""
 
     def setup_method(self):
-        self.tool = PowerBISemanticModelDaxTool(
-            workspace_id=WS_ID, dataset_id=DS_ID
-        )
+        self.tool = PowerBISemanticModelDaxTool(workspace_id=WS_ID, dataset_id=DS_ID)
 
     def _run(self, coro):
         return asyncio.run(coro)
@@ -2014,7 +2339,9 @@ class TestFetchFullCacheTables:
         mock_service = MagicMock()
         mock_service.get_cached_metadata = AsyncMock(return_value=None)
 
-        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
+        with patch.object(
+            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)
+        ):
             result = self._run(self.tool._fetch_full_cache_tables(config, {"Sales"}))
 
         assert result is None
@@ -2028,14 +2355,25 @@ class TestFetchFullCacheTables:
                     {"name": "Date", "columns": ["Year"]},
                 ],
             },
-            "relationships": [{"from_table": "Sales", "from_column": "DateKey", "to_table": "Date", "to_column": "DateKey"}],
-            "sample_data": {"Sales[Amount]": {"type": "categorical", "sample_values": [100, 200]}},
+            "relationships": [
+                {
+                    "from_table": "Sales",
+                    "from_column": "DateKey",
+                    "to_table": "Date",
+                    "to_column": "DateKey",
+                }
+            ],
+            "sample_data": {
+                "Sales[Amount]": {"type": "categorical", "sample_values": [100, 200]}
+            },
         }
 
         mock_service = MagicMock()
         mock_service.get_cached_metadata = AsyncMock(return_value=full_cached)
 
-        with patch.object(ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)):
+        with patch.object(
+            ToolSessionProvider, "cache_service", _mock_cache_service_ctx(mock_service)
+        ):
             result = self._run(self.tool._fetch_full_cache_tables(config, {"Sales"}))
 
         assert result is not None
@@ -2047,6 +2385,7 @@ class TestFetchFullCacheTables:
 # ===========================================================================
 # _generate_deterministic_dax tests
 # ===========================================================================
+
 
 class TestGenerateDeterministicDax:
     """Tests for _generate_deterministic_dax."""
@@ -2065,7 +2404,9 @@ class TestGenerateDeterministicDax:
             "tables": [{"name": "Sales", "columns": ["Amount"]}],
             "sample_data": {},
         }
-        result = self.tool._generate_deterministic_dax("what is revenue?", model_context, {})
+        result = self.tool._generate_deterministic_dax(
+            "what is revenue?", model_context, {}
+        )
         assert result is not None
         assert "EVALUATE" in result
         assert "Revenue" in result
@@ -2077,7 +2418,9 @@ class TestGenerateDeterministicDax:
             "sample_data": {},
         }
         config = {"active_filters": {"Sales[BU]": "Italy"}}
-        result = self.tool._generate_deterministic_dax("revenue?", model_context, config)
+        result = self.tool._generate_deterministic_dax(
+            "revenue?", model_context, config
+        )
         assert result is not None
         assert "TREATAS" in result
         assert "Italy" in result
@@ -2089,7 +2432,9 @@ class TestGenerateDeterministicDax:
             "sample_data": {},
         }
         config = {"active_filters": {"Sales[BU]": ["Italy", "Germany"]}}
-        result = self.tool._generate_deterministic_dax("revenue?", model_context, config)
+        result = self.tool._generate_deterministic_dax(
+            "revenue?", model_context, config
+        )
         assert result is not None
         assert "TREATAS" in result
 
@@ -2100,7 +2445,9 @@ class TestGenerateDeterministicDax:
             "sample_data": {},
         }
         config = {"active_filters": {"Sales[BU]": "NOT NULL"}}
-        result = self.tool._generate_deterministic_dax("revenue?", model_context, config)
+        result = self.tool._generate_deterministic_dax(
+            "revenue?", model_context, config
+        )
         assert result is not None
         # NOT NULL is excluded from TREATAS
         assert "NOT NULL" not in result
@@ -2110,10 +2457,15 @@ class TestGenerateDeterministicDax:
             "measures": [{"name": "Revenue", "table": "Sales"}],
             "tables": [{"name": "dim_country", "columns": ["BU"]}],
             "sample_data": {
-                "dim_country[BU]": {"type": "categorical", "sample_values": ["Italy", "Germany"]}
+                "dim_country[BU]": {
+                    "type": "categorical",
+                    "sample_values": ["Italy", "Germany"],
+                }
             },
         }
-        result = self.tool._generate_deterministic_dax("revenue for Italy?", model_context, {})
+        result = self.tool._generate_deterministic_dax(
+            "revenue for Italy?", model_context, {}
+        )
         assert result is not None
         assert "Italy" in result
 
@@ -2127,7 +2479,9 @@ class TestGenerateDeterministicDax:
             "sample_data": {},
         }
         # "units" appears in "Units Sold" and in the question → should match
-        result = self.tool._generate_deterministic_dax("what is units sold?", model_context, {})
+        result = self.tool._generate_deterministic_dax(
+            "what is units sold?", model_context, {}
+        )
         assert result is not None
         # Either measure could be picked, just verify DAX was generated
         assert "EVALUATE" in result
@@ -2137,6 +2491,7 @@ class TestGenerateDeterministicDax:
 # _patch_dax_with_active_filters tests
 # ===========================================================================
 
+
 class TestPatchDaxWithActiveFilters:
     """Tests for _patch_dax_with_active_filters."""
 
@@ -2144,7 +2499,7 @@ class TestPatchDaxWithActiveFilters:
         self.tool = PowerBISemanticModelDaxTool()
 
     def test_basic_patch_injects_treatas(self):
-        dax = "EVALUATE\nSUMMARIZECOLUMNS(\n    \"Result\", [Revenue]\n)"
+        dax = 'EVALUATE\nSUMMARIZECOLUMNS(\n    "Result", [Revenue]\n)'
         model_context = {"tables": [{"name": "Sales"}]}
         config = {"active_filters": {"Sales[BU]": "Italy"}}
         result = self.tool._patch_dax_with_active_filters(dax, config, model_context)
@@ -2152,7 +2507,7 @@ class TestPatchDaxWithActiveFilters:
         assert "Italy" in result
 
     def test_removes_treatas_for_unknown_table(self):
-        dax = "EVALUATE\nSUMMARIZECOLUMNS(\n    TREATAS({\"Italy\"}, UnknownTable[BU]),\n    \"Result\", [Revenue]\n)"
+        dax = 'EVALUATE\nSUMMARIZECOLUMNS(\n    TREATAS({"Italy"}, UnknownTable[BU]),\n    "Result", [Revenue]\n)'
         model_context = {"tables": [{"name": "Sales"}]}
         config = {"active_filters": {}}
         result = self.tool._patch_dax_with_active_filters(dax, config, model_context)
@@ -2160,14 +2515,14 @@ class TestPatchDaxWithActiveFilters:
         assert "UnknownTable" not in result
 
     def test_skips_filter_already_in_dax(self):
-        dax = "EVALUATE\nSUMMARIZECOLUMNS(\n    TREATAS({\"Italy\"}, Sales[BU]),\n    \"Result\", [Revenue]\n)"
+        dax = 'EVALUATE\nSUMMARIZECOLUMNS(\n    TREATAS({"Italy"}, Sales[BU]),\n    "Result", [Revenue]\n)'
         model_context = {"tables": [{"name": "Sales"}]}
         config = {"active_filters": {"Sales[BU]": "Italy"}}
         result = self.tool._patch_dax_with_active_filters(dax, config, model_context)
         assert isinstance(result, str)
 
     def test_list_value_injects_multi_treatas(self):
-        dax = "EVALUATE\nSUMMARIZECOLUMNS(\n    \"Result\", [Revenue]\n)"
+        dax = 'EVALUATE\nSUMMARIZECOLUMNS(\n    "Result", [Revenue]\n)'
         model_context = {"tables": [{"name": "Sales"}]}
         config = {"active_filters": {"Sales[BU]": ["Italy", "Germany"]}}
         result = self.tool._patch_dax_with_active_filters(dax, config, model_context)
@@ -2175,14 +2530,14 @@ class TestPatchDaxWithActiveFilters:
         assert "Germany" in result
 
     def test_table_with_spaces_quoted(self):
-        dax = "EVALUATE\nSUMMARIZECOLUMNS(\n    \"Result\", [Revenue]\n)"
+        dax = 'EVALUATE\nSUMMARIZECOLUMNS(\n    "Result", [Revenue]\n)'
         model_context = {"tables": [{"name": "My Sales"}]}
         config = {"active_filters": {"My Sales[BU]": "Italy"}}
         result = self.tool._patch_dax_with_active_filters(dax, config, model_context)
         assert isinstance(result, str)
 
     def test_unqualified_filter_skipped(self):
-        dax = "EVALUATE\nSUMMARIZECOLUMNS(\n    \"Result\", [Revenue]\n)"
+        dax = 'EVALUATE\nSUMMARIZECOLUMNS(\n    "Result", [Revenue]\n)'
         model_context = {"tables": [{"name": "Sales"}]}
         config = {"active_filters": {"BU_only": "Italy"}}  # no [, so unqualified
         result = self.tool._patch_dax_with_active_filters(dax, config, model_context)
@@ -2192,6 +2547,7 @@ class TestPatchDaxWithActiveFilters:
 # ===========================================================================
 # _generate_dax_with_llm and _generate_dax_with_self_correction extra tests
 # ===========================================================================
+
 
 class TestGenerateDaxWithLlmExtra:
     """Extra tests for _generate_dax_with_llm covering uncovered paths."""
@@ -2218,7 +2574,11 @@ class TestGenerateDaxWithLlmExtra:
 
     def test_no_measures_returns_none(self):
         """No measures → LLM returns None."""
-        model_context = {"measures": [], "tables": [{"name": "Sales"}], "sample_data": {}}
+        model_context = {
+            "measures": [],
+            "tables": [{"name": "Sales"}],
+            "sample_data": {},
+        }
         config = {
             "llm_workspace_url": "https://example.com",
             "llm_token": "tok",
@@ -2247,12 +2607,16 @@ class TestGenerateDaxWithLlmExtra:
         bad_resp = MagicMock()
         bad_resp.status_code = 400
         bad_resp.raise_for_status = MagicMock(
-            side_effect=httpx.HTTPStatusError("400", request=MagicMock(), response=bad_resp)
+            side_effect=httpx.HTTPStatusError(
+                "400", request=MagicMock(), response=bad_resp
+            )
         )
         good_resp = MagicMock()
         good_resp.raise_for_status = MagicMock()
         good_resp.json.return_value = {
-            "choices": [{"message": {"content": "EVALUATE\nSUMMARIZECOLUMNS(\"R\", [Revenue])"}}]
+            "choices": [
+                {"message": {"content": 'EVALUATE\nSUMMARIZECOLUMNS("R", [Revenue])'}}
+            ]
         }
 
         call_count = [0]
@@ -2260,7 +2624,9 @@ class TestGenerateDaxWithLlmExtra:
         async def mock_post(*args, **kwargs):
             if call_count[0] == 0:
                 call_count[0] += 1
-                raise httpx.HTTPStatusError("400", request=MagicMock(), response=bad_resp)
+                raise httpx.HTTPStatusError(
+                    "400", request=MagicMock(), response=bad_resp
+                )
             return good_resp
 
         mock_client = MagicMock()
@@ -2268,7 +2634,10 @@ class TestGenerateDaxWithLlmExtra:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=mock_post)
 
-        with patch("src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._generate_dax_with_llm("revenue?", model_context, config)
             )
@@ -2293,7 +2662,10 @@ class TestGenerateDaxWithLlmExtra:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("network failure"))
 
-        with patch("src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._generate_dax_with_llm("revenue?", model_context, config)
             )
@@ -2313,9 +2685,7 @@ class TestGenerateDaxWithSelfCorrectionExtra:
     def test_no_llm_config_returns_none(self):
         config = {}
         result = self._run(
-            self.tool._generate_dax_with_self_correction(
-                "revenue?", {}, config, []
-            )
+            self.tool._generate_dax_with_self_correction("revenue?", {}, config, [])
         )
         assert result is None
 
@@ -2330,18 +2700,25 @@ class TestGenerateDaxWithSelfCorrectionExtra:
             "llm_token": "tok",
             "llm_model": "test-model",
         }
-        previous = [{"attempt": 1, "dax": "bad", "success": False, "error": "schema error"}]
+        previous = [
+            {"attempt": 1, "dax": "bad", "success": False, "error": "schema error"}
+        ]
 
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
-        mock_resp.json.return_value = {"choices": [{"message": {"content": "not a dax"}}]}
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "not a dax"}}]
+        }
 
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_resp)
 
-        with patch("src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._generate_dax_with_self_correction(
                     "revenue?", model_context, config, previous
@@ -2366,7 +2743,10 @@ class TestGenerateDaxWithSelfCorrectionExtra:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=Exception("network error"))
 
-        with patch("src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "src.services.tools.powerbi_semantic_model_dax_tool.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
             result = self._run(
                 self.tool._generate_dax_with_self_correction(
                     "revenue?", model_context, config, []
@@ -2379,6 +2759,7 @@ class TestGenerateDaxWithSelfCorrectionExtra:
 # ===========================================================================
 # _parse_report_pages/_parse_report_visuals tests
 # ===========================================================================
+
 
 class TestParseReportPages:
     """Tests for _parse_report_pages and related methods."""
@@ -2397,7 +2778,7 @@ class TestParseReportPages:
     def test_page_json_parsed(self):
         part = self._make_part(
             "definition/pages/Page1/page.json",
-            {"name": "Overview", "displayName": "Overview Page", "ordinal": 1}
+            {"name": "Overview", "displayName": "Overview Page", "ordinal": 1},
         )
         result = self.tool._parse_report_pages([part])
         assert len(result) == 1
@@ -2415,7 +2796,10 @@ class TestParseReportPages:
         assert len(result) == 2
 
     def test_invalid_payload_skipped(self):
-        bad_part = {"path": "definition/pages/Bad/page.json", "payload": "not-base64-json"}
+        bad_part = {
+            "path": "definition/pages/Bad/page.json",
+            "payload": "not-base64-json",
+        }
         result = self.tool._parse_report_pages([bad_part])
         assert result == []
 
@@ -2437,8 +2821,7 @@ class TestParseReportVisuals:
     def test_visual_json_parsed(self):
         visual_data = {"visual": {"visualType": "barChart"}}
         part = self._make_part(
-            "definition/pages/Page1/visuals/Visual1/visual.json",
-            visual_data
+            "definition/pages/Page1/visuals/Visual1/visual.json", visual_data
         )
         result = self.tool._parse_report_visuals([part])
         assert len(result) == 1
@@ -2451,9 +2834,7 @@ class TestParseReportVisuals:
             "pages": [
                 {
                     "name": "Overview",
-                    "visualContainers": [
-                        {"name": "vis1", "config": config_data}
-                    ]
+                    "visualContainers": [{"name": "vis1", "config": config_data}],
                 }
             ]
         }
@@ -2465,6 +2846,7 @@ class TestParseReportVisuals:
 # ===========================================================================
 # _extract_measures_from_visual / _find_measures_in_dict tests
 # ===========================================================================
+
 
 class TestExtractMeasuresFromVisual:
     """Tests for _extract_measures_from_visual and _find_measures_in_dict."""
@@ -2482,7 +2864,7 @@ class TestExtractMeasuresFromVisual:
                 "singleVisual": {
                     "projections": {
                         "Y": [{"active": True, "queryRef": "Sum(Amount)"}],
-                        "measures": [{"measure": {"property": "Total Revenue"}}]
+                        "measures": [{"measure": {"property": "Total Revenue"}}],
                     }
                 }
             }
@@ -2494,9 +2876,7 @@ class TestExtractMeasuresFromVisual:
         visual = {
             "config": {
                 "prototypeQuery": {
-                    "Select": [
-                        {"Measure": {"Property": "Profit Margin"}}
-                    ]
+                    "Select": [{"Measure": {"Property": "Profit Margin"}}]
                 }
             }
         }
@@ -2504,7 +2884,9 @@ class TestExtractMeasuresFromVisual:
         assert "Profit Margin" in result
 
     def test_string_config_parsed(self):
-        config_str = json.dumps({"prototypeQuery": {"Select": [{"Measure": {"Property": "Units"}}]}})
+        config_str = json.dumps(
+            {"prototypeQuery": {"Select": [{"Measure": {"Property": "Units"}}]}}
+        )
         visual = {"config": config_str}
         result = self.tool._extract_measures_from_visual(visual)
         assert "Units" in result
@@ -2526,6 +2908,7 @@ class TestExtractMeasuresFromVisual:
 # _build_page_url tests
 # ===========================================================================
 
+
 class TestBuildPageUrl:
     def setup_method(self):
         self.tool = PowerBISemanticModelDaxTool()
@@ -2544,13 +2927,16 @@ class TestBuildPageUrl:
 # _save_to_conversion_history tests
 # ===========================================================================
 
+
 class TestSaveToConversionHistory:
     """Tests for _save_to_conversion_history (fail-open)."""
 
     def setup_method(self):
         self.tool = PowerBISemanticModelDaxTool(
-            workspace_id=WS_ID, dataset_id=DS_ID, access_token=ACCESS_TOKEN,
-            user_question="test?"
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            access_token=ACCESS_TOKEN,
+            user_question="test?",
         )
 
     def _run(self, coro):
@@ -2599,6 +2985,7 @@ class TestSaveToConversionHistory:
 # _run — context enrichment JSON parse paths
 # ===========================================================================
 
+
 class TestRunContextEnrichmentJsonParse:
     """Tests for _run covering JSON parse paths in context enrichment."""
 
@@ -2607,7 +2994,7 @@ class TestRunContextEnrichmentJsonParse:
         tool = _make_tool()
         with patch(
             "src.services.tools.powerbi_semantic_model_dax_tool._run_async_in_sync_context",
-            return_value="ok"
+            return_value="ok",
         ):
             result = tool._run(business_mappings='{"CGR": "= Complete CGR"}')
         assert result == "ok"
@@ -2617,7 +3004,7 @@ class TestRunContextEnrichmentJsonParse:
         tool = _make_tool()
         with patch(
             "src.services.tools.powerbi_semantic_model_dax_tool._run_async_in_sync_context",
-            return_value="ok"
+            return_value="ok",
         ):
             result = tool._run(active_filters='{"Sales[BU]": "Italy"}')
         assert result == "ok"
@@ -2627,9 +3014,9 @@ class TestRunContextEnrichmentJsonParse:
         tool = _make_tool()
         with patch(
             "src.services.tools.powerbi_semantic_model_dax_tool._run_async_in_sync_context",
-            return_value="ok"
+            return_value="ok",
         ):
-            result = tool._run(active_filters='{bad json}')
+            result = tool._run(active_filters="{bad json}")
         assert result == "ok"
 
 
@@ -2637,13 +3024,16 @@ class TestRunContextEnrichmentJsonParse:
 # Full pipeline execution — dax retry / completeness / deterministic fallback
 # ===========================================================================
 
+
 class TestExecuteDaxPipelineRetryPaths:
     """Tests for the DAX retry loop branches in _execute_dax_pipeline."""
 
     def setup_method(self):
         self.tool = PowerBISemanticModelDaxTool(
-            workspace_id=WS_ID, dataset_id=DS_ID,
-            access_token=ACCESS_TOKEN, user_question="test?"
+            workspace_id=WS_ID,
+            dataset_id=DS_ID,
+            access_token=ACCESS_TOKEN,
+            user_question="test?",
         )
 
     def _run(self, coro):
@@ -2661,7 +3051,13 @@ class TestExecuteDaxPipelineRetryPaths:
             "dataset_id": DS_ID,
             "default_filters": {},
         }
-        exec_result = {"success": True, "data": [{"[Rev]": 100}], "row_count": 1, "columns": ["[Rev]"], "error": None}
+        exec_result = {
+            "success": True,
+            "data": [{"[Rev]": 100}],
+            "row_count": 1,
+            "columns": ["[Rev]"],
+            "error": None,
+        }
 
         call_count = [0]
 
@@ -2669,7 +3065,7 @@ class TestExecuteDaxPipelineRetryPaths:
             call_count[0] += 1
             if call_count[0] < 3:
                 return None  # Simulate empty LLM response
-            return "EVALUATE\nSUMMARIZECOLUMNS(\"Result\", [Revenue])"
+            return 'EVALUATE\nSUMMARIZECOLUMNS("Result", [Revenue])'
 
         config = {
             "user_question": "revenue?",
@@ -2680,14 +3076,21 @@ class TestExecuteDaxPipelineRetryPaths:
             "include_visual_references": False,
         }
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(self.tool, "_resolve_model_context", return_value=model_ctx), \
-             patch.object(self.tool, "_generate_dax_with_llm", side_effect=mock_llm), \
-             patch.object(self.tool, "_generate_dax_with_self_correction",
-                          return_value="EVALUATE\nSUMMARIZECOLUMNS(\"Result\", [Revenue])"), \
-             patch.object(self.tool, "_execute_dax_query", return_value=exec_result), \
-             patch.object(self.tool, "_save_to_conversion_history", return_value=None), \
-             patch("src.services.tools.powerbi_semantic_model_dax_tool.DaxRagRetriever") as mock_rag:
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(self.tool, "_resolve_model_context", return_value=model_ctx),
+            patch.object(self.tool, "_generate_dax_with_llm", side_effect=mock_llm),
+            patch.object(
+                self.tool,
+                "_generate_dax_with_self_correction",
+                return_value='EVALUATE\nSUMMARIZECOLUMNS("Result", [Revenue])',
+            ),
+            patch.object(self.tool, "_execute_dax_query", return_value=exec_result),
+            patch.object(self.tool, "_save_to_conversion_history", return_value=None),
+            patch(
+                "src.services.tools.powerbi_semantic_model_dax_tool.DaxRagRetriever"
+            ) as mock_rag,
+        ):
             mock_rag_instance = MagicMock()
             mock_rag_instance.retrieve = AsyncMock(return_value=[])
             mock_rag_instance.store = AsyncMock(return_value=None)
@@ -2709,7 +3112,13 @@ class TestExecuteDaxPipelineRetryPaths:
             "default_filters": {},
             "dataset_id": DS_ID,
         }
-        exec_result = {"success": True, "data": [], "row_count": 0, "columns": [], "error": None}
+        exec_result = {
+            "success": True,
+            "data": [],
+            "row_count": 0,
+            "columns": [],
+            "error": None,
+        }
         extra_tables = {
             "tables": [{"name": "Filters", "columns": ["BU"]}],
             "relationships": [],
@@ -2723,18 +3132,28 @@ class TestExecuteDaxPipelineRetryPaths:
             "output_format": "json",
             "max_dax_retries": 1,
             "include_visual_references": False,
-            "active_filters": {"Filters[BU]": "Italy"},  # Filters table not in model_ctx
+            "active_filters": {
+                "Filters[BU]": "Italy"
+            },  # Filters table not in model_ctx
         }
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(self.tool, "_resolve_model_context", return_value=model_ctx), \
-             patch.object(self.tool, "_fetch_full_cache_tables",
-                          return_value=extra_tables), \
-             patch.object(self.tool, "_generate_dax_with_llm",
-                          return_value="EVALUATE\nSUMMARIZECOLUMNS(\"R\", [Revenue])"), \
-             patch.object(self.tool, "_execute_dax_query", return_value=exec_result), \
-             patch.object(self.tool, "_save_to_conversion_history", return_value=None), \
-             patch("src.services.tools.powerbi_semantic_model_dax_tool.DaxRagRetriever") as mock_rag:
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(self.tool, "_resolve_model_context", return_value=model_ctx),
+            patch.object(
+                self.tool, "_fetch_full_cache_tables", return_value=extra_tables
+            ),
+            patch.object(
+                self.tool,
+                "_generate_dax_with_llm",
+                return_value='EVALUATE\nSUMMARIZECOLUMNS("R", [Revenue])',
+            ),
+            patch.object(self.tool, "_execute_dax_query", return_value=exec_result),
+            patch.object(self.tool, "_save_to_conversion_history", return_value=None),
+            patch(
+                "src.services.tools.powerbi_semantic_model_dax_tool.DaxRagRetriever"
+            ) as mock_rag,
+        ):
             mock_rag_instance = MagicMock()
             mock_rag_instance.retrieve = AsyncMock(return_value=[])
             mock_rag_instance.store = AsyncMock(return_value=None)
@@ -2756,8 +3175,20 @@ class TestExecuteDaxPipelineRetryPaths:
             "dataset_id": DS_ID,
             "default_filters": {},
         }
-        exec_result = {"success": True, "data": [], "row_count": 0, "columns": [], "error": None}
-        visual_refs = [{"report_name": "Sales Report", "measure": "Revenue", "page_name": "Overview"}]
+        exec_result = {
+            "success": True,
+            "data": [],
+            "row_count": 0,
+            "columns": [],
+            "error": None,
+        }
+        visual_refs = [
+            {
+                "report_name": "Sales Report",
+                "measure": "Revenue",
+                "page_name": "Overview",
+            }
+        ]
 
         config = {
             "user_question": "revenue?",
@@ -2768,15 +3199,23 @@ class TestExecuteDaxPipelineRetryPaths:
             "include_visual_references": True,
         }
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(self.tool, "_resolve_model_context", return_value=model_ctx), \
-             patch.object(self.tool, "_generate_dax_with_llm",
-                          return_value="EVALUATE\nSUMMARIZECOLUMNS(\"R\", [Revenue])"), \
-             patch.object(self.tool, "_execute_dax_query", return_value=exec_result), \
-             patch.object(self.tool, "_find_visual_references",
-                          return_value=visual_refs), \
-             patch.object(self.tool, "_save_to_conversion_history", return_value=None), \
-             patch("src.services.tools.powerbi_semantic_model_dax_tool.DaxRagRetriever") as mock_rag:
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(self.tool, "_resolve_model_context", return_value=model_ctx),
+            patch.object(
+                self.tool,
+                "_generate_dax_with_llm",
+                return_value='EVALUATE\nSUMMARIZECOLUMNS("R", [Revenue])',
+            ),
+            patch.object(self.tool, "_execute_dax_query", return_value=exec_result),
+            patch.object(
+                self.tool, "_find_visual_references", return_value=visual_refs
+            ),
+            patch.object(self.tool, "_save_to_conversion_history", return_value=None),
+            patch(
+                "src.services.tools.powerbi_semantic_model_dax_tool.DaxRagRetriever"
+            ) as mock_rag,
+        ):
             mock_rag_instance = MagicMock()
             mock_rag_instance.retrieve = AsyncMock(return_value=[])
             mock_rag_instance.store = AsyncMock(return_value=None)
@@ -2807,10 +3246,14 @@ class TestExecuteDaxPipelineRetryPaths:
             "include_visual_references": False,
         }
 
-        with patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN), \
-             patch.object(self.tool, "_resolve_model_context", return_value=model_ctx), \
-             patch.object(self.tool, "_save_to_conversion_history", return_value=None), \
-             patch("src.services.tools.powerbi_semantic_model_dax_tool.DaxRagRetriever") as mock_rag:
+        with (
+            patch.object(self.tool, "_get_access_token", return_value=ACCESS_TOKEN),
+            patch.object(self.tool, "_resolve_model_context", return_value=model_ctx),
+            patch.object(self.tool, "_save_to_conversion_history", return_value=None),
+            patch(
+                "src.services.tools.powerbi_semantic_model_dax_tool.DaxRagRetriever"
+            ) as mock_rag,
+        ):
             mock_rag_instance = MagicMock()
             mock_rag_instance.retrieve = AsyncMock(return_value=[])
             mock_rag.return_value = mock_rag_instance
@@ -2825,6 +3268,7 @@ class TestExecuteDaxPipelineRetryPaths:
 # _format_output — llm_prompt shown in output
 # ===========================================================================
 
+
 class TestFormatOutputWithLlmPrompt:
     """Test that llm_prompt appears in markdown output."""
 
@@ -2836,14 +3280,22 @@ class TestFormatOutputWithLlmPrompt:
             "dataset_id": DS_ID,
             "model_context": {"measures": [], "tables": [], "relationships": []},
             "generated_dax": "EVALUATE {[Revenue]}",
-            "dax_execution": {"success": True, "data": [], "row_count": 0, "error": None},
+            "dax_execution": {
+                "success": True,
+                "data": [],
+                "row_count": 0,
+                "error": None,
+            },
             "visual_references": [],
             "errors": [],
             "dax_attempts": [],
         }
 
     def test_llm_prompt_shown_in_markdown(self):
-        results = {**self.base_results, "llm_prompt": "System:\nYou are...\n\nUser:\nRevenue?"}
+        results = {
+            **self.base_results,
+            "llm_prompt": "System:\nYou are...\n\nUser:\nRevenue?",
+        }
         result = self.tool._format_output(results, "markdown")
         assert "LLM Prompt" in result or "prompt" in result.lower()
 

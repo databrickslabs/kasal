@@ -4,30 +4,37 @@ Unit tests for schedule schemas.
 Tests the functionality of Pydantic schemas for schedule operations
 including validation, serialization, and field constraints.
 """
-import pytest
+
 from datetime import datetime
-from uuid import uuid4, UUID
+from typing import Any, Dict, List
+from uuid import UUID, uuid4
+
+import pytest
 from pydantic import ValidationError
-from typing import Dict, Any, List
 
 from src.schemas.schedule import (
-    ScheduleBase, ScheduleCreate, ScheduleCreateFromExecution,
-    ScheduleUpdate, ScheduleResponse, ScheduleListResponse,
-    ToggleResponse, CrewConfig
+    CrewConfig,
+    ScheduleBase,
+    ScheduleCreate,
+    ScheduleCreateFromExecution,
+    ScheduleListResponse,
+    ScheduleResponse,
+    ScheduleUpdate,
+    ToggleResponse,
 )
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
 
 
 class TestScheduleBase:
     """Test cases for ScheduleBase schema."""
-    
+
     def test_valid_schedule_base_minimal(self):
         """Test ScheduleBase with minimal required fields."""
         data = {
             "name": "test-schedule",
             "cron_expression": "0 9 * * MON-FRI",
             "agents_yaml": {"agent1": {"role": "analyst"}},
-            "tasks_yaml": {"task1": {"description": "Analysis task"}}
+            "tasks_yaml": {"task1": {"description": "Analysis task"}},
         }
         schedule = ScheduleBase(**data)
         assert schedule.name == "test-schedule"
@@ -67,15 +74,15 @@ class TestScheduleBase:
             "cron_expression": "0 */6 * * *",
             "agents_yaml": {
                 "agent1": {"role": "researcher", "goal": "research topics"},
-                "agent2": {"role": "writer", "goal": "write reports"}
+                "agent2": {"role": "writer", "goal": "write reports"},
             },
             "tasks_yaml": {
                 "task1": {"description": "Research task", "agent": "agent1"},
-                "task2": {"description": "Writing task", "agent": "agent2"}
+                "task2": {"description": "Writing task", "agent": "agent2"},
             },
             "inputs": {"topic": "AI trends", "format": "report"},
             "is_active": False,
-            "model": "gpt-4"
+            "model": "gpt-4",
         }
         schedule = ScheduleBase(**data)
         assert schedule.name == "full-schedule"
@@ -92,7 +99,9 @@ class TestScheduleBase:
             ScheduleBase(name="test-schedule")
 
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "cron_expression" in missing_fields
 
     def test_schedule_base_crew_requires_agents_and_tasks(self):
@@ -101,12 +110,14 @@ class TestScheduleBase:
         data = {
             "name": "empty-schedule",
             "cron_expression": "0 12 * * *",
-            "execution_type": "crew"
+            "execution_type": "crew",
             # No agents_yaml or tasks_yaml
         }
         with pytest.raises(ValidationError) as exc_info:
             ScheduleBase(**data)
-        assert "agents_yaml and tasks_yaml are required for crew executions" in str(exc_info.value)
+        assert "agents_yaml and tasks_yaml are required for crew executions" in str(
+            exc_info.value
+        )
 
     def test_schedule_base_flow_allows_empty_yaml_fields(self):
         """Test ScheduleBase flow execution allows empty YAML dictionaries."""
@@ -114,7 +125,7 @@ class TestScheduleBase:
             "name": "flow-schedule",
             "cron_expression": "0 12 * * *",
             "execution_type": "flow",
-            "flow_id": uuid4()
+            "flow_id": uuid4(),
         }
         schedule = ScheduleBase(**data)
         assert schedule.agents_yaml is None
@@ -127,7 +138,7 @@ class TestScheduleBase:
             "cron_expression": "0 8 * * *",
             "agents_yaml": {"agent": {"role": "test"}},
             "tasks_yaml": {"task": {"description": "test"}},
-            "is_active": "false"
+            "is_active": "false",
         }
         schedule = ScheduleBase(**data)
         assert schedule.is_active is False
@@ -135,28 +146,28 @@ class TestScheduleBase:
 
 class TestScheduleCreate:
     """Test cases for ScheduleCreate schema."""
-    
+
     def test_schedule_create_inheritance(self):
         """Test that ScheduleCreate inherits from ScheduleBase."""
         data = {
             "name": "create-schedule",
             "cron_expression": "0 10 * * *",
             "agents_yaml": {"agent": {"role": "creator"}},
-            "tasks_yaml": {"task": {"description": "creation task"}}
+            "tasks_yaml": {"task": {"description": "creation task"}},
         }
         create_schedule = ScheduleCreate(**data)
-        
+
         # Should have all base class attributes
-        assert hasattr(create_schedule, 'name')
-        assert hasattr(create_schedule, 'cron_expression')
-        assert hasattr(create_schedule, 'agents_yaml')
-        assert hasattr(create_schedule, 'tasks_yaml')
-        assert hasattr(create_schedule, 'inputs')
-        assert hasattr(create_schedule, 'is_active')
-        assert hasattr(create_schedule, 'model')
+        assert hasattr(create_schedule, "name")
+        assert hasattr(create_schedule, "cron_expression")
+        assert hasattr(create_schedule, "agents_yaml")
+        assert hasattr(create_schedule, "tasks_yaml")
+        assert hasattr(create_schedule, "inputs")
+        assert hasattr(create_schedule, "is_active")
+        assert hasattr(create_schedule, "model")
         # The planner was removed, so the inherited surface must NOT include it.
-        assert not hasattr(create_schedule, 'planning')
-        
+        assert not hasattr(create_schedule, "planning")
+
         # Should behave like base class
         assert create_schedule.name == "create-schedule"
         assert create_schedule.cron_expression == "0 10 * * *"
@@ -170,7 +181,7 @@ class TestScheduleCreate:
             "agents_yaml": {"custom_agent": {"role": "custom"}},
             "tasks_yaml": {"custom_task": {"description": "custom task"}},
             "inputs": {"custom_input": "value"},
-            "model": "claude-3"
+            "model": "claude-3",
         }
         create_schedule = ScheduleCreate(**data)
         assert create_schedule.name == "custom-create-schedule"
@@ -180,14 +191,14 @@ class TestScheduleCreate:
 
 class TestScheduleCreateFromExecution:
     """Test cases for ScheduleCreateFromExecution schema."""
-    
+
     def test_valid_schedule_create_from_execution(self):
         """Test ScheduleCreateFromExecution with all fields."""
         data = {
             "name": "execution-schedule",
             "cron_expression": "0 16 * * *",
             "execution_id": 123,
-            "is_active": False
+            "is_active": False,
         }
         schedule = ScheduleCreateFromExecution(**data)
         assert schedule.name == "execution-schedule"
@@ -200,7 +211,7 @@ class TestScheduleCreateFromExecution:
         data = {
             "name": "default-execution-schedule",
             "cron_expression": "0 18 * * *",
-            "execution_id": 456
+            "execution_id": 456,
         }
         schedule = ScheduleCreateFromExecution(**data)
         assert schedule.name == "default-execution-schedule"
@@ -211,12 +222,13 @@ class TestScheduleCreateFromExecution:
         """Test ScheduleCreateFromExecution validation with missing fields."""
         with pytest.raises(ValidationError) as exc_info:
             ScheduleCreateFromExecution(
-                name="incomplete-schedule",
-                cron_expression="0 20 * * *"
+                name="incomplete-schedule", cron_expression="0 20 * * *"
             )
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "execution_id" in missing_fields
 
     def test_execution_id_type_validation(self):
@@ -224,7 +236,7 @@ class TestScheduleCreateFromExecution:
         data = {
             "name": "type-test-schedule",
             "cron_expression": "0 22 * * *",
-            "execution_id": "123"  # String that can be converted to int
+            "execution_id": "123",  # String that can be converted to int
         }
         schedule = ScheduleCreateFromExecution(**data)
         assert schedule.execution_id == 123
@@ -233,28 +245,28 @@ class TestScheduleCreateFromExecution:
 
 class TestScheduleUpdate:
     """Test cases for ScheduleUpdate schema."""
-    
+
     def test_schedule_update_inheritance(self):
         """Test that ScheduleUpdate inherits from ScheduleBase."""
         data = {
             "name": "update-schedule",
             "cron_expression": "0 11 * * *",
             "agents_yaml": {"updated_agent": {"role": "updater"}},
-            "tasks_yaml": {"updated_task": {"description": "update task"}}
+            "tasks_yaml": {"updated_task": {"description": "update task"}},
         }
         update_schedule = ScheduleUpdate(**data)
-        
+
         # Should have all base class attributes
-        assert hasattr(update_schedule, 'name')
-        assert hasattr(update_schedule, 'cron_expression')
-        assert hasattr(update_schedule, 'agents_yaml')
-        assert hasattr(update_schedule, 'tasks_yaml')
-        assert hasattr(update_schedule, 'inputs')
-        assert hasattr(update_schedule, 'is_active')
-        assert hasattr(update_schedule, 'model')
+        assert hasattr(update_schedule, "name")
+        assert hasattr(update_schedule, "cron_expression")
+        assert hasattr(update_schedule, "agents_yaml")
+        assert hasattr(update_schedule, "tasks_yaml")
+        assert hasattr(update_schedule, "inputs")
+        assert hasattr(update_schedule, "is_active")
+        assert hasattr(update_schedule, "model")
         # The planner was removed, so the inherited surface must NOT include it.
-        assert not hasattr(update_schedule, 'planning')
-        
+        assert not hasattr(update_schedule, "planning")
+
         # Should behave like base class
         assert update_schedule.name == "update-schedule"
         assert update_schedule.cron_expression == "0 11 * * *"
@@ -264,7 +276,7 @@ class TestScheduleUpdate:
         data = {
             "name": "partial-update-schedule",
             "is_active": False,
-            "model": "gpt-3.5-turbo"
+            "model": "gpt-3.5-turbo",
         }
         # Note: ScheduleUpdate inherits from ScheduleBase, so required fields are still required
         # This test would need to include all required fields from ScheduleBase
@@ -274,12 +286,12 @@ class TestScheduleUpdate:
 
 class TestScheduleResponse:
     """Test cases for ScheduleResponse schema."""
-    
+
     def test_valid_schedule_response(self):
         """Test ScheduleResponse with all required fields."""
         now = datetime.now()
         next_run = datetime(2023, 12, 25, 9, 0, 0)
-        
+
         data = {
             "id": 1,
             "name": "response-schedule",
@@ -289,7 +301,7 @@ class TestScheduleResponse:
             "last_run_at": now,
             "next_run_at": next_run,
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         response = ScheduleResponse(**data)
         assert response.id == 1
@@ -299,17 +311,17 @@ class TestScheduleResponse:
         assert response.next_run_at == next_run
         assert response.created_at == now
         assert response.updated_at == now
-        
+
         # Should inherit all base class defaults
         assert response.inputs == {}
         assert response.is_active is True
         assert response.model == DEFAULT_ENGINE_MODEL
-        assert not hasattr(response, 'planning')
+        assert not hasattr(response, "planning")
 
     def test_schedule_response_config(self):
         """Test ScheduleResponse model config."""
-        assert hasattr(ScheduleResponse, 'model_config')
-        assert ScheduleResponse.model_config['from_attributes'] is True
+        assert hasattr(ScheduleResponse, "model_config")
+        assert ScheduleResponse.model_config["from_attributes"] is True
 
     def test_schedule_response_missing_fields(self):
         """Test ScheduleResponse validation with missing fields."""
@@ -321,11 +333,13 @@ class TestScheduleResponse:
                 agents_yaml={},
                 tasks_yaml={},
                 created_at=now,
-                updated_at=now
+                updated_at=now,
             )
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "id" in missing_fields
 
     def test_schedule_response_optional_timestamps(self):
@@ -338,7 +352,7 @@ class TestScheduleResponse:
             "agents_yaml": {"agent": {"role": "test"}},
             "tasks_yaml": {"task": {"description": "test"}},
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         response = ScheduleResponse(**data)
         assert response.id == 2
@@ -356,7 +370,7 @@ class TestScheduleResponse:
             "last_run_at": "2023-01-01T12:00:00",
             "next_run_at": "2023-01-02T12:00:00",
             "created_at": "2023-01-01T10:00:00",
-            "updated_at": "2023-01-01T11:00:00"
+            "updated_at": "2023-01-01T11:00:00",
         }
         response = ScheduleResponse(**data)
         assert response.id == 3
@@ -368,7 +382,7 @@ class TestScheduleResponse:
 
 class TestScheduleListResponse:
     """Test cases for ScheduleListResponse schema."""
-    
+
     def test_valid_schedule_list_response(self):
         """Test ScheduleListResponse with all fields."""
         now = datetime.now()
@@ -380,7 +394,7 @@ class TestScheduleListResponse:
                 agents_yaml={"agent1": {"role": "agent1"}},
                 tasks_yaml={"task1": {"description": "task1"}},
                 created_at=now,
-                updated_at=now
+                updated_at=now,
             ),
             ScheduleResponse(
                 id=2,
@@ -389,16 +403,13 @@ class TestScheduleListResponse:
                 agents_yaml={"agent2": {"role": "agent2"}},
                 tasks_yaml={"task2": {"description": "task2"}},
                 created_at=now,
-                updated_at=now
-            )
+                updated_at=now,
+            ),
         ]
-        
-        data = {
-            "schedules": schedules,
-            "count": 2
-        }
+
+        data = {"schedules": schedules, "count": 2}
         list_response = ScheduleListResponse(**data)
-        
+
         assert len(list_response.schedules) == 2
         assert list_response.count == 2
         assert list_response.schedules[0].name == "schedule-1"
@@ -406,10 +417,7 @@ class TestScheduleListResponse:
 
     def test_empty_schedule_list_response(self):
         """Test ScheduleListResponse with empty schedule list."""
-        data = {
-            "schedules": [],
-            "count": 0
-        }
+        data = {"schedules": [], "count": 0}
         list_response = ScheduleListResponse(**data)
         assert len(list_response.schedules) == 0
         assert list_response.count == 0
@@ -425,21 +433,23 @@ class TestScheduleListResponse:
                 agents_yaml={},
                 tasks_yaml={},
                 created_at=now,
-                updated_at=now
+                updated_at=now,
             )
         ]
-        
+
         with pytest.raises(ValidationError) as exc_info:
             ScheduleListResponse(schedules=schedules)
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "count" in missing_fields
 
 
 class TestToggleResponse:
     """Test cases for ToggleResponse schema."""
-    
+
     def test_toggle_response_inheritance(self):
         """Test that ToggleResponse inherits from ScheduleResponse."""
         now = datetime.now()
@@ -451,20 +461,20 @@ class TestToggleResponse:
             "tasks_yaml": {"toggle_task": {"description": "toggle task"}},
             "is_active": False,
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         toggle_response = ToggleResponse(**data)
-        
+
         # Should have all ScheduleResponse attributes
-        assert hasattr(toggle_response, 'id')
-        assert hasattr(toggle_response, 'name')
-        assert hasattr(toggle_response, 'cron_expression')
-        assert hasattr(toggle_response, 'agents_yaml')
-        assert hasattr(toggle_response, 'tasks_yaml')
-        assert hasattr(toggle_response, 'is_active')
-        assert hasattr(toggle_response, 'created_at')
-        assert hasattr(toggle_response, 'updated_at')
-        
+        assert hasattr(toggle_response, "id")
+        assert hasattr(toggle_response, "name")
+        assert hasattr(toggle_response, "cron_expression")
+        assert hasattr(toggle_response, "agents_yaml")
+        assert hasattr(toggle_response, "tasks_yaml")
+        assert hasattr(toggle_response, "is_active")
+        assert hasattr(toggle_response, "created_at")
+        assert hasattr(toggle_response, "updated_at")
+
         # Should behave like ScheduleResponse
         assert toggle_response.id == 5
         assert toggle_response.name == "toggle-schedule"
@@ -473,12 +483,12 @@ class TestToggleResponse:
 
 class TestCrewConfig:
     """Test cases for CrewConfig schema."""
-    
+
     def test_valid_crew_config_minimal(self):
         """Test CrewConfig with minimal required fields."""
         data = {
             "agents_yaml": {"agent": {"role": "worker"}},
-            "tasks_yaml": {"task": {"description": "work task"}}
+            "tasks_yaml": {"task": {"description": "work task"}},
         }
         config = CrewConfig(**data)
         assert config.agents_yaml == {"agent": {"role": "worker"}}
@@ -507,14 +517,14 @@ class TestCrewConfig:
         data = {
             "agents_yaml": {
                 "analyst": {"role": "data_analyst", "goal": "analyze data"},
-                "reporter": {"role": "report_writer", "goal": "write reports"}
+                "reporter": {"role": "report_writer", "goal": "write reports"},
             },
             "tasks_yaml": {
                 "analysis": {"description": "analyze the data", "agent": "analyst"},
-                "reporting": {"description": "write the report", "agent": "reporter"}
+                "reporting": {"description": "write the report", "agent": "reporter"},
             },
             "inputs": {"dataset": "sales_data.csv", "period": "Q4"},
-            "model": "gpt-4"
+            "model": "gpt-4",
         }
         config = CrewConfig(**data)
         assert len(config.agents_yaml) == 2
@@ -533,10 +543,7 @@ class TestCrewConfig:
 
     def test_crew_config_empty_yaml_fields(self):
         """Test CrewConfig with empty YAML dictionaries."""
-        data = {
-            "agents_yaml": {},
-            "tasks_yaml": {}
-        }
+        data = {"agents_yaml": {}, "tasks_yaml": {}}
         config = CrewConfig(**data)
         assert config.agents_yaml == {}
         assert config.tasks_yaml == {}
@@ -545,7 +552,7 @@ class TestCrewConfig:
         """Test CrewConfig default values for string and dict fields."""
         data = {
             "agents_yaml": {"agent": {"role": "default_test"}},
-            "tasks_yaml": {"task": {"description": "default test task"}}
+            "tasks_yaml": {"task": {"description": "default test task"}},
         }
         config = CrewConfig(**data)
         assert config.model == DEFAULT_ENGINE_MODEL
@@ -555,7 +562,7 @@ class TestCrewConfig:
 
 class TestSchemaIntegration:
     """Integration tests for schedule schema interactions."""
-    
+
     def test_schedule_creation_workflow(self):
         """Test complete schedule creation workflow."""
         # Create schedule
@@ -564,17 +571,23 @@ class TestSchemaIntegration:
             "cron_expression": "0 8 * * MON-FRI",
             "agents_yaml": {
                 "researcher": {"role": "research_agent", "goal": "research topics"},
-                "writer": {"role": "content_writer", "goal": "write articles"}
+                "writer": {"role": "content_writer", "goal": "write articles"},
             },
             "tasks_yaml": {
-                "research": {"description": "research latest trends", "agent": "researcher"},
-                "writing": {"description": "write article based on research", "agent": "writer"}
+                "research": {
+                    "description": "research latest trends",
+                    "agent": "researcher",
+                },
+                "writing": {
+                    "description": "write article based on research",
+                    "agent": "writer",
+                },
             },
             "inputs": {"topic": "AI trends", "length": "2000 words"},
-            "model": "gpt-4"
+            "model": "gpt-4",
         }
         create_schedule = ScheduleCreate(**create_data)
-        
+
         # Update schedule
         update_data = {
             "name": "updated-workflow-schedule",
@@ -582,14 +595,14 @@ class TestSchemaIntegration:
             "agents_yaml": create_data["agents_yaml"],
             "tasks_yaml": create_data["tasks_yaml"],
             "is_active": False,
-            "model": "claude-3"
+            "model": "claude-3",
         }
         update_schedule = ScheduleUpdate(**update_data)
-        
+
         # Simulate database entity
         now = datetime.now()
         next_run = datetime(2023, 12, 25, 9, 0, 0)
-        
+
         db_data = {
             "id": 1,
             "name": update_data["name"],
@@ -601,13 +614,13 @@ class TestSchemaIntegration:
             "model": update_data["model"],
             "next_run_at": next_run,
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         schedule_response = ScheduleResponse(**db_data)
-        
+
         # Toggle response
         toggle_response = ToggleResponse(**db_data)
-        
+
         # Verify the complete workflow
         assert create_schedule.name == "workflow-schedule"
         assert create_schedule.model == "gpt-4"
@@ -627,24 +640,28 @@ class TestSchemaIntegration:
             "name": "execution-based-schedule",
             "cron_expression": "0 14 * * *",
             "execution_id": 789,
-            "is_active": True
+            "is_active": True,
         }
         from_execution_schedule = ScheduleCreateFromExecution(**from_execution_data)
-        
+
         # Simulate conversion to full schedule response
         now = datetime.now()
         response_data = {
             "id": 2,
             "name": from_execution_schedule.name,
             "cron_expression": from_execution_schedule.cron_expression,
-            "agents_yaml": {"execution_agent": {"role": "executor"}},  # Would come from execution
-            "tasks_yaml": {"execution_task": {"description": "execute task"}},  # Would come from execution
+            "agents_yaml": {
+                "execution_agent": {"role": "executor"}
+            },  # Would come from execution
+            "tasks_yaml": {
+                "execution_task": {"description": "execute task"}
+            },  # Would come from execution
             "is_active": from_execution_schedule.is_active,
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         schedule_response = ScheduleResponse(**response_data)
-        
+
         # Verify workflow
         assert from_execution_schedule.execution_id == 789
         assert from_execution_schedule.is_active is True
@@ -660,30 +677,30 @@ class TestSchemaIntegration:
                 "data_analyst": {
                     "role": "Senior Data Analyst",
                     "goal": "Analyze business data and provide insights",
-                    "backstory": "Expert in data analysis with 10 years experience"
+                    "backstory": "Expert in data analysis with 10 years experience",
                 },
                 "report_writer": {
-                    "role": "Business Report Writer", 
+                    "role": "Business Report Writer",
                     "goal": "Create comprehensive business reports",
-                    "backstory": "Professional writer specializing in business communication"
-                }
+                    "backstory": "Professional writer specializing in business communication",
+                },
             },
             tasks_yaml={
                 "data_analysis": {
                     "description": "Analyze the provided dataset for trends and insights",
                     "agent": "data_analyst",
-                    "expected_output": "Data analysis report with key findings"
+                    "expected_output": "Data analysis report with key findings",
                 },
                 "report_creation": {
                     "description": "Create a business report based on the analysis",
                     "agent": "report_writer",
-                    "expected_output": "Professional business report"
-                }
+                    "expected_output": "Professional business report",
+                },
             },
             inputs={"data_source": "quarterly_sales", "format": "executive_summary"},
-            model="gpt-4"
+            model="gpt-4",
         )
-        
+
         # Use crew config in schedule
         schedule_data = {
             "name": "business-analysis-schedule",
@@ -691,10 +708,10 @@ class TestSchemaIntegration:
             "agents_yaml": crew_config.agents_yaml,
             "tasks_yaml": crew_config.tasks_yaml,
             "inputs": crew_config.inputs,
-            "model": crew_config.model
+            "model": crew_config.model,
         }
         schedule = ScheduleCreate(**schedule_data)
-        
+
         # Verify integration
         assert len(schedule.agents_yaml) == 2
         assert len(schedule.tasks_yaml) == 2
@@ -708,7 +725,7 @@ class TestSchemaIntegration:
     def test_schedule_list_management(self):
         """Test schedule list management workflow."""
         now = datetime.now()
-        
+
         # Create multiple schedules
         schedules = []
         for i in range(3):
@@ -720,16 +737,13 @@ class TestSchemaIntegration:
                 "tasks_yaml": {f"task{i + 1}": {"description": f"task {i + 1}"}},
                 "is_active": i % 2 == 0,  # Alternate active/inactive
                 "created_at": now,
-                "updated_at": now
+                "updated_at": now,
             }
             schedules.append(ScheduleResponse(**schedule_data))
-        
+
         # Create list response
-        list_response = ScheduleListResponse(
-            schedules=schedules,
-            count=len(schedules)
-        )
-        
+        list_response = ScheduleListResponse(schedules=schedules, count=len(schedules))
+
         # Verify list management
         assert list_response.count == 3
         assert len(list_response.schedules) == 3
@@ -737,7 +751,7 @@ class TestSchemaIntegration:
         assert list_response.schedules[0].is_active is True
         assert list_response.schedules[1].is_active is False
         assert list_response.schedules[2].is_active is True
-        
+
         # Test filtering active schedules
         active_schedules = [s for s in list_response.schedules if s.is_active]
         assert len(active_schedules) == 2
@@ -754,7 +768,7 @@ class TestScheduleBaseFlowExecution:
             "name": "crew-schedule",
             "cron_expression": "0 9 * * *",
             "agents_yaml": {"agent1": {"role": "analyst"}},
-            "tasks_yaml": {"task1": {"description": "analysis"}}
+            "tasks_yaml": {"task1": {"description": "analysis"}},
         }
         schedule = ScheduleBase(**data)
         assert schedule.execution_type == "crew"
@@ -766,7 +780,7 @@ class TestScheduleBaseFlowExecution:
             "name": "flow-schedule",
             "cron_expression": "0 10 * * *",
             "execution_type": "flow",
-            "flow_id": flow_uuid
+            "flow_id": flow_uuid,
         }
         schedule = ScheduleBase(**data)
         assert schedule.execution_type == "flow"
@@ -781,7 +795,7 @@ class TestScheduleBaseFlowExecution:
             "cron_expression": "0 11 * * *",
             "execution_type": "flow",
             "nodes": nodes,
-            "edges": edges
+            "edges": edges,
         }
         schedule = ScheduleBase(**data)
         assert schedule.execution_type == "flow"
@@ -793,22 +807,26 @@ class TestScheduleBaseFlowExecution:
         data = {
             "name": "invalid-flow-schedule",
             "cron_expression": "0 12 * * *",
-            "execution_type": "flow"
+            "execution_type": "flow",
         }
         with pytest.raises(ValidationError) as exc_info:
             ScheduleBase(**data)
-        assert "flow_id or nodes/edges are required for flow executions" in str(exc_info.value)
+        assert "flow_id or nodes/edges are required for flow executions" in str(
+            exc_info.value
+        )
 
     def test_schedule_base_crew_validation_requires_agents_tasks(self):
         """Test ScheduleBase crew execution requires agents_yaml and tasks_yaml."""
         data = {
             "name": "invalid-crew-schedule",
             "cron_expression": "0 13 * * *",
-            "execution_type": "crew"
+            "execution_type": "crew",
         }
         with pytest.raises(ValidationError) as exc_info:
             ScheduleBase(**data)
-        assert "agents_yaml and tasks_yaml are required for crew executions" in str(exc_info.value)
+        assert "agents_yaml and tasks_yaml are required for crew executions" in str(
+            exc_info.value
+        )
 
     def test_schedule_base_flow_config_field(self):
         """Test ScheduleBase with flow_config."""
@@ -818,7 +836,7 @@ class TestScheduleBaseFlowExecution:
             "cron_expression": "0 14 * * *",
             "execution_type": "flow",
             "flow_id": uuid4(),
-            "flow_config": flow_config
+            "flow_config": flow_config,
         }
         schedule = ScheduleBase(**data)
         assert schedule.flow_config == flow_config
@@ -830,7 +848,7 @@ class TestScheduleBaseFlowExecution:
             "cron_expression": "0 15 * * *",
             "execution_type": "crew",
             "agents_yaml": {"agent": {"role": "test"}},
-            "tasks_yaml": {"task": {"description": "test"}}
+            "tasks_yaml": {"task": {"description": "test"}},
         }
         schedule = ScheduleBase(**data)
         assert schedule.flow_id is None
@@ -859,7 +877,7 @@ class TestScheduleResponseFlowFields:
             "edges": edges,
             "flow_config": {"checkpoint": True},
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         response = ScheduleResponse(**data)
 
@@ -880,7 +898,7 @@ class TestScheduleResponseFlowFields:
             "agents_yaml": {"agent": {"role": "test"}},
             "tasks_yaml": {"task": {"description": "test"}},
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         response = ScheduleResponse(**data)
 
@@ -897,7 +915,7 @@ class TestCrewConfigFlowSupport:
         """Test CrewConfig default execution type is 'crew'."""
         config = CrewConfig(
             agents_yaml={"agent": {"role": "test"}},
-            tasks_yaml={"task": {"description": "test"}}
+            tasks_yaml={"task": {"description": "test"}},
         )
         assert config.execution_type == "crew"
 
@@ -905,10 +923,7 @@ class TestCrewConfigFlowSupport:
         """Test CrewConfig with flow execution type."""
         flow_uuid = uuid4()
         config = CrewConfig(
-            execution_type="flow",
-            flow_id=flow_uuid,
-            nodes=[{"id": "node1"}],
-            edges=[]
+            execution_type="flow", flow_id=flow_uuid, nodes=[{"id": "node1"}], edges=[]
         )
         assert config.execution_type == "flow"
         assert config.flow_id == flow_uuid
@@ -918,7 +933,7 @@ class TestCrewConfigFlowSupport:
         flow_uuid = uuid4()
         nodes = [
             {"id": "crew1", "type": "crew", "data": {"name": "Research"}},
-            {"id": "crew2", "type": "crew", "data": {"name": "Analysis"}}
+            {"id": "crew2", "type": "crew", "data": {"name": "Analysis"}},
         ]
         edges = [{"id": "e1", "source": "crew1", "target": "crew2"}]
         flow_config = {"checkpoint_enabled": True, "max_concurrency": 3}
@@ -928,7 +943,7 @@ class TestCrewConfigFlowSupport:
             flow_id=flow_uuid,
             nodes=nodes,
             edges=edges,
-            flow_config=flow_config
+            flow_config=flow_config,
         )
 
         assert config.execution_type == "flow"
@@ -951,7 +966,7 @@ class TestCrewConfigFlowSupport:
         config = CrewConfig(
             execution_type="crew",
             agents_yaml={"agent": {"role": "test"}},
-            tasks_yaml={"task": {"description": "test"}}
+            tasks_yaml={"task": {"description": "test"}},
         )
 
         assert config.flow_id is None
@@ -970,7 +985,7 @@ class TestCrewConfigFlowSupport:
             execution_type="flow",
             flow_id=uuid4(),
             inputs={"topic": "AI", "depth": "detailed"},
-            model="gpt-4"
+            model="gpt-4",
         )
 
         assert config.inputs["topic"] == "AI"
@@ -981,10 +996,7 @@ class TestCrewConfigFlowSupport:
         """Test CrewConfig accepts UUID for flow_id."""
         flow_uuid = uuid4()
         config = CrewConfig(
-            execution_type="flow",
-            flow_id=flow_uuid,
-            nodes=[],
-            edges=[]
+            execution_type="flow", flow_id=flow_uuid, nodes=[], edges=[]
         )
 
         assert config.flow_id == flow_uuid
@@ -1001,7 +1013,7 @@ class TestScheduleCreateFlowExecution:
             "name": "new-flow-schedule",
             "cron_expression": "0 9 * * *",
             "execution_type": "flow",
-            "flow_id": flow_uuid
+            "flow_id": flow_uuid,
         }
         schedule = ScheduleCreate(**data)
 
@@ -1015,7 +1027,7 @@ class TestScheduleCreateFlowExecution:
             "cron_expression": "0 10 * * *",
             "execution_type": "flow",
             "nodes": [{"id": "node1"}],
-            "edges": [{"source": "node1", "target": "node2"}]
+            "edges": [{"source": "node1", "target": "node2"}],
         }
         schedule = ScheduleCreate(**data)
 
@@ -1033,7 +1045,7 @@ class TestScheduleUpdateFlowExecution:
             "name": "updated-flow-schedule",
             "cron_expression": "0 9 * * *",
             "execution_type": "flow",
-            "flow_id": uuid4()
+            "flow_id": uuid4(),
         }
         schedule = ScheduleUpdate(**data)
 
@@ -1049,7 +1061,7 @@ class TestScheduleUpdateFlowExecution:
             "cron_expression": "0 10 * * *",
             "execution_type": "flow",
             "nodes": new_nodes,
-            "edges": new_edges
+            "edges": new_edges,
         }
         schedule = ScheduleUpdate(**data)
 

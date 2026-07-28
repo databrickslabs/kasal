@@ -4,9 +4,10 @@ Comprehensive unit tests for services/crew_executor.py
 
 import asyncio
 import threading
-import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 # Reset singleton before each test
 import src.services.execution.thread_executor as crew_executor_module
@@ -15,6 +16,7 @@ import src.services.execution.thread_executor as crew_executor_module
 def _fresh_executor(max_workers=5):
     """Create a fresh CrewExecutor bypassing the singleton."""
     from concurrent.futures import ThreadPoolExecutor
+
     from src.services.execution.thread_executor import CrewExecutor
 
     executor = object.__new__(CrewExecutor)
@@ -40,6 +42,7 @@ class TestCrewExecutorInit:
 
     def test_creates_thread_pool(self, executor):
         from concurrent.futures import ThreadPoolExecutor
+
         assert isinstance(executor._executor, ThreadPoolExecutor)
 
     def test_active_executions_empty(self, executor):
@@ -62,6 +65,7 @@ class TestCrewExecutorInit:
 
     def test_second_init_is_noop(self):
         from src.services.execution.thread_executor import CrewExecutor
+
         # Test that calling __init__ again on an already-initialized executor is a no-op
         ex = _fresh_executor()
         original_executor = ex._executor
@@ -305,6 +309,7 @@ class TestRunCrew:
 
         def slow_kickoff():
             import time
+
             time.sleep(10)
 
         mock_crew.kickoff.side_effect = slow_kickoff
@@ -385,13 +390,23 @@ class TestRunCrewWithExecutor:
 
     @pytest.mark.asyncio
     async def test_calls_global_executor(self):
-        from src.services.execution.thread_executor import run_crew_with_executor, crew_executor
+        from src.services.execution.thread_executor import (
+            crew_executor,
+            run_crew_with_executor,
+        )
 
         mock_crew = MagicMock()
         mock_crew.kickoff.return_value = "helper result"
 
-        with patch.object(crew_executor, "run_crew", new_callable=AsyncMock, return_value="helper result") as mock_run:
-            result = await run_crew_with_executor("exec-helper", mock_crew, inputs={"k": "v"})
+        with patch.object(
+            crew_executor,
+            "run_crew",
+            new_callable=AsyncMock,
+            return_value="helper result",
+        ) as mock_run:
+            result = await run_crew_with_executor(
+                "exec-helper", mock_crew, inputs={"k": "v"}
+            )
 
         mock_run.assert_called_once_with(
             execution_id="exec-helper",

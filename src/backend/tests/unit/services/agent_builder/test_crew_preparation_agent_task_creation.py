@@ -3,21 +3,23 @@ Unit tests for src/engines/kasal/crew_preparation.py
 
 Targets uncovered lines (68% → 85%+).
 """
+
 import os
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from src.services.agent_builder.crew_preparation import (
     CrewPreparation,
-    validate_crew_config,
     handle_crew_error,
     process_crew_output,
+    validate_crew_config,
 )
-
 
 # ---------------------------------------------------------------------------
 # Module-level functions
 # ---------------------------------------------------------------------------
+
 
 class TestValidateCrewConfig:
     def test_valid_config(self):
@@ -77,6 +79,7 @@ class TestProcessCrewOutput:
 # CrewPreparation.__init__
 # ---------------------------------------------------------------------------
 
+
 class TestCrewPreparationInit:
     def test_init_basic(self):
         config = {"agents": [], "tasks": []}
@@ -111,6 +114,7 @@ class TestCrewPreparationInit:
 # CrewPreparation.cleanup
 # ---------------------------------------------------------------------------
 
+
 class TestCrewPreparationCleanup:
     def test_cleanup_restores_original_storage_dir(self):
         config = {"agents": [], "tasks": []}
@@ -141,6 +145,7 @@ class TestCrewPreparationCleanup:
 # CrewPreparation.execute
 # ---------------------------------------------------------------------------
 
+
 class TestCrewPreparationExecute:
     @pytest.mark.asyncio
     async def test_execute_without_crew_returns_error(self):
@@ -157,12 +162,21 @@ class TestCrewPreparationExecute:
         cp = CrewPreparation(config=config)
         mock_crew = MagicMock()
         mock_result = {"result": "crew output", "type": "processed"}
-        mock_crew.kickoff_async = AsyncMock(return_value=mock_result)  # CrewAI 1.14.5 uses async kickoff
+        mock_crew.kickoff_async = AsyncMock(
+            return_value=mock_result
+        )  # CrewAI 1.14.5 uses async kickoff
         cp.crew = mock_crew
 
-        with patch("src.services.agent_builder.crew_preparation.process_crew_output",
-                   new_callable=AsyncMock) as mock_process, \
-             patch("src.services.agent_builder.crew_preparation.is_data_missing", return_value=False):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.process_crew_output",
+                new_callable=AsyncMock,
+            ) as mock_process,
+            patch(
+                "src.services.agent_builder.crew_preparation.is_data_missing",
+                return_value=False,
+            ),
+        ):
             mock_process.return_value = mock_result
             result = await cp.execute()
 
@@ -176,9 +190,16 @@ class TestCrewPreparationExecute:
         mock_crew.kickoff = AsyncMock(return_value={"result": "output"})
         cp.crew = mock_crew
 
-        with patch("src.services.agent_builder.crew_preparation.process_crew_output",
-                   new_callable=AsyncMock) as mock_process, \
-             patch("src.services.agent_builder.crew_preparation.is_data_missing", return_value=True):
+        with (
+            patch(
+                "src.services.agent_builder.crew_preparation.process_crew_output",
+                new_callable=AsyncMock,
+            ) as mock_process,
+            patch(
+                "src.services.agent_builder.crew_preparation.is_data_missing",
+                return_value=True,
+            ),
+        ):
             mock_process.return_value = {"result": "output"}
             result = await cp.execute()
 
@@ -200,14 +221,19 @@ class TestCrewPreparationExecute:
 # CrewPreparation._should_disable_memory_for_agent
 # ---------------------------------------------------------------------------
 
+
 class TestShouldDisableMemoryForAgent:
     def test_memory_explicitly_false(self):
         cp = CrewPreparation(config={"agents": [], "tasks": []})
-        assert cp._should_disable_memory_for_agent({"role": "R", "memory": False}) is True
+        assert (
+            cp._should_disable_memory_for_agent({"role": "R", "memory": False}) is True
+        )
 
     def test_memory_true_does_not_disable(self):
         cp = CrewPreparation(config={"agents": [], "tasks": []})
-        assert cp._should_disable_memory_for_agent({"role": "R", "memory": True}) is False
+        assert (
+            cp._should_disable_memory_for_agent({"role": "R", "memory": True}) is False
+        )
 
     def test_no_memory_key_does_not_disable(self):
         cp = CrewPreparation(config={"agents": [], "tasks": []})
@@ -217,6 +243,7 @@ class TestShouldDisableMemoryForAgent:
 # ---------------------------------------------------------------------------
 # CrewPreparation._find_agent_by_reference
 # ---------------------------------------------------------------------------
+
 
 class TestFindAgentByReference:
     def _make_cp(self, agents=None):
@@ -264,9 +291,7 @@ class TestFindAgentByReference:
     def test_lookup_by_config_id(self):
         mock_agent = MagicMock()
         config = {
-            "agents": [
-                {"id": "agent-config-id-123", "name": "researcher"}
-            ],
+            "agents": [{"id": "agent-config-id-123", "name": "researcher"}],
             "tasks": [],
         }
         cp = CrewPreparation(config=config)
@@ -278,6 +303,7 @@ class TestFindAgentByReference:
 # ---------------------------------------------------------------------------
 # CrewPreparation._handle_openai_api_key
 # ---------------------------------------------------------------------------
+
 
 class TestHandleOpenAIApiKey:
     @pytest.mark.asyncio
@@ -316,6 +342,7 @@ class TestHandleOpenAIApiKey:
 # CrewPreparation._lookup_kasal_agent_uuid_via_service
 # ---------------------------------------------------------------------------
 
+
 class TestLookupKasalAgentUUID:
     @pytest.mark.asyncio
     async def test_finds_by_role(self):
@@ -327,9 +354,11 @@ class TestLookupKasalAgentUUID:
         db_agent.role = "Analyst"
         db_agent.name = "agent-1"
 
-        with patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.catalog.agents.AgentService") as mock_svc_cls, \
-             patch("src.utils.user_context.GroupContext") as mock_gc:
+        with (
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.catalog.agents.AgentService") as mock_svc_cls,
+            patch("src.utils.user_context.GroupContext") as mock_gc,
+        ):
 
             mock_session = AsyncMock()
             mock_session.__aenter__ = AsyncMock(return_value=mock_session)
@@ -356,9 +385,11 @@ class TestLookupKasalAgentUUID:
         db_agent.role = "OtherRole"
         db_agent.name = "target-agent"
 
-        with patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.catalog.agents.AgentService") as mock_svc_cls, \
-             patch("src.utils.user_context.GroupContext"):
+        with (
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.catalog.agents.AgentService") as mock_svc_cls,
+            patch("src.utils.user_context.GroupContext"),
+        ):
 
             mock_session = AsyncMock()
             mock_session.__aenter__ = AsyncMock(return_value=mock_session)
@@ -384,9 +415,11 @@ class TestLookupKasalAgentUUID:
         db_agent.role = "Role"
         db_agent.name = "AgentName"
 
-        with patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.catalog.agents.AgentService") as mock_svc_cls, \
-             patch("src.utils.user_context.GroupContext"):
+        with (
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.catalog.agents.AgentService") as mock_svc_cls,
+            patch("src.utils.user_context.GroupContext"),
+        ):
 
             mock_session = AsyncMock()
             mock_session.__aenter__ = AsyncMock(return_value=mock_session)
@@ -398,7 +431,7 @@ class TestLookupKasalAgentUUID:
 
             result = await cp._lookup_kasal_agent_uuid_via_service(
                 {"role": "Role", "name": "AgentName"},
-                "uuid-configid-match"  # matches db_agent.id
+                "uuid-configid-match",  # matches db_agent.id
             )
 
         assert result == "uuid-configid-match"
@@ -413,9 +446,11 @@ class TestLookupKasalAgentUUID:
         db_agent.role = "OtherRole"
         db_agent.name = "OtherAgent"
 
-        with patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.catalog.agents.AgentService") as mock_svc_cls, \
-             patch("src.utils.user_context.GroupContext"):
+        with (
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.catalog.agents.AgentService") as mock_svc_cls,
+            patch("src.utils.user_context.GroupContext"),
+        ):
 
             mock_session = AsyncMock()
             mock_session.__aenter__ = AsyncMock(return_value=mock_session)
@@ -436,8 +471,9 @@ class TestLookupKasalAgentUUID:
         config = {"agents": [], "tasks": [], "group_id": "grp-1"}
         cp = CrewPreparation(config=config)
 
-        with patch("src.db.session.request_scoped_session",
-                   side_effect=Exception("db error")):
+        with patch(
+            "src.db.session.request_scoped_session", side_effect=Exception("db error")
+        ):
             result = await cp._lookup_kasal_agent_uuid_via_service(
                 {"role": "R"}, "config-id"
             )
@@ -445,10 +481,10 @@ class TestLookupKasalAgentUUID:
         assert result is None
 
 
-
 # ---------------------------------------------------------------------------
 # CrewPreparation.prepare – full flow mocked
 # ---------------------------------------------------------------------------
+
 
 class TestCrewPreparationPrepare:
     def _make_cp(self, config=None):
@@ -488,8 +524,10 @@ class TestCrewPreparationPrepare:
         }
         cp = CrewPreparation(config=config)
 
-        with patch.object(cp, "_create_agents", new_callable=AsyncMock) as mock_ca, \
-             patch.object(cp, "_create_tasks", new_callable=AsyncMock) as mock_ct:
+        with (
+            patch.object(cp, "_create_agents", new_callable=AsyncMock) as mock_ca,
+            patch.object(cp, "_create_tasks", new_callable=AsyncMock) as mock_ct,
+        ):
             mock_ca.return_value = True
             mock_ct.return_value = False
             result = await cp.prepare()
@@ -504,9 +542,11 @@ class TestCrewPreparationPrepare:
         }
         cp = CrewPreparation(config=config)
 
-        with patch.object(cp, "_create_agents", new_callable=AsyncMock) as mock_ca, \
-             patch.object(cp, "_create_tasks", new_callable=AsyncMock) as mock_ct, \
-             patch.object(cp, "_create_crew", new_callable=AsyncMock) as mock_cc:
+        with (
+            patch.object(cp, "_create_agents", new_callable=AsyncMock) as mock_ca,
+            patch.object(cp, "_create_tasks", new_callable=AsyncMock) as mock_ct,
+            patch.object(cp, "_create_crew", new_callable=AsyncMock) as mock_cc,
+        ):
             mock_ca.return_value = True
             mock_ct.return_value = True
             mock_cc.return_value = False
@@ -522,9 +562,11 @@ class TestCrewPreparationPrepare:
         }
         cp = CrewPreparation(config=config)
 
-        with patch.object(cp, "_create_agents", new_callable=AsyncMock) as mock_ca, \
-             patch.object(cp, "_create_tasks", new_callable=AsyncMock) as mock_ct, \
-             patch.object(cp, "_create_crew", new_callable=AsyncMock) as mock_cc:
+        with (
+            patch.object(cp, "_create_agents", new_callable=AsyncMock) as mock_ca,
+            patch.object(cp, "_create_tasks", new_callable=AsyncMock) as mock_ct,
+            patch.object(cp, "_create_crew", new_callable=AsyncMock) as mock_cc,
+        ):
             mock_ca.return_value = True
             mock_ct.return_value = True
             mock_cc.return_value = True
@@ -551,6 +593,7 @@ class TestCrewPreparationPrepare:
 # CrewPreparation._create_agents
 # ---------------------------------------------------------------------------
 
+
 class TestCreateAgents:
     @pytest.mark.asyncio
     async def test_creates_agents_successfully(self):
@@ -562,9 +605,16 @@ class TestCreateAgents:
         cp = CrewPreparation(config=config)
 
         mock_agent = MagicMock()
-        with patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.services.agent_builder.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
-             patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
+        with (
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch(
+                "src.services.agent_builder.crew_preparation.create_agent",
+                new_callable=AsyncMock,
+            ) as mock_ca,
+            patch.object(
+                cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock
+            ) as mock_lookup,
+        ):
 
             mock_mcp.collect_agent_mcp_requirements = AsyncMock(return_value={})
             mock_ca.return_value = mock_agent
@@ -586,9 +636,16 @@ class TestCreateAgents:
         cp = CrewPreparation(config=config)
 
         mock_agent = MagicMock()
-        with patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.services.agent_builder.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
-             patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
+        with (
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch(
+                "src.services.agent_builder.crew_preparation.create_agent",
+                new_callable=AsyncMock,
+            ) as mock_ca,
+            patch.object(
+                cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock
+            ) as mock_lookup,
+        ):
 
             mock_mcp.collect_agent_mcp_requirements = AsyncMock(return_value={})
             mock_ca.return_value = mock_agent
@@ -610,9 +667,16 @@ class TestCreateAgents:
         }
         cp = CrewPreparation(config=config)
 
-        with patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.services.agent_builder.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
-             patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
+        with (
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch(
+                "src.services.agent_builder.crew_preparation.create_agent",
+                new_callable=AsyncMock,
+            ) as mock_ca,
+            patch.object(
+                cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock
+            ) as mock_lookup,
+        ):
 
             mock_mcp.collect_agent_mcp_requirements = AsyncMock(return_value={})
             mock_ca.return_value = None  # Agent creation failed
@@ -631,9 +695,16 @@ class TestCreateAgents:
         }
         cp = CrewPreparation(config=config)
 
-        with patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.services.agent_builder.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
-             patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
+        with (
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch(
+                "src.services.agent_builder.crew_preparation.create_agent",
+                new_callable=AsyncMock,
+            ) as mock_ca,
+            patch.object(
+                cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock
+            ) as mock_lookup,
+        ):
 
             mock_mcp.collect_agent_mcp_requirements = AsyncMock(return_value={})
             mock_ca.side_effect = Exception("agent creation error")
@@ -655,11 +726,20 @@ class TestCreateAgents:
         mock_agent = MagicMock()
         mcp_requirements = {"ag1": [{"name": "server1", "url": "http://server1"}]}
 
-        with patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.services.agent_builder.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
-             patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
+        with (
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch(
+                "src.services.agent_builder.crew_preparation.create_agent",
+                new_callable=AsyncMock,
+            ) as mock_ca,
+            patch.object(
+                cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock
+            ) as mock_lookup,
+        ):
 
-            mock_mcp.collect_agent_mcp_requirements = AsyncMock(return_value=mcp_requirements)
+            mock_mcp.collect_agent_mcp_requirements = AsyncMock(
+                return_value=mcp_requirements
+            )
             mock_ca.return_value = mock_agent
             mock_lookup.return_value = None
 
@@ -676,6 +756,7 @@ class TestCreateAgents:
 # ---------------------------------------------------------------------------
 # CrewPreparation._create_tasks
 # ---------------------------------------------------------------------------
+
 
 class TestCreateTasks:
     @pytest.mark.asyncio
@@ -700,7 +781,10 @@ class TestCreateTasks:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.services.agent_builder.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch(
+            "src.services.agent_builder.task_adapter.create_task",
+            new_callable=AsyncMock,
+        ) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 
@@ -729,7 +813,10 @@ class TestCreateTasks:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.services.agent_builder.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch(
+            "src.services.agent_builder.task_adapter.create_task",
+            new_callable=AsyncMock,
+        ) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 
@@ -774,7 +861,10 @@ class TestCreateTasks:
         cp = CrewPreparation(config=config)
         cp.agents = {"ag1": MagicMock()}
 
-        with patch("src.services.agent_builder.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch(
+            "src.services.agent_builder.task_adapter.create_task",
+            new_callable=AsyncMock,
+        ) as mock_ct:
             mock_ct.side_effect = Exception("task creation error")
             result = await cp._create_tasks()
 
@@ -786,12 +876,18 @@ class TestCreateTasks:
             "agents": [{"name": "ag1", "role": "R", "goal": "G", "backstory": "B"}],
             "tasks": [
                 {
-                    "id": "t1", "name": "task1",
-                    "description": "First", "expected_output": "O1", "agent": "ag1",
+                    "id": "t1",
+                    "name": "task1",
+                    "description": "First",
+                    "expected_output": "O1",
+                    "agent": "ag1",
                 },
                 {
-                    "id": "t2", "name": "task2",
-                    "description": "Second", "expected_output": "O2", "agent": "ag1",
+                    "id": "t2",
+                    "name": "task2",
+                    "description": "Second",
+                    "expected_output": "O2",
+                    "agent": "ag1",
                     "context": ["t1"],
                 },
             ],
@@ -806,7 +902,10 @@ class TestCreateTasks:
         task2 = MagicMock()
         task2.async_execution = False
 
-        with patch("src.services.agent_builder.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch(
+            "src.services.agent_builder.task_adapter.create_task",
+            new_callable=AsyncMock,
+        ) as mock_ct:
             mock_ct.side_effect = [task1, task2]
             result = await cp._create_tasks()
 
@@ -819,10 +918,22 @@ class TestCreateTasks:
         config = {
             "agents": [{"name": "ag1", "role": "R", "goal": "G", "backstory": "B"}],
             "tasks": [
-                {"id": "t1", "name": "task1", "description": "T1", "expected_output": "O1",
-                 "agent": "ag1", "async_execution": True},
-                {"id": "t2", "name": "task2", "description": "T2", "expected_output": "O2",
-                 "agent": "ag1", "async_execution": True},
+                {
+                    "id": "t1",
+                    "name": "task1",
+                    "description": "T1",
+                    "expected_output": "O1",
+                    "agent": "ag1",
+                    "async_execution": True,
+                },
+                {
+                    "id": "t2",
+                    "name": "task2",
+                    "description": "T2",
+                    "expected_output": "O2",
+                    "agent": "ag1",
+                    "async_execution": True,
+                },
             ],
             "group_id": "grp-1",
         }
@@ -839,9 +950,16 @@ class TestCreateTasks:
         task2.context = None
         task2.agent = mock_agent
 
-        with patch("src.services.agent_builder.task_adapter.create_task", new_callable=AsyncMock) as mock_ct, \
-             patch("src.services.agent_builder.crew_preparation.Task") as mock_task_cls_module, \
-             patch("src.services.execution.runtime.Task") as mock_task_cls_crewai:
+        with (
+            patch(
+                "src.services.agent_builder.task_adapter.create_task",
+                new_callable=AsyncMock,
+            ) as mock_ct,
+            patch(
+                "src.services.agent_builder.crew_preparation.Task"
+            ) as mock_task_cls_module,
+            patch("src.services.execution.runtime.Task") as mock_task_cls_crewai,
+        ):
             mock_ct.side_effect = [task1, task2]
             completion_task = MagicMock()
             mock_task_cls_module.return_value = completion_task
@@ -863,11 +981,14 @@ class TestCreateTasksKnowledgeToolInjection:
         config = {
             "agents": [
                 {
-                    "name": "ag1", "role": "Analyst", "goal": "G", "backstory": "B",
+                    "name": "ag1",
+                    "role": "Analyst",
+                    "goal": "G",
+                    "backstory": "B",
                     "knowledge_sources": [
                         {"fileInfo": {"filename": "report.pdf"}},
                         {"metadata": {"filename": "data.csv"}},
-                    ]
+                    ],
                 }
             ],
             "tasks": [
@@ -889,7 +1010,10 @@ class TestCreateTasksKnowledgeToolInjection:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.services.agent_builder.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch(
+            "src.services.agent_builder.task_adapter.create_task",
+            new_callable=AsyncMock,
+        ) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 
@@ -898,8 +1022,9 @@ class TestCreateTasksKnowledgeToolInjection:
         call_kwargs = mock_ct.call_args[1]
         task_config_used = call_kwargs.get("task_config", {})
         # The description should have been injected with the knowledge-search instruction
-        assert "DatabricksKnowledgeSearchTool" in task_config_used.get("description", "") or \
-               "CRITICAL" in task_config_used.get("description", "")
+        assert "DatabricksKnowledgeSearchTool" in task_config_used.get(
+            "description", ""
+        ) or "CRITICAL" in task_config_used.get("description", "")
 
     @pytest.mark.asyncio
     async def test_first_task_with_tool_id_36_injects_nudge(self):
@@ -925,7 +1050,10 @@ class TestCreateTasksKnowledgeToolInjection:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.services.agent_builder.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch(
+            "src.services.agent_builder.task_adapter.create_task",
+            new_callable=AsyncMock,
+        ) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 
@@ -937,13 +1065,16 @@ class TestCreateTasksKnowledgeToolInjection:
         config = {
             "agents": [
                 {
-                    "name": "ag1", "role": "R", "goal": "G", "backstory": "B",
+                    "name": "ag1",
+                    "role": "R",
+                    "goal": "G",
+                    "backstory": "B",
                     "id": "agent-id-1",
                     "knowledge_sources": [
                         {"fileInfo": {"filename": "doc1.pdf"}},
                         {"metadata": {"filename": "doc2.csv"}},
                         {"no_filename": True},  # Should be skipped
-                    ]
+                    ],
                 }
             ],
             "tasks": [
@@ -965,7 +1096,10 @@ class TestCreateTasksKnowledgeToolInjection:
         mock_task = MagicMock()
         mock_task.async_execution = False
 
-        with patch("src.services.agent_builder.task_adapter.create_task", new_callable=AsyncMock) as mock_ct:
+        with patch(
+            "src.services.agent_builder.task_adapter.create_task",
+            new_callable=AsyncMock,
+        ) as mock_ct:
             mock_ct.return_value = mock_task
             result = await cp._create_tasks()
 

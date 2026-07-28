@@ -1,8 +1,14 @@
 """Tests for shared utility functions."""
+
 import pytest
+
 from src.services.tools.metric_view_utils.utils import (
-    to_snake_case, col_to_readable, spark_sql_compat, unflatten_table_name,
-    load_mapping, yaml_scalar,
+    col_to_readable,
+    load_mapping,
+    spark_sql_compat,
+    to_snake_case,
+    unflatten_table_name,
+    yaml_scalar,
 )
 
 
@@ -84,7 +90,8 @@ class TestSparkSqlCompat:
     def test_rewrite_2part_when_enabled(self):
         result = spark_sql_compat(
             "FROM myschema.mytable",
-            catalog="cat", schema="sch",
+            catalog="cat",
+            schema="sch",
             rewrite_2part_tables=True,
         )
         assert "cat.sch.myschema__mytable" in result
@@ -109,7 +116,9 @@ class TestSparkSqlCompat:
 
 class TestUnflattenTableName:
     def test_triple_underscore_unflattened(self):
-        result = unflatten_table_name("cat.sch.cat__sch__tbl", catalog="cat", schema="sch")
+        result = unflatten_table_name(
+            "cat.sch.cat__sch__tbl", catalog="cat", schema="sch"
+        )
         assert result == "cat.sch.tbl"
 
     def test_no_flatten_passes_through(self):
@@ -117,7 +126,9 @@ class TestUnflattenTableName:
         assert result == "cat.sch.regular_table"
 
     def test_no_matching_prefix(self):
-        result = unflatten_table_name("other.prefix.cat__sch__tbl", catalog="cat", schema="sch")
+        result = unflatten_table_name(
+            "other.prefix.cat__sch__tbl", catalog="cat", schema="sch"
+        )
         # Prefix "cat.sch." doesn't match "other.prefix...", so remainder = full name
         # "other.prefix.cat__sch__tbl" splits on __ -> ["other.prefix.cat", "sch", "tbl"] (3 parts)
         # -> joined as "other.prefix.cat.sch.tbl"

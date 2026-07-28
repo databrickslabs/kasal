@@ -5,6 +5,7 @@ memory_table is interpolated into raw Lakebase SQL throughout the storage
 backend, so a crafted value could inject SQL / comment out the appended
 group_id tenant filter. It must be a strict SQL identifier.
 """
+
 import pytest
 
 from src.schemas.memory_backend import LakebaseMemoryConfig
@@ -13,7 +14,10 @@ from src.services.memory.lakebase_storage_backend import _validate_table_name
 
 class TestMemoryTableSchemaValidation:
     def test_accepts_valid(self):
-        assert LakebaseMemoryConfig(memory_table="crew_memory").memory_table == "crew_memory"
+        assert (
+            LakebaseMemoryConfig(memory_table="crew_memory").memory_table
+            == "crew_memory"
+        )
 
     @pytest.mark.parametrize(
         "bad",
@@ -37,7 +41,13 @@ class TestStorageBackendTableValidation:
 
     @pytest.mark.parametrize(
         "bad",
-        ["crew_memory WHERE 1=1 --", "a; DROP TABLE x", "a UNION SELECT", "bad name", ""],
+        [
+            "crew_memory WHERE 1=1 --",
+            "a; DROP TABLE x",
+            "a UNION SELECT",
+            "bad name",
+            "",
+        ],
     )
     def test_rejects_injection(self, bad):
         with pytest.raises(ValueError):

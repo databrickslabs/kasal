@@ -6,8 +6,8 @@ it has never written a trace. Traces come off the OTel pipeline
 (BatchSpanProcessor -> KasalDBSpanExporter -> services/trace). This owns the
 LOGS writer and nothing else.
 """
-import logging
 import asyncio
+import logging
 import threading
 from typing import Optional
 

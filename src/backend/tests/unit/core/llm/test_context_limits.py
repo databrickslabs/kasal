@@ -4,12 +4,12 @@ A missed phrase is not cosmetic: the run hard-fails where it could have compacte
 and continued, so a phrase learned in one place has to reach every consumer.
 """
 
-from src.core.llm.transport import CONTEXT_LIMIT_ERRORS
 from src.core.llm.context_limits import (
     _KASAL_CONTEXT_LIMIT_PHRASES,
     extend_engine_context_limit_phrases,
     is_context_limit_error,
 )
+from src.core.llm.transport import CONTEXT_LIMIT_ERRORS
 
 
 class TestSharedPhraseList:
@@ -36,7 +36,9 @@ class TestIsContextLimitError:
         )
 
     def test_anthropic_on_databricks_phrasing(self):
-        assert is_context_limit_error("BadRequestError: prompt is too long: 210000 tokens")
+        assert is_context_limit_error(
+            "BadRequestError: prompt is too long: 210000 tokens"
+        )
 
     def test_openai_phrasing(self):
         assert is_context_limit_error("context_length_exceeded: maximum context length")
@@ -57,7 +59,9 @@ class TestHandlerUsesTheSharedList:
         from unittest.mock import patch
 
         with patch("src.services.llm.handlers.databricks_retry_llm.litellm"):
-            from src.services.llm.handlers.databricks_retry_llm import DatabricksRetryLLM
+            from src.services.llm.handlers.databricks_retry_llm import (
+                DatabricksRetryLLM,
+            )
 
             llm = DatabricksRetryLLM(model="databricks/x", api_key="k")
 

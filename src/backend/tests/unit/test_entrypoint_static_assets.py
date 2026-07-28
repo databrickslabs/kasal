@@ -3,9 +3,11 @@ Unit tests for entrypoint.py static asset serving.
 
 Tests that all Kasal icon variants are served correctly.
 """
+
 import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -29,12 +31,14 @@ class TestKasalIconRoutes:
             # Replicate the entrypoint pattern for icon routes
             kasal_icon_16 = os.path.join(frontend_static_dir, "kasal-icon-16.png")
             if fake_exists(kasal_icon_16):
+
                 @app.get("/kasal-icon-16.png")
                 async def serve_kasal_icon_16():
                     return FileResponse(kasal_icon_16)
 
             kasal_icon_24 = os.path.join(frontend_static_dir, "kasal-icon-24.png")
             if fake_exists(kasal_icon_24):
+
                 @app.get("/kasal-icon-24.png")
                 async def serve_kasal_icon_24():
                     return FileResponse(kasal_icon_24)
@@ -55,7 +59,9 @@ class TestKasalIconRoutes:
 
     def test_both_icon_routes_registered(self):
         """Both icon routes are registered when both files exist."""
-        app = self._create_app_with_static_dir({"kasal-icon-16.png", "kasal-icon-24.png"})
+        app = self._create_app_with_static_dir(
+            {"kasal-icon-16.png", "kasal-icon-24.png"}
+        )
         routes = [r.path for r in app.routes]
         assert "/kasal-icon-16.png" in routes
         assert "/kasal-icon-24.png" in routes
@@ -79,6 +85,7 @@ class TestEntrypointIconRouteInSource:
     def test_entrypoint_serves_kasal_icon_24(self):
         """entrypoint.py must contain a route for kasal-icon-24.png."""
         import pathlib
+
         entrypoint_path = pathlib.Path(__file__).resolve().parents[3] / "entrypoint.py"
         source = entrypoint_path.read_text()
         assert "kasal-icon-24.png" in source
@@ -87,6 +94,7 @@ class TestEntrypointIconRouteInSource:
     def test_entrypoint_serves_kasal_icon_16(self):
         """entrypoint.py must contain a route for kasal-icon-16.png."""
         import pathlib
+
         entrypoint_path = pathlib.Path(__file__).resolve().parents[3] / "entrypoint.py"
         source = entrypoint_path.read_text()
         assert "kasal-icon-16.png" in source

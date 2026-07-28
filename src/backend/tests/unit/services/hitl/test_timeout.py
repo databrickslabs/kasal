@@ -7,13 +7,14 @@ expiration processing, webhook notification dispatch, and error handling.
 """
 
 import asyncio
-import pytest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
+import pytest
 
 from src.services.hitl.timeout import (
-    HITLTimeoutService,
     HITL_TIMEOUT_CHECK_INTERVAL,
+    HITLTimeoutService,
     start_hitl_timeout_service,
     stop_hitl_timeout_service,
 )
@@ -306,7 +307,9 @@ class TestCheckExpiredApprovals:
         with patch(_PATCH_SESSION_FACTORY, mock_session_factory):
             with patch(_PATCH_APPROVAL_REPO, return_value=mock_approval_repo):
                 with patch(_PATCH_HITL_SERVICE, return_value=mock_hitl_service):
-                    with patch(_PATCH_WEBHOOK_SERVICE, return_value=mock_webhook_service):
+                    with patch(
+                        _PATCH_WEBHOOK_SERVICE, return_value=mock_webhook_service
+                    ):
                         await service._check_expired_approvals()
 
         mock_approval_repo.get_expired_pending.assert_awaited_once()
@@ -333,7 +336,9 @@ class TestCheckExpiredApprovals:
         with patch(_PATCH_SESSION_FACTORY, mock_session_factory):
             with patch(_PATCH_APPROVAL_REPO, return_value=mock_approval_repo):
                 with patch(_PATCH_HITL_SERVICE, return_value=mock_hitl_service):
-                    with patch(_PATCH_WEBHOOK_SERVICE, return_value=mock_webhook_service):
+                    with patch(
+                        _PATCH_WEBHOOK_SERVICE, return_value=mock_webhook_service
+                    ):
                         await service._check_expired_approvals()
 
         mock_approval_repo.get_by_id.assert_awaited_once_with(42)
@@ -357,7 +362,9 @@ class TestCheckExpiredApprovals:
         with patch(_PATCH_SESSION_FACTORY, mock_session_factory):
             with patch(_PATCH_APPROVAL_REPO, return_value=mock_approval_repo):
                 with patch(_PATCH_HITL_SERVICE, return_value=mock_hitl_service):
-                    with patch(_PATCH_WEBHOOK_SERVICE, return_value=mock_webhook_service):
+                    with patch(
+                        _PATCH_WEBHOOK_SERVICE, return_value=mock_webhook_service
+                    ):
                         await service._check_expired_approvals()
 
         mock_hitl_service.process_expired_approvals.assert_not_awaited()
@@ -401,7 +408,9 @@ class TestCheckExpiredApprovals:
         with patch(_PATCH_SESSION_FACTORY, mock_session_factory):
             with patch(_PATCH_APPROVAL_REPO, return_value=mock_approval_repo):
                 with patch(_PATCH_HITL_SERVICE, return_value=mock_hitl_service):
-                    with patch(_PATCH_WEBHOOK_SERVICE, return_value=mock_webhook_service):
+                    with patch(
+                        _PATCH_WEBHOOK_SERVICE, return_value=mock_webhook_service
+                    ):
                         await service._check_expired_approvals()
 
         # Both webhooks were attempted
@@ -428,7 +437,9 @@ class TestCheckExpiredApprovals:
         with patch(_PATCH_SESSION_FACTORY, mock_session_factory):
             with patch(_PATCH_APPROVAL_REPO, return_value=mock_approval_repo):
                 with patch(_PATCH_HITL_SERVICE, return_value=mock_hitl_service):
-                    with patch(_PATCH_WEBHOOK_SERVICE, return_value=mock_webhook_service):
+                    with patch(
+                        _PATCH_WEBHOOK_SERVICE, return_value=mock_webhook_service
+                    ):
                         await service._check_expired_approvals()
 
         mock_approval_repo.get_by_id.assert_awaited_once_with(99)
@@ -455,7 +466,9 @@ class TestCheckExpiredApprovals:
         with patch(_PATCH_SESSION_FACTORY, mock_session_factory):
             with patch(_PATCH_APPROVAL_REPO, return_value=mock_approval_repo):
                 with patch(_PATCH_HITL_SERVICE, return_value=mock_hitl_service):
-                    with patch(_PATCH_WEBHOOK_SERVICE, return_value=mock_webhook_service):
+                    with patch(
+                        _PATCH_WEBHOOK_SERVICE, return_value=mock_webhook_service
+                    ):
                         # Must not raise
                         await service._check_expired_approvals()
 
@@ -477,9 +490,7 @@ class TestModuleFunctions:
         mock_task = MagicMock()
 
         with patch("asyncio.create_task", return_value=mock_task) as mock_create:
-            with patch.object(
-                HITLTimeoutService, "start", new_callable=AsyncMock
-            ):
+            with patch.object(HITLTimeoutService, "start", new_callable=AsyncMock):
                 await start_hitl_timeout_service()
 
                 mock_create.assert_called_once()

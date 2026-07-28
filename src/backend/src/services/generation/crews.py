@@ -21,14 +21,12 @@ and no call site changes.
 
 import logging
 import traceback
-from typing import TYPE_CHECKING, Dict, Any, List, Tuple, Optional
-from src.services.catalog.templates import TemplateService
-from src.services.tools.tool_service import ToolService
-from src.repositories.log_repository import LLMLogRepository
-from src.services.execution.logs.llm_log_service import LLMLogService
-from src.repositories.crew_generator_repository import CrewGeneratorRepository
-from src.utils.user_context import GroupContext
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from src.repositories.crew_generator_repository import CrewGeneratorRepository
+from src.repositories.log_repository import LLMLogRepository
+from src.services.catalog.templates import TemplateService
+from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.generation.crew import (
     ChatFastPathMixin,
     CompleteGenerationMixin,
@@ -36,6 +34,8 @@ from src.services.generation.crew import (
     ProgressiveGenerationMixin,
     RecipeHooksMixin,
 )
+from src.services.tools.tool_service import ToolService
+from src.utils.user_context import GroupContext
 
 if TYPE_CHECKING:  # imported for the annotation only, no runtime cost
     from src.schemas.crew import CrewStreamingRequest
@@ -67,9 +67,16 @@ class CrewGenerationService(
         self.crew_generator_repository = CrewGeneratorRepository(session)
         logger.info("Initialized CrewGeneratorRepository during service creation")
 
-    async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str,
-                                  status: str = 'success', error_message: str = None,
-                                  group_context: Optional[GroupContext] = None) -> None:
+    async def _log_llm_interaction(
+        self,
+        endpoint: str,
+        prompt: str,
+        response: str,
+        model: str,
+        status: str = "success",
+        error_message: str = None,
+        group_context: Optional[GroupContext] = None,
+    ) -> None:
         """
         Log LLM interaction using the log service.
 
@@ -89,14 +96,19 @@ class CrewGenerationService(
                 model=model,
                 status=status,
                 error_message=error_message,
-                group_context=group_context
+                group_context=group_context,
             )
             logger.info(f"Logged {endpoint} interaction to database")
         except Exception as e:
             logger.error(f"Failed to log LLM interaction: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
 
-    async def _prepare_prompt_template(self, tools: List[Dict[str, Any]], group_context: Optional[GroupContext], prompt: Optional[str] = None) -> str:
+    async def _prepare_prompt_template(
+        self,
+        tools: List[Dict[str, Any]],
+        group_context: Optional[GroupContext],
+        prompt: Optional[str] = None,
+    ) -> str:
         """
         Prepare the prompt template (with group/user appended overrides) and tool descriptions.
 
@@ -111,10 +123,14 @@ class CrewGenerationService(
             ValueError: If prompt template is not found
         """
         # Get composed prompt template from database using the TemplateService
-        system_message = await TemplateService.get_effective_template_content("generate_crew", group_context)
+        system_message = await TemplateService.get_effective_template_content(
+            "generate_crew", group_context
+        )
 
         if not system_message:
-            raise ValueError("Required prompt template 'generate_crew' not found in database")
+            raise ValueError(
+                "Required prompt template 'generate_crew' not found in database"
+            )
 
         # NOTE: the generation templates are format-neutral (content/structure only,
         # never HTML/CSS/JS). Output formatting is owned entirely by the shared A2UI
@@ -130,23 +146,26 @@ class CrewGenerationService(
                 # assignments; parameter schemas matter at execution, not here.
                 # Omitting them keeps the prompt small (it scales with tool count)
                 # without changing which tools the model picks.
-                name = tool.get('name', 'Unknown Tool')
-                description = tool.get('description', 'No description available')
+                name = tool.get("name", "Unknown Tool")
+                description = tool.get("description", "No description available")
                 tools_context += f"- {name}: {description}\n"
 
             tools_context += "\n\nEnsure that agents and tasks only use tools from this list. Assign tools to agents based on their capabilities and the tools' functionalities."
 
             # Add specific usage example for the NL2SQLTool if it's in the tools list
-            if any(tool.get('name') == 'NL2SQLTool' for tool in tools):
+            if any(tool.get("name") == "NL2SQLTool" for tool in tools):
                 tools_context += "\n\nFor NL2SQLTool, use the following format for input: {'sql_query': <your_query>}"
 
         # Bias the generator toward GenieTool for internal-data questions when it's
         # available — otherwise Auto-format prompts ("most effective campaign") get a
         # web-research crew (Perplexity) and never surface the Genie-space picker.
-        if any(tool.get('name') == 'GenieTool' for tool in (tools or [])):
+        if any(tool.get("name") == "GenieTool" for tool in (tools or [])):
             from src.seeds.prompt_templates import GENIE_ROUTING_DIRECTIVE
+
             tools_context += f"\n{GENIE_ROUTING_DIRECTIVE}"
-            logger.info("[GenieRouting] generate_crew: applied Genie routing directive (GenieTool available)")
+            logger.info(
+                "[GenieRouting] generate_crew: applied Genie routing directive (GenieTool available)"
+            )
 
         # Add tools context to the system message. Exemplars are appended by the
         # caller: it owns the recipe decision (including the holdout arm) because
@@ -165,7 +184,7 @@ class CrewGenerationService(
         Returns:
             The attribute value or default
         """
-        if hasattr(obj, 'get') and callable(obj.get):
+        if hasattr(obj, "get") and callable(obj.get):
             # Dictionary-like access
             return obj.get(attr, default)
         elif hasattr(obj, attr):
@@ -174,7 +193,9 @@ class CrewGenerationService(
         else:
             return default
 
-    def _create_tool_name_to_id_map(self, tools: List[Dict[str, Any]]) -> Dict[str, str]:
+    def _create_tool_name_to_id_map(
+        self, tools: List[Dict[str, Any]]
+    ) -> Dict[str, str]:
         """
         Create a mapping from tool names to tool IDs.
 
@@ -187,20 +208,22 @@ class CrewGenerationService(
         name_to_id = {}
         for tool in tools:
             # Use title as name if available
-            name = tool.get('title') or tool.get('name')
-            tool_id = tool.get('id')
+            name = tool.get("title") or tool.get("name")
+            tool_id = tool.get("id")
 
             if name and tool_id:
                 # Ensure ID is a string
                 name_to_id[name] = str(tool_id)
 
                 # Also add the original name as a key if different from title
-                if 'name' in tool and tool['name'] != name:
-                    name_to_id[tool['name']] = str(tool_id)
+                if "name" in tool and tool["name"] != name:
+                    name_to_id[tool["name"]] = str(tool_id)
 
         return name_to_id
 
-    async def _get_tool_details(self, tool_identifiers: List[Any], tool_service: ToolService) -> List[Dict[str, Any]]:
+    async def _get_tool_details(
+        self, tool_identifiers: List[Any], tool_service: ToolService
+    ) -> List[Dict[str, Any]]:
         """
         Get detailed information about tools from the tool service.
 
@@ -224,8 +247,12 @@ class CrewGenerationService(
             logger.info(f"Retrieved {len(all_tools)} tools from tool service")
 
             # Create lookup maps for faster tool retrieval
-            tools_by_name = {tool.title: tool for tool in all_tools if hasattr(tool, 'title')}
-            tools_by_id = {str(tool.id): tool for tool in all_tools if hasattr(tool, 'id')}
+            tools_by_name = {
+                tool.title: tool for tool in all_tools if hasattr(tool, "title")
+            }
+            tools_by_id = {
+                str(tool.id): tool for tool in all_tools if hasattr(tool, "id")
+            }
 
             # Process each tool identifier
             for identifier in tool_identifiers:
@@ -240,13 +267,19 @@ class CrewGenerationService(
                     else:
                         logger.warning(f"Tool not found: {identifier}")
                         # Add a placeholder with just the name
-                        detailed_tools.append({"name": identifier, "description": f"A tool named {identifier}", "id": identifier})
+                        detailed_tools.append(
+                            {
+                                "name": identifier,
+                                "description": f"A tool named {identifier}",
+                                "id": identifier,
+                            }
+                        )
                         continue
 
                 elif isinstance(identifier, dict):
                     # Extract name or ID from dictionary
-                    name = identifier.get('name')
-                    tool_id = identifier.get('id')
+                    name = identifier.get("name")
+                    tool_id = identifier.get("id")
 
                     if name and name in tools_by_name:
                         tool_detail = tools_by_name[name]
@@ -255,14 +288,21 @@ class CrewGenerationService(
                     elif name:
                         # If we have a name but no match, add it as is
                         logger.warning(f"Tool not found by name: {name}")
-                        detailed_tools.append({
-                            "name": name,
-                            "description": identifier.get('description', f"A tool named {name}"),
-                            "id": tool_id or name  # Use ID if available, otherwise use name
-                        })
+                        detailed_tools.append(
+                            {
+                                "name": name,
+                                "description": identifier.get(
+                                    "description", f"A tool named {name}"
+                                ),
+                                "id": tool_id
+                                or name,  # Use ID if available, otherwise use name
+                            }
+                        )
                         continue
                     else:
-                        logger.warning(f"Invalid tool identifier, missing name or id: {identifier}")
+                        logger.warning(
+                            f"Invalid tool identifier, missing name or id: {identifier}"
+                        )
                         continue
                 else:
                     logger.warning(f"Unknown tool identifier format: {identifier}")
@@ -270,21 +310,29 @@ class CrewGenerationService(
 
                 # Convert tool to dictionary with all details
                 if tool_detail:
-                    if hasattr(tool_detail, 'model_dump'):
+                    if hasattr(tool_detail, "model_dump"):
                         tool_dict = tool_detail.model_dump()
                     else:
                         # If it's already a dictionary or has __dict__
-                        tool_dict = tool_detail.__dict__ if hasattr(tool_detail, '__dict__') else dict(tool_detail)
+                        tool_dict = (
+                            tool_detail.__dict__
+                            if hasattr(tool_detail, "__dict__")
+                            else dict(tool_detail)
+                        )
 
                     # Ensure we have name and description
-                    if 'name' not in tool_dict and hasattr(tool_detail, 'title'):
-                        tool_dict['name'] = tool_detail.title
-                    if 'description' not in tool_dict and hasattr(tool_detail, 'description'):
-                        tool_dict['description'] = tool_detail.description
+                    if "name" not in tool_dict and hasattr(tool_detail, "title"):
+                        tool_dict["name"] = tool_detail.title
+                    if "description" not in tool_dict and hasattr(
+                        tool_detail, "description"
+                    ):
+                        tool_dict["description"] = tool_detail.description
 
                     detailed_tools.append(tool_dict)
 
-            logger.info(f"Processed {len(detailed_tools)} tools with detailed information")
+            logger.info(
+                f"Processed {len(detailed_tools)} tools with detailed information"
+            )
             return detailed_tools
 
         except Exception as e:
@@ -292,10 +340,18 @@ class CrewGenerationService(
             logger.error(f"Traceback: {traceback.format_exc()}")
 
             # Fall back to basic processing if tool service fails
-            return [{"name": t if isinstance(t, str) else t.get('name', 'Unknown'),
+            return [
+                {
+                    "name": t if isinstance(t, str) else t.get("name", "Unknown"),
                     "description": f"A tool named {t if isinstance(t, str) else t.get('name', 'Unknown')}",
-                    "id": t if isinstance(t, str) else t.get('id', t.get('name', 'Unknown'))}
-                   for t in tool_identifiers]
+                    "id": (
+                        t
+                        if isinstance(t, str)
+                        else t.get("id", t.get("name", "Unknown"))
+                    ),
+                }
+                for t in tool_identifiers
+            ]
 
     @staticmethod
     async def _has_persistent_memory_backend(session, group_context) -> bool:
@@ -310,15 +366,23 @@ class CrewGenerationService(
             primary_group_id = group_context.primary_group_id if group_context else None
             if not primary_group_id:
                 return False
-            from src.repositories.memory_backend_repository import MemoryBackendRepository
             from src.models.memory_backend import MemoryBackendTypeEnum
+            from src.repositories.memory_backend_repository import (
+                MemoryBackendRepository,
+            )
+
             mem_repo = MemoryBackendRepository(session)
-            for backend_type in (MemoryBackendTypeEnum.DATABRICKS, MemoryBackendTypeEnum.LAKEBASE):
+            for backend_type in (
+                MemoryBackendTypeEnum.DATABRICKS,
+                MemoryBackendTypeEnum.LAKEBASE,
+            ):
                 if await mem_repo.get_by_type(primary_group_id, backend_type):
                     return True
             return False
         except Exception as e:
-            logger.warning(f"Memory backend check failed, assuming no persistent memory: {e}")
+            logger.warning(
+                f"Memory backend check failed, assuming no persistent memory: {e}"
+            )
             return False
 
     @staticmethod
@@ -342,7 +406,9 @@ class CrewGenerationService(
         # Files attached in this chat turn. When present, the knowledge search tool
         # is scoped to ONLY these files (by basename), so the run grounds on the
         # just-uploaded document instead of any other file in the group.
-        knowledge_file_paths = list(getattr(request, "knowledge_file_paths", None) or [])
+        knowledge_file_paths = list(
+            getattr(request, "knowledge_file_paths", None) or []
+        )
         user_request = request.original_prompt or request.prompt
 
         # Agent Bricks endpoints picked in the chat "+" menu. This backend builder is
@@ -353,7 +419,9 @@ class CrewGenerationService(
         # the AgentBricksTool (catalog seed id 71) on each agent/task; when NONE is
         # picked, STRIP any AgentBricksTool the generator/LLM equipped on its own, since
         # an unconfigured AgentBricksTool aborts the task ("endpoint name is not configured").
-        agentbricks_endpoints = list(getattr(request, "agentbricks_endpoints", None) or [])
+        agentbricks_endpoints = list(
+            getattr(request, "agentbricks_endpoints", None) or []
+        )
         has_agentbricks = bool(agentbricks_endpoints)
         ABT_ID = "71"  # AgentBricksTool seed id
 
@@ -372,11 +440,23 @@ class CrewGenerationService(
             return [t for t in tools if not _is_agentbricks_tool(t)]
 
         OPTIONAL_AGENT_FIELDS = (
-            "llm", "function_calling_llm", "max_iter", "max_rpm",
-            "max_execution_time", "memory", "verbose", "allow_delegation",
-            "cache", "system_template", "prompt_template", "response_template",
-            "allow_code_execution", "code_execution_mode", "max_retry_limit",
-            "use_system_prompt", "respect_context_window",
+            "llm",
+            "function_calling_llm",
+            "max_iter",
+            "max_rpm",
+            "max_execution_time",
+            "memory",
+            "verbose",
+            "allow_delegation",
+            "cache",
+            "system_template",
+            "prompt_template",
+            "response_template",
+            "allow_code_execution",
+            "code_execution_mode",
+            "max_retry_limit",
+            "use_system_prompt",
+            "respect_context_window",
         )
 
         agents_yaml: Dict[str, Dict[str, Any]] = {}
@@ -403,11 +483,17 @@ class CrewGenerationService(
             if request.model and not cfg.get("llm"):
                 cfg["llm"] = request.model
             if mcp_servers:
-                cfg.setdefault("tool_configs", {})["MCP_SERVERS"] = {"servers": mcp_servers}
+                cfg.setdefault("tool_configs", {})["MCP_SERVERS"] = {
+                    "servers": mcp_servers
+                }
             if knowledge_file_paths:
-                cfg.setdefault("tool_configs", {})["DatabricksKnowledgeSearchTool"] = {"file_paths": knowledge_file_paths}
+                cfg.setdefault("tool_configs", {})["DatabricksKnowledgeSearchTool"] = {
+                    "file_paths": knowledge_file_paths
+                }
             if has_agentbricks:
-                cfg.setdefault("tool_configs", {})["AgentBricksTool"] = {"endpointName": agentbricks_endpoints}
+                cfg.setdefault("tool_configs", {})["AgentBricksTool"] = {
+                    "endpointName": agentbricks_endpoints
+                }
             # "No memory" mode: force every agent to be created without memory so
             # the backend disables crew memory entirely (nothing recalled/persisted).
             if request.disable_memory:
@@ -421,7 +507,7 @@ class CrewGenerationService(
             agent_id = str(task.get("agent_id") or task.get("agent") or "")
             agent_key = agent_id_to_key.get(agent_id)
             context: List[str] = []
-            for dep in (task.get("context") or []):
+            for dep in task.get("context") or []:
                 if isinstance(dep, str):
                     context.append(f"task_{dep}")
                 elif isinstance(dep, dict) and dep.get("id"):
@@ -432,7 +518,9 @@ class CrewGenerationService(
             base_desc = str(task.get("description") or "")
             grounding: List[str] = []
             if user_request:
-                grounding.append(f"USER REQUEST — this run exists to answer it:\n{user_request}")
+                grounding.append(
+                    f"USER REQUEST — this run exists to answer it:\n{user_request}"
+                )
             if mcp_servers:
                 grounding.append(
                     f"MCP data sources attached — query them for data questions: {', '.join(mcp_servers)}"
@@ -443,7 +531,9 @@ class CrewGenerationService(
                     "delegate the request to it and base your answer on its response: "
                     f"{', '.join(agentbricks_endpoints)}"
                 )
-            description = f"{base_desc}\n\n" + "\n\n".join(grounding) if grounding else base_desc
+            description = (
+                f"{base_desc}\n\n" + "\n\n".join(grounding) if grounding else base_desc
+            )
             entry: Dict[str, Any] = {
                 "id": tid,
                 "description": description,
@@ -455,11 +545,17 @@ class CrewGenerationService(
                 "output_file": task.get("output_file") or f"output/{tid}.md",
             }
             if mcp_servers:
-                entry.setdefault("tool_configs", {})["MCP_SERVERS"] = {"servers": mcp_servers}
+                entry.setdefault("tool_configs", {})["MCP_SERVERS"] = {
+                    "servers": mcp_servers
+                }
             if knowledge_file_paths:
-                entry.setdefault("tool_configs", {})["DatabricksKnowledgeSearchTool"] = {"file_paths": knowledge_file_paths}
+                entry.setdefault("tool_configs", {})[
+                    "DatabricksKnowledgeSearchTool"
+                ] = {"file_paths": knowledge_file_paths}
             if has_agentbricks:
-                entry.setdefault("tool_configs", {})["AgentBricksTool"] = {"endpointName": agentbricks_endpoints}
+                entry.setdefault("tool_configs", {})["AgentBricksTool"] = {
+                    "endpointName": agentbricks_endpoints
+                }
             tasks_yaml[key] = entry
 
         # ── ChatMode answer mode → reasoning budget / execution_type ──────────
@@ -472,7 +568,7 @@ class CrewGenerationService(
         # The effort rides in inputs.reasoning_config and is applied per agent to the
         # agent's own LLM by the shared agent builder, capability-gated per model
         # (unsupported models drop it silently — see utils/model_config).
-        _mode = (getattr(request, "chat_mode_type", "chat") or "chat")
+        _mode = getattr(request, "chat_mode_type", "chat") or "chat"
         _reasoning_effort = {"research": "medium", "deep": "high"}.get(_mode)
         _reasoning = _reasoning_effort is not None
         _execution_type = "agent" if _mode == "chat" else "crew"

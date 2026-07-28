@@ -6,11 +6,12 @@ Covers SAP BW exception aggregation and constant selection patterns.
 """
 
 import pytest
+
+from src.services.converters.base.models import KPI
 from src.services.converters.formats.uc_metrics.helpers.uc_metrics_aggregations import (
     UCMetricsAggregationBuilder,
-    detect_and_build_aggregation
+    detect_and_build_aggregation,
 )
-from src.services.converters.base.models import KPI
 
 
 class TestUCMetricsAggregationBuilder:
@@ -28,7 +29,7 @@ class TestUCMetricsAggregationBuilder:
             description="Revenue",
             technical_name="revenue",
             formula="amount",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
     # ========== Initialization Tests ==========
@@ -50,7 +51,7 @@ class TestUCMetricsAggregationBuilder:
             description="Revenue",
             technical_name="revenue",
             formula="amount",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
         result = builder.build_measure_expression(kpi)
         assert result == "SUM(amount)"
@@ -61,7 +62,7 @@ class TestUCMetricsAggregationBuilder:
             description="Row Count",
             technical_name="count",
             formula="*",
-            aggregation_type="COUNT"
+            aggregation_type="COUNT",
         )
         result = builder.build_measure_expression(kpi)
         assert result == "COUNT(*)"
@@ -72,7 +73,7 @@ class TestUCMetricsAggregationBuilder:
             description="Unique Customers",
             technical_name="unique_customers",
             formula="customer_id",
-            aggregation_type="DISTINCTCOUNT"
+            aggregation_type="DISTINCTCOUNT",
         )
         result = builder.build_measure_expression(kpi)
         assert result == "COUNT(DISTINCT customer_id)"
@@ -83,7 +84,7 @@ class TestUCMetricsAggregationBuilder:
             description="Average Price",
             technical_name="avg_price",
             formula="price",
-            aggregation_type="AVERAGE"
+            aggregation_type="AVERAGE",
         )
         result = builder.build_measure_expression(kpi)
         assert result == "AVG(price)"
@@ -94,7 +95,7 @@ class TestUCMetricsAggregationBuilder:
             description="Min Date",
             technical_name="min_date",
             formula="order_date",
-            aggregation_type="MIN"
+            aggregation_type="MIN",
         )
         result = builder.build_measure_expression(kpi)
         assert result == "MIN(order_date)"
@@ -105,7 +106,7 @@ class TestUCMetricsAggregationBuilder:
             description="Max Date",
             technical_name="max_date",
             formula="order_date",
-            aggregation_type="MAX"
+            aggregation_type="MAX",
         )
         result = builder.build_measure_expression(kpi)
         assert result == "MAX(order_date)"
@@ -116,7 +117,7 @@ class TestUCMetricsAggregationBuilder:
             description="Profit",
             technical_name="profit",
             formula="[revenue] - [cost]",
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
         result = builder.build_measure_expression(kpi)
         assert result == "[revenue] - [cost]"
@@ -127,18 +128,14 @@ class TestUCMetricsAggregationBuilder:
             description="Test",
             technical_name="test",
             formula="value",
-            aggregation_type="UNKNOWN"
+            aggregation_type="UNKNOWN",
         )
         result = builder.build_measure_expression(kpi)
         assert result == "SUM(value)"
 
     def test_build_measure_expression_no_aggregation_type(self, builder):
         """Test building expression with no aggregation type (defaults to SUM)"""
-        kpi = KPI(
-            description="Test",
-            technical_name="test",
-            formula="value"
-        )
+        kpi = KPI(description="Test", technical_name="test", formula="value")
         result = builder.build_measure_expression(kpi)
         assert result == "SUM(value)"
 
@@ -148,7 +145,7 @@ class TestUCMetricsAggregationBuilder:
             description="Count",
             technical_name="count",
             formula="",  # Empty string formula
-            aggregation_type="COUNT"
+            aggregation_type="COUNT",
         )
         result = builder.build_measure_expression(kpi)
         assert result == "COUNT(1)"
@@ -166,7 +163,7 @@ class TestUCMetricsAggregationBuilder:
             description="Revenue",
             technical_name="revenue",
             formula="amount",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
         result = builder.build_measure_expression_with_filter(kpi, "region = 'US'")
         assert "SUM(amount)" in result
@@ -178,11 +175,10 @@ class TestUCMetricsAggregationBuilder:
             description="Revenue",
             technical_name="revenue",
             formula="amount",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
         result = builder.build_measure_expression_with_filter(
-            kpi,
-            "region = 'US' AND status = 'active'"
+            kpi, "region = 'US' AND status = 'active'"
         )
         assert "SUM(amount)" in result
         assert "FILTER (WHERE region = 'US' AND status = 'active')" in result
@@ -194,7 +190,7 @@ class TestUCMetricsAggregationBuilder:
             technical_name="cost",
             formula="cost_amount",
             aggregation_type="SUM",
-            display_sign=-1
+            display_sign=-1,
         )
         result = builder.build_measure_expression_with_filter(kpi, None)
         assert "(-1) * SUM(cost_amount)" in result
@@ -206,7 +202,7 @@ class TestUCMetricsAggregationBuilder:
             technical_name="cost",
             formula="cost_amount",
             aggregation_type="SUM",
-            display_sign=-1
+            display_sign=-1,
         )
         result = builder.build_measure_expression_with_filter(kpi, "region = 'US'")
         assert "(-1) *" in result
@@ -219,7 +215,7 @@ class TestUCMetricsAggregationBuilder:
             description="Count",
             technical_name="count",
             formula="id",
-            aggregation_type="COUNT"
+            aggregation_type="COUNT",
         )
         result = builder.build_measure_expression_with_filter(kpi, "status = 'active'")
         assert "COUNT(id)" in result
@@ -231,7 +227,7 @@ class TestUCMetricsAggregationBuilder:
             description="Unique Customers",
             technical_name="unique_customers",
             formula="customer_id",
-            aggregation_type="DISTINCTCOUNT"
+            aggregation_type="DISTINCTCOUNT",
         )
         result = builder.build_measure_expression_with_filter(kpi, "year = 2023")
         assert "COUNT(DISTINCT customer_id)" in result
@@ -243,7 +239,7 @@ class TestUCMetricsAggregationBuilder:
             description="Average Price",
             technical_name="avg_price",
             formula="price",
-            aggregation_type="AVERAGE"
+            aggregation_type="AVERAGE",
         )
         result = builder.build_measure_expression_with_filter(kpi, "category = 'A'")
         assert "AVG(price)" in result
@@ -273,10 +269,7 @@ class TestUCMetricsAggregationBuilder:
 
     def test_apply_exceptions_multiple(self, builder):
         """Test applying multiple exceptions"""
-        exceptions = [
-            {"type": "null_to_zero"},
-            {"type": "negative_to_zero"}
-        ]
+        exceptions = [{"type": "null_to_zero"}, {"type": "negative_to_zero"}]
         result = builder.apply_exceptions_to_formula("revenue", exceptions)
         assert "COALESCE" in result
         assert "CASE WHEN" in result
@@ -295,9 +288,11 @@ class TestUCMetricsAggregationBuilder:
             technical_name="revenue",
             formula="amount",
             aggregation_type="SUM",
-            exception_aggregation="SUM"
+            exception_aggregation="SUM",
         )
-        result, window_config = builder.build_exception_aggregation_with_window(kpi, None)
+        result, window_config = builder.build_exception_aggregation_with_window(
+            kpi, None
+        )
         assert "SUM(" in result
         assert "amount" in result
         assert isinstance(window_config, list)
@@ -311,9 +306,11 @@ class TestUCMetricsAggregationBuilder:
             formula="stock_level",
             aggregation_type="SUM",
             exception_aggregation="SUM",
-            fields_for_exception_aggregation=["fiscal_period", "product_id"]
+            fields_for_exception_aggregation=["fiscal_period", "product_id"],
         )
-        result, window_config = builder.build_exception_aggregation_with_window(kpi, None)
+        result, window_config = builder.build_exception_aggregation_with_window(
+            kpi, None
+        )
         assert "SUM(" in result
         assert "stock_level" in result
         assert len(window_config) == 2
@@ -328,9 +325,11 @@ class TestUCMetricsAggregationBuilder:
             technical_name="count",
             formula="*",
             aggregation_type="SUM",
-            exception_aggregation="COUNT"
+            exception_aggregation="COUNT",
         )
-        result, window_config = builder.build_exception_aggregation_with_window(kpi, None)
+        result, window_config = builder.build_exception_aggregation_with_window(
+            kpi, None
+        )
         assert "COUNT(" in result
 
     def test_build_exception_aggregation_avg(self, builder):
@@ -340,9 +339,11 @@ class TestUCMetricsAggregationBuilder:
             technical_name="avg",
             formula="value",
             aggregation_type="SUM",
-            exception_aggregation="AVG"
+            exception_aggregation="AVG",
         )
-        result, window_config = builder.build_exception_aggregation_with_window(kpi, None)
+        result, window_config = builder.build_exception_aggregation_with_window(
+            kpi, None
+        )
         assert "AVG(" in result
 
     def test_build_exception_aggregation_min(self, builder):
@@ -352,9 +353,11 @@ class TestUCMetricsAggregationBuilder:
             technical_name="min",
             formula="value",
             aggregation_type="SUM",
-            exception_aggregation="MIN"
+            exception_aggregation="MIN",
         )
-        result, window_config = builder.build_exception_aggregation_with_window(kpi, None)
+        result, window_config = builder.build_exception_aggregation_with_window(
+            kpi, None
+        )
         assert "MIN(" in result
 
     def test_build_exception_aggregation_max(self, builder):
@@ -364,9 +367,11 @@ class TestUCMetricsAggregationBuilder:
             technical_name="max",
             formula="value",
             aggregation_type="SUM",
-            exception_aggregation="MAX"
+            exception_aggregation="MAX",
         )
-        result, window_config = builder.build_exception_aggregation_with_window(kpi, None)
+        result, window_config = builder.build_exception_aggregation_with_window(
+            kpi, None
+        )
         assert "MAX(" in result
 
     def test_build_exception_aggregation_negative_sign(self, builder):
@@ -377,9 +382,11 @@ class TestUCMetricsAggregationBuilder:
             formula="amount",
             aggregation_type="SUM",
             exception_aggregation="SUM",
-            display_sign=-1
+            display_sign=-1,
         )
-        result, window_config = builder.build_exception_aggregation_with_window(kpi, None)
+        result, window_config = builder.build_exception_aggregation_with_window(
+            kpi, None
+        )
         assert "(-1) *" in result
         assert "SUM(" in result
 
@@ -392,7 +399,7 @@ class TestUCMetricsAggregationBuilder:
             technical_name="inventory",
             formula="stock_level",
             aggregation_type="SUM",
-            fields_for_constant_selection=["fiscal_period"]
+            fields_for_constant_selection=["fiscal_period"],
         )
         result, window_config = builder.build_constant_selection_measure(kpi, [])
         assert "SUM(stock_level)" in result
@@ -407,7 +414,7 @@ class TestUCMetricsAggregationBuilder:
             technical_name="inventory",
             formula="stock_level",
             aggregation_type="SUM",
-            fields_for_constant_selection=["fiscal_period"]
+            fields_for_constant_selection=["fiscal_period"],
         )
         filters = ["region = 'US'", "status = 'active'"]
         result, window_config = builder.build_constant_selection_measure(kpi, filters)
@@ -423,7 +430,7 @@ class TestUCMetricsAggregationBuilder:
             technical_name="count",
             formula="id",
             aggregation_type="COUNT",
-            fields_for_constant_selection=["fiscal_period"]
+            fields_for_constant_selection=["fiscal_period"],
         )
         result, window_config = builder.build_constant_selection_measure(kpi, [])
         assert "COUNT(id)" in result
@@ -436,7 +443,7 @@ class TestUCMetricsAggregationBuilder:
             technical_name="avg",
             formula="value",
             aggregation_type="AVERAGE",
-            fields_for_constant_selection=["fiscal_period"]
+            fields_for_constant_selection=["fiscal_period"],
         )
         result, window_config = builder.build_constant_selection_measure(kpi, [])
         assert "AVG(value)" in result
@@ -448,7 +455,7 @@ class TestUCMetricsAggregationBuilder:
             technical_name="min",
             formula="value",
             aggregation_type="MIN",
-            fields_for_constant_selection=["fiscal_period"]
+            fields_for_constant_selection=["fiscal_period"],
         )
         result, window_config = builder.build_constant_selection_measure(kpi, [])
         assert "MIN(value)" in result
@@ -460,7 +467,7 @@ class TestUCMetricsAggregationBuilder:
             technical_name="max",
             formula="value",
             aggregation_type="MAX",
-            fields_for_constant_selection=["fiscal_period"]
+            fields_for_constant_selection=["fiscal_period"],
         )
         result, window_config = builder.build_constant_selection_measure(kpi, [])
         assert "MAX(value)" in result
@@ -473,7 +480,7 @@ class TestUCMetricsAggregationBuilder:
             formula="amount",
             aggregation_type="SUM",
             display_sign=-1,
-            fields_for_constant_selection=["fiscal_period"]
+            fields_for_constant_selection=["fiscal_period"],
         )
         result, window_config = builder.build_constant_selection_measure(kpi, [])
         assert "(-1) *" in result
@@ -486,7 +493,11 @@ class TestUCMetricsAggregationBuilder:
             technical_name="inventory",
             formula="stock_level",
             aggregation_type="SUM",
-            fields_for_constant_selection=["fiscal_period", "product_id", "warehouse_id"]
+            fields_for_constant_selection=[
+                "fiscal_period",
+                "product_id",
+                "warehouse_id",
+            ],
         )
         result, window_config = builder.build_constant_selection_measure(kpi, [])
         assert len(window_config) == 3
@@ -505,7 +516,7 @@ class TestDetectAndBuildAggregation:
             description="Revenue",
             technical_name="revenue",
             formula="amount",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
         result = detect_and_build_aggregation(kpi)
         assert result == "SUM(amount)"
@@ -516,7 +527,7 @@ class TestDetectAndBuildAggregation:
             description="Row Count",
             technical_name="count",
             formula="*",
-            aggregation_type="COUNT"
+            aggregation_type="COUNT",
         )
         result = detect_and_build_aggregation(kpi)
         assert result == "COUNT(*)"
@@ -527,7 +538,7 @@ class TestDetectAndBuildAggregation:
             description="Unique Customers",
             technical_name="unique_customers",
             formula="customer_id",
-            aggregation_type="DISTINCTCOUNT"
+            aggregation_type="DISTINCTCOUNT",
         )
         result = detect_and_build_aggregation(kpi)
         assert result == "COUNT(DISTINCT customer_id)"
@@ -538,7 +549,7 @@ class TestDetectAndBuildAggregation:
             description="Average Price",
             technical_name="avg_price",
             formula="price",
-            aggregation_type="AVERAGE"
+            aggregation_type="AVERAGE",
         )
         result = detect_and_build_aggregation(kpi)
         assert result == "AVG(price)"
@@ -549,7 +560,7 @@ class TestDetectAndBuildAggregation:
             description="Min Date",
             technical_name="min_date",
             formula="order_date",
-            aggregation_type="MIN"
+            aggregation_type="MIN",
         )
         result = detect_and_build_aggregation(kpi)
         assert result == "MIN(order_date)"
@@ -560,7 +571,7 @@ class TestDetectAndBuildAggregation:
             description="Max Date",
             technical_name="max_date",
             formula="order_date",
-            aggregation_type="MAX"
+            aggregation_type="MAX",
         )
         result = detect_and_build_aggregation(kpi)
         assert result == "MAX(order_date)"
@@ -571,17 +582,13 @@ class TestDetectAndBuildAggregation:
             description="Profit",
             technical_name="profit",
             formula="[revenue] - [cost]",
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
         result = detect_and_build_aggregation(kpi)
         assert result == "[revenue] - [cost]"
 
     def test_detect_and_build_default(self):
         """Test detecting and building with no aggregation type (defaults to SUM)"""
-        kpi = KPI(
-            description="Value",
-            technical_name="value",
-            formula="amount"
-        )
+        kpi = KPI(description="Value", technical_name="value", formula="amount")
         result = detect_and_build_aggregation(kpi)
         assert result == "SUM(amount)"

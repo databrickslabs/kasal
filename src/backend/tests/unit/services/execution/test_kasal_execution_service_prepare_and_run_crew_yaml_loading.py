@@ -4,18 +4,22 @@ Missing: prepare_and_run_crew error paths, agents_yaml/tasks_yaml branches,
 run_crew_execution, cancel_execution, get_execution_status, update_execution_status,
 run_flow_execution branches, get_flow_execution, get_flow_executions_by_flow.
 """
+
 import asyncio
-import pytest
 import uuid
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
-from src.services.execution.kasal_service import (
-    KasalExecutionService, executions, JobStatus
-)
+import pytest
+
 from src.models.execution_status import ExecutionStatus
 from src.schemas.execution import CrewConfig
+from src.services.execution.kasal_service import (
+    JobStatus,
+    KasalExecutionService,
+    executions,
+)
 from src.utils.user_context import GroupContext
 
 
@@ -46,6 +50,7 @@ def make_group_context(group_ids=None):
 # prepare_and_run_crew - agents_yaml path
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_prepare_and_run_crew_agents_yaml_path():
     svc = KasalExecutionService()
@@ -54,11 +59,19 @@ async def test_prepare_and_run_crew_agents_yaml_path():
 
     config = make_config(
         agents_yaml={
-            "agent_1": {"name": "researcher", "role": "Researcher", "tool_configs": {"key": "val"}}
+            "agent_1": {
+                "name": "researcher",
+                "role": "Researcher",
+                "tool_configs": {"key": "val"},
+            }
         },
         tasks_yaml={
-            "task_1": {"name": "task one", "description": "do research", "tool_configs": {}}
-        }
+            "task_1": {
+                "name": "task one",
+                "description": "do research",
+                "tool_configs": {},
+            }
+        },
     )
 
     mock_engine = AsyncMock()
@@ -78,16 +91,29 @@ async def test_prepare_and_run_crew_agents_yaml_path():
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=mock_engine), \
-         patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.AgentService",
-               return_value=mock_agent_svc), \
-         patch("src.services.execution.kasal_service.TaskService",
-               return_value=mock_task_svc), \
-         patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock):
+    with (
+        patch(
+            "src.services.execution.kasal_service.EngineFactory.get_engine",
+            new_callable=AsyncMock,
+            return_value=mock_engine,
+        ),
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.AgentService",
+            return_value=mock_agent_svc,
+        ),
+        patch(
+            "src.services.execution.kasal_service.TaskService",
+            return_value=mock_task_svc,
+        ),
+        patch(
+            "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+        ),
+    ):
         result = await svc.prepare_and_run_crew(exec_id, config)
         assert result["execution_id"] == exec_id
 
@@ -100,7 +126,7 @@ async def test_prepare_and_run_crew_with_db_agent():
 
     config = make_config(
         agents_yaml={"agent_1": {"role": "Worker"}},
-        tasks_yaml={"task_1": {"description": "do work"}}
+        tasks_yaml={"task_1": {"description": "do work"}},
     )
 
     mock_engine = AsyncMock()
@@ -122,16 +148,29 @@ async def test_prepare_and_run_crew_with_db_agent():
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=mock_engine), \
-         patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.AgentService",
-               return_value=mock_agent_svc), \
-         patch("src.services.execution.kasal_service.TaskService",
-               return_value=mock_task_svc), \
-         patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock):
+    with (
+        patch(
+            "src.services.execution.kasal_service.EngineFactory.get_engine",
+            new_callable=AsyncMock,
+            return_value=mock_engine,
+        ),
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.AgentService",
+            return_value=mock_agent_svc,
+        ),
+        patch(
+            "src.services.execution.kasal_service.TaskService",
+            return_value=mock_task_svc,
+        ),
+        patch(
+            "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+        ),
+    ):
         result = await svc.prepare_and_run_crew(exec_id, config)
         assert result["execution_id"] == exec_id
 
@@ -148,10 +187,17 @@ async def test_prepare_and_run_crew_with_agents_yaml_empty_dict():
     mock_engine = AsyncMock()
     mock_engine.run_execution = AsyncMock(return_value={})
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=mock_engine), \
-         patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock):
+    with (
+        patch(
+            "src.services.execution.kasal_service.EngineFactory.get_engine",
+            new_callable=AsyncMock,
+            return_value=mock_engine,
+        ),
+        patch(
+            "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+        ),
+    ):
         result = await svc.prepare_and_run_crew(exec_id, config)
         assert "execution_id" in result
 
@@ -165,7 +211,7 @@ async def test_prepare_and_run_crew_hierarchical_process():
     config = make_config(
         inputs={"process": "hierarchical", "manager_llm": "gpt-4"},
         agents_yaml={"agent1": {"role": "Worker"}},
-        tasks_yaml={"task1": {"description": "task"}}
+        tasks_yaml={"task1": {"description": "task"}},
     )
 
     mock_engine = AsyncMock()
@@ -183,16 +229,29 @@ async def test_prepare_and_run_crew_hierarchical_process():
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=mock_engine), \
-         patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.AgentService",
-               return_value=mock_agent_svc), \
-         patch("src.services.execution.kasal_service.TaskService",
-               return_value=mock_task_svc), \
-         patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock):
+    with (
+        patch(
+            "src.services.execution.kasal_service.EngineFactory.get_engine",
+            new_callable=AsyncMock,
+            return_value=mock_engine,
+        ),
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.AgentService",
+            return_value=mock_agent_svc,
+        ),
+        patch(
+            "src.services.execution.kasal_service.TaskService",
+            return_value=mock_task_svc,
+        ),
+        patch(
+            "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+        ),
+    ):
         result = await svc.prepare_and_run_crew(exec_id, config)
         assert "execution_id" in result
 
@@ -206,7 +265,7 @@ async def test_prepare_and_run_crew_planning_llm():
     config = make_config(
         inputs={"planning_llm": "claude-3", "reasoning_llm": "gpt-4"},
         agents_yaml={"agent1": {"role": "Worker"}},
-        tasks_yaml={"task1": {"description": "task"}}
+        tasks_yaml={"task1": {"description": "task"}},
     )
 
     mock_engine = AsyncMock()
@@ -224,16 +283,29 @@ async def test_prepare_and_run_crew_planning_llm():
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=mock_engine), \
-         patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.AgentService",
-               return_value=mock_agent_svc), \
-         patch("src.services.execution.kasal_service.TaskService",
-               return_value=mock_task_svc), \
-         patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock):
+    with (
+        patch(
+            "src.services.execution.kasal_service.EngineFactory.get_engine",
+            new_callable=AsyncMock,
+            return_value=mock_engine,
+        ),
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.AgentService",
+            return_value=mock_agent_svc,
+        ),
+        patch(
+            "src.services.execution.kasal_service.TaskService",
+            return_value=mock_task_svc,
+        ),
+        patch(
+            "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+        ),
+    ):
         result = await svc.prepare_and_run_crew(exec_id, config)
         assert "execution_id" in result
 
@@ -246,7 +318,7 @@ async def test_prepare_and_run_crew_with_group_context():
 
     config = make_config(
         agents_yaml={"agent1": {"role": "Worker"}},
-        tasks_yaml={"task1": {"description": "task"}}
+        tasks_yaml={"task1": {"description": "task"}},
     )
     group_ctx = make_group_context()
 
@@ -265,17 +337,32 @@ async def test_prepare_and_run_crew_with_group_context():
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=mock_engine), \
-         patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.AgentService",
-               return_value=mock_agent_svc), \
-         patch("src.services.execution.kasal_service.TaskService",
-               return_value=mock_task_svc), \
-         patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock):
-        result = await svc.prepare_and_run_crew(exec_id, config, group_context=group_ctx)
+    with (
+        patch(
+            "src.services.execution.kasal_service.EngineFactory.get_engine",
+            new_callable=AsyncMock,
+            return_value=mock_engine,
+        ),
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.AgentService",
+            return_value=mock_agent_svc,
+        ),
+        patch(
+            "src.services.execution.kasal_service.TaskService",
+            return_value=mock_task_svc,
+        ),
+        patch(
+            "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+        ),
+    ):
+        result = await svc.prepare_and_run_crew(
+            exec_id, config, group_context=group_ctx
+        )
         assert result["execution_id"] == exec_id
 
 
@@ -287,10 +374,17 @@ async def test_prepare_and_run_crew_exception_path():
 
     config = make_config()
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, side_effect=RuntimeError("engine crash")), \
-         patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock):
+    with (
+        patch(
+            "src.services.execution.kasal_service.EngineFactory.get_engine",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("engine crash"),
+        ),
+        patch(
+            "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+        ),
+    ):
         with pytest.raises(RuntimeError, match="engine crash"):
             await svc.prepare_and_run_crew(exec_id, config)
 
@@ -314,12 +408,21 @@ async def test_prepare_and_run_crew_agents_yaml_db_exception_fallback():
     mock_session.__aenter__ = AsyncMock(side_effect=RuntimeError("DB down"))
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=mock_engine), \
-         patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock):
+    with (
+        patch(
+            "src.services.execution.kasal_service.EngineFactory.get_engine",
+            new_callable=AsyncMock,
+            return_value=mock_engine,
+        ),
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+        ),
+    ):
         result = await svc.prepare_and_run_crew(exec_id, config)
         assert result["execution_id"] == exec_id
 
@@ -331,9 +434,7 @@ async def test_prepare_and_run_crew_tasks_yaml_db_exception_fallback():
     exec_id = str(uuid.uuid4())
     executions[exec_id] = {"run_name": "Run", "status": "RUNNING"}
 
-    config = make_config(
-        tasks_yaml={"task_1": {"description": "do stuff"}}
-    )
+    config = make_config(tasks_yaml={"task_1": {"description": "do stuff"}})
 
     mock_engine = AsyncMock()
     mock_engine.run_execution = AsyncMock(return_value={})
@@ -351,10 +452,17 @@ async def test_prepare_and_run_crew_tasks_yaml_db_exception_fallback():
         ctx.__aexit__ = AsyncMock(return_value=None)
         return ctx
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=mock_engine), \
-         patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock):
+    with (
+        patch(
+            "src.services.execution.kasal_service.EngineFactory.get_engine",
+            new_callable=AsyncMock,
+            return_value=mock_engine,
+        ),
+        patch(
+            "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+        ),
+    ):
         # Run - it may succeed or fail; the important thing is no unhandled crash
         try:
             result = await svc.prepare_and_run_crew(exec_id, config)
@@ -366,6 +474,7 @@ async def test_prepare_and_run_crew_tasks_yaml_db_exception_fallback():
 # _prepare_engine
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_prepare_engine_returns_engine():
     svc = KasalExecutionService()
@@ -373,8 +482,11 @@ async def test_prepare_engine_returns_engine():
 
     mock_engine = AsyncMock()
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=mock_engine):
+    with patch(
+        "src.services.execution.kasal_service.EngineFactory.get_engine",
+        new_callable=AsyncMock,
+        return_value=mock_engine,
+    ):
         engine = await svc._prepare_engine(config)
         assert engine is mock_engine
 
@@ -384,8 +496,11 @@ async def test_prepare_engine_none_raises():
     svc = KasalExecutionService()
     config = make_config()
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=None):
+    with patch(
+        "src.services.execution.kasal_service.EngineFactory.get_engine",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
         with pytest.raises(ValueError, match="Failed to initialize"):
             await svc._prepare_engine(config)
 
@@ -393,6 +508,7 @@ async def test_prepare_engine_none_raises():
 # ---------------------------------------------------------------------------
 # run_crew_execution
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_run_crew_execution_creates_task():
@@ -412,6 +528,7 @@ async def test_run_crew_execution_creates_task():
 # ---------------------------------------------------------------------------
 # get_execution / add_execution_to_memory
 # ---------------------------------------------------------------------------
+
 
 def test_get_execution_found():
     exec_id = str(uuid.uuid4())
@@ -436,7 +553,9 @@ def test_add_execution_to_memory():
 def test_add_execution_to_memory_with_timestamp():
     exec_id = str(uuid.uuid4())
     ts = datetime(2025, 1, 1)
-    KasalExecutionService.add_execution_to_memory(exec_id, "RUNNING", "Run", created_at=ts)
+    KasalExecutionService.add_execution_to_memory(
+        exec_id, "RUNNING", "Run", created_at=ts
+    )
     assert executions[exec_id]["created_at"] == ts
 
 
@@ -444,14 +563,17 @@ def test_add_execution_to_memory_with_timestamp():
 # update_execution_status
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_update_execution_status_in_memory():
     svc = KasalExecutionService()
     exec_id = str(uuid.uuid4())
     executions[exec_id] = {"status": "RUNNING", "message": ""}
 
-    with patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock):
+    with patch(
+        "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+        new_callable=AsyncMock,
+    ):
         await svc.update_execution_status(
             exec_id, ExecutionStatus.COMPLETED, "Done", result={"output": "results"}
         )
@@ -466,8 +588,10 @@ async def test_update_execution_status_not_in_memory():
     # Ensure not in executions
     executions.pop(exec_id, None)
 
-    with patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock) as mock_update:
+    with patch(
+        "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+        new_callable=AsyncMock,
+    ) as mock_update:
         await svc.update_execution_status(exec_id, ExecutionStatus.FAILED, "fail")
 
     mock_update.assert_awaited_once()
@@ -479,9 +603,13 @@ async def test_update_execution_status_non_terminal():
     exec_id = str(uuid.uuid4())
     executions[exec_id] = {"status": "RUNNING"}
 
-    with patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock):
-        await svc.update_execution_status(exec_id, ExecutionStatus.RUNNING, "still running")
+    with patch(
+        "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+        new_callable=AsyncMock,
+    ):
+        await svc.update_execution_status(
+            exec_id, ExecutionStatus.RUNNING, "still running"
+        )
 
     # Non-terminal status should keep it in memory
     assert exec_id in executions
@@ -491,6 +619,7 @@ async def test_update_execution_status_non_terminal():
 # ---------------------------------------------------------------------------
 # cancel_execution
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_cancel_execution_not_in_memory():
@@ -508,8 +637,11 @@ async def test_cancel_execution_engine_not_found():
     exec_id = str(uuid.uuid4())
     executions[exec_id] = {"status": "RUNNING"}
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=None):
+    with patch(
+        "src.services.execution.kasal_service.EngineFactory.get_engine",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
         result = await svc.cancel_execution(exec_id)
 
     assert result is False
@@ -525,8 +657,11 @@ async def test_cancel_execution_success():
     mock_engine = AsyncMock()
     mock_engine.cancel_execution = AsyncMock(return_value=True)
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=mock_engine):
+    with patch(
+        "src.services.execution.kasal_service.EngineFactory.get_engine",
+        new_callable=AsyncMock,
+        return_value=mock_engine,
+    ):
         result = await svc.cancel_execution(exec_id)
 
     assert result is True
@@ -536,6 +671,7 @@ async def test_cancel_execution_success():
 # ---------------------------------------------------------------------------
 # get_execution_status
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_execution_status_from_memory_terminal():
@@ -557,8 +693,11 @@ async def test_get_execution_status_from_memory_running_then_engine():
     mock_engine = AsyncMock()
     mock_engine.get_execution_status = AsyncMock(return_value={"status": "RUNNING"})
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=mock_engine):
+    with patch(
+        "src.services.execution.kasal_service.EngineFactory.get_engine",
+        new_callable=AsyncMock,
+        return_value=mock_engine,
+    ):
         result = await svc.get_execution_status(exec_id)
 
     assert result is not None
@@ -571,8 +710,11 @@ async def test_get_execution_status_engine_not_found():
     exec_id = str(uuid.uuid4())
     executions.pop(exec_id, None)
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=None):
+    with patch(
+        "src.services.execution.kasal_service.EngineFactory.get_engine",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
         result = await svc.get_execution_status(exec_id)
 
     assert result is None
@@ -587,8 +729,11 @@ async def test_get_execution_status_not_in_memory():
     mock_engine = AsyncMock()
     mock_engine.get_execution_status = AsyncMock(return_value={"status": "COMPLETED"})
 
-    with patch("src.services.execution.kasal_service.EngineFactory.get_engine",
-               new_callable=AsyncMock, return_value=mock_engine):
+    with patch(
+        "src.services.execution.kasal_service.EngineFactory.get_engine",
+        new_callable=AsyncMock,
+        return_value=mock_engine,
+    ):
         result = await svc.get_execution_status(exec_id)
 
     assert result["status"] == "COMPLETED"
@@ -598,12 +743,15 @@ async def test_get_execution_status_not_in_memory():
 # run_flow_execution
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_run_flow_execution_no_flow_id_no_nodes():
     svc = KasalExecutionService()
 
-    with patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock):
+    with patch(
+        "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+        new_callable=AsyncMock,
+    ):
         result = await svc.run_flow_execution(flow_id=None, nodes=None, job_id="j1")
 
     assert result["success"] is False
@@ -623,10 +771,16 @@ async def test_run_flow_execution_with_nodes_directly():
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.KasalFlowService",
-               return_value=mock_flow_svc):
+    with (
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.KasalFlowService",
+            return_value=mock_flow_svc,
+        ),
+    ):
         result = await svc.run_flow_execution(nodes=nodes, edges=edges, job_id="j1")
 
     assert result["success"] is True
@@ -646,14 +800,23 @@ async def test_run_flow_execution_with_group_context():
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
     import src.utils.user_context as user_ctx_mod
-    orig_set_group = getattr(user_ctx_mod.UserContext, 'set_group_context', None)
 
-    with patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.KasalFlowService",
-               return_value=mock_flow_svc), \
-         patch.object(user_ctx_mod.UserContext, 'set_group_context', MagicMock()):
-        result = await svc.run_flow_execution(nodes=nodes, job_id="j2", group_context=group_ctx)
+    orig_set_group = getattr(user_ctx_mod.UserContext, "set_group_context", None)
+
+    with (
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.KasalFlowService",
+            return_value=mock_flow_svc,
+        ),
+        patch.object(user_ctx_mod.UserContext, "set_group_context", MagicMock()),
+    ):
+        result = await svc.run_flow_execution(
+            nodes=nodes, job_id="j2", group_context=group_ctx
+        )
 
     assert result["success"] is True
 
@@ -670,12 +833,20 @@ async def test_run_flow_execution_flow_service_error():
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.KasalFlowService",
-               return_value=mock_flow_svc), \
-         patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock):
+    with (
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.KasalFlowService",
+            return_value=mock_flow_svc,
+        ),
+        patch(
+            "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+        ),
+    ):
         result = await svc.run_flow_execution(nodes=nodes, job_id="j3")
 
     assert result["success"] is False
@@ -694,10 +865,16 @@ async def test_run_flow_execution_no_job_id_generates_one():
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.KasalFlowService",
-               return_value=mock_flow_svc):
+    with (
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.KasalFlowService",
+            return_value=mock_flow_svc,
+        ),
+    ):
         result = await svc.run_flow_execution(nodes=nodes, job_id=None)
 
     assert result["success"] is True
@@ -736,14 +913,21 @@ async def test_run_flow_execution_with_flow_id_loads_from_repo():
         return mock_exec_session
 
     import src.repositories.flow_repository as flow_repo_mod
+
     orig_flow_repo = flow_repo_mod.FlowRepository
     flow_repo_mod.FlowRepository = lambda s: mock_flow_repo_instance
 
     try:
-        with patch("src.services.execution.kasal_service.request_scoped_session",
-                   side_effect=get_session), \
-             patch("src.services.execution.kasal_service.KasalFlowService",
-                   return_value=mock_flow_svc):
+        with (
+            patch(
+                "src.services.execution.kasal_service.request_scoped_session",
+                side_effect=get_session,
+            ),
+            patch(
+                "src.services.execution.kasal_service.KasalFlowService",
+                return_value=mock_flow_svc,
+            ),
+        ):
             result = await svc.run_flow_execution(flow_id=flow_id, job_id="j4")
     finally:
         flow_repo_mod.FlowRepository = orig_flow_repo
@@ -762,12 +946,15 @@ async def test_run_flow_execution_with_flow_id_not_found():
     mock_db_session.__aexit__ = AsyncMock(return_value=None)
 
     import src.repositories.flow_repository as flow_repo_mod
+
     orig_flow_repo = flow_repo_mod.FlowRepository
     flow_repo_mod.FlowRepository = lambda s: mock_flow_repo_instance
 
     try:
-        with patch("src.services.execution.kasal_service.request_scoped_session",
-                   return_value=mock_db_session):
+        with patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_db_session,
+        ):
             result = await svc.run_flow_execution(flow_id=flow_id, job_id="j5")
     finally:
         flow_repo_mod.FlowRepository = orig_flow_repo
@@ -783,7 +970,7 @@ async def test_run_flow_execution_with_resume_params():
     config = {
         "resume_from_flow_uuid": "flow-uuid-123",
         "resume_from_execution_id": 42,
-        "resume_from_crew_sequence": 2
+        "resume_from_crew_sequence": 2,
     }
 
     mock_flow_svc = AsyncMock()
@@ -793,10 +980,16 @@ async def test_run_flow_execution_with_resume_params():
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.KasalFlowService",
-               return_value=mock_flow_svc):
+    with (
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.KasalFlowService",
+            return_value=mock_flow_svc,
+        ),
+    ):
         result = await svc.run_flow_execution(nodes=nodes, job_id="j6", config=config)
 
     assert result["success"] is True
@@ -816,12 +1009,20 @@ async def test_run_flow_execution_unexpected_outer_exception():
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.KasalFlowService",
-               return_value=mock_flow_svc), \
-         patch("src.services.execution.kasal_service.ExecutionStatusService.update_status",
-               new_callable=AsyncMock):
+    with (
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.KasalFlowService",
+            return_value=mock_flow_svc,
+        ),
+        patch(
+            "src.services.execution.kasal_service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+        ),
+    ):
         result = await svc.run_flow_execution(nodes=nodes, job_id="j7")
 
     # The inner exception handler returns success=False
@@ -832,6 +1033,7 @@ async def test_run_flow_execution_unexpected_outer_exception():
 # ---------------------------------------------------------------------------
 # get_flow_execution and get_flow_executions_by_flow
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_flow_execution():
@@ -844,10 +1046,16 @@ async def test_get_flow_execution():
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.KasalFlowService",
-               return_value=mock_flow_svc):
+    with (
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.KasalFlowService",
+            return_value=mock_flow_svc,
+        ),
+    ):
         result = await svc.get_flow_execution(1)
 
     assert result["id"] == 1
@@ -864,10 +1072,16 @@ async def test_get_flow_execution_error():
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.KasalFlowService",
-               return_value=mock_flow_svc):
+    with (
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.KasalFlowService",
+            return_value=mock_flow_svc,
+        ),
+    ):
         with pytest.raises(RuntimeError):
             await svc.get_flow_execution(99)
 
@@ -877,16 +1091,24 @@ async def test_get_flow_executions_by_flow():
     svc = KasalExecutionService()
 
     mock_flow_svc = AsyncMock()
-    mock_flow_svc.get_flow_executions_by_flow = AsyncMock(return_value={"executions": []})
+    mock_flow_svc.get_flow_executions_by_flow = AsyncMock(
+        return_value={"executions": []}
+    )
 
     mock_session = AsyncMock()
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.KasalFlowService",
-               return_value=mock_flow_svc):
+    with (
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.KasalFlowService",
+            return_value=mock_flow_svc,
+        ),
+    ):
         result = await svc.get_flow_executions_by_flow("flow-1")
 
     assert result is not None
@@ -897,16 +1119,24 @@ async def test_get_flow_executions_by_flow_error():
     svc = KasalExecutionService()
 
     mock_flow_svc = AsyncMock()
-    mock_flow_svc.get_flow_executions_by_flow = AsyncMock(side_effect=RuntimeError("crash"))
+    mock_flow_svc.get_flow_executions_by_flow = AsyncMock(
+        side_effect=RuntimeError("crash")
+    )
 
     mock_session = AsyncMock()
     mock_session.__aenter__ = AsyncMock(return_value=mock_session)
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("src.services.execution.kasal_service.request_scoped_session",
-               return_value=mock_session), \
-         patch("src.services.execution.kasal_service.KasalFlowService",
-               return_value=mock_flow_svc):
+    with (
+        patch(
+            "src.services.execution.kasal_service.request_scoped_session",
+            return_value=mock_session,
+        ),
+        patch(
+            "src.services.execution.kasal_service.KasalFlowService",
+            return_value=mock_flow_svc,
+        ),
+    ):
         with pytest.raises(RuntimeError):
             await svc.get_flow_executions_by_flow("flow-1")
 
@@ -919,6 +1149,7 @@ async def test_get_flow_executions_by_flow_error():
 # runner's own behavior is covered in
 # tests/unit/engines/kasal/test_execution_runner_light_agent.py.
 
+
 @pytest.mark.asyncio
 async def test_run_light_agent_execution_delegates_to_engine():
     """The service resolves the CrewAI engine and hands the light run off to
@@ -926,15 +1157,26 @@ async def test_run_light_agent_execution_delegates_to_engine():
     svc = KasalExecutionService()
     exec_id = f"light-{uuid.uuid4()}"
     config = make_config(
-        agents_yaml={"agent_a1": {"id": "agent_a1", "role": "Assistant", "goal": "g",
-                                  "backstory": "b", "tools": [], "tool_configs": {"k": 1}}},
+        agents_yaml={
+            "agent_a1": {
+                "id": "agent_a1",
+                "role": "Assistant",
+                "goal": "g",
+                "backstory": "b",
+                "tools": [],
+                "tool_configs": {"k": 1},
+            }
+        },
         tasks_yaml={"task_t1": {"id": "task_t1", "description": "Answer: hello"}},
     )
     ctx = make_group_context(["g1"])
 
     engine = MagicMock()
     engine.run_light_agent_execution = AsyncMock(
-        return_value={"execution_id": exec_id, "status": ExecutionStatus.COMPLETED.value}
+        return_value={
+            "execution_id": exec_id,
+            "status": ExecutionStatus.COMPLETED.value,
+        }
     )
     prepare_mock = AsyncMock(return_value=engine)
 
@@ -954,18 +1196,27 @@ async def test_run_light_agent_execution_delegates_to_engine():
 # in-process light/chat path, so downstream service->repo->db uses Lakebase).
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_run_light_agent_activates_lakebase_when_not_active():
     svc = KasalExecutionService()
     mock_engine = SimpleNamespace(
-        run_light_agent_execution=AsyncMock(return_value={"execution_id": "e1", "status": "completed"})
+        run_light_agent_execution=AsyncMock(
+            return_value={"execution_id": "e1", "status": "completed"}
+        )
     )
     svc._prepare_engine = AsyncMock(return_value=mock_engine)
     activate = AsyncMock(return_value=True)
 
-    with patch("src.db.session.async_session_factory", SimpleNamespace(is_lakebase=False)), \
-         patch("src.db.database_router.activate_lakebase_in_subprocess", activate):
-        result = await svc.run_light_agent_execution("e1", make_config(), group_context=None)
+    with (
+        patch(
+            "src.db.session.async_session_factory", SimpleNamespace(is_lakebase=False)
+        ),
+        patch("src.db.database_router.activate_lakebase_in_subprocess", activate),
+    ):
+        result = await svc.run_light_agent_execution(
+            "e1", make_config(), group_context=None
+        )
 
     activate.assert_awaited_once()
     mock_engine.run_light_agent_execution.assert_awaited_once()
@@ -981,8 +1232,12 @@ async def test_run_light_agent_skips_lakebase_when_already_active():
     svc._prepare_engine = AsyncMock(return_value=mock_engine)
     activate = AsyncMock(return_value=True)
 
-    with patch("src.db.session.async_session_factory", SimpleNamespace(is_lakebase=True)), \
-         patch("src.db.database_router.activate_lakebase_in_subprocess", activate):
+    with (
+        patch(
+            "src.db.session.async_session_factory", SimpleNamespace(is_lakebase=True)
+        ),
+        patch("src.db.database_router.activate_lakebase_in_subprocess", activate),
+    ):
         await svc.run_light_agent_execution("e1", make_config(), group_context=None)
 
     activate.assert_not_awaited()
@@ -999,9 +1254,15 @@ async def test_run_light_agent_lakebase_activation_failure_is_non_fatal():
     svc._prepare_engine = AsyncMock(return_value=mock_engine)
     boom = AsyncMock(side_effect=RuntimeError("lakebase down"))
 
-    with patch("src.db.session.async_session_factory", SimpleNamespace(is_lakebase=False)), \
-         patch("src.db.database_router.activate_lakebase_in_subprocess", boom):
-        result = await svc.run_light_agent_execution("e1", make_config(), group_context=None)
+    with (
+        patch(
+            "src.db.session.async_session_factory", SimpleNamespace(is_lakebase=False)
+        ),
+        patch("src.db.database_router.activate_lakebase_in_subprocess", boom),
+    ):
+        result = await svc.run_light_agent_execution(
+            "e1", make_config(), group_context=None
+        )
 
     mock_engine.run_light_agent_execution.assert_awaited_once()
     assert result["status"] == "completed"

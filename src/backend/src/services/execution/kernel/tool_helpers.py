@@ -4,6 +4,7 @@ Tool helper functions for CrewAI engine.
 This module provides helper functions for handling tool-related operations
 in the CrewAI engine service.
 """
+
 import logging
 from typing import List, Union
 
@@ -12,7 +13,10 @@ from src.services.tools.tool_service import ToolService
 
 logger = logging.getLogger(__name__)
 
-async def resolve_tool_ids_to_names(tool_ids: List[Union[str, int]], tool_service: ToolService) -> List[str]:
+
+async def resolve_tool_ids_to_names(
+    tool_ids: List[Union[str, int]], tool_service: ToolService
+) -> List[str]:
     """
     Resolve tool IDs to their corresponding names using the tool service.
     Handles both numeric IDs and tool names.
@@ -41,7 +45,9 @@ async def resolve_tool_ids_to_names(tool_ids: List[Union[str, int]], tool_servic
                     numeric_id = int(tool_id)
                 except ValueError:
                     # Not a numeric ID - for invalid strings, add empty string
-                    logger.error(f"Error resolving tool ID {tool_id}: Invalid numeric format")
+                    logger.error(
+                        f"Error resolving tool ID {tool_id}: Invalid numeric format"
+                    )
                     tool_names.append("")
                     continue
             else:
@@ -58,4 +64,3 @@ async def resolve_tool_ids_to_names(tool_ids: List[Union[str, int]], tool_servic
             tool_names.append("")  # Add empty string for unresolved IDs
 
     return tool_names
-

@@ -20,9 +20,9 @@ False to reach the exact branch under test.
 
 import contextlib
 import io
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.agent_builder.process_executor import run_crew_in_process
 
@@ -66,9 +66,7 @@ def _run_with_prepare_false(crew_config):
                     "src.core.events": MagicMock(),
                     "crewai.utilities": MagicMock(),
                     "crewai.utilities.exceptions": MagicMock(),
-                    "src.core.llm.transport": MagicMock(
-                        CONTEXT_LIMIT_ERRORS=[]
-                    ),
+                    "src.core.llm.transport": MagicMock(CONTEXT_LIMIT_ERRORS=[]),
                 },
             )
         )
@@ -87,7 +85,9 @@ def _run_with_prepare_false(crew_config):
                 new=_fake_smart_db_session,
             )
         )
-        stack.enter_context(patch("src.services.tools.tool_service.ToolService", MagicMock()))
+        stack.enter_context(
+            patch("src.services.tools.tool_service.ToolService", MagicMock())
+        )
         stack.enter_context(
             patch("src.services.settings.api_keys.ApiKeysService", MagicMock())
         )

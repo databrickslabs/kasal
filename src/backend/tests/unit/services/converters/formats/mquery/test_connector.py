@@ -8,29 +8,30 @@ All external dependencies (AadService, PowerBIAdminScanner, MQueryLLMConverter)
 are mocked.
 """
 
-import pytest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
+import pytest
+
+from src.services.converters.formats.mquery.connector import MQueryConnector
 from src.services.converters.formats.mquery.models import (
-    ExpressionType,
     ColumnDataType,
-    StorageMode,
+    ConversionResult,
+    ExpressionType,
     MQueryConversionConfig,
-    SemanticModel,
+    MQueryExpression,
     PowerBITable,
+    SemanticModel,
+    StorageMode,
     TableColumn,
     TableMeasure,
     TableRelationship,
-    MQueryExpression,
-    ConversionResult,
 )
-from src.services.converters.formats.mquery.connector import MQueryConnector
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_config(**kwargs):
     defaults = dict(
@@ -45,20 +46,31 @@ def _make_config(**kwargs):
     return MQueryConversionConfig(**defaults)
 
 
-def _make_table(name="SalesTable", with_calculated_col=False, with_measure=False, expr_type=ExpressionType.SQL_DATABASE):
+def _make_table(
+    name="SalesTable",
+    with_calculated_col=False,
+    with_measure=False,
+    expr_type=ExpressionType.SQL_DATABASE,
+):
     cols = [TableColumn(name="id", data_type=ColumnDataType.INT64)]
     if with_calculated_col:
-        cols.append(TableColumn(
-            name="Tax",
-            data_type=ColumnDataType.DOUBLE,
-            column_type="Calculated",
-            expression="[Amount] * 0.2",
-        ))
+        cols.append(
+            TableColumn(
+                name="Tax",
+                data_type=ColumnDataType.DOUBLE,
+                column_type="Calculated",
+                expression="[Amount] * 0.2",
+            )
+        )
     measures = []
     if with_measure:
         measures.append(TableMeasure(name="TotalSales", expression="SUM([Amount])"))
 
-    source_exprs = [MQueryExpression(raw_expression="Sql.Database(\"srv\",\"db\")", expression_type=expr_type)]
+    source_exprs = [
+        MQueryExpression(
+            raw_expression='Sql.Database("srv","db")', expression_type=expr_type
+        )
+    ]
 
     return PowerBITable(
         name=name,
@@ -85,6 +97,7 @@ def _make_semantic_model(tables=None, relationships=None):
 # Connector construction
 # ---------------------------------------------------------------------------
 
+
 def test_connector_initial_state():
     """Newly created connector is not connected."""
     cfg = _make_config()
@@ -105,12 +118,17 @@ def test_connector_uses_access_token_from_config():
 # connect / disconnect
 # ---------------------------------------------------------------------------
 
+
 def test_connect_sets_connected_state():
     """connect() marks the connector as connected."""
     cfg = _make_config(access_token="tok")  # skip real auth
 
-    with patch("src.services.converters.formats.mquery.connector.AadService") as MockAuth, \
-         patch("src.services.converters.formats.mquery.connector.PowerBIAdminScanner"):
+    with (
+        patch(
+            "src.services.converters.formats.mquery.connector.AadService"
+        ) as MockAuth,
+        patch("src.services.converters.formats.mquery.connector.PowerBIAdminScanner"),
+    ):
         conn = MQueryConnector(cfg)
         conn.connect()
 
@@ -122,8 +140,10 @@ def test_connect_idempotent():
     """Calling connect() twice is a no-op on the second call."""
     cfg = _make_config(access_token="tok")
 
-    with patch("src.services.converters.formats.mquery.connector.AadService"), \
-         patch("src.services.converters.formats.mquery.connector.PowerBIAdminScanner"):
+    with (
+        patch("src.services.converters.formats.mquery.connector.AadService"),
+        patch("src.services.converters.formats.mquery.connector.PowerBIAdminScanner"),
+    ):
         conn = MQueryConnector(cfg)
         conn.connect()
         # Second call should not re-initialize
@@ -136,8 +156,10 @@ def test_disconnect_resets_state():
     """disconnect() resets all state to initial."""
     cfg = _make_config(access_token="tok")
 
-    with patch("src.services.converters.formats.mquery.connector.AadService"), \
-         patch("src.services.converters.formats.mquery.connector.PowerBIAdminScanner"):
+    with (
+        patch("src.services.converters.formats.mquery.connector.AadService"),
+        patch("src.services.converters.formats.mquery.connector.PowerBIAdminScanner"),
+    ):
         conn = MQueryConnector(cfg)
         conn.connect()
 
@@ -152,9 +174,13 @@ def test_connect_without_llm_creds_creates_llm_converter():
     so no per-connector credentials are needed."""
     cfg = _make_config(access_token="tok")  # No llm_workspace_url / llm_token
 
-    with patch("src.services.converters.formats.mquery.connector.AadService"), \
-         patch("src.services.converters.formats.mquery.connector.PowerBIAdminScanner"), \
-         patch("src.services.converters.formats.mquery.connector.MQueryLLMConverter") as MockLLM:
+    with (
+        patch("src.services.converters.formats.mquery.connector.AadService"),
+        patch("src.services.converters.formats.mquery.connector.PowerBIAdminScanner"),
+        patch(
+            "src.services.converters.formats.mquery.connector.MQueryLLMConverter"
+        ) as MockLLM,
+    ):
         conn = MQueryConnector(cfg)
         conn.connect()
 
@@ -171,9 +197,13 @@ def test_connect_with_llm_creds_creates_llm_converter():
         llm_model="databricks-claude-sonnet-4",
     )
 
-    with patch("src.services.converters.formats.mquery.connector.AadService"), \
-         patch("src.services.converters.formats.mquery.connector.PowerBIAdminScanner"), \
-         patch("src.services.converters.formats.mquery.connector.MQueryLLMConverter") as MockLLM:
+    with (
+        patch("src.services.converters.formats.mquery.connector.AadService"),
+        patch("src.services.converters.formats.mquery.connector.PowerBIAdminScanner"),
+        patch(
+            "src.services.converters.formats.mquery.connector.MQueryLLMConverter"
+        ) as MockLLM,
+    ):
         conn = MQueryConnector(cfg)
         conn.connect()
 
@@ -184,14 +214,17 @@ def test_connect_with_llm_creds_creates_llm_converter():
 # async context manager
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_async_context_manager_connects_and_disconnects():
     """Connector async context manager calls connect/disconnect."""
     cfg = _make_config(access_token="tok")
 
-    with patch("src.services.converters.formats.mquery.connector.AadService"), \
-         patch("src.services.converters.formats.mquery.connector.PowerBIAdminScanner"), \
-         patch("src.services.converters.formats.mquery.connector.MQueryLLMConverter"):
+    with (
+        patch("src.services.converters.formats.mquery.connector.AadService"),
+        patch("src.services.converters.formats.mquery.connector.PowerBIAdminScanner"),
+        patch("src.services.converters.formats.mquery.connector.MQueryLLMConverter"),
+    ):
         async with MQueryConnector(cfg) as conn:
             assert conn.is_connected is True
         assert conn.is_connected is False
@@ -200,6 +233,7 @@ async def test_async_context_manager_connects_and_disconnects():
 # ---------------------------------------------------------------------------
 # extract_measures
 # ---------------------------------------------------------------------------
+
 
 def test_extract_measures_empty_when_no_models():
     """extract_measures returns empty list when no models are loaded."""
@@ -212,7 +246,9 @@ def test_extract_measures_returns_kpis():
     """extract_measures returns KPI for each measure in all tables."""
     cfg = _make_config()
     conn = MQueryConnector(cfg)
-    conn._semantic_models = [_make_semantic_model(tables=[_make_table(with_measure=True)])]
+    conn._semantic_models = [
+        _make_semantic_model(tables=[_make_table(with_measure=True)])
+    ]
 
     kpis = conn.extract_measures()
     assert len(kpis) == 1
@@ -222,6 +258,7 @@ def test_extract_measures_returns_kpis():
 # ---------------------------------------------------------------------------
 # get_metadata
 # ---------------------------------------------------------------------------
+
 
 def test_get_metadata_no_models():
     """get_metadata works when no models have been scanned."""
@@ -237,10 +274,14 @@ def test_get_metadata_with_models():
     cfg = _make_config()
     conn = MQueryConnector(cfg)
     conn._connected = True
-    conn._semantic_models = [_make_semantic_model(tables=[
-        _make_table("T1", with_measure=True),
-        _make_table("T2"),
-    ])]
+    conn._semantic_models = [
+        _make_semantic_model(
+            tables=[
+                _make_table("T1", with_measure=True),
+                _make_table("T2"),
+            ]
+        )
+    ]
 
     meta = conn.get_metadata()
     assert meta.measure_count == 1
@@ -249,6 +290,7 @@ def test_get_metadata_with_models():
 # ---------------------------------------------------------------------------
 # get_relationships
 # ---------------------------------------------------------------------------
+
 
 def test_get_relationships_empty_when_no_models():
     """get_relationships returns empty list when no models loaded."""
@@ -301,6 +343,7 @@ def test_get_relationships_truncates_long_constraint_name():
 # get_calculated_columns
 # ---------------------------------------------------------------------------
 
+
 def test_get_calculated_columns_empty_when_no_models():
     """get_calculated_columns returns empty dict when no models loaded."""
     conn = MQueryConnector(_make_config())
@@ -310,7 +353,9 @@ def test_get_calculated_columns_empty_when_no_models():
 def test_get_calculated_columns_returns_columns():
     """get_calculated_columns returns dict with table name mapping."""
     conn = MQueryConnector(_make_config())
-    conn._semantic_models = [_make_semantic_model(tables=[_make_table("Sales", with_calculated_col=True)])]
+    conn._semantic_models = [
+        _make_semantic_model(tables=[_make_table("Sales", with_calculated_col=True)])
+    ]
 
     result = conn.get_calculated_columns()
     assert "Sales" in result
@@ -322,6 +367,7 @@ def test_get_calculated_columns_returns_columns():
 # generate_summary_report
 # ---------------------------------------------------------------------------
 
+
 def test_generate_summary_report_no_models():
     """generate_summary_report returns error when no models scanned."""
     conn = MQueryConnector(_make_config())
@@ -332,10 +378,14 @@ def test_generate_summary_report_no_models():
 def test_generate_summary_report_with_models():
     """generate_summary_report returns correct statistics."""
     conn = MQueryConnector(_make_config())
-    conn._semantic_models = [_make_semantic_model(tables=[
-        _make_table("T1", with_measure=True, with_calculated_col=True),
-        _make_table("T2"),
-    ])]
+    conn._semantic_models = [
+        _make_semantic_model(
+            tables=[
+                _make_table("T1", with_measure=True, with_calculated_col=True),
+                _make_table("T2"),
+            ]
+        )
+    ]
 
     report = conn.generate_summary_report()
     assert report["total_tables"] == 2

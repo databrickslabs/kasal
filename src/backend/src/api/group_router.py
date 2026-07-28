@@ -4,16 +4,15 @@ API router for group management.
 Provides endpoints for manual group creation and user assignment.
 This is the admin interface for the simple multi-group foundation.
 """
+
 from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-
-from src.config.settings import settings
 from pydantic import BaseModel
 
-from src.core.exceptions import ForbiddenError, NotFoundError
-
+from src.config.settings import settings
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import ForbiddenError, NotFoundError
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context
 from src.dependencies.admin_auth import (
@@ -343,7 +342,9 @@ async def list_group_users(
             current_user.id, group_id
         )
         if not user_group_membership:
-            raise ForbiddenError("You must be a member of this workspace to view its users")
+            raise ForbiddenError(
+                "You must be a member of this workspace to view its users"
+            )
 
         # Check if user is a workspace admin of this specific group
         if user_group_membership.role.lower() != "admin":

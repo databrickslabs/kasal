@@ -5,11 +5,12 @@ This module defines exceptions used during flow execution,
 particularly for Human in the Loop (HITL) gate handling.
 """
 
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 
 class FlowExecutionError(Exception):
     """Base exception for flow execution errors."""
+
     pass
 
 
@@ -39,7 +40,7 @@ class FlowPausedForApprovalException(BaseException):
         message: str,
         execution_id: Optional[str] = None,
         crew_sequence: Optional[int] = None,
-        flow_uuid: Optional[str] = None
+        flow_uuid: Optional[str] = None,
     ):
         self.approval_id = approval_id
         self.gate_node_id = gate_node_id
@@ -62,7 +63,7 @@ class FlowPausedForApprovalException(BaseException):
             "execution_id": self.execution_id,
             "crew_sequence": self.crew_sequence,
             "flow_uuid": self.flow_uuid,
-            "status": "waiting_for_approval"
+            "status": "waiting_for_approval",
         }
 
 

@@ -16,6 +16,7 @@ Focus areas:
 - Context enrichment injection
 - Placeholder resolution with sensitive key masking
 """
+
 # This file used to carry an ORDERING NOTE saying it must sort AFTER
 # test_tool_factory_create_tool_paths.py, because something here left state
 # that made that file's patched DatabricksKnowledgeSearchTool resolve to the
@@ -26,14 +27,16 @@ Focus areas:
 
 import asyncio
 import os
-import pytest
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
+import pytest
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
 
+
 def _make_factory(config=None, api_keys_service=None, user_token=None):
     from src.services.tools.tool_factory import ToolFactory
+
     return ToolFactory(
         config=config or {"group_id": "grp-1"},
         api_keys_service=api_keys_service,
@@ -57,6 +60,7 @@ def _mock_tool_cls():
 
 # ─── PowerBI Relationships Tool ──────────────────────────────────────────────
 
+
 class TestPowerBIRelationshipsToolCreation:
 
     def _setup(self, config=None):
@@ -68,10 +72,15 @@ class TestPowerBIRelationshipsToolCreation:
         return f, cls
 
     def test_creates_relationships_tool_with_creds(self):
-        f, cls = self._setup({
-            "workspace_id": "ws1", "dataset_id": "ds1",
-            "tenant_id": "t1", "client_id": "c1", "client_secret": "s1",
-        })
+        f, cls = self._setup(
+            {
+                "workspace_id": "ws1",
+                "dataset_id": "ds1",
+                "tenant_id": "t1",
+                "client_id": "c1",
+                "client_secret": "s1",
+            }
+        )
         result = f.create_tool("Power BI Relationships Tool")
         assert result is cls.return_value
 
@@ -95,6 +104,7 @@ class TestPowerBIRelationshipsToolCreation:
 
 
 # ─── PowerBI Hierarchies Tool ────────────────────────────────────────────────
+
 
 class TestPowerBIHierarchiesToolCreation:
 
@@ -127,27 +137,39 @@ class TestPowerBIHierarchiesToolCreation:
 
 # ─── PowerBI Field Parameters & Calculation Groups Tool ──────────────────────
 
+
 class TestPowerBIFieldParamsToolCreation:
 
     def _setup(self, config=None):
         f = _make_factory()
-        info = _tool_info("Power BI Field Parameters & Calculation Groups Tool", 12, config or {})
+        info = _tool_info(
+            "Power BI Field Parameters & Calculation Groups Tool", 12, config or {}
+        )
         f._available_tools["Power BI Field Parameters & Calculation Groups Tool"] = info
         cls = _mock_tool_cls()
-        f._tool_implementations["Power BI Field Parameters & Calculation Groups Tool"] = cls
+        f._tool_implementations[
+            "Power BI Field Parameters & Calculation Groups Tool"
+        ] = cls
         return f, cls
 
     def test_creates_field_params_tool(self):
-        f, cls = self._setup({
-            "workspace_id": "ws1", "dataset_id": "ds1",
-            "tenant_id": "t1", "client_id": "c1", "client_secret": "s1",
-        })
+        f, cls = self._setup(
+            {
+                "workspace_id": "ws1",
+                "dataset_id": "ds1",
+                "tenant_id": "t1",
+                "client_id": "c1",
+                "client_secret": "s1",
+            }
+        )
         result = f.create_tool("Power BI Field Parameters & Calculation Groups Tool")
         assert result is cls.return_value
 
     def test_field_params_result_as_answer(self):
         f, cls = self._setup({})
-        f.create_tool("Power BI Field Parameters & Calculation Groups Tool", result_as_answer=True)
+        f.create_tool(
+            "Power BI Field Parameters & Calculation Groups Tool", result_as_answer=True
+        )
         call_kwargs = cls.call_args[1]
         assert call_kwargs.get("result_as_answer") is True
 
@@ -161,6 +183,7 @@ class TestPowerBIFieldParamsToolCreation:
 
 # ─── Measure Conversion Pipeline ─────────────────────────────────────────────
 
+
 class TestMeasureConversionPipelineCreation:
 
     def _setup(self, config=None):
@@ -172,13 +195,15 @@ class TestMeasureConversionPipelineCreation:
         return f, cls
 
     def test_creates_measure_pipeline_tool(self):
-        f, cls = self._setup({
-            "powerbi_semantic_model_id": "m1",
-            "powerbi_group_id": "g1",
-            "powerbi_client_id": "c1",
-            "powerbi_tenant_id": "t1",
-            "powerbi_client_secret": "s1",
-        })
+        f, cls = self._setup(
+            {
+                "powerbi_semantic_model_id": "m1",
+                "powerbi_group_id": "g1",
+                "powerbi_client_id": "c1",
+                "powerbi_tenant_id": "t1",
+                "powerbi_client_secret": "s1",
+            }
+        )
         result = f.create_tool("Measure Conversion Pipeline")
         assert result is cls.return_value
 
@@ -194,13 +219,17 @@ class TestMeasureConversionPipelineCreation:
         f, cls = self._setup({"inbound_connector": "pbi"})
         f.create_tool(
             "Measure Conversion Pipeline",
-            tool_config_override={"inbound_connector": "override_val", "outbound_format": "sql"}
+            tool_config_override={
+                "inbound_connector": "override_val",
+                "outbound_format": "sql",
+            },
         )
         call_kwargs = cls.call_args[1]
         assert call_kwargs.get("inbound_connector") == "override_val"
 
 
 # ─── M-Query Conversion Pipeline ─────────────────────────────────────────────
+
 
 class TestMQueryConversionPipelineCreation:
 
@@ -213,10 +242,14 @@ class TestMQueryConversionPipelineCreation:
         return f, cls
 
     def test_creates_mquery_pipeline_tool(self):
-        f, cls = self._setup({
-            "workspace_id": "ws1", "client_id": "c1",
-            "tenant_id": "t1", "client_secret": "s1",
-        })
+        f, cls = self._setup(
+            {
+                "workspace_id": "ws1",
+                "client_id": "c1",
+                "tenant_id": "t1",
+                "client_secret": "s1",
+            }
+        )
         result = f.create_tool("M-Query Conversion Pipeline")
         assert result is cls.return_value
 
@@ -236,6 +269,7 @@ class TestMQueryConversionPipelineCreation:
 
 # ─── MCPTool path ─────────────────────────────────────────────────────────────
 
+
 class TestMCPToolCreation:
 
     def test_mcptool_returns_marker_tuple(self):
@@ -252,6 +286,7 @@ class TestMCPToolCreation:
 
 
 # ─── PowerBIConnectorTool ─────────────────────────────────────────────────────
+
 
 class TestPowerBIConnectorToolCreation:
 
@@ -280,6 +315,7 @@ class TestPowerBIConnectorToolCreation:
 
 
 # ─── Generic tool with no config (else branch) ───────────────────────────────
+
 
 class TestGenericToolNullConfig:
 
@@ -314,14 +350,17 @@ class TestGenericToolNullConfig:
 
 # ─── Execution inputs injection ───────────────────────────────────────────────
 
+
 class TestExecutionInputsInjection:
 
     def test_user_question_injected_from_execution_inputs(self):
         """user_question from execution_inputs injected into empty tool config."""
-        f = _make_factory(config={
-            "group_id": "g1",
-            "inputs": {"inputs": {"user_question": "What is revenue?"}},
-        })
+        f = _make_factory(
+            config={
+                "group_id": "g1",
+                "inputs": {"inputs": {"user_question": "What is revenue?"}},
+            }
+        )
         info = _tool_info("ScrapeWebsiteTool", 1, {})
         f._available_tools["ScrapeWebsiteTool"] = info
         cls = _mock_tool_cls()
@@ -333,16 +372,18 @@ class TestExecutionInputsInjection:
 
     def test_direct_inputs_with_user_inputs_filtered(self):
         """Direct inputs (not nested, no inner 'inputs' key) get filtered of system keys."""
-        f = _make_factory(config={
-            "group_id": "g1",
-            "inputs": {
-                # This dict has no 'inputs' sub-key, so it goes to the fallback path
-                "agents_yaml": "...",  # should be filtered out
-                "tasks_yaml": "...",   # should be filtered out
-                "planning": "false",   # should be filtered out
-                "my_custom_key": "custom_value",  # should be kept
-            },
-        })
+        f = _make_factory(
+            config={
+                "group_id": "g1",
+                "inputs": {
+                    # This dict has no 'inputs' sub-key, so it goes to the fallback path
+                    "agents_yaml": "...",  # should be filtered out
+                    "tasks_yaml": "...",  # should be filtered out
+                    "planning": "false",  # should be filtered out
+                    "my_custom_key": "custom_value",  # should be kept
+                },
+            }
+        )
         info = _tool_info("ScrapeWebsiteTool", 1, {})
         f._available_tools["ScrapeWebsiteTool"] = info
         cls = _mock_tool_cls()
@@ -357,10 +398,12 @@ class TestExecutionInputsInjection:
 
     def test_sensitive_key_masking_in_placeholder_resolution(self):
         """Placeholder resolution masks secrets in logs."""
-        f = _make_factory(config={
-            "group_id": "g1",
-            "inputs": {"inputs": {"client_secret": "super-secret-value"}},
-        })
+        f = _make_factory(
+            config={
+                "group_id": "g1",
+                "inputs": {"inputs": {"client_secret": "super-secret-value"}},
+            }
+        )
         info = _tool_info("ScrapeWebsiteTool", 1, {"api_secret": "{client_secret}"})
         f._available_tools["ScrapeWebsiteTool"] = info
         cls = _mock_tool_cls()
@@ -373,10 +416,12 @@ class TestExecutionInputsInjection:
 
     def test_execution_inputs_key_removed_from_final_config(self):
         """execution_inputs key must be stripped before calling tool constructor."""
-        f = _make_factory(config={
-            "group_id": "g1",
-            "inputs": {"inputs": {"some_value": "123"}},
-        })
+        f = _make_factory(
+            config={
+                "group_id": "g1",
+                "inputs": {"inputs": {"some_value": "123"}},
+            }
+        )
         info = _tool_info("ScrapeWebsiteTool", 1, {})
         f._available_tools["ScrapeWebsiteTool"] = info
         cls = _mock_tool_cls()
@@ -389,17 +434,23 @@ class TestExecutionInputsInjection:
 
 # ─── JSON parsing for PowerBI DAX tool ───────────────────────────────────────
 
+
 class TestPowerBIJSONFieldParsing:
 
     def test_json_fields_parsed_for_dax_tool(self):
         """business_mappings etc. are parsed from JSON strings for PowerBI DAX tool."""
         import json
+
         f = _make_factory()
         bm = json.dumps({"Revenue": "sum(sales)"})
-        info = _tool_info("Power BI Semantic Model DAX Generator", 40, {
-            "workspace_id": "ws1",
-            "business_mappings": bm,
-        })
+        info = _tool_info(
+            "Power BI Semantic Model DAX Generator",
+            40,
+            {
+                "workspace_id": "ws1",
+                "business_mappings": bm,
+            },
+        )
         f._available_tools["Power BI Semantic Model DAX Generator"] = info
         cls = _mock_tool_cls()
         f._tool_implementations["Power BI Semantic Model DAX Generator"] = cls
@@ -414,10 +465,14 @@ class TestPowerBIJSONFieldParsing:
     def test_invalid_json_kept_as_string(self):
         """Invalid JSON in business_mappings kept as string."""
         f = _make_factory()
-        info = _tool_info("Power BI Comprehensive Analysis Tool", 41, {
-            "workspace_id": "ws1",
-            "business_mappings": "not valid json {{{",
-        })
+        info = _tool_info(
+            "Power BI Comprehensive Analysis Tool",
+            41,
+            {
+                "workspace_id": "ws1",
+                "business_mappings": "not valid json {{{",
+            },
+        )
         f._available_tools["Power BI Comprehensive Analysis Tool"] = info
         cls = _mock_tool_cls()
         f._tool_implementations["Power BI Comprehensive Analysis Tool"] = cls
@@ -428,6 +483,7 @@ class TestPowerBIJSONFieldParsing:
 
 
 # ─── cleanup_after_crew_execution ────────────────────────────────────────────
+
 
 class TestCleanupAfterCrewExecution:
 
@@ -442,12 +498,18 @@ class TestCleanupAfterCrewExecution:
     async def test_handles_exception_gracefully(self):
         """cleanup_after_crew_execution handles exceptions without raising."""
         f = _make_factory()
-        with patch.object(f, "_load_available_tools_async", new_callable=AsyncMock, side_effect=Exception("Load fail")):
+        with patch.object(
+            f,
+            "_load_available_tools_async",
+            new_callable=AsyncMock,
+            side_effect=Exception("Load fail"),
+        ):
             # Should not propagate
             await f.cleanup_after_crew_execution()
 
 
 # ─── _sync_load_available_tools ───────────────────────────────────────────────
+
 
 class TestSyncLoadAvailableTools:
 
@@ -461,31 +523,45 @@ class TestSyncLoadAvailableTools:
     def test_sync_load_handles_exception(self):
         """_sync_load_available_tools handles failures without raising."""
         f = _make_factory()
-        with patch.object(f, "_load_available_tools_async", new_callable=AsyncMock, side_effect=Exception("fail")):
+        with patch.object(
+            f,
+            "_load_available_tools_async",
+            new_callable=AsyncMock,
+            side_effect=Exception("fail"),
+        ):
             # Should not propagate
             f._sync_load_available_tools()
 
 
 # ─── _get_api_key (sync) ──────────────────────────────────────────────────────
 
+
 class TestGetApiKeySync:
 
     def test_get_api_key_not_in_event_loop(self):
         """_get_api_key in non-async context runs new event loop."""
         f = _make_factory()
-        with patch.object(f, "_get_api_key_async", new_callable=AsyncMock, return_value="sync-key"):
+        with patch.object(
+            f, "_get_api_key_async", new_callable=AsyncMock, return_value="sync-key"
+        ):
             result = f._get_api_key("MY_KEY")
         assert result == "sync-key"
 
     def test_get_api_key_returns_none_on_exception(self):
         """_get_api_key returns None on exception."""
         f = _make_factory()
-        with patch.object(f, "_get_api_key_async", new_callable=AsyncMock, side_effect=Exception("db error")):
+        with patch.object(
+            f,
+            "_get_api_key_async",
+            new_callable=AsyncMock,
+            side_effect=Exception("db error"),
+        ):
             result = f._get_api_key("MY_KEY")
         assert result is None
 
 
 # ─── initialize with api_keys_service ────────────────────────────────────────
+
 
 class TestInitializeWithApiKeysService:
 
@@ -495,9 +571,14 @@ class TestInitializeWithApiKeysService:
         mock_svc = MagicMock()
         f = _make_factory(api_keys_service=mock_svc)
 
-        with patch.object(f, "_load_available_tools_async", new_callable=AsyncMock), \
-             patch("src.utils.asyncio_utils.execute_db_operation_with_fresh_engine",
-                   new_callable=AsyncMock, return_value=None):
+        with (
+            patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
+            patch(
+                "src.utils.asyncio_utils.execute_db_operation_with_fresh_engine",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
             await f.initialize()
 
         assert f._initialized is True
@@ -508,15 +589,21 @@ class TestInitializeWithApiKeysService:
         mock_svc = MagicMock()
         f = _make_factory(api_keys_service=mock_svc)
 
-        with patch.object(f, "_load_available_tools_async", new_callable=AsyncMock), \
-             patch("src.utils.asyncio_utils.execute_db_operation_with_fresh_engine",
-                   new_callable=AsyncMock, side_effect=Exception("key error")):
+        with (
+            patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
+            patch(
+                "src.utils.asyncio_utils.execute_db_operation_with_fresh_engine",
+                new_callable=AsyncMock,
+                side_effect=Exception("key error"),
+            ),
+        ):
             await f.initialize()
 
         assert f._initialized is True
 
 
 # ─── _update_tool_config_async ───────────────────────────────────────────────
+
 
 class TestUpdateToolConfigAsync:
 
@@ -531,16 +618,16 @@ class TestUpdateToolConfigAsync:
         mock_svc = MagicMock()
         mock_svc.update_tool = AsyncMock(return_value=MagicMock())
 
-        with patch("src.db.session.request_scoped_session") as mock_sess_ctx, \
-             patch("src.services.tools.tool_service.ToolService", return_value=mock_svc), \
-             patch.object(f, "_load_available_tools_async", new_callable=AsyncMock):
+        with (
+            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch("src.services.tools.tool_service.ToolService", return_value=mock_svc),
+            patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
+        ):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await f._update_tool_config_async(
-                tool_identifier="42",
-                tool_info=info,
-                config_update={"new": "val"}
+                tool_identifier="42", tool_info=info, config_update={"new": "val"}
             )
 
         assert result is True
@@ -554,18 +641,22 @@ class TestUpdateToolConfigAsync:
 
         mock_session = AsyncMock()
         mock_svc = MagicMock()
-        mock_svc.update_tool_configuration_by_title = AsyncMock(return_value=MagicMock())
+        mock_svc.update_tool_configuration_by_title = AsyncMock(
+            return_value=MagicMock()
+        )
 
-        with patch("src.db.session.request_scoped_session") as mock_sess_ctx, \
-             patch("src.services.tools.tool_service.ToolService", return_value=mock_svc), \
-             patch.object(f, "_load_available_tools_async", new_callable=AsyncMock):
+        with (
+            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch("src.services.tools.tool_service.ToolService", return_value=mock_svc),
+            patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
+        ):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await f._update_tool_config_async(
                 tool_identifier="MyTitleTool",
                 tool_info=info,
-                config_update={"updated": "val"}
+                config_update={"updated": "val"},
             )
 
         assert result is True
@@ -578,14 +669,22 @@ class TestUpdateToolConfigAsync:
 
         # Patch asyncio.get_running_loop to raise RuntimeError (no running loop)
         # so it falls into the "create new loop" branch
-        with patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")), \
-             patch.object(f, "_update_tool_config_async", new_callable=AsyncMock, return_value=True):
+        with (
+            patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
+            patch.object(
+                f,
+                "_update_tool_config_async",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+        ):
             result = f.update_tool_config("SomeTool", {"k": "v"})
 
         assert result is True
 
 
 # ─── DallETool ────────────────────────────────────────────────────────────────
+
 
 class TestImageGenerationToolCreation:
 
@@ -601,7 +700,9 @@ class TestImageGenerationToolCreation:
 
     def test_image_generation_tool_with_config(self):
         f = _make_factory()
-        info = _tool_info("Image Generation Tool", 3, {"model": "gpt-image-1", "size": "1024x1024"})
+        info = _tool_info(
+            "Image Generation Tool", 3, {"model": "gpt-image-1", "size": "1024x1024"}
+        )
         f._available_tools["Image Generation Tool"] = info
         cls = _mock_tool_cls()
         f._tool_implementations["Image Generation Tool"] = cls
@@ -612,6 +713,7 @@ class TestImageGenerationToolCreation:
 
 
 # ─── _validate_databricks_auth additional branches ────────────────────────────
+
 
 class TestValidateDatabricksAuthExtended:
 
@@ -629,10 +731,18 @@ class TestValidateDatabricksAuthExtended:
         mock_svc = MagicMock()
         mock_svc.get_databricks_config = AsyncMock(return_value=mock_config)
 
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock,
-                   side_effect=Exception("no auth")), \
-             patch("src.db.session.request_scoped_session") as mock_sess_ctx, \
-             patch("src.services.databricks.workspace.service.DatabricksService", return_value=mock_svc):
+        with (
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                side_effect=Exception("no auth"),
+            ),
+            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService",
+                return_value=mock_svc,
+            ),
+        ):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -654,10 +764,18 @@ class TestValidateDatabricksAuthExtended:
         mock_svc = MagicMock()
         mock_svc.get_databricks_config = AsyncMock(return_value=mock_config)
 
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock,
-                   side_effect=Exception("no auth")), \
-             patch("src.db.session.request_scoped_session") as mock_sess_ctx, \
-             patch("src.services.databricks.workspace.service.DatabricksService", return_value=mock_svc):
+        with (
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                side_effect=Exception("no auth"),
+            ),
+            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService",
+                return_value=mock_svc,
+            ),
+        ):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -674,10 +792,18 @@ class TestValidateDatabricksAuthExtended:
         mock_svc = MagicMock()
         mock_svc.get_databricks_config = AsyncMock(return_value=None)
 
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock,
-                   side_effect=Exception("no auth")), \
-             patch("src.db.session.request_scoped_session") as mock_sess_ctx, \
-             patch("src.services.databricks.workspace.service.DatabricksService", return_value=mock_svc):
+        with (
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                side_effect=Exception("no auth"),
+            ),
+            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService",
+                return_value=mock_svc,
+            ),
+        ):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -687,6 +813,7 @@ class TestValidateDatabricksAuthExtended:
 
 
 # ─── _load_available_tools_async success path ─────────────────────────────────
+
 
 class TestLoadAvailableToolsAsync:
 
@@ -702,10 +829,14 @@ class TestLoadAvailableToolsAsync:
         mock_response.tools = [mock_tool]
 
         mock_svc_instance = MagicMock()
-        mock_svc_instance.get_enabled_tools_for_group = AsyncMock(return_value=mock_response)
+        mock_svc_instance.get_enabled_tools_for_group = AsyncMock(
+            return_value=mock_response
+        )
 
-        with patch("src.db.session.request_scoped_session") as mock_sess_ctx, \
-             patch("src.services.tools.tool_service.ToolService") as mock_svc_cls:
+        with (
+            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch("src.services.tools.tool_service.ToolService") as mock_svc_cls,
+        ):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_svc_cls.return_value = mock_svc_instance
@@ -720,6 +851,7 @@ class TestLoadAvailableToolsAsync:
         """_load_available_tools_async calls get_all_tools when no group_id."""
         # Use ToolFactory directly to avoid the _make_factory helper that defaults group_id
         from src.services.tools.tool_factory import ToolFactory
+
         f = ToolFactory(config={"no_group": "yes"})  # dict without group_id key
 
         mock_tool = MagicMock()
@@ -731,8 +863,10 @@ class TestLoadAvailableToolsAsync:
         mock_svc_instance = MagicMock()
         mock_svc_instance.get_all_tools = AsyncMock(return_value=mock_response)
 
-        with patch("src.db.session.request_scoped_session") as mock_sess_ctx, \
-             patch("src.services.tools.tool_service.ToolService") as mock_svc_cls:
+        with (
+            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch("src.services.tools.tool_service.ToolService") as mock_svc_cls,
+        ):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_svc_cls.return_value = mock_svc_instance
@@ -746,7 +880,9 @@ class TestLoadAvailableToolsAsync:
         """_load_available_tools_async handles exceptions gracefully."""
         f = _make_factory()
 
-        with patch("src.db.session.request_scoped_session", side_effect=Exception("DB error")):
+        with patch(
+            "src.db.session.request_scoped_session", side_effect=Exception("DB error")
+        ):
             # Should not raise
             await f._load_available_tools_async()
 
@@ -756,18 +892,22 @@ class TestLoadAvailableToolsAsync:
 
 # ─── _get_api_key sync - in running loop ─────────────────────────────────────
 
+
 class TestGetApiKeySyncWithRunningLoop:
 
     def test_get_api_key_in_running_loop_uses_thread(self):
         """_get_api_key falls back to thread when in async context."""
         f = _make_factory()
-        with patch("asyncio.get_running_loop", return_value=MagicMock()), \
-             patch.object(f, "_run_in_new_loop", return_value="loop-key") as mock_run:
+        with (
+            patch("asyncio.get_running_loop", return_value=MagicMock()),
+            patch.object(f, "_run_in_new_loop", return_value="loop-key") as mock_run,
+        ):
             result = f._get_api_key("SOME_KEY")
         assert result == "loop-key"
 
 
 # ─── _get_api_key_async with service - key not found path ────────────────────
+
 
 class TestGetApiKeyAsyncNotFound:
 
@@ -801,16 +941,21 @@ class TestGetApiKeyAsyncNotFound:
         mock_svc.find_by_name = AsyncMock(side_effect=Exception("fallthrough"))
 
         from src.services.tools.tool_factory import ToolFactory
+
         f = ToolFactory(config={"no_group": True}, api_keys_service=mock_svc)
 
-        with patch("src.utils.asyncio_utils.execute_db_operation_with_fresh_engine",
-                   new_callable=AsyncMock, return_value="fresh-key"):
+        with patch(
+            "src.utils.asyncio_utils.execute_db_operation_with_fresh_engine",
+            new_callable=AsyncMock,
+            return_value="fresh-key",
+        ):
             result = await f._get_api_key_async("FRESH_KEY")
 
         assert result == "fresh-key"
 
 
 # ─── PerplexityTool with api_keys_service ────────────────────────────────────
+
 
 class TestPerplexityToolWithApiKeysService:
 
@@ -825,16 +970,26 @@ class TestPerplexityToolWithApiKeysService:
         f._tool_implementations["PerplexityTool"] = mock_cls
 
         # No PERPLEXITY_API_KEY in env, no api_key in config -> tries service
-        env_without_perplexity = {k: v for k, v in os.environ.items() if k != "PERPLEXITY_API_KEY"}
-        with patch.dict(os.environ, env_without_perplexity, clear=True), \
-             patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")), \
-             patch.object(f, "_get_api_key_async", new_callable=AsyncMock, return_value="service-key"):
+        env_without_perplexity = {
+            k: v for k, v in os.environ.items() if k != "PERPLEXITY_API_KEY"
+        }
+        with (
+            patch.dict(os.environ, env_without_perplexity, clear=True),
+            patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
+            patch.object(
+                f,
+                "_get_api_key_async",
+                new_callable=AsyncMock,
+                return_value="service-key",
+            ),
+        ):
             result = f.create_tool("PerplexityTool")
 
         assert result is not None
 
 
 # ─── SerperDevTool with api_keys_service ─────────────────────────────────────
+
 
 class TestSerperDevToolWithApiKeysService:
 
@@ -848,16 +1003,26 @@ class TestSerperDevToolWithApiKeysService:
         mock_cls = _mock_tool_cls()
         f._tool_implementations["SerperDevTool"] = mock_cls
 
-        env_without_serper = {k: v for k, v in os.environ.items() if k != "SERPER_API_KEY"}
-        with patch.dict(os.environ, env_without_serper, clear=True), \
-             patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")), \
-             patch.object(f, "_get_api_key_async", new_callable=AsyncMock, return_value="serper-key"):
+        env_without_serper = {
+            k: v for k, v in os.environ.items() if k != "SERPER_API_KEY"
+        }
+        with (
+            patch.dict(os.environ, env_without_serper, clear=True),
+            patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
+            patch.object(
+                f,
+                "_get_api_key_async",
+                new_callable=AsyncMock,
+                return_value="serper-key",
+            ),
+        ):
             result = f.create_tool("SerperDevTool")
 
         assert result is not None
 
 
 # ─── update_tool_config in running event loop ────────────────────────────────
+
 
 class TestUpdateToolConfigRunningLoop:
 
@@ -867,8 +1032,10 @@ class TestUpdateToolConfigRunningLoop:
         info = _tool_info("TestTool", 10, {})
         f._available_tools["TestTool"] = info
 
-        with patch("asyncio.get_running_loop", return_value=MagicMock()), \
-             patch.object(f, "_run_in_new_loop", return_value=True) as mock_run:
+        with (
+            patch("asyncio.get_running_loop", return_value=MagicMock()),
+            patch.object(f, "_run_in_new_loop", return_value=True) as mock_run,
+        ):
             result = f.update_tool_config("TestTool", {"key": "val"})
 
         assert result is True
@@ -888,6 +1055,7 @@ class TestUpdateToolConfigRunningLoop:
 
 # ─── _update_tool_config_async: non-dict config path ─────────────────────────
 
+
 class TestUpdateToolConfigAsyncNonDictConfig:
 
     @pytest.mark.asyncio
@@ -901,16 +1069,19 @@ class TestUpdateToolConfigAsyncNonDictConfig:
         mock_svc_instance = MagicMock()
         mock_svc_instance.update_tool = AsyncMock(return_value=MagicMock())
 
-        with patch("src.db.session.request_scoped_session") as mock_sess_ctx, \
-             patch("src.services.tools.tool_service.ToolService", return_value=mock_svc_instance), \
-             patch.object(f, "_load_available_tools_async", new_callable=AsyncMock):
+        with (
+            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch(
+                "src.services.tools.tool_service.ToolService",
+                return_value=mock_svc_instance,
+            ),
+            patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
+        ):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await f._update_tool_config_async(
-                tool_identifier="42",
-                tool_info=info,
-                config_update={"new": "val"}
+                tool_identifier="42", tool_info=info, config_update={"new": "val"}
             )
 
         assert result is True
@@ -921,6 +1092,7 @@ class TestUpdateToolConfigAsyncNonDictConfig:
 
 
 # ─── _sync_load_available_tools with api_keys preloading ────────────────────
+
 
 class TestSyncLoadWithApiKeysPreloading:
 
@@ -934,9 +1106,16 @@ class TestSyncLoadWithApiKeysPreloading:
         # into subsequent tests and pollute the auth chain.
         with patch.dict(os.environ, {}, clear=False):
             # No running loop, uses new loop
-            with patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")), \
-                 patch.object(f, "_load_available_tools_async", new_callable=AsyncMock), \
-                 patch.object(f, "_get_api_key_async", new_callable=AsyncMock, return_value="found-key"):
+            with (
+                patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
+                patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
+                patch.object(
+                    f,
+                    "_get_api_key_async",
+                    new_callable=AsyncMock,
+                    return_value="found-key",
+                ),
+            ):
                 f._sync_load_available_tools()
 
         # Should have pre-loaded SERPER_API_KEY into environment
@@ -947,14 +1126,22 @@ class TestSyncLoadWithApiKeysPreloading:
         mock_svc = MagicMock()
         f = _make_factory(api_keys_service=mock_svc)
 
-        with patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")), \
-             patch.object(f, "_load_available_tools_async", new_callable=AsyncMock), \
-             patch.object(f, "_get_api_key_async", new_callable=AsyncMock, side_effect=Exception("key error")):
+        with (
+            patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
+            patch.object(f, "_load_available_tools_async", new_callable=AsyncMock),
+            patch.object(
+                f,
+                "_get_api_key_async",
+                new_callable=AsyncMock,
+                side_effect=Exception("key error"),
+            ),
+        ):
             # Should not raise
             f._sync_load_available_tools()
 
 
 # ─── _validate_databricks_auth: DB exception and no-auth fallback ────────────
+
 
 class TestValidateDatabricksAuthFallbacks:
 
@@ -963,16 +1150,25 @@ class TestValidateDatabricksAuthFallbacks:
         """When DB check raises, fallthrough to 'No Databricks auth' error."""
         f = _make_factory(config={"group_id": "g1"})
 
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock,
-                   side_effect=Exception("no unified auth")), \
-             patch("src.db.session.request_scoped_session") as mock_sess_ctx:
+        with (
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                side_effect=Exception("no unified auth"),
+            ),
+            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+        ):
             # Make the DB session itself raise
             mock_sess_ctx.side_effect = Exception("DB session error")
 
             valid, msg = await f._validate_databricks_auth()
 
         assert valid is False
-        assert "No Databricks" in msg or "No authentication" in msg or "error" in msg.lower()
+        assert (
+            "No Databricks" in msg
+            or "No authentication" in msg
+            or "error" in msg.lower()
+        )
 
     @pytest.mark.asyncio
     async def test_outer_exception_returns_false(self):
@@ -980,8 +1176,10 @@ class TestValidateDatabricksAuthFallbacks:
         f = _make_factory()
 
         # Make get_auth_context import fail in an unexpected way
-        with patch("src.utils.databricks_auth.get_auth_context",
-                   side_effect=TypeError("unexpected error")):
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            side_effect=TypeError("unexpected error"),
+        ):
             valid, msg = await f._validate_databricks_auth()
 
         # The outer except catches TypeError
@@ -992,10 +1190,17 @@ class TestValidateDatabricksAuthFallbacks:
         """When no auth available at all, returns (False, helpful msg)."""
         f = _make_factory(user_token=None)
 
-        with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock,
-                   side_effect=Exception("no auth")), \
-             patch("src.db.session.request_scoped_session") as mock_sess_ctx, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_svc_cls:
+        with (
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                side_effect=Exception("no auth"),
+            ),
+            patch("src.db.session.request_scoped_session") as mock_sess_ctx,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_svc_cls,
+        ):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
             # Service itself raises
@@ -1007,6 +1212,7 @@ class TestValidateDatabricksAuthFallbacks:
 
 
 # ─── GenieTool: API key lookup paths ─────────────────────────────────────────
+
 
 class TestGenieToolApiKeyPaths:
 
@@ -1022,9 +1228,11 @@ class TestGenieToolApiKeyPaths:
         """GenieTool without user_token tries API key lookup."""
         f, cls = self._setup_genie_no_user_token()
 
-        with patch("src.utils.user_context.UserContext") as mock_ctx, \
-             patch("src.utils.databricks_auth.get_auth_context") as mock_auth_ctx, \
-             patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
+        with (
+            patch("src.utils.user_context.UserContext") as mock_ctx,
+            patch("src.utils.databricks_auth.get_auth_context") as mock_auth_ctx,
+            patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
+        ):
             mock_ctx.get_user_token.return_value = None
             mock_ctx.get_group_context.return_value = None
             auth_ctx = MagicMock()
@@ -1041,9 +1249,11 @@ class TestGenieToolApiKeyPaths:
         """GenieTool gets DATABRICKS_HOST from unified auth."""
         f, cls = self._setup_genie_no_user_token()
 
-        with patch("src.utils.user_context.UserContext") as mock_ctx, \
-             patch("src.utils.databricks_auth.get_auth_context") as mock_auth, \
-             patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
+        with (
+            patch("src.utils.user_context.UserContext") as mock_ctx,
+            patch("src.utils.databricks_auth.get_auth_context") as mock_auth,
+            patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
+        ):
             mock_ctx.get_user_token.return_value = None
             mock_ctx.get_group_context.return_value = None
             auth_obj = MagicMock()
@@ -1057,12 +1267,14 @@ class TestGenieToolApiKeyPaths:
 
 # ─── PerplexityTool without api_keys_service - fallback path ─────────────────
 
+
 class TestPerplexityFallbackPath:
 
     def test_perplexity_no_service_no_env_uses_direct_key_method_no_loop(self):
         """PerplexityTool fallback when no service and no env key in non-async context."""
         # No api_keys_service, in non-async context, gets key via _get_api_key
         from src.services.tools.tool_factory import ToolFactory
+
         f = ToolFactory(config={"group_id": "g"}, api_keys_service=None)
 
         info = _tool_info("PerplexityTool", 3, {})
@@ -1070,10 +1282,14 @@ class TestPerplexityFallbackPath:
         cls = _mock_tool_cls()
         f._tool_implementations["PerplexityTool"] = cls
 
-        env_without_perplexity = {k: v for k, v in os.environ.items() if k != "PERPLEXITY_API_KEY"}
-        with patch.dict(os.environ, env_without_perplexity, clear=True), \
-             patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")), \
-             patch.object(f, "_get_api_key", return_value="direct-key"):
+        env_without_perplexity = {
+            k: v for k, v in os.environ.items() if k != "PERPLEXITY_API_KEY"
+        }
+        with (
+            patch.dict(os.environ, env_without_perplexity, clear=True),
+            patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
+            patch.object(f, "_get_api_key", return_value="direct-key"),
+        ):
             result = f.create_tool("PerplexityTool")
 
         call_kwargs = cls.call_args[1]
@@ -1082,6 +1298,7 @@ class TestPerplexityFallbackPath:
     def test_perplexity_no_service_no_env_no_db_key(self):
         """PerplexityTool when no key anywhere creates tool with empty api_key."""
         from src.services.tools.tool_factory import ToolFactory
+
         f = ToolFactory(config={"group_id": "g"}, api_keys_service=None)
 
         info = _tool_info("PerplexityTool", 3, {})
@@ -1089,10 +1306,14 @@ class TestPerplexityFallbackPath:
         cls = _mock_tool_cls()
         f._tool_implementations["PerplexityTool"] = cls
 
-        env_without_perplexity = {k: v for k, v in os.environ.items() if k != "PERPLEXITY_API_KEY"}
-        with patch.dict(os.environ, env_without_perplexity, clear=True), \
-             patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")), \
-             patch.object(f, "_get_api_key", return_value=None):
+        env_without_perplexity = {
+            k: v for k, v in os.environ.items() if k != "PERPLEXITY_API_KEY"
+        }
+        with (
+            patch.dict(os.environ, env_without_perplexity, clear=True),
+            patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
+            patch.object(f, "_get_api_key", return_value=None),
+        ):
             result = f.create_tool("PerplexityTool")
 
         # Tool created even without key
@@ -1101,11 +1322,13 @@ class TestPerplexityFallbackPath:
 
 # ─── SerperDevTool without api_keys_service fallback ─────────────────────────
 
+
 class TestSerperFallbackPath:
 
     def test_serper_no_service_no_env_uses_direct_key(self):
         """SerperDevTool fallback when no service and no env key."""
         from src.services.tools.tool_factory import ToolFactory
+
         f = ToolFactory(config={"group_id": "g"}, api_keys_service=None)
 
         info = _tool_info("SerperDevTool", 2, {})
@@ -1113,10 +1336,14 @@ class TestSerperFallbackPath:
         cls = _mock_tool_cls()
         f._tool_implementations["SerperDevTool"] = cls
 
-        env_without_serper = {k: v for k, v in os.environ.items() if k != "SERPER_API_KEY"}
-        with patch.dict(os.environ, env_without_serper, clear=True), \
-             patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")), \
-             patch.object(f, "_get_api_key", return_value="serper-direct"):
+        env_without_serper = {
+            k: v for k, v in os.environ.items() if k != "SERPER_API_KEY"
+        }
+        with (
+            patch.dict(os.environ, env_without_serper, clear=True),
+            patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
+            patch.object(f, "_get_api_key", return_value="serper-direct"),
+        ):
             result = f.create_tool("SerperDevTool")
 
         call_kwargs = cls.call_args[1]
@@ -1124,6 +1351,7 @@ class TestSerperFallbackPath:
 
 
 # ─── DatabricksJobsTool: context user_token path and no-group_id warning ────
+
 
 class TestDatabricksJobsToolAuthPaths:
 
@@ -1139,8 +1367,13 @@ class TestDatabricksJobsToolAuthPaths:
         """User token extracted from context when factory has no user_token."""
         f, cls = self._setup_jobs_tool(user_token=None)
 
-        with patch("src.utils.user_context.UserContext") as mock_ctx, \
-             patch("src.utils.databricks_auth.get_auth_context", side_effect=Exception("no auth")):
+        with (
+            patch("src.utils.user_context.UserContext") as mock_ctx,
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                side_effect=Exception("no auth"),
+            ),
+        ):
             mock_ctx.get_user_token.return_value = "ctx-token"
             result = f.create_tool("DatabricksJobsTool")
 
@@ -1150,14 +1383,20 @@ class TestDatabricksJobsToolAuthPaths:
     def test_no_group_id_in_config_logs_warning(self):
         """DatabricksJobsTool logs warning when no group_id in config."""
         from src.services.tools.tool_factory import ToolFactory
+
         f = ToolFactory(config={"no_group": "true"})  # No group_id
         info = _tool_info("DatabricksJobsTool", 5, {})
         f._available_tools["DatabricksJobsTool"] = info
         cls = _mock_tool_cls()
         f._tool_implementations["DatabricksJobsTool"] = cls
 
-        with patch("src.utils.user_context.UserContext") as mock_ctx, \
-             patch("src.utils.databricks_auth.get_auth_context", side_effect=Exception("no auth")):
+        with (
+            patch("src.utils.user_context.UserContext") as mock_ctx,
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                side_effect=Exception("no auth"),
+            ),
+        ):
             mock_ctx.get_user_token.return_value = None
             result = f.create_tool("DatabricksJobsTool")
 
@@ -1169,16 +1408,25 @@ class TestDatabricksJobsToolAuthPaths:
     def test_jobs_tool_api_keys_service_in_sync(self):
         """DatabricksJobsTool uses api_keys_service in sync context."""
         mock_svc = MagicMock()
-        f = _make_factory(config={"group_id": "g"}, api_keys_service=mock_svc, user_token=None)
+        f = _make_factory(
+            config={"group_id": "g"}, api_keys_service=mock_svc, user_token=None
+        )
         info = _tool_info("DatabricksJobsTool", 5, {})
         f._available_tools["DatabricksJobsTool"] = info
         cls = _mock_tool_cls()
         f._tool_implementations["DatabricksJobsTool"] = cls
 
-        with patch("src.utils.user_context.UserContext") as mock_ctx, \
-             patch("src.utils.databricks_auth.get_auth_context", side_effect=Exception("no auth")), \
-             patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")), \
-             patch.object(f, "_get_api_key_async", new_callable=AsyncMock, return_value="jobs-key"):
+        with (
+            patch("src.utils.user_context.UserContext") as mock_ctx,
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                side_effect=Exception("no auth"),
+            ),
+            patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
+            patch.object(
+                f, "_get_api_key_async", new_callable=AsyncMock, return_value="jobs-key"
+            ),
+        ):
             mock_ctx.get_user_token.return_value = None
             result = f.create_tool("DatabricksJobsTool")
 

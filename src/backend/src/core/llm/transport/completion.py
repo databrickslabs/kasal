@@ -17,7 +17,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, PrivateAttr
 
 from src.core.events.bus import event_bus
-from src.core.events.types import ContextCompactionEvent, LLMCallType, LLMStreamChunkEvent
+from src.core.events.types import (
+    ContextCompactionEvent,
+    LLMCallType,
+    LLMStreamChunkEvent,
+)
+
 from .base import BaseLLM
 from .constants import CONTEXT_WINDOW_USAGE_RATIO, LLM_CONTEXT_WINDOW_SIZES
 from .exceptions import (
@@ -134,8 +139,14 @@ class OpenAICompletion(BaseLLM):
         import asyncio
 
         return await asyncio.to_thread(
-            self.call, messages, tools, callbacks, available_functions,
-            from_task, from_agent, response_model,
+            self.call,
+            messages,
+            tools,
+            callbacks,
+            available_functions,
+            from_task,
+            from_agent,
+            response_model,
         )
 
     # ------------------------------- call -------------------------------
@@ -354,19 +365,30 @@ class OpenAICompletion(BaseLLM):
         drift. A small model cannot do both a huge prompt and a huge output — this
         trades output headroom for never 400ing.
         """
-        key = "max_completion_tokens" if "max_completion_tokens" in params else "max_tokens"
+        key = (
+            "max_completion_tokens"
+            if "max_completion_tokens" in params
+            else "max_tokens"
+        )
         want = params.get(key)
         window = self._raw_context_window()
         if not want or not window:
             return
-        input_tokens = self._estimate_tokens(params.get("messages") or [], params.get("tools"))
+        input_tokens = self._estimate_tokens(
+            params.get("messages") or [], params.get("tools")
+        )
         margin = max(2048, int(input_tokens * 0.15))
         allowed = window - input_tokens - margin - _WINDOW_SAFETY_TOKENS
         if allowed < want:
             params[key] = max(256, allowed)
             logger.warning(
                 "output clamp: model=%s input~=%d + %s=%d > window=%d; clamped to %d",
-                self.model, input_tokens, key, want, window, params[key],
+                self.model,
+                input_tokens,
+                key,
+                want,
+                window,
+                params[key],
             )
 
     def _model_window_is_known(self) -> bool:
@@ -401,7 +423,11 @@ class OpenAICompletion(BaseLLM):
         than a hardcoded 8192.
         """
         if not self._model_window_is_known():
-            configured = getattr(from_agent, "max_context_window_size", None) if from_agent else None
+            configured = (
+                getattr(from_agent, "max_context_window_size", None)
+                if from_agent
+                else None
+            )
             if isinstance(configured, int) and configured > 0:
                 return int(configured * CONTEXT_WINDOW_USAGE_RATIO)
         return self.get_context_window_size()
@@ -454,7 +480,10 @@ class OpenAICompletion(BaseLLM):
         ContextCompactionEvent — it used to happen with no trace at all, which
         made the resulting re-query loop impossible to diagnose from the UI.
         """
-        if from_agent is not None and getattr(from_agent, "respect_context_window", True) is False:
+        if (
+            from_agent is not None
+            and getattr(from_agent, "respect_context_window", True) is False
+        ):
             return
         window = self._input_budget(from_agent)
         if not window:
@@ -572,7 +601,9 @@ class OpenAICompletion(BaseLLM):
                         {
                             "role": "tool",
                             "tool_call_id": fc["id"],
-                            "content": result if result is not None else "Tool not found.",
+                            "content": (
+                                result if result is not None else "Tool not found."
+                            ),
                         }
                     )
                 continue
@@ -654,10 +685,14 @@ class OpenAICompletion(BaseLLM):
             "prompt_tokens": getattr(usage, "prompt_tokens", 0),
             "completion_tokens": getattr(usage, "completion_tokens", 0),
             "total_tokens": getattr(usage, "total_tokens", 0),
-            "cached_prompt_tokens": getattr(details, "cached_tokens", 0) if details else 0,
+            "cached_prompt_tokens": (
+                getattr(details, "cached_tokens", 0) if details else 0
+            ),
         }
 
-    def _extract_function_calls_from_response(self, response: Any) -> list[dict[str, Any]]:
+    def _extract_function_calls_from_response(
+        self, response: Any
+    ) -> list[dict[str, Any]]:
         """Normalized tool calls from a chat completion or a Responses object."""
         calls: list[dict[str, Any]] = []
         choices = getattr(response, "choices", None)
@@ -678,7 +713,8 @@ class OpenAICompletion(BaseLLM):
             if getattr(item, "type", None) == "function_call":
                 calls.append(
                     {
-                        "id": getattr(item, "call_id", None) or getattr(item, "id", None),
+                        "id": getattr(item, "call_id", None)
+                        or getattr(item, "id", None),
                         "name": item.name,
                         "arguments": item.arguments,
                     }
@@ -708,14 +744,16 @@ class OpenAICompletion(BaseLLM):
             params["reasoning"] = {"effort": self.reasoning_effort}
         if tools:
             params["tools"] = [
-                {
-                    "type": "function",
-                    "name": t["function"]["name"],
-                    "description": t["function"].get("description", ""),
-                    "parameters": t["function"].get("parameters", {}),
-                }
-                if t.get("type") == "function" and "function" in t
-                else t
+                (
+                    {
+                        "type": "function",
+                        "name": t["function"]["name"],
+                        "description": t["function"].get("description", ""),
+                        "parameters": t["function"].get("parameters", {}),
+                    }
+                    if t.get("type") == "function" and "function" in t
+                    else t
+                )
                 for t in tools
             ]
         params.update(self.additional_params)
@@ -750,7 +788,9 @@ class OpenAICompletion(BaseLLM):
                         {
                             "type": "function_call_output",
                             "call_id": fc["id"],
-                            "output": result if result is not None else "Tool not found.",
+                            "output": (
+                                result if result is not None else "Tool not found."
+                            ),
                         }
                     )
                 continue

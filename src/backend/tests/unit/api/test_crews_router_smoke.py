@@ -1,22 +1,24 @@
-import pytest
-from unittest.mock import AsyncMock
-from types import SimpleNamespace
 from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.crews_router import (
-    router as crews_router,
-    get_crew_service,
-    list_crews,
-    get_crew,
     create_crew,
     debug_crew_data,
-    update_crew,
-    delete_crew,
     delete_all_crews,
+    delete_crew,
+    get_crew,
+    get_crew_service,
+    list_crews,
+)
+from src.api.crews_router import router as crews_router
+from src.api.crews_router import (
+    update_crew,
 )
 from src.core.dependencies import get_group_context
 from src.db.database_router import get_smart_db_session
@@ -26,7 +28,9 @@ from tests.unit.api.conftest import register_exception_handlers
 
 
 def gc(role="user"):
-    return GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role=role)
+    return GroupContext(
+        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role=role
+    )
 
 
 def make_crew(i=None):
@@ -47,7 +51,9 @@ def test_crew_schemas_carry_reasoning_config():
     """reasoning_config must round-trip through CrewCreate/Update (create persists
     via model_dump, update via model_dump(exclude_none=True))."""
     rc = {"reasoning_effort": "low", "max_steps": 3, "max_replans": 0}
-    created = CrewCreate(name="t", agent_ids=[], task_ids=[], reasoning=True, reasoning_config=rc)
+    created = CrewCreate(
+        name="t", agent_ids=[], task_ids=[], reasoning=True, reasoning_config=rc
+    )
     assert created.model_dump()["reasoning_config"] == rc
     updated = CrewUpdate(reasoning_config=rc)
     assert updated.model_dump(exclude_none=True)["reasoning_config"] == rc
@@ -58,11 +64,16 @@ def test_crew_to_response_carries_execution_config():
     reasoning / llms — they were dropped before, so a catalog-saved crew reloaded
     with empty execution config."""
     from src.api.crews_router import _crew_to_response
+
     crew = make_crew()
     crew.process = "hierarchical"
     crew.reasoning = True
     crew.reasoning_llm = "databricks-claude-haiku-4-5"
-    crew.reasoning_config = {"reasoning_effort": "low", "max_steps": 3, "max_replans": 0}
+    crew.reasoning_config = {
+        "reasoning_effort": "low",
+        "max_steps": 3,
+        "max_replans": 0,
+    }
     crew.manager_llm = "m"
     crew.tool_configs = {}
     crew.memory = False
@@ -71,7 +82,11 @@ def test_crew_to_response_carries_execution_config():
 
     resp = _crew_to_response(crew)
     assert resp.reasoning is True
-    assert resp.reasoning_config == {"reasoning_effort": "low", "max_steps": 3, "max_replans": 0}
+    assert resp.reasoning_config == {
+        "reasoning_effort": "low",
+        "max_steps": 3,
+        "max_replans": 0,
+    }
     assert resp.process == "hierarchical"
 
     # defensive default path (stub without config fields) must not raise
@@ -99,9 +114,17 @@ async def test_list_get_create_paths():
 
     # create forbidden and success
     with pytest.raises(Exception):
-        await create_crew(CrewCreate(name="C", agent_ids=["a1"], task_ids=["t1"], nodes=[], edges=[]), service=svc, group_context=gc("user"))
+        await create_crew(
+            CrewCreate(name="C", agent_ids=["a1"], task_ids=["t1"], nodes=[], edges=[]),
+            service=svc,
+            group_context=gc("user"),
+        )
     svc.create_with_group = AsyncMock(return_value=make_crew())
-    created = await create_crew(CrewCreate(name="C", agent_ids=["a1"], task_ids=["t1"], nodes=[], edges=[]), service=svc, group_context=gc("editor"))
+    created = await create_crew(
+        CrewCreate(name="C", agent_ids=["a1"], task_ids=["t1"], nodes=[], edges=[]),
+        service=svc,
+        group_context=gc("editor"),
+    )
     assert created.name == "C"
 
 
@@ -111,7 +134,9 @@ async def test_create_crew_overwrite_param_direct():
     svc = AsyncMock()
     svc.create_with_group = AsyncMock(return_value=make_crew())
     ctx = gc("editor")
-    crew_in = CrewCreate(name="C", agent_ids=["a1"], task_ids=["t1"], nodes=[], edges=[])
+    crew_in = CrewCreate(
+        name="C", agent_ids=["a1"], task_ids=["t1"], nodes=[], edges=[]
+    )
 
     await create_crew(crew_in, service=svc, group_context=ctx, overwrite=True)
     svc.create_with_group.assert_awaited_once_with(crew_in, ctx, overwrite=True)
@@ -144,7 +169,13 @@ def _overwrite_client(svc):
 
 
 def _create_payload():
-    return {"name": "C", "agent_ids": ["a1"], "task_ids": ["t1"], "nodes": [], "edges": []}
+    return {
+        "name": "C",
+        "agent_ids": ["a1"],
+        "task_ids": ["t1"],
+        "nodes": [],
+        "edges": [],
+    }
 
 
 def test_create_crew_overwrite_true_via_http():
@@ -176,17 +207,26 @@ async def test_debug_and_update_delete_paths():
     svc = AsyncMock()
 
     # debug returns success structure
-    dbg = await debug_crew_data(CrewCreate(name="C", agent_ids=[], task_ids=[], nodes=[], edges=[]), group_context=gc("operator"))
+    dbg = await debug_crew_data(
+        CrewCreate(name="C", agent_ids=[], task_ids=[], nodes=[], edges=[]),
+        group_context=gc("operator"),
+    )
     assert dbg["status"] in ("success", "error")
 
     # update forbidden, 404, success
     with pytest.raises(Exception):
-        await update_crew(uuid4(), CrewUpdate(name="X"), service=svc, group_context=gc("user"))
+        await update_crew(
+            uuid4(), CrewUpdate(name="X"), service=svc, group_context=gc("user")
+        )
     svc.update_with_partial_data_by_group = AsyncMock(return_value=None)
     with pytest.raises(Exception):
-        await update_crew(uuid4(), CrewUpdate(name="X"), service=svc, group_context=gc("admin"))
+        await update_crew(
+            uuid4(), CrewUpdate(name="X"), service=svc, group_context=gc("admin")
+        )
     svc.update_with_partial_data_by_group = AsyncMock(return_value=make_crew())
-    upd = await update_crew(uuid4(), CrewUpdate(name="X"), service=svc, group_context=gc("editor"))
+    upd = await update_crew(
+        uuid4(), CrewUpdate(name="X"), service=svc, group_context=gc("editor")
+    )
     assert upd.name in ("C", "X")
 
     # delete forbidden, 404, success
@@ -207,4 +247,3 @@ async def test_delete_all_crews_admin_only():
         await delete_all_crews(service=svc, group_context=gc("operator"))
     svc.delete_all_by_group = AsyncMock(return_value=None)
     assert await delete_all_crews(service=svc, group_context=gc("admin")) is None
-

@@ -2,9 +2,11 @@
 Comprehensive unit tests for flow_processors.py module.
 Target: 80%+ coverage
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
 import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 class TestFlowProcessorManager:
@@ -14,9 +16,9 @@ class TestFlowProcessorManager:
     def mock_repositories(self):
         """Create mock repositories."""
         return {
-            'task': AsyncMock(),
-            'agent': AsyncMock(),
-            'crew': AsyncMock(),
+            "task": AsyncMock(),
+            "agent": AsyncMock(),
+            "crew": AsyncMock(),
         }
 
     @pytest.fixture
@@ -30,7 +32,7 @@ class TestFlowProcessorManager:
     def mock_callbacks(self):
         """Create mock callbacks."""
         return {
-            'task_callback': MagicMock(),
+            "task_callback": MagicMock(),
         }
 
 
@@ -41,17 +43,19 @@ class TestProcessStartingPoints:
     def mock_repositories(self):
         """Create mock repositories."""
         return {
-            'task': AsyncMock(),
-            'agent': AsyncMock(),
-            'crew': AsyncMock(),
+            "task": AsyncMock(),
+            "agent": AsyncMock(),
+            "crew": AsyncMock(),
         }
 
     @pytest.mark.asyncio
     async def test_process_starting_points_no_task_repo(self):
         """Test process_starting_points returns empty when no task repo."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
-        flow_config = {'startingPoints': [{'taskId': 'task-1', 'crewId': 'crew-1'}]}
+        flow_config = {"startingPoints": [{"taskId": "task-1", "crewId": "crew-1"}]}
         all_tasks = {}
 
         result = await FlowProcessorManager.process_starting_points(
@@ -63,9 +67,11 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_process_starting_points_missing_task_id(self, mock_repositories):
         """Test process_starting_points skips entries without task_id."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
-        flow_config = {'startingPoints': [{'crewId': 'crew-1'}]}  # Missing taskId
+        flow_config = {"startingPoints": [{"crewId": "crew-1"}]}  # Missing taskId
         all_tasks = {}
 
         result = await FlowProcessorManager.process_starting_points(
@@ -77,9 +83,11 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_process_starting_points_missing_crew_id(self, mock_repositories):
         """Test process_starting_points skips entries without crew_id."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
-        flow_config = {'startingPoints': [{'taskId': 'task-1'}]}  # Missing crewId
+        flow_config = {"startingPoints": [{"taskId": "task-1"}]}  # Missing crewId
         all_tasks = {}
 
         result = await FlowProcessorManager.process_starting_points(
@@ -91,12 +99,14 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_process_starting_points_crew_not_found(self, mock_repositories):
         """Test process_starting_points handles crew not found."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
-        flow_config = {'startingPoints': [{'taskId': 'task-1', 'crewId': 'crew-1'}]}
+        flow_config = {"startingPoints": [{"taskId": "task-1", "crewId": "crew-1"}]}
         all_tasks = {}
 
-        mock_repositories['crew'].get = AsyncMock(return_value=None)
+        mock_repositories["crew"].get = AsyncMock(return_value=None)
 
         result = await FlowProcessorManager.process_starting_points(
             flow_config, all_tasks, mock_repositories
@@ -107,20 +117,22 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_process_starting_points_task_not_found(self, mock_repositories):
         """Test process_starting_points handles task not found."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
 
-        flow_config = {'startingPoints': [{'taskId': task_id, 'crewId': crew_id}]}
+        flow_config = {"startingPoints": [{"taskId": task_id, "crewId": crew_id}]}
         all_tasks = {}
 
         mock_crew = MagicMock()
         mock_crew.name = "Test Crew"
         mock_crew.nodes = []
         mock_crew.edges = []
-        mock_repositories['crew'].get = AsyncMock(return_value=mock_crew)
-        mock_repositories['task'].get = AsyncMock(return_value=None)
+        mock_repositories["crew"].get = AsyncMock(return_value=mock_crew)
+        mock_repositories["task"].get = AsyncMock(return_value=None)
 
         result = await FlowProcessorManager.process_starting_points(
             flow_config, all_tasks, mock_repositories
@@ -131,24 +143,26 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_process_starting_points_success(self, mock_repositories):
         """Test process_starting_points successfully processes starting points."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
         agent_id = str(uuid.uuid4())
 
-        flow_config = {'startingPoints': [{'taskId': task_id, 'crewId': crew_id}]}
+        flow_config = {"startingPoints": [{"taskId": task_id, "crewId": crew_id}]}
         all_tasks = {}
 
         # Create mock crew with nodes and edges
         mock_crew = MagicMock()
         mock_crew.name = "Test Crew"
         mock_crew.nodes = [
-            {'id': f'taskNode-{task_id}', 'type': 'taskNode'},
-            {'id': f'agentNode-{agent_id}', 'type': 'agentNode'},
+            {"id": f"taskNode-{task_id}", "type": "taskNode"},
+            {"id": f"agentNode-{agent_id}", "type": "agentNode"},
         ]
         mock_crew.edges = [
-            {'source': f'agentNode-{agent_id}', 'target': f'taskNode-{task_id}'},
+            {"source": f"agentNode-{agent_id}", "target": f"taskNode-{task_id}"},
         ]
         mock_crew.tool_configs = {}
 
@@ -160,16 +174,24 @@ class TestProcessStartingPoints:
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
 
-        mock_repositories['crew'].get = AsyncMock(return_value=mock_crew)
-        mock_repositories['task'].get = AsyncMock(return_value=mock_task)
-        mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
+        mock_repositories["crew"].get = AsyncMock(return_value=mock_crew)
+        mock_repositories["task"].get = AsyncMock(return_value=mock_task)
+        mock_repositories["agent"].get = AsyncMock(return_value=mock_agent)
 
         # Mock the AgentConfig and TaskConfig at their source modules (imports happen inside functions)
-        with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config:
+        with (
+            patch(
+                "src.services.flow_builder.modules.agent_adapter.AgentConfig"
+            ) as mock_agent_config,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.TaskConfig"
+            ) as mock_task_config,
+        ):
             mock_agent_obj = MagicMock()
             mock_agent_obj.role = "Test Agent"
-            mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
+            mock_agent_config.configure_agent_and_tools = AsyncMock(
+                return_value=mock_agent_obj
+            )
 
             mock_task_obj = MagicMock()
             mock_task_obj.agent = mock_agent_obj
@@ -180,12 +202,14 @@ class TestProcessStartingPoints:
             )
 
             assert len(result) == 1
-            assert result[0][0] == 'starting_point_0'
+            assert result[0][0] == "starting_point_0"
 
     @pytest.mark.asyncio
     async def test_process_starting_points_groups_by_crew(self, mock_repositories):
         """Test process_starting_points groups tasks by crew_id."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         task_id_1 = str(uuid.uuid4())
         task_id_2 = str(uuid.uuid4())
@@ -193,9 +217,9 @@ class TestProcessStartingPoints:
         agent_id = str(uuid.uuid4())
 
         flow_config = {
-            'startingPoints': [
-                {'taskId': task_id_1, 'crewId': crew_id},
-                {'taskId': task_id_2, 'crewId': crew_id},  # Same crew
+            "startingPoints": [
+                {"taskId": task_id_1, "crewId": crew_id},
+                {"taskId": task_id_2, "crewId": crew_id},  # Same crew
             ]
         }
         all_tasks = {}
@@ -203,13 +227,13 @@ class TestProcessStartingPoints:
         mock_crew = MagicMock()
         mock_crew.name = "Test Crew"
         mock_crew.nodes = [
-            {'id': f'taskNode-{task_id_1}', 'type': 'taskNode'},
-            {'id': f'taskNode-{task_id_2}', 'type': 'taskNode'},
-            {'id': f'agentNode-{agent_id}', 'type': 'agentNode'},
+            {"id": f"taskNode-{task_id_1}", "type": "taskNode"},
+            {"id": f"taskNode-{task_id_2}", "type": "taskNode"},
+            {"id": f"agentNode-{agent_id}", "type": "agentNode"},
         ]
         mock_crew.edges = [
-            {'source': f'agentNode-{agent_id}', 'target': f'taskNode-{task_id_1}'},
-            {'source': f'agentNode-{agent_id}', 'target': f'taskNode-{task_id_2}'},
+            {"source": f"agentNode-{agent_id}", "target": f"taskNode-{task_id_1}"},
+            {"source": f"agentNode-{agent_id}", "target": f"taskNode-{task_id_2}"},
         ]
         mock_crew.tool_configs = {}
 
@@ -221,15 +245,23 @@ class TestProcessStartingPoints:
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
 
-        mock_repositories['crew'].get = AsyncMock(return_value=mock_crew)
-        mock_repositories['task'].get = AsyncMock(return_value=mock_task)
-        mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
+        mock_repositories["crew"].get = AsyncMock(return_value=mock_crew)
+        mock_repositories["task"].get = AsyncMock(return_value=mock_task)
+        mock_repositories["agent"].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config, \
-             patch('src.services.execution.runtime.Task') as mock_crewai_task:
+        with (
+            patch(
+                "src.services.flow_builder.modules.agent_adapter.AgentConfig"
+            ) as mock_agent_config,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.TaskConfig"
+            ) as mock_task_config,
+            patch("src.services.execution.runtime.Task") as mock_crewai_task,
+        ):
             mock_agent_obj = MagicMock()
-            mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
+            mock_agent_config.configure_agent_and_tools = AsyncMock(
+                return_value=mock_agent_obj
+            )
 
             mock_task_obj = MagicMock()
             mock_task_obj.agent = mock_agent_obj
@@ -250,7 +282,9 @@ class TestProcessStartingPoints:
     @pytest.mark.asyncio
     async def test_process_starting_points_with_async_tasks(self, mock_repositories):
         """Test process_starting_points handles async tasks correctly."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         task_id_1 = str(uuid.uuid4())
         task_id_2 = str(uuid.uuid4())
@@ -258,9 +292,9 @@ class TestProcessStartingPoints:
         agent_id = str(uuid.uuid4())
 
         flow_config = {
-            'startingPoints': [
-                {'taskId': task_id_1, 'crewId': crew_id},
-                {'taskId': task_id_2, 'crewId': crew_id},
+            "startingPoints": [
+                {"taskId": task_id_1, "crewId": crew_id},
+                {"taskId": task_id_2, "crewId": crew_id},
             ]
         }
         all_tasks = {}
@@ -268,13 +302,13 @@ class TestProcessStartingPoints:
         mock_crew = MagicMock()
         mock_crew.name = "Test Crew"
         mock_crew.nodes = [
-            {'id': f'taskNode-{task_id_1}', 'type': 'taskNode'},
-            {'id': f'taskNode-{task_id_2}', 'type': 'taskNode'},
-            {'id': f'agentNode-{agent_id}', 'type': 'agentNode'},
+            {"id": f"taskNode-{task_id_1}", "type": "taskNode"},
+            {"id": f"taskNode-{task_id_2}", "type": "taskNode"},
+            {"id": f"agentNode-{agent_id}", "type": "agentNode"},
         ]
         mock_crew.edges = [
-            {'source': f'agentNode-{agent_id}', 'target': f'taskNode-{task_id_1}'},
-            {'source': f'agentNode-{agent_id}', 'target': f'taskNode-{task_id_2}'},
+            {"source": f"agentNode-{agent_id}", "target": f"taskNode-{task_id_1}"},
+            {"source": f"agentNode-{agent_id}", "target": f"taskNode-{task_id_2}"},
         ]
         mock_crew.tool_configs = {}
 
@@ -287,15 +321,23 @@ class TestProcessStartingPoints:
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
 
-        mock_repositories['crew'].get = AsyncMock(return_value=mock_crew)
-        mock_repositories['task'].get = AsyncMock(return_value=mock_task)
-        mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
+        mock_repositories["crew"].get = AsyncMock(return_value=mock_crew)
+        mock_repositories["task"].get = AsyncMock(return_value=mock_task)
+        mock_repositories["agent"].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config, \
-             patch('src.services.execution.runtime.Task') as mock_crewai_task:
+        with (
+            patch(
+                "src.services.flow_builder.modules.agent_adapter.AgentConfig"
+            ) as mock_agent_config,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.TaskConfig"
+            ) as mock_task_config,
+            patch("src.services.execution.runtime.Task") as mock_crewai_task,
+        ):
             mock_agent_obj = MagicMock()
-            mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
+            mock_agent_config.configure_agent_and_tools = AsyncMock(
+                return_value=mock_agent_obj
+            )
 
             mock_task_obj = MagicMock()
             mock_task_obj.agent = mock_agent_obj
@@ -319,17 +361,19 @@ class TestProcessListeners:
     def mock_repositories(self):
         """Create mock repositories."""
         return {
-            'task': AsyncMock(),
-            'agent': AsyncMock(),
-            'crew': AsyncMock(),
+            "task": AsyncMock(),
+            "agent": AsyncMock(),
+            "crew": AsyncMock(),
         }
 
     @pytest.mark.asyncio
     async def test_process_listeners_no_task_repo(self):
         """Test process_listeners returns empty when no task repo."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
-        flow_config = {'listeners': [{'crewId': 'crew-1'}]}
+        flow_config = {"listeners": [{"crewId": "crew-1"}]}
         all_tasks = {}
 
         result = await FlowProcessorManager.process_listeners(
@@ -341,9 +385,11 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_process_listeners_missing_crew_id(self, mock_repositories):
         """Test process_listeners skips entries without crew_id."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
-        flow_config = {'listeners': [{'tasks': []}]}  # Missing crewId
+        flow_config = {"listeners": [{"tasks": []}]}  # Missing crewId
         all_tasks = {}
 
         result = await FlowProcessorManager.process_listeners(
@@ -355,12 +401,12 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_process_listeners_skips_router_type(self, mock_repositories):
         """Test process_listeners skips ROUTER condition type."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         flow_config = {
-            'listeners': [
-                {'crewId': 'crew-1', 'conditionType': 'ROUTER', 'tasks': []}
-            ]
+            "listeners": [{"crewId": "crew-1", "conditionType": "ROUTER", "tasks": []}]
         }
         all_tasks = {}
 
@@ -373,17 +419,23 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_process_listeners_crew_not_found(self, mock_repositories):
         """Test process_listeners handles crew not found."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         crew_id = str(uuid.uuid4())
         flow_config = {
-            'listeners': [
-                {'crewId': crew_id, 'tasks': [{'id': 'task-1'}], 'listenToTaskIds': ['task-0']}
+            "listeners": [
+                {
+                    "crewId": crew_id,
+                    "tasks": [{"id": "task-1"}],
+                    "listenToTaskIds": ["task-0"],
+                }
             ]
         }
         all_tasks = {}
 
-        mock_repositories['crew'].get = AsyncMock(return_value=None)
+        mock_repositories["crew"].get = AsyncMock(return_value=None)
 
         result = await FlowProcessorManager.process_listeners(
             flow_config, all_tasks, mock_repositories
@@ -394,12 +446,14 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_process_listeners_no_tasks(self, mock_repositories):
         """Test process_listeners handles no tasks in listener."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         crew_id = str(uuid.uuid4())
         flow_config = {
-            'listeners': [
-                {'crewId': crew_id, 'tasks': [], 'listenToTaskIds': ['task-0']}
+            "listeners": [
+                {"crewId": crew_id, "tasks": [], "listenToTaskIds": ["task-0"]}
             ]
         }
         all_tasks = {}
@@ -413,19 +467,21 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_process_listeners_success(self, mock_repositories):
         """Test process_listeners successfully processes listeners."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
         agent_id = str(uuid.uuid4())
 
         flow_config = {
-            'listeners': [
+            "listeners": [
                 {
-                    'crewId': crew_id,
-                    'tasks': [{'id': task_id}],
-                    'listenToTaskIds': ['start-task'],
-                    'conditionType': 'NONE',
+                    "crewId": crew_id,
+                    "tasks": [{"id": task_id}],
+                    "listenToTaskIds": ["start-task"],
+                    "conditionType": "NONE",
                 }
             ]
         }
@@ -434,11 +490,11 @@ class TestProcessListeners:
         mock_crew = MagicMock()
         mock_crew.name = "Listener Crew"
         mock_crew.nodes = [
-            {'id': f'taskNode-{task_id}', 'type': 'taskNode'},
-            {'id': f'agentNode-{agent_id}', 'type': 'agentNode'},
+            {"id": f"taskNode-{task_id}", "type": "taskNode"},
+            {"id": f"agentNode-{agent_id}", "type": "agentNode"},
         ]
         mock_crew.edges = [
-            {'source': f'agentNode-{agent_id}', 'target': f'taskNode-{task_id}'},
+            {"source": f"agentNode-{agent_id}", "target": f"taskNode-{task_id}"},
         ]
         mock_crew.tool_configs = {}
 
@@ -450,14 +506,22 @@ class TestProcessListeners:
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
 
-        mock_repositories['crew'].get = AsyncMock(return_value=mock_crew)
-        mock_repositories['task'].get = AsyncMock(return_value=mock_task)
-        mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
+        mock_repositories["crew"].get = AsyncMock(return_value=mock_crew)
+        mock_repositories["task"].get = AsyncMock(return_value=mock_task)
+        mock_repositories["agent"].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config:
+        with (
+            patch(
+                "src.services.flow_builder.modules.agent_adapter.AgentConfig"
+            ) as mock_agent_config,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.TaskConfig"
+            ) as mock_task_config,
+        ):
             mock_agent_obj = MagicMock()
-            mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
+            mock_agent_config.configure_agent_and_tools = AsyncMock(
+                return_value=mock_agent_obj
+            )
 
             mock_task_obj = MagicMock()
             mock_task_obj.agent = mock_agent_obj
@@ -468,12 +532,14 @@ class TestProcessListeners:
             )
 
             assert len(result) == 1
-            assert result[0][0] == 'listener_0'
+            assert result[0][0] == "listener_0"
 
     @pytest.mark.asyncio
     async def test_process_listeners_groups_by_crew(self, mock_repositories):
         """Test process_listeners groups listeners by crew_id."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         task_id_1 = str(uuid.uuid4())
         task_id_2 = str(uuid.uuid4())
@@ -481,18 +547,18 @@ class TestProcessListeners:
         agent_id = str(uuid.uuid4())
 
         flow_config = {
-            'listeners': [
+            "listeners": [
                 {
-                    'crewId': crew_id,
-                    'tasks': [{'id': task_id_1}],
-                    'listenToTaskIds': ['start-task'],
-                    'conditionType': 'NONE',
+                    "crewId": crew_id,
+                    "tasks": [{"id": task_id_1}],
+                    "listenToTaskIds": ["start-task"],
+                    "conditionType": "NONE",
                 },
                 {
-                    'crewId': crew_id,  # Same crew
-                    'tasks': [{'id': task_id_2}],
-                    'listenToTaskIds': ['start-task'],
-                    'conditionType': 'NONE',
+                    "crewId": crew_id,  # Same crew
+                    "tasks": [{"id": task_id_2}],
+                    "listenToTaskIds": ["start-task"],
+                    "conditionType": "NONE",
                 },
             ]
         }
@@ -501,13 +567,13 @@ class TestProcessListeners:
         mock_crew = MagicMock()
         mock_crew.name = "Listener Crew"
         mock_crew.nodes = [
-            {'id': f'taskNode-{task_id_1}', 'type': 'taskNode'},
-            {'id': f'taskNode-{task_id_2}', 'type': 'taskNode'},
-            {'id': f'agentNode-{agent_id}', 'type': 'agentNode'},
+            {"id": f"taskNode-{task_id_1}", "type": "taskNode"},
+            {"id": f"taskNode-{task_id_2}", "type": "taskNode"},
+            {"id": f"agentNode-{agent_id}", "type": "agentNode"},
         ]
         mock_crew.edges = [
-            {'source': f'agentNode-{agent_id}', 'target': f'taskNode-{task_id_1}'},
-            {'source': f'agentNode-{agent_id}', 'target': f'taskNode-{task_id_2}'},
+            {"source": f"agentNode-{agent_id}", "target": f"taskNode-{task_id_1}"},
+            {"source": f"agentNode-{agent_id}", "target": f"taskNode-{task_id_2}"},
         ]
         mock_crew.tool_configs = {}
 
@@ -519,14 +585,22 @@ class TestProcessListeners:
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
 
-        mock_repositories['crew'].get = AsyncMock(return_value=mock_crew)
-        mock_repositories['task'].get = AsyncMock(return_value=mock_task)
-        mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
+        mock_repositories["crew"].get = AsyncMock(return_value=mock_crew)
+        mock_repositories["task"].get = AsyncMock(return_value=mock_task)
+        mock_repositories["agent"].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config:
+        with (
+            patch(
+                "src.services.flow_builder.modules.agent_adapter.AgentConfig"
+            ) as mock_agent_config,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.TaskConfig"
+            ) as mock_task_config,
+        ):
             mock_agent_obj = MagicMock()
-            mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
+            mock_agent_config.configure_agent_and_tools = AsyncMock(
+                return_value=mock_agent_obj
+            )
 
             mock_task_obj = MagicMock()
             mock_task_obj.agent = mock_agent_obj
@@ -544,19 +618,21 @@ class TestProcessListeners:
     @pytest.mark.asyncio
     async def test_process_listeners_auto_and_condition(self, mock_repositories):
         """Test process_listeners auto-sets AND condition for multiple listen targets."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
         agent_id = str(uuid.uuid4())
 
         flow_config = {
-            'listeners': [
+            "listeners": [
                 {
-                    'crewId': crew_id,
-                    'tasks': [{'id': task_id}],
-                    'listenToTaskIds': ['task-1', 'task-2'],  # Multiple listen targets
-                    'conditionType': 'NONE',
+                    "crewId": crew_id,
+                    "tasks": [{"id": task_id}],
+                    "listenToTaskIds": ["task-1", "task-2"],  # Multiple listen targets
+                    "conditionType": "NONE",
                 },
             ]
         }
@@ -565,11 +641,11 @@ class TestProcessListeners:
         mock_crew = MagicMock()
         mock_crew.name = "Listener Crew"
         mock_crew.nodes = [
-            {'id': f'taskNode-{task_id}', 'type': 'taskNode'},
-            {'id': f'agentNode-{agent_id}', 'type': 'agentNode'},
+            {"id": f"taskNode-{task_id}", "type": "taskNode"},
+            {"id": f"agentNode-{agent_id}", "type": "agentNode"},
         ]
         mock_crew.edges = [
-            {'source': f'agentNode-{agent_id}', 'target': f'taskNode-{task_id}'},
+            {"source": f"agentNode-{agent_id}", "target": f"taskNode-{task_id}"},
         ]
         mock_crew.tool_configs = {}
 
@@ -581,14 +657,22 @@ class TestProcessListeners:
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
 
-        mock_repositories['crew'].get = AsyncMock(return_value=mock_crew)
-        mock_repositories['task'].get = AsyncMock(return_value=mock_task)
-        mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
+        mock_repositories["crew"].get = AsyncMock(return_value=mock_crew)
+        mock_repositories["task"].get = AsyncMock(return_value=mock_task)
+        mock_repositories["agent"].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config:
+        with (
+            patch(
+                "src.services.flow_builder.modules.agent_adapter.AgentConfig"
+            ) as mock_agent_config,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.TaskConfig"
+            ) as mock_task_config,
+        ):
             mock_agent_obj = MagicMock()
-            mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
+            mock_agent_config.configure_agent_and_tools = AsyncMock(
+                return_value=mock_agent_obj
+            )
 
             mock_task_obj = MagicMock()
             mock_task_obj.agent = mock_agent_obj
@@ -600,7 +684,7 @@ class TestProcessListeners:
 
             assert len(result) == 1
             # Should have AND condition type
-            assert result[0][6] == 'AND'
+            assert result[0][6] == "AND"
 
 
 class TestProcessRouters:
@@ -610,17 +694,19 @@ class TestProcessRouters:
     def mock_repositories(self):
         """Create mock repositories."""
         return {
-            'task': AsyncMock(),
-            'agent': AsyncMock(),
-            'crew': AsyncMock(),
+            "task": AsyncMock(),
+            "agent": AsyncMock(),
+            "crew": AsyncMock(),
         }
 
     @pytest.mark.asyncio
     async def test_process_routers_no_task_repo(self):
         """Test process_routers returns empty when no task repo."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
-        flow_config = {'routers': [{'name': 'router-1'}]}
+        flow_config = {"routers": [{"name": "router-1"}]}
         all_tasks = {}
 
         result = await FlowProcessorManager.process_routers(
@@ -632,9 +718,13 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_missing_listen_to(self, mock_repositories):
         """Test process_routers skips entries without listenTo."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
-        flow_config = {'routers': [{'name': 'router-1', 'routes': {}}]}  # Missing listenTo
+        flow_config = {
+            "routers": [{"name": "router-1", "routes": {}}]
+        }  # Missing listenTo
         all_tasks = {}
 
         result = await FlowProcessorManager.process_routers(
@@ -646,11 +736,13 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_empty_routes(self, mock_repositories):
         """Test process_routers handles empty routes."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         flow_config = {
-            'routers': [
-                {'name': 'router-1', 'listenTo': 'starting_point_0', 'routes': {}}
+            "routers": [
+                {"name": "router-1", "listenTo": "starting_point_0", "routes": {}}
             ]
         }
         all_tasks = {}
@@ -664,16 +756,18 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_route_no_crew_id(self, mock_repositories):
         """Test process_routers handles route without crew_id."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         task_id = str(uuid.uuid4())
         flow_config = {
-            'routers': [
+            "routers": [
                 {
-                    'name': 'router-1',
-                    'listenTo': 'starting_point_0',
-                    'routes': {'success': [{'id': task_id}]},  # No crewId
-                    'routeConditions': {},
+                    "name": "router-1",
+                    "listenTo": "starting_point_0",
+                    "routes": {"success": [{"id": task_id}]},  # No crewId
+                    "routeConditions": {},
                 }
             ]
         }
@@ -688,23 +782,25 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_crew_not_found(self, mock_repositories):
         """Test process_routers handles crew not found."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
         flow_config = {
-            'routers': [
+            "routers": [
                 {
-                    'name': 'router-1',
-                    'listenTo': 'starting_point_0',
-                    'routes': {'success': [{'id': task_id, 'crewId': crew_id}]},
-                    'routeConditions': {},
+                    "name": "router-1",
+                    "listenTo": "starting_point_0",
+                    "routes": {"success": [{"id": task_id, "crewId": crew_id}]},
+                    "routeConditions": {},
                 }
             ]
         }
         all_tasks = {}
 
-        mock_repositories['crew'].get = AsyncMock(return_value=None)
+        mock_repositories["crew"].get = AsyncMock(return_value=None)
 
         result = await FlowProcessorManager.process_routers(
             flow_config, all_tasks, mock_repositories
@@ -715,19 +811,21 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_success(self, mock_repositories):
         """Test process_routers successfully processes routers."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
         agent_id = str(uuid.uuid4())
 
         flow_config = {
-            'routers': [
+            "routers": [
                 {
-                    'name': 'router-1',
-                    'listenTo': 'starting_point_0',
-                    'routes': {'success': [{'id': task_id, 'crewId': crew_id}]},
-                    'routeConditions': {'success': 'state.get("result") == True'},
+                    "name": "router-1",
+                    "listenTo": "starting_point_0",
+                    "routes": {"success": [{"id": task_id, "crewId": crew_id}]},
+                    "routeConditions": {"success": 'state.get("result") == True'},
                 }
             ]
         }
@@ -736,11 +834,11 @@ class TestProcessRouters:
         mock_crew = MagicMock()
         mock_crew.name = "Route Crew"
         mock_crew.nodes = [
-            {'id': f'taskNode-{task_id}', 'type': 'taskNode'},
-            {'id': f'agentNode-{agent_id}', 'type': 'agentNode'},
+            {"id": f"taskNode-{task_id}", "type": "taskNode"},
+            {"id": f"agentNode-{agent_id}", "type": "agentNode"},
         ]
         mock_crew.edges = [
-            {'source': f'agentNode-{agent_id}', 'target': f'taskNode-{task_id}'},
+            {"source": f"agentNode-{agent_id}", "target": f"taskNode-{task_id}"},
         ]
         mock_crew.tool_configs = {}
 
@@ -751,14 +849,22 @@ class TestProcessRouters:
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
 
-        mock_repositories['crew'].get = AsyncMock(return_value=mock_crew)
-        mock_repositories['task'].get = AsyncMock(return_value=mock_task)
-        mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
+        mock_repositories["crew"].get = AsyncMock(return_value=mock_crew)
+        mock_repositories["task"].get = AsyncMock(return_value=mock_task)
+        mock_repositories["agent"].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config:
+        with (
+            patch(
+                "src.services.flow_builder.modules.agent_adapter.AgentConfig"
+            ) as mock_agent_config,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.TaskConfig"
+            ) as mock_task_config,
+        ):
             mock_agent_obj = MagicMock()
-            mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
+            mock_agent_config.configure_agent_and_tools = AsyncMock(
+                return_value=mock_agent_obj
+            )
 
             mock_task_obj = MagicMock()
             mock_task_obj.agent = mock_agent_obj
@@ -769,12 +875,14 @@ class TestProcessRouters:
             )
 
             assert len(result) == 1
-            assert result[0][0] == 'router_0'
+            assert result[0][0] == "router_0"
 
     @pytest.mark.asyncio
     async def test_process_routers_multiple_routes(self, mock_repositories):
         """Test process_routers handles multiple routes."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         task_id_1 = str(uuid.uuid4())
         task_id_2 = str(uuid.uuid4())
@@ -782,17 +890,17 @@ class TestProcessRouters:
         agent_id = str(uuid.uuid4())
 
         flow_config = {
-            'routers': [
+            "routers": [
                 {
-                    'name': 'router-1',
-                    'listenTo': 'starting_point_0',
-                    'routes': {
-                        'success': [{'id': task_id_1, 'crewId': crew_id}],
-                        'failure': [{'id': task_id_2, 'crewId': crew_id}],
+                    "name": "router-1",
+                    "listenTo": "starting_point_0",
+                    "routes": {
+                        "success": [{"id": task_id_1, "crewId": crew_id}],
+                        "failure": [{"id": task_id_2, "crewId": crew_id}],
                     },
-                    'routeConditions': {
-                        'success': 'state.get("result") == True',
-                        'failure': 'state.get("result") == False',
+                    "routeConditions": {
+                        "success": 'state.get("result") == True',
+                        "failure": 'state.get("result") == False',
                     },
                 }
             ]
@@ -802,13 +910,13 @@ class TestProcessRouters:
         mock_crew = MagicMock()
         mock_crew.name = "Route Crew"
         mock_crew.nodes = [
-            {'id': f'taskNode-{task_id_1}', 'type': 'taskNode'},
-            {'id': f'taskNode-{task_id_2}', 'type': 'taskNode'},
-            {'id': f'agentNode-{agent_id}', 'type': 'agentNode'},
+            {"id": f"taskNode-{task_id_1}", "type": "taskNode"},
+            {"id": f"taskNode-{task_id_2}", "type": "taskNode"},
+            {"id": f"agentNode-{agent_id}", "type": "agentNode"},
         ]
         mock_crew.edges = [
-            {'source': f'agentNode-{agent_id}', 'target': f'taskNode-{task_id_1}'},
-            {'source': f'agentNode-{agent_id}', 'target': f'taskNode-{task_id_2}'},
+            {"source": f"agentNode-{agent_id}", "target": f"taskNode-{task_id_1}"},
+            {"source": f"agentNode-{agent_id}", "target": f"taskNode-{task_id_2}"},
         ]
         mock_crew.tool_configs = {}
 
@@ -819,14 +927,22 @@ class TestProcessRouters:
         mock_agent = MagicMock()
         mock_agent.role = "Test Agent"
 
-        mock_repositories['crew'].get = AsyncMock(return_value=mock_crew)
-        mock_repositories['task'].get = AsyncMock(return_value=mock_task)
-        mock_repositories['agent'].get = AsyncMock(return_value=mock_agent)
+        mock_repositories["crew"].get = AsyncMock(return_value=mock_crew)
+        mock_repositories["task"].get = AsyncMock(return_value=mock_task)
+        mock_repositories["agent"].get = AsyncMock(return_value=mock_agent)
 
-        with patch('src.services.flow_builder.modules.agent_adapter.AgentConfig') as mock_agent_config, \
-             patch('src.services.flow_builder.modules.task_adapter.TaskConfig') as mock_task_config:
+        with (
+            patch(
+                "src.services.flow_builder.modules.agent_adapter.AgentConfig"
+            ) as mock_agent_config,
+            patch(
+                "src.services.flow_builder.modules.task_adapter.TaskConfig"
+            ) as mock_task_config,
+        ):
             mock_agent_obj = MagicMock()
-            mock_agent_config.configure_agent_and_tools = AsyncMock(return_value=mock_agent_obj)
+            mock_agent_config.configure_agent_and_tools = AsyncMock(
+                return_value=mock_agent_obj
+            )
 
             mock_task_obj = MagicMock()
             mock_task_obj.agent = mock_agent_obj
@@ -843,24 +959,28 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_exception_handling(self, mock_repositories):
         """Test process_routers handles exceptions gracefully."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
 
         flow_config = {
-            'routers': [
+            "routers": [
                 {
-                    'name': 'router-1',
-                    'listenTo': 'starting_point_0',
-                    'routes': {'success': [{'id': task_id, 'crewId': crew_id}]},
-                    'routeConditions': {},
+                    "name": "router-1",
+                    "listenTo": "starting_point_0",
+                    "routes": {"success": [{"id": task_id, "crewId": crew_id}]},
+                    "routeConditions": {},
                 }
             ]
         }
         all_tasks = {}
 
-        mock_repositories['crew'].get = AsyncMock(side_effect=Exception("Database error"))
+        mock_repositories["crew"].get = AsyncMock(
+            side_effect=Exception("Database error")
+        )
 
         result = await FlowProcessorManager.process_routers(
             flow_config, all_tasks, mock_repositories
@@ -871,18 +991,20 @@ class TestProcessRouters:
     @pytest.mark.asyncio
     async def test_process_routers_task_not_found(self, mock_repositories):
         """Test process_routers handles task not found."""
-        from src.services.flow_builder.modules.flow_processors import FlowProcessorManager
+        from src.services.flow_builder.modules.flow_processors import (
+            FlowProcessorManager,
+        )
 
         task_id = str(uuid.uuid4())
         crew_id = str(uuid.uuid4())
 
         flow_config = {
-            'routers': [
+            "routers": [
                 {
-                    'name': 'router-1',
-                    'listenTo': 'starting_point_0',
-                    'routes': {'success': [{'id': task_id, 'crewId': crew_id}]},
-                    'routeConditions': {},
+                    "name": "router-1",
+                    "listenTo": "starting_point_0",
+                    "routes": {"success": [{"id": task_id, "crewId": crew_id}]},
+                    "routeConditions": {},
                 }
             ]
         }
@@ -894,8 +1016,8 @@ class TestProcessRouters:
         mock_crew.edges = []
         mock_crew.tool_configs = {}
 
-        mock_repositories['crew'].get = AsyncMock(return_value=mock_crew)
-        mock_repositories['task'].get = AsyncMock(return_value=None)
+        mock_repositories["crew"].get = AsyncMock(return_value=mock_crew)
+        mock_repositories["task"].get = AsyncMock(return_value=None)
 
         result = await FlowProcessorManager.process_routers(
             flow_config, all_tasks, mock_repositories

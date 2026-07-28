@@ -4,6 +4,7 @@ Implements Kahn's algorithm for topological sorting of measure-to-measure
 dependencies, with cycle detection. Used by the pipeline's Pass 2 to ensure
 measures are translated in the correct order (leaves first, composed measures last).
 """
+
 from __future__ import annotations
 
 import re
@@ -24,11 +25,11 @@ def _find_measure_refs(dax: str, all_measure_names: set[str]) -> set[str]:
         Set of referenced measure names
     """
     refs: set[str] = set()
-    for m in re.finditer(r'\[([^\[\]]+)\]', dax):
+    for m in re.finditer(r"\[([^\[\]]+)\]", dax):
         ref_name = m.group(1)
         # Skip Table[col] patterns: preceded by a word character (table name)
-        before = dax[:m.start()].rstrip()
-        if before and re.search(r'\w$', before):
+        before = dax[: m.start()].rstrip()
+        if before and re.search(r"\w$", before):
             continue
         if ref_name in all_measure_names:
             refs.add(ref_name)
@@ -55,10 +56,10 @@ def build_dependency_graph(measures: list[dict]) -> dict:
     all_names: set[str] = set()
     name_to_dax: dict[str, str] = {}
     for m in measures:
-        name = m.get('measure_name', m.get('name', m.get('original_name', '')))
+        name = m.get("measure_name", m.get("name", m.get("original_name", "")))
         if name:
             all_names.add(name)
-            name_to_dax[name] = m.get('dax_expression', '')
+            name_to_dax[name] = m.get("dax_expression", "")
 
     # Build adjacency: measure → [measures it depends on]
     adjacency: dict[str, list[str]] = {}
@@ -66,7 +67,7 @@ def build_dependency_graph(measures: list[dict]) -> dict:
     in_degree: dict[str, int] = {}
 
     for name in all_names:
-        dax = name_to_dax.get(name, '')
+        dax = name_to_dax.get(name, "")
         deps = _find_measure_refs(dax, all_names - {name})  # exclude self-refs
         adjacency[name] = sorted(deps)
         in_degree.setdefault(name, 0)
@@ -111,12 +112,12 @@ def build_dependency_graph(measures: list[dict]) -> dict:
     roots = [name for name in topo_order if not reverse_adj.get(name)]
 
     return {
-        'adjacency': adjacency,
-        'reverse_adjacency': reverse_adj,
-        'topo_order': topo_order,
-        'leaves': leaves,
-        'roots': roots,
-        'cycles': cycles,
+        "adjacency": adjacency,
+        "reverse_adjacency": reverse_adj,
+        "topo_order": topo_order,
+        "leaves": leaves,
+        "roots": roots,
+        "cycles": cycles,
     }
 
 

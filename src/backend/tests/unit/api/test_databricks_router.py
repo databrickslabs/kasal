@@ -4,19 +4,21 @@ Tests all endpoints using direct async function calls with mocked service
 dependencies. Permission checks are tested by supplying GroupContext objects
 with different role configurations.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from types import SimpleNamespace
+
 from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.api.databricks_router import (
-    set_databricks_config,
-    set_ai_gateway_status,
-    get_databricks_config,
-    check_personal_token_required,
     check_databricks_connection,
+    check_personal_token_required,
+    get_databricks_config,
     get_databricks_environment,
     router,
+    set_ai_gateway_status,
+    set_databricks_config,
 )
 from src.core.exceptions import ForbiddenError, NotFoundError
 from src.schemas.databricks_config import (
@@ -60,6 +62,7 @@ def gc_operator():
 # ---------------------------------------------------------------------------
 # POST /databricks/config
 # ---------------------------------------------------------------------------
+
 
 class TestSetDatabricksConfig:
     """Tests for set_databricks_config endpoint."""
@@ -153,9 +156,7 @@ class TestSetDatabricksConfig:
     @pytest.mark.asyncio
     async def test_set_config_propagates_service_error(self):
         svc = AsyncMock()
-        svc.set_databricks_config = AsyncMock(
-            side_effect=RuntimeError("config error")
-        )
+        svc.set_databricks_config = AsyncMock(side_effect=RuntimeError("config error"))
 
         request = DatabricksConfigCreate(
             workspace_url="https://example.com",
@@ -177,6 +178,7 @@ class TestSetDatabricksConfig:
 # GET /databricks/config
 # ---------------------------------------------------------------------------
 
+
 class TestGetDatabricksConfig:
     """Tests for get_databricks_config endpoint."""
 
@@ -192,9 +194,7 @@ class TestGetDatabricksConfig:
         )
         svc.get_databricks_config = AsyncMock(return_value=config)
 
-        result = await get_databricks_config(
-            group_context=gc_admin(), service=svc
-        )
+        result = await get_databricks_config(group_context=gc_admin(), service=svc)
 
         assert result.workspace_url == "https://example.com"
 
@@ -203,9 +203,7 @@ class TestGetDatabricksConfig:
         svc = AsyncMock()
         svc.get_databricks_config = AsyncMock(return_value=None)
 
-        result = await get_databricks_config(
-            group_context=gc_admin(), service=svc
-        )
+        result = await get_databricks_config(group_context=gc_admin(), service=svc)
 
         assert isinstance(result, DatabricksConfigResponse)
         assert result.workspace_url == ""
@@ -216,23 +214,20 @@ class TestGetDatabricksConfig:
         svc = AsyncMock()
 
         with pytest.raises(ForbiddenError):
-            await get_databricks_config(
-                group_context=gc_editor(), service=svc
-            )
+            await get_databricks_config(group_context=gc_editor(), service=svc)
 
     @pytest.mark.asyncio
     async def test_get_config_forbidden_for_operator(self):
         svc = AsyncMock()
 
         with pytest.raises(ForbiddenError):
-            await get_databricks_config(
-                group_context=gc_operator(), service=svc
-            )
+            await get_databricks_config(group_context=gc_operator(), service=svc)
 
 
 # ---------------------------------------------------------------------------
 # GET /databricks/status/personal-token-required
 # ---------------------------------------------------------------------------
+
 
 class TestCheckPersonalTokenRequired:
     """Tests for check_personal_token_required endpoint."""
@@ -241,7 +236,10 @@ class TestCheckPersonalTokenRequired:
     async def test_token_required_true(self):
         svc = AsyncMock()
         svc.check_personal_token_required = AsyncMock(
-            return_value={"personal_token_required": True, "message": "OAuth not configured"}
+            return_value={
+                "personal_token_required": True,
+                "message": "OAuth not configured",
+            }
         )
 
         result = await check_personal_token_required(
@@ -268,14 +266,13 @@ class TestCheckPersonalTokenRequired:
         svc = AsyncMock()
 
         with pytest.raises(ForbiddenError):
-            await check_personal_token_required(
-                group_context=gc_editor(), service=svc
-            )
+            await check_personal_token_required(group_context=gc_editor(), service=svc)
 
 
 # ---------------------------------------------------------------------------
 # GET /databricks/connection
 # ---------------------------------------------------------------------------
+
 
 class TestCheckDatabricksConnection:
     """Tests for check_databricks_connection endpoint."""
@@ -314,14 +311,13 @@ class TestCheckDatabricksConnection:
         svc = AsyncMock()
 
         with pytest.raises(ForbiddenError):
-            await check_databricks_connection(
-                group_context=gc_operator(), service=svc
-            )
+            await check_databricks_connection(group_context=gc_operator(), service=svc)
 
 
 # ---------------------------------------------------------------------------
 # GET /databricks/environment
 # ---------------------------------------------------------------------------
+
 
 class TestGetDatabricksEnvironment:
     """Tests for get_databricks_environment endpoint."""
@@ -336,16 +332,15 @@ class TestGetDatabricksEnvironment:
         mock_auth_context.auth_method = "pat"
         mock_auth_context.user_identity = "admin@x.com"
 
-        with patch(
-            "src.utils.databricks_auth._databricks_auth", mock_auth
-        ), patch(
-            "src.utils.databricks_auth.get_auth_context",
-            new_callable=AsyncMock,
-            return_value=mock_auth_context,
+        with (
+            patch("src.utils.databricks_auth._databricks_auth", mock_auth),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth_context,
+            ),
         ):
-            result = await get_databricks_environment(
-                group_context=gc_admin()
-            )
+            result = await get_databricks_environment(group_context=gc_admin())
 
         assert result["databricks_host"] == "https://example.com"
         assert result["auth_method"] == "pat"
@@ -358,16 +353,15 @@ class TestGetDatabricksEnvironment:
         mock_auth._workspace_host = "https://example.com"
         mock_auth._load_config = AsyncMock()
 
-        with patch(
-            "src.utils.databricks_auth._databricks_auth", mock_auth
-        ), patch(
-            "src.utils.databricks_auth.get_auth_context",
-            new_callable=AsyncMock,
-            return_value=None,
+        with (
+            patch("src.utils.databricks_auth._databricks_auth", mock_auth),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
-            result = await get_databricks_environment(
-                group_context=gc_admin()
-            )
+            result = await get_databricks_environment(group_context=gc_admin())
 
         assert result["databricks_host"] == "https://example.com"
         assert result["auth_method"] is None
@@ -382,6 +376,7 @@ class TestGetDatabricksEnvironment:
 # ---------------------------------------------------------------------------
 # Router configuration
 # ---------------------------------------------------------------------------
+
 
 class TestRouterConfiguration:
     """Tests for router prefix and tags."""

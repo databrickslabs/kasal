@@ -1,4 +1,5 @@
 """Unit tests for the shared knowledge embedder resolver."""
+
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -37,7 +38,9 @@ async def test_falls_back_to_ollama_when_auth_probe_raises():
 
 @pytest.mark.asyncio
 async def test_ollama_model_is_configurable():
-    with patch.object(knowledge_embedder, "KNOWLEDGE_OLLAMA_EMBED_MODEL", "custom-1024"):
+    with patch.object(
+        knowledge_embedder, "KNOWLEDGE_OLLAMA_EMBED_MODEL", "custom-1024"
+    ):
         with patch(_GET_AUTH, new_callable=AsyncMock, return_value=None):
             cfg = await resolve_knowledge_embedder_config()
     assert cfg["config"]["model"] == "custom-1024"

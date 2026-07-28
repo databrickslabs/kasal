@@ -6,9 +6,10 @@ Tests the Lakebase activation state tracker that distinguishes startup
 """
 
 import importlib
-import pytest
 from datetime import datetime, timezone
 from unittest.mock import patch
+
+import pytest
 
 import src.db.lakebase_state as lakebase_state_mod
 
@@ -27,6 +28,7 @@ def _reset_state():
 # is_fallback_allowed / is_lakebase_activated — initial state
 # ---------------------------------------------------------------------------
 
+
 class TestInitialState:
     def test_fallback_allowed_initially(self):
         assert lakebase_state_mod.is_fallback_allowed() is True
@@ -41,6 +43,7 @@ class TestInitialState:
 # ---------------------------------------------------------------------------
 # mark_lakebase_activated
 # ---------------------------------------------------------------------------
+
 
 class TestMarkLakebaseActivated:
     def test_mark_sets_activated(self):
@@ -67,6 +70,7 @@ class TestMarkLakebaseActivated:
 # ---------------------------------------------------------------------------
 # record_successful_connection
 # ---------------------------------------------------------------------------
+
 
 class TestRecordSuccessfulConnection:
     def test_records_timestamp(self):
@@ -96,6 +100,7 @@ class TestRecordSuccessfulConnection:
 # ---------------------------------------------------------------------------
 # Combined scenarios
 # ---------------------------------------------------------------------------
+
 
 class TestCombinedScenarios:
     def test_activation_then_connection(self):

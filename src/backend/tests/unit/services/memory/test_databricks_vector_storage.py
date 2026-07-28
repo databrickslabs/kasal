@@ -4,8 +4,9 @@ Comprehensive unit tests for DatabricksVectorStorage.
 
 import os
 import sys
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
 
 # Must set env before imports to avoid nullpool side effects in test isolation
 os.environ.setdefault("DATABASE_TYPE", "sqlite")

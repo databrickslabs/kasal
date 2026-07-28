@@ -23,6 +23,7 @@ from typing import Any, Generic, TypeVar
 from pydantic import BaseModel
 
 from src.core.llm.json_extraction import extract_json_dict
+
 from .base import BaseLLM
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,13 @@ T = TypeVar("T", bound=BaseModel)
 
 def strip_numeric_bounds(schema: dict[str, Any]) -> dict[str, Any]:
     """Recursively drop numeric range keywords some providers reject."""
-    banned = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"}
+    banned = {
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "multipleOf",
+    }
 
     def clean(node: Any) -> Any:
         if isinstance(node, dict):
@@ -60,9 +67,7 @@ class InternalInstructor(Generic[T]):
         self.content = content
         self.model = model
         self.agent = agent
-        self.llm = llm or (
-            (agent.function_calling_llm or agent.llm) if agent else None
-        )
+        self.llm = llm or ((agent.function_calling_llm or agent.llm) if agent else None)
         self.instructor_mode = instructor_mode  # accepted for compatibility
         self.schema_transform = schema_transform
 

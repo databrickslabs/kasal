@@ -8,11 +8,11 @@ Handles:
 - Optional parameters
 """
 
-from typing import Dict, Any, List, Optional
 import logging
-from src.services.execution.runtime import Process
+from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
+from src.services.execution.runtime import Process
 
 logger = LoggerManager.get_instance().crew
 
@@ -39,11 +39,11 @@ class CrewConfigBuilder:
         agents_with_memory_enabled = []
         agents_with_memory_disabled = []
 
-        for agent_config in self.config.get('agents', []):
-            agent_name = agent_config.get('name', agent_config.get('role', 'Unknown'))
+        for agent_config in self.config.get("agents", []):
+            agent_name = agent_config.get("name", agent_config.get("role", "Unknown"))
 
-            if 'memory' in agent_config:
-                if agent_config['memory'] is False:
+            if "memory" in agent_config:
+                if agent_config["memory"] is False:
                     agents_with_memory_disabled.append(agent_name)
                     logger.info(f"Agent '{agent_name}' has memory explicitly disabled")
                 else:
@@ -57,15 +57,21 @@ class CrewConfigBuilder:
         # If ALL agents have memory disabled, disable crew memory
         if agents_with_memory_disabled and not agents_with_memory_enabled:
             default_crew_memory = False
-            logger.info("All agents have memory disabled - setting crew memory to False")
+            logger.info(
+                "All agents have memory disabled - setting crew memory to False"
+            )
         else:
             # At least one agent has memory enabled
-            crew_config = self.config.get('crew', {})
-            default_crew_memory = crew_config.get('memory', True)
+            crew_config = self.config.get("crew", {})
+            default_crew_memory = crew_config.get("memory", True)
             if agents_with_memory_enabled:
-                logger.info(f"At least one agent has memory enabled - using crew memory setting: {default_crew_memory}")
+                logger.info(
+                    f"At least one agent has memory enabled - using crew memory setting: {default_crew_memory}"
+                )
             else:
-                logger.info(f"No agent memory settings found - using crew memory default: {default_crew_memory}")
+                logger.info(
+                    f"No agent memory settings found - using crew memory default: {default_crew_memory}"
+                )
 
         return default_crew_memory
 
@@ -76,14 +82,14 @@ class CrewConfigBuilder:
         Returns:
             Process enum value
         """
-        crew_config = self.config.get('crew', {})
-        process_type = crew_config.get('process', 'sequential')
+        crew_config = self.config.get("crew", {})
+        process_type = crew_config.get("process", "sequential")
 
         if isinstance(process_type, str):
-            if process_type.lower() == 'hierarchical':
+            if process_type.lower() == "hierarchical":
                 process_type = Process.hierarchical
                 logger.info("Using hierarchical process for crew")
-            elif process_type.lower() == 'parallel':
+            elif process_type.lower() == "parallel":
                 # The engine has no "parallel" Process — parallelism is per-task
                 # async_execution, which crew_preparation turns on for every
                 # context-free task when the crew process is "parallel". The
@@ -105,7 +111,7 @@ class CrewConfigBuilder:
         agents: List[Any],
         tasks: List[Any],
         process_type: Process,
-        default_crew_memory: bool
+        default_crew_memory: bool,
     ) -> Dict[str, Any]:
         """
         Build base crew kwargs
@@ -120,12 +126,12 @@ class CrewConfigBuilder:
             Base crew kwargs dictionary
         """
         crew_kwargs = {
-            'agents': agents,
-            'tasks': tasks,
-            'process': process_type,
-            'verbose': True,
-            'memory': default_crew_memory,
-            'prompt_to_print_output': False  # CRITICAL: Disable interactive trace prompt to prevent subprocess hang
+            "agents": agents,
+            "tasks": tasks,
+            "process": process_type,
+            "verbose": True,
+            "memory": default_crew_memory,
+            "prompt_to_print_output": False,  # CRITICAL: Disable interactive trace prompt to prevent subprocess hang
             # Note: 'tracing' parameter removed - not supported in all CrewAI versions
             # CrewAI cloud tracing is disabled by default anyway
         }
@@ -142,11 +148,11 @@ class CrewConfigBuilder:
         Returns:
             Updated crew kwargs
         """
-        crew_config = self.config.get('crew', {})
+        crew_config = self.config.get("crew", {})
 
         # Max RPM
-        if 'max_rpm' in self.config:
-            crew_kwargs['max_rpm'] = self.config['max_rpm']
+        if "max_rpm" in self.config:
+            crew_kwargs["max_rpm"] = self.config["max_rpm"]
 
         # NOTE: 'planning' / 'planning_llm' are deliberately NOT forwarded. The
         # CrewAI-style prose planner was removed — the engine has no planner, so
@@ -170,9 +176,9 @@ class CrewConfigBuilder:
             The planner is gone, and reasoning is the model's own native reasoning
             budget on each agent's LLM — there is no separate reasoning model.
         """
-        crew_config = self.config.get('crew', {})
+        crew_config = self.config.get("crew", {})
 
-        if 'reasoning_llm' in crew_config:
+        if "reasoning_llm" in crew_config:
             logger.warning(
                 "'reasoning_llm' is ignored: reasoning is the model's native reasoning "
                 "budget applied to each agent's own LLM, not a separate model."
@@ -196,17 +202,19 @@ class CrewConfigBuilder:
         logger.info("Performance benefit: No memory operations will be performed")
         logger.info("=" * 80)
 
-        crew_kwargs['memory'] = False
+        crew_kwargs["memory"] = False
         # Legacy per-type kwargs (pre-1.10) are popped defensively in case
         # anything upstream still sets them.
-        crew_kwargs.pop('short_term_memory', None)
-        crew_kwargs.pop('long_term_memory', None)
-        crew_kwargs.pop('entity_memory', None)
-        crew_kwargs.pop('embedder', None)
+        crew_kwargs.pop("short_term_memory", None)
+        crew_kwargs.pop("long_term_memory", None)
+        crew_kwargs.pop("entity_memory", None)
+        crew_kwargs.pop("embedder", None)
 
         return crew_kwargs
 
-    def check_memory_disabled_by_backend_config(self, memory_backend_config: Optional[Dict[str, Any]]) -> bool:
+    def check_memory_disabled_by_backend_config(
+        self, memory_backend_config: Optional[Dict[str, Any]]
+    ) -> bool:
         """Return True when the loaded config explicitly disables memory.
 
         With CrewAI 1.10+ unified memory there are no per-type enable flags.
@@ -228,7 +236,7 @@ class CrewConfigBuilder:
     def log_memory_configuration(
         self,
         crew_kwargs: Dict[str, Any],
-        memory_backend_config: Optional[Dict[str, Any]]
+        memory_backend_config: Optional[Dict[str, Any]],
     ) -> None:
         """
         Log memory configuration before crew creation
@@ -238,11 +246,13 @@ class CrewConfigBuilder:
             memory_backend_config: Memory backend configuration
         """
         logger.info("=== MEMORY CONFIGURATION BEFORE CREW CREATION ===")
-        memory_value = crew_kwargs.get('memory', False)
+        memory_value = crew_kwargs.get("memory", False)
         logger.info(f"Memory enabled: {bool(memory_value)}")
 
         if memory_backend_config:
-            logger.info(f"Memory backend: {memory_backend_config.get('backend_type', 'unknown')}")
+            logger.info(
+                f"Memory backend: {memory_backend_config.get('backend_type', 'unknown')}"
+            )
         else:
             logger.info("Memory backend: Default (local SQLite store)")
 
@@ -253,32 +263,44 @@ class CrewConfigBuilder:
                 f"Unified Memory: {type(memory_value).__name__} "
                 f"(storage={type(getattr(memory_value, '_storage', None) or getattr(memory_value, 'storage', None)).__name__})"
             )
-        logger.info(f"Embedder: {'configured' if 'embedder' in crew_kwargs else 'not configured'}")
+        logger.info(
+            f"Embedder: {'configured' if 'embedder' in crew_kwargs else 'not configured'}"
+        )
 
         # Banner for explicit memory backend summary
         try:
             if memory_backend_config:
-                backend_type = memory_backend_config.get('backend_type', 'unknown')
-                bt = backend_type.lower() if isinstance(backend_type, str) else str(backend_type).lower()
+                backend_type = memory_backend_config.get("backend_type", "unknown")
+                bt = (
+                    backend_type.lower()
+                    if isinstance(backend_type, str)
+                    else str(backend_type).lower()
+                )
 
-                if bt == 'databricks':
-                    dbc = memory_backend_config.get('databricks_config')
-                    if hasattr(dbc, 'model_dump') and callable(getattr(dbc, 'model_dump')):
+                if bt == "databricks":
+                    dbc = memory_backend_config.get("databricks_config")
+                    if hasattr(dbc, "model_dump") and callable(
+                        getattr(dbc, "model_dump")
+                    ):
                         dbc = dbc.model_dump()
-                    elif hasattr(dbc, 'dict') and callable(getattr(dbc, 'dict')):
+                    elif hasattr(dbc, "dict") and callable(getattr(dbc, "dict")):
                         dbc = dbc.dict()
                     dbc = dbc or {}
 
                     logger.info("=" * 80)
                     logger.info("MEMORY BACKEND: DATABRICKS VECTOR SEARCH (unified)")
-                    logger.info(f"Endpoint: {dbc.get('endpoint_name')} | Workspace: {dbc.get('workspace_url')}")
+                    logger.info(
+                        f"Endpoint: {dbc.get('endpoint_name')} | Workspace: {dbc.get('workspace_url')}"
+                    )
                     logger.info(f"Unified memory index: {dbc.get('memory_index')}")
                     logger.info("=" * 80)
-                elif bt == 'lakebase':
-                    lbc = memory_backend_config.get('lakebase_config')
-                    if hasattr(lbc, 'model_dump') and callable(getattr(lbc, 'model_dump')):
+                elif bt == "lakebase":
+                    lbc = memory_backend_config.get("lakebase_config")
+                    if hasattr(lbc, "model_dump") and callable(
+                        getattr(lbc, "model_dump")
+                    ):
                         lbc = lbc.model_dump()
-                    elif hasattr(lbc, 'dict') and callable(getattr(lbc, 'dict')):
+                    elif hasattr(lbc, "dict") and callable(getattr(lbc, "dict")):
                         lbc = lbc.dict()
                     lbc = lbc or {}
                     logger.info("=" * 80)
@@ -303,13 +325,15 @@ class CrewConfigBuilder:
             logger.debug(f"Could not print memory backend banner: {banner_err}")
 
         # Embedder info
-        if 'embedder' in crew_kwargs:
-            embedder_info = crew_kwargs['embedder']
+        if "embedder" in crew_kwargs:
+            embedder_info = crew_kwargs["embedder"]
             if isinstance(embedder_info, dict):
-                logger.info(f"Embedder provider: {embedder_info.get('provider', 'unknown')}")
+                logger.info(
+                    f"Embedder provider: {embedder_info.get('provider', 'unknown')}"
+                )
             else:
                 logger.info("Embedder provider: custom Databricks embedder")
-                if hasattr(embedder_info, 'model'):
+                if hasattr(embedder_info, "model"):
                     logger.info(f"Custom embedder model: {embedder_info.model}")
                     logger.info(f"Expected embedding dimension: 1024")
 

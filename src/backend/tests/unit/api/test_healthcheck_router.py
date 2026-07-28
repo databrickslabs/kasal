@@ -6,11 +6,12 @@ Tests the health check endpoints including:
 - Cache statistics endpoint
 """
 
-import pytest
 from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.api.healthcheck_router import health_check, cache_stats, db_health
+import pytest
+
+from src.api.healthcheck_router import cache_stats, db_health, health_check
 
 
 class TestHealthCheckEndpoint:
@@ -124,7 +125,7 @@ class TestCacheStatsEndpoint:
             assert isinstance(stats["misses"], int)
 
     @pytest.mark.asyncio
-    @patch('src.api.healthcheck_router.get_all_cache_stats')
+    @patch("src.api.healthcheck_router.get_all_cache_stats")
     async def test_cache_stats_uses_get_all_cache_stats(self, mock_get_stats):
         """Test that cache_stats endpoint uses the get_all_cache_stats function."""
         mock_get_stats.return_value = {
@@ -135,7 +136,7 @@ class TestCacheStatsEndpoint:
                 "ttl": 60,
                 "hits": 50,
                 "misses": 5,
-                "hit_rate": "90.9%"
+                "hit_rate": "90.9%",
             }
         }
 
@@ -146,7 +147,7 @@ class TestCacheStatsEndpoint:
         assert result["caches"]["test_cache"]["hits"] == 50
 
     @pytest.mark.asyncio
-    @patch('src.api.healthcheck_router.get_all_cache_stats')
+    @patch("src.api.healthcheck_router.get_all_cache_stats")
     async def test_cache_stats_handles_empty_caches(self, mock_get_stats):
         """Test that cache_stats handles empty cache stats."""
         mock_get_stats.return_value = {}
@@ -157,7 +158,7 @@ class TestCacheStatsEndpoint:
         assert result["caches"] == {}
 
     @pytest.mark.asyncio
-    @patch('src.api.healthcheck_router.get_all_cache_stats')
+    @patch("src.api.healthcheck_router.get_all_cache_stats")
     async def test_cache_stats_handles_high_hit_rate(self, mock_get_stats):
         """Test cache stats with high hit rate."""
         mock_get_stats.return_value = {
@@ -168,7 +169,7 @@ class TestCacheStatsEndpoint:
                 "ttl": 300,
                 "hits": 1000,
                 "misses": 1,
-                "hit_rate": "99.9%"
+                "hit_rate": "99.9%",
             }
         }
 
@@ -178,7 +179,7 @@ class TestCacheStatsEndpoint:
         assert result["caches"]["model_config"]["hit_rate"] == "99.9%"
 
     @pytest.mark.asyncio
-    @patch('src.api.healthcheck_router.get_all_cache_stats')
+    @patch("src.api.healthcheck_router.get_all_cache_stats")
     async def test_cache_stats_handles_zero_requests(self, mock_get_stats):
         """Test cache stats when no requests have been made."""
         mock_get_stats.return_value = {
@@ -189,7 +190,7 @@ class TestCacheStatsEndpoint:
                 "ttl": 300,
                 "hits": 0,
                 "misses": 0,
-                "hit_rate": "0.0%"
+                "hit_rate": "0.0%",
             }
         }
 
@@ -204,14 +205,21 @@ class TestCacheStatsEndpoint:
 # /health/db — Database health endpoint
 # ---------------------------------------------------------------------------
 
+
 class TestDbHealthEndpoint:
     """Test cases for the database health check endpoint."""
 
     @pytest.mark.asyncio
-    @patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False)
+    @patch(
+        "src.db.database_router.is_lakebase_enabled",
+        new_callable=AsyncMock,
+        return_value=False,
+    )
     @patch("src.db.lakebase_state.is_lakebase_activated", return_value=False)
     @patch("src.db.lakebase_state.get_last_successful_connection", return_value=None)
-    async def test_lakebase_disabled(self, mock_last_conn, mock_activated, mock_enabled):
+    async def test_lakebase_disabled(
+        self, mock_last_conn, mock_activated, mock_enabled
+    ):
         """When Lakebase is disabled, return basic ok status."""
         result = await db_health()
 
@@ -222,10 +230,16 @@ class TestDbHealthEndpoint:
         assert result["lakebase_error"] is None
 
     @pytest.mark.asyncio
-    @patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=True)
+    @patch(
+        "src.db.database_router.is_lakebase_enabled",
+        new_callable=AsyncMock,
+        return_value=True,
+    )
     @patch("src.db.lakebase_state.is_lakebase_activated", return_value=True)
     @patch("src.db.lakebase_state.get_last_successful_connection", return_value=None)
-    async def test_lakebase_enabled_and_reachable(self, mock_last_conn, mock_activated, mock_enabled):
+    async def test_lakebase_enabled_and_reachable(
+        self, mock_last_conn, mock_activated, mock_enabled
+    ):
         """When Lakebase is enabled and reachable, report reachable=True."""
         mock_session = AsyncMock()
         mock_factory = MagicMock()
@@ -243,15 +257,23 @@ class TestDbHealthEndpoint:
         assert result["lakebase_reachable"] is True
 
     @pytest.mark.asyncio
-    @patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=True)
+    @patch(
+        "src.db.database_router.is_lakebase_enabled",
+        new_callable=AsyncMock,
+        return_value=True,
+    )
     @patch("src.db.lakebase_state.is_lakebase_activated", return_value=True)
     @patch("src.db.lakebase_state.get_last_successful_connection", return_value=None)
-    async def test_lakebase_enabled_but_unreachable(self, mock_last_conn, mock_activated, mock_enabled):
+    async def test_lakebase_enabled_but_unreachable(
+        self, mock_last_conn, mock_activated, mock_enabled
+    ):
         """When Lakebase is enabled but SELECT 1 fails, report degraded."""
         mock_factory = MagicMock()
         mock_factory.is_lakebase = True
         mock_ctx = AsyncMock()
-        mock_ctx.__aenter__ = AsyncMock(side_effect=ConnectionError("connection refused"))
+        mock_ctx.__aenter__ = AsyncMock(
+            side_effect=ConnectionError("connection refused")
+        )
         mock_ctx.__aexit__ = AsyncMock(return_value=False)
         mock_factory.return_value = mock_ctx
 
@@ -263,10 +285,16 @@ class TestDbHealthEndpoint:
         assert "connection refused" in result["lakebase_error"]
 
     @pytest.mark.asyncio
-    @patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=True)
+    @patch(
+        "src.db.database_router.is_lakebase_enabled",
+        new_callable=AsyncMock,
+        return_value=True,
+    )
     @patch("src.db.lakebase_state.is_lakebase_activated", return_value=False)
     @patch("src.db.lakebase_state.get_last_successful_connection", return_value=None)
-    async def test_lakebase_enabled_factory_not_initialised(self, mock_last_conn, mock_activated, mock_enabled):
+    async def test_lakebase_enabled_factory_not_initialised(
+        self, mock_last_conn, mock_activated, mock_enabled
+    ):
         """When Lakebase is enabled but factory not swapped, report not initialised."""
         mock_factory = MagicMock()
         mock_factory.is_lakebase = False
@@ -278,10 +306,16 @@ class TestDbHealthEndpoint:
         assert result["lakebase_error"] == "Lakebase factory not initialised"
 
     @pytest.mark.asyncio
-    @patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False)
+    @patch(
+        "src.db.database_router.is_lakebase_enabled",
+        new_callable=AsyncMock,
+        return_value=False,
+    )
     @patch("src.db.lakebase_state.is_lakebase_activated", return_value=True)
     @patch("src.db.lakebase_state.get_last_successful_connection")
-    async def test_includes_last_successful_connection(self, mock_last_conn, mock_activated, mock_enabled):
+    async def test_includes_last_successful_connection(
+        self, mock_last_conn, mock_activated, mock_enabled
+    ):
         """When last_successful_connection is set, include it in the response."""
         ts = datetime(2026, 3, 3, 12, 0, 0, tzinfo=timezone.utc)
         mock_last_conn.return_value = ts
@@ -291,10 +325,16 @@ class TestDbHealthEndpoint:
         assert result["last_successful_connection"] == ts.isoformat()
 
     @pytest.mark.asyncio
-    @patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False)
+    @patch(
+        "src.db.database_router.is_lakebase_enabled",
+        new_callable=AsyncMock,
+        return_value=False,
+    )
     @patch("src.db.lakebase_state.is_lakebase_activated", return_value=False)
     @patch("src.db.lakebase_state.get_last_successful_connection", return_value=None)
-    async def test_no_last_connection_key_when_none(self, mock_last_conn, mock_activated, mock_enabled):
+    async def test_no_last_connection_key_when_none(
+        self, mock_last_conn, mock_activated, mock_enabled
+    ):
         """When no successful connection recorded, omit last_successful_connection."""
         result = await db_health()
 

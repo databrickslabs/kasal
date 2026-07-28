@@ -3,18 +3,19 @@ Unit tests for AgentBricks schemas.
 """
 
 import pytest
+
 from src.schemas.agentbricks import (
-    AgentBricksEndpointState,
-    AgentBricksQueryStatus,
+    AgentBricksAuthConfig,
     AgentBricksEndpoint,
     AgentBricksEndpointsRequest,
     AgentBricksEndpointsResponse,
+    AgentBricksEndpointState,
+    AgentBricksExecutionRequest,
+    AgentBricksExecutionResponse,
     AgentBricksMessage,
     AgentBricksQueryRequest,
     AgentBricksQueryResponse,
-    AgentBricksAuthConfig,
-    AgentBricksExecutionRequest,
-    AgentBricksExecutionResponse,
+    AgentBricksQueryStatus,
 )
 
 
@@ -56,10 +57,7 @@ class TestAgentBricksEndpoint:
 
     def test_endpoint_required_fields(self):
         """Test that required fields must be provided."""
-        endpoint = AgentBricksEndpoint(
-            id="endpoint-123",
-            name="test-endpoint"
-        )
+        endpoint = AgentBricksEndpoint(id="endpoint-123", name="test-endpoint")
         assert endpoint.id == "endpoint-123"
         assert endpoint.name == "test-endpoint"
 
@@ -75,7 +73,7 @@ class TestAgentBricksEndpoint:
             config={"key": "value"},
             tags=[{"key": "env", "value": "prod"}],
             task="llm/v1/chat",
-            endpoint_type="external"
+            endpoint_type="external",
         )
         assert endpoint.creator == "user@example.com"
         assert endpoint.creation_timestamp == 1700000000000
@@ -84,10 +82,7 @@ class TestAgentBricksEndpoint:
 
     def test_endpoint_default_values(self):
         """Test that optional fields have proper defaults."""
-        endpoint = AgentBricksEndpoint(
-            id="endpoint-123",
-            name="test-endpoint"
-        )
+        endpoint = AgentBricksEndpoint(id="endpoint-123", name="test-endpoint")
         assert endpoint.creator is None
         assert endpoint.state is None
         assert endpoint.tags == []
@@ -97,7 +92,7 @@ class TestAgentBricksEndpoint:
         endpoint = AgentBricksEndpoint(
             id="endpoint-123",
             name="test-endpoint",
-            state=AgentBricksEndpointState.READY
+            state=AgentBricksEndpointState.READY,
         )
         data = endpoint.model_dump()
         assert data["state"] == "READY"
@@ -120,7 +115,7 @@ class TestAgentBricksEndpointsRequest:
             search_query="agent",
             endpoint_ids=["ep-1", "ep-2"],
             ready_only=False,
-            creator_filter="user@example.com"
+            creator_filter="user@example.com",
         )
         assert request.search_query == "agent"
         assert len(request.endpoint_ids) == 2
@@ -141,12 +136,10 @@ class TestAgentBricksEndpointsResponse:
         """Test response with endpoint list."""
         endpoints = [
             AgentBricksEndpoint(id="ep-1", name="endpoint-1"),
-            AgentBricksEndpoint(id="ep-2", name="endpoint-2")
+            AgentBricksEndpoint(id="ep-2", name="endpoint-2"),
         ]
         response = AgentBricksEndpointsResponse(
-            endpoints=endpoints,
-            total_count=2,
-            filtered=True
+            endpoints=endpoints, total_count=2, filtered=True
         )
         assert len(response.endpoints) == 2
         assert response.total_count == 2
@@ -158,19 +151,13 @@ class TestAgentBricksMessage:
 
     def test_message_required_fields(self):
         """Test that required fields must be provided."""
-        message = AgentBricksMessage(
-            role="user",
-            content="Hello, agent!"
-        )
+        message = AgentBricksMessage(role="user", content="Hello, agent!")
         assert message.role == "user"
         assert message.content == "Hello, agent!"
 
     def test_message_assistant_role(self):
         """Test message with assistant role."""
-        message = AgentBricksMessage(
-            role="assistant",
-            content="How can I help you?"
-        )
+        message = AgentBricksMessage(role="assistant", content="How can I help you?")
         assert message.role == "assistant"
 
 
@@ -181,8 +168,7 @@ class TestAgentBricksQueryRequest:
         """Test required fields for query request."""
         messages = [AgentBricksMessage(role="user", content="Hello")]
         request = AgentBricksQueryRequest(
-            endpoint_name="test-endpoint",
-            messages=messages
+            endpoint_name="test-endpoint", messages=messages
         )
         assert request.endpoint_name == "test-endpoint"
         assert len(request.messages) == 1
@@ -195,7 +181,7 @@ class TestAgentBricksQueryRequest:
             messages=messages,
             custom_inputs={"context": "test"},
             return_trace=True,
-            stream=True
+            stream=True,
         )
         assert request.custom_inputs == {"context": "test"}
         assert request.return_trace is True
@@ -205,8 +191,7 @@ class TestAgentBricksQueryRequest:
         """Test default values for optional fields."""
         messages = [AgentBricksMessage(role="user", content="Hello")]
         request = AgentBricksQueryRequest(
-            endpoint_name="test-endpoint",
-            messages=messages
+            endpoint_name="test-endpoint", messages=messages
         )
         assert request.custom_inputs is None
         assert request.return_trace is False
@@ -219,8 +204,7 @@ class TestAgentBricksQueryResponse:
     def test_response_success(self):
         """Test successful query response."""
         response = AgentBricksQueryResponse(
-            response="Here is your answer",
-            status=AgentBricksQueryStatus.SUCCESS
+            response="Here is your answer", status=AgentBricksQueryStatus.SUCCESS
         )
         assert response.response == "Here is your answer"
         assert response.status == "SUCCESS"  # use_enum_values=True
@@ -231,7 +215,7 @@ class TestAgentBricksQueryResponse:
         response = AgentBricksQueryResponse(
             response="",
             status=AgentBricksQueryStatus.FAILED,
-            error="Authentication failed"
+            error="Authentication failed",
         )
         assert response.status == "FAILED"
         assert response.error == "Authentication failed"
@@ -242,7 +226,7 @@ class TestAgentBricksQueryResponse:
             response="Answer",
             status=AgentBricksQueryStatus.SUCCESS,
             trace={"steps": ["step1", "step2"]},
-            usage={"prompt_tokens": 10, "completion_tokens": 20}
+            usage={"prompt_tokens": 10, "completion_tokens": 20},
         )
         assert response.trace is not None
         assert response.usage is not None
@@ -265,7 +249,7 @@ class TestAgentBricksAuthConfig:
             use_obo=True,
             user_token="user-token-123",
             pat_token="pat-token-456",
-            host="https://workspace.databricks.com"
+            host="https://workspace.databricks.com",
         )
         assert config.user_token == "user-token-123"
         assert config.host == "https://workspace.databricks.com"
@@ -273,9 +257,7 @@ class TestAgentBricksAuthConfig:
     def test_auth_config_excludes_sensitive_fields(self):
         """Test that sensitive fields are excluded from serialization."""
         config = AgentBricksAuthConfig(
-            use_obo=True,
-            user_token="secret-token",
-            pat_token="secret-pat"
+            use_obo=True, user_token="secret-token", pat_token="secret-pat"
         )
         data = config.model_dump()
         assert "user_token" not in data
@@ -288,8 +270,7 @@ class TestAgentBricksExecutionRequest:
     def test_execution_request_required_fields(self):
         """Test required fields for execution request."""
         request = AgentBricksExecutionRequest(
-            endpoint_name="test-endpoint",
-            question="What is the weather?"
+            endpoint_name="test-endpoint", question="What is the weather?"
         )
         assert request.endpoint_name == "test-endpoint"
         assert request.question == "What is the weather?"
@@ -297,8 +278,7 @@ class TestAgentBricksExecutionRequest:
     def test_execution_request_defaults(self):
         """Test default values for execution request."""
         request = AgentBricksExecutionRequest(
-            endpoint_name="test-endpoint",
-            question="Hello"
+            endpoint_name="test-endpoint", question="Hello"
         )
         assert request.custom_inputs is None
         assert request.return_trace is False
@@ -311,7 +291,7 @@ class TestAgentBricksExecutionRequest:
             question="Hello",
             custom_inputs={"key": "value"},
             return_trace=True,
-            timeout=60
+            timeout=60,
         )
         assert request.custom_inputs == {"key": "value"}
         assert request.return_trace is True
@@ -326,7 +306,7 @@ class TestAgentBricksExecutionResponse:
         response = AgentBricksExecutionResponse(
             endpoint_name="test-endpoint",
             status=AgentBricksQueryStatus.SUCCESS,
-            result="Here is your answer"
+            result="Here is your answer",
         )
         assert response.endpoint_name == "test-endpoint"
         assert response.status == "SUCCESS"
@@ -338,7 +318,7 @@ class TestAgentBricksExecutionResponse:
         response = AgentBricksExecutionResponse(
             endpoint_name="test-endpoint",
             status=AgentBricksQueryStatus.FAILED,
-            error="Endpoint not found"
+            error="Endpoint not found",
         )
         assert response.status == "FAILED"
         assert response.error == "Endpoint not found"
@@ -350,6 +330,6 @@ class TestAgentBricksExecutionResponse:
             endpoint_name="test-endpoint",
             status=AgentBricksQueryStatus.SUCCESS,
             result="Answer",
-            trace={"execution_time": 1.5}
+            trace={"execution_time": 1.5},
         )
         assert response.trace is not None

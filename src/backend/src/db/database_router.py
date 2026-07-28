@@ -4,20 +4,21 @@ Database router that automatically selects between regular database (PostgreSQL/
 This module provides a routing mechanism to dynamically choose the appropriate database
 backend based on configuration stored in the database itself.
 """
+
 import asyncio
-import os
 import logging
-from typing import AsyncGenerator, Optional, Dict, Any
+import os
 from contextlib import asynccontextmanager
+from typing import Any, AsyncGenerator, Dict, Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.session import async_session_factory, _request_session
-from src.db.lakebase_session import get_lakebase_session
-from src.db.lakebase_state import is_fallback_allowed, record_successful_connection
 from src.core.exceptions import LakebaseUnavailableError
 from src.core.logger import LoggerManager
+from src.db.lakebase_session import get_lakebase_session
+from src.db.lakebase_state import is_fallback_allowed, record_successful_connection
+from src.db.session import _request_session, async_session_factory
 
 logger_manager = LoggerManager.get_instance()
 logger = logger_manager.database
@@ -39,6 +40,7 @@ async def get_lakebase_config_from_db() -> Optional[Dict[str, Any]]:
     try:
         import json
         import sqlite3
+
         from src.db.session import settings
 
         db_path = settings.SQLITE_DB_PATH or "./app.db"
@@ -82,22 +84,26 @@ async def is_lakebase_enabled() -> bool:
             return False
 
         is_enabled = (
-            config.get("enabled", False) and
-            config.get("endpoint") and
-            (
-                config.get("migration_completed", False) or
-                config.get("database_type") == "lakebase" or
-                config.get("instance_status") == "READY"
+            config.get("enabled", False)
+            and config.get("endpoint")
+            and (
+                config.get("migration_completed", False)
+                or config.get("database_type") == "lakebase"
+                or config.get("instance_status") == "READY"
             )
         )
 
         if is_enabled:
-            logger.info(f"🔵 Lakebase ENABLED via database config (endpoint: {config.get('endpoint')})")
+            logger.info(
+                f"🔵 Lakebase ENABLED via database config (endpoint: {config.get('endpoint')})"
+            )
         else:
-            logger.debug(f"🔴 Lakebase DISABLED - Config incomplete: "
-                        f"enabled={config.get('enabled')}, "
-                        f"has_endpoint={bool(config.get('endpoint'))}, "
-                        f"migration_completed={config.get('migration_completed')}")
+            logger.debug(
+                f"🔴 Lakebase DISABLED - Config incomplete: "
+                f"enabled={config.get('enabled')}, "
+                f"has_endpoint={bool(config.get('endpoint'))}, "
+                f"migration_completed={config.get('migration_completed')}"
+            )
 
         return is_enabled
 
@@ -125,9 +131,8 @@ async def activate_lakebase_in_subprocess() -> bool:
             return False
 
         config = await get_lakebase_config_from_db()
-        instance_name = (
-            (config or {}).get("instance_name")
-            or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+        instance_name = (config or {}).get("instance_name") or os.environ.get(
+            "LAKEBASE_INSTANCE_NAME", "kasal-lakebase"
         )
 
         from src.db.lakebase_session import LakebaseSessionFactory
@@ -137,6 +142,7 @@ async def activate_lakebase_in_subprocess() -> bool:
         async_session_factory.activate_lakebase(lb_factory._session_factory)
 
         from src.db.lakebase_state import mark_lakebase_activated
+
         mark_lakebase_activated()
 
         logger.info(
@@ -182,11 +188,14 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
         # Get user token and email from unified auth
         try:
             from src.utils.databricks_auth import get_auth_context
+
             auth = await get_auth_context()
             if auth:
                 user_token = auth.token
                 user_email = auth.user_identity
-                logger.debug(f"Using unified {auth.auth_method} auth for Lakebase session")
+                logger.debug(
+                    f"Using unified {auth.auth_method} auth for Lakebase session"
+                )
         except Exception as e:
             logger.warning(f"Failed to get unified auth for Lakebase: {e}")
 
@@ -200,9 +209,15 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
 
         for attempt in range(max_retries):
             try:
-                logger.debug(f"  • Instance: {instance_name} (attempt {attempt + 1}/{max_retries})")
-                logger.debug(f"  • Endpoint: {config.get('endpoint') if config else 'N/A'}")
-                async with get_lakebase_session(instance_name, user_token, user_email) as session:
+                logger.debug(
+                    f"  • Instance: {instance_name} (attempt {attempt + 1}/{max_retries})"
+                )
+                logger.debug(
+                    f"  • Endpoint: {config.get('endpoint') if config else 'N/A'}"
+                )
+                async with get_lakebase_session(
+                    instance_name, user_token, user_email
+                ) as session:
                     record_successful_connection()
                     token = _request_session.set(session)
                     try:
@@ -252,7 +267,9 @@ async def get_smart_db_session() -> AsyncGenerator[AsyncSession, None]:
             yield session
             await session.commit()
         except Exception as e:
-            logger.error(f"[DB ROUTER] Rolling back session {id(session)} due to exception: {e}")
+            logger.error(
+                f"[DB ROUTER] Rolling back session {id(session)} due to exception: {e}"
+            )
             await session.rollback()
             raise
         finally:

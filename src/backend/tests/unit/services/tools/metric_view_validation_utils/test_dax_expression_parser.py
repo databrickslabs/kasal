@@ -1,15 +1,16 @@
 """Tests for metric_view_validation_utils.dax_expression_parser (DAXExpressionParser)."""
+
 import pytest
 
 from src.services.tools.metric_view_validation_utils.dax_expression_parser import (
-    DAXExpressionParser,
     _MAX_VAR_SUBSTITUTION_ITERATIONS,
+    DAXExpressionParser,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def parser():
@@ -19,6 +20,7 @@ def parser():
 # ---------------------------------------------------------------------------
 # clean_dax_comments()
 # ---------------------------------------------------------------------------
+
 
 class TestCleanDaxComments:
     def test_removes_double_slash_comment(self, parser):
@@ -48,6 +50,7 @@ class TestCleanDaxComments:
 # ---------------------------------------------------------------------------
 # parse_function_call()
 # ---------------------------------------------------------------------------
+
 
 class TestParseFunctionCall:
     def test_simple_value(self, parser):
@@ -81,6 +84,7 @@ class TestParseFunctionCall:
 # _parse_arguments()
 # ---------------------------------------------------------------------------
 
+
 class TestParseArguments:
     def test_empty(self, parser):
         assert parser._parse_arguments("") == []
@@ -103,6 +107,7 @@ class TestParseArguments:
 # ---------------------------------------------------------------------------
 # _extract_variables() + _extract_return_expr()
 # ---------------------------------------------------------------------------
+
 
 class TestExtractVariables:
     def test_single_var(self, parser):
@@ -139,6 +144,7 @@ class TestExtractReturnExpr:
 # check_variable_usage()
 # ---------------------------------------------------------------------------
 
+
 class TestCheckVariableUsage:
     def test_variable_in_expression(self, parser):
         assert parser.check_variable_usage("myVar", " myVar + 1") is True
@@ -150,6 +156,7 @@ class TestCheckVariableUsage:
 # ---------------------------------------------------------------------------
 # decompose_toplevel()
 # ---------------------------------------------------------------------------
+
 
 class TestDecomposeToplevel:
     def test_simple_no_vars(self, parser):
@@ -171,9 +178,12 @@ class TestDecomposeToplevel:
 # _substitute_single_variable()
 # ---------------------------------------------------------------------------
 
+
 class TestSubstituteSingleVariable:
     def test_substitutes_variable(self, parser):
-        result = parser._substitute_single_variable(" myVar + 1", "myVar", "SUM(T[col])")
+        result = parser._substitute_single_variable(
+            " myVar + 1", "myVar", "SUM(T[col])"
+        )
         assert "SUM(T[col])" in result
 
     def test_no_match_returns_unchanged(self, parser):
@@ -182,13 +192,16 @@ class TestSubstituteSingleVariable:
         assert result == original
 
     def test_case_insensitive(self, parser):
-        result = parser._substitute_single_variable(" MyVar / 2", "myvar", "SUM(T[col])")
+        result = parser._substitute_single_variable(
+            " MyVar / 2", "myvar", "SUM(T[col])"
+        )
         assert "SUM(T[col])" in result
 
 
 # ---------------------------------------------------------------------------
 # substitute_all_variables_recursively()
 # ---------------------------------------------------------------------------
+
 
 class TestSubstituteAllVariablesRecursively:
     def test_empty_list(self, parser):
@@ -223,6 +236,7 @@ class TestSubstituteAllVariablesRecursively:
 # decompose()
 # ---------------------------------------------------------------------------
 
+
 class TestDecompose:
     def test_simple_expression(self, parser):
         tree = parser.decompose("SUM(T[col])")
@@ -244,6 +258,7 @@ class TestDecompose:
 # parse()  (full pipeline)
 # ---------------------------------------------------------------------------
 
+
 class TestParse:
     def test_raw_preserved(self, parser):
         expr = "SUM(fact[amount])"
@@ -259,7 +274,7 @@ class TestParse:
         assert "fact.amount" in result["references"]
 
     def test_filter_extracted(self, parser):
-        result = parser.parse("CALCULATE(SUM(T[a]),FILTER(T,T[b]=\"val\"))")
+        result = parser.parse('CALCULATE(SUM(T[a]),FILTER(T,T[b]="val"))')
         assert len(result["filters"]) >= 1
 
     def test_division_in_operations(self, parser):
@@ -271,13 +286,14 @@ class TestParse:
         assert result["structure"]["is_division"] is True
 
     def test_calculate_in_structure(self, parser):
-        result = parser.parse("CALCULATE(SUM(T[a]),FILTER(T,T[b]=\"x\"))")
+        result = parser.parse('CALCULATE(SUM(T[a]),FILTER(T,T[b]="x"))')
         assert result["structure"]["has_calculate"] is True
 
 
 # ---------------------------------------------------------------------------
 # _extract_balanced_parens()
 # ---------------------------------------------------------------------------
+
 
 class TestDaxExtractBalancedParens:
     def test_round_parens(self, parser):
@@ -298,6 +314,7 @@ class TestDaxExtractBalancedParens:
 # ---------------------------------------------------------------------------
 # format_parse_tree()
 # ---------------------------------------------------------------------------
+
 
 class TestFormatParseTree:
     def test_leaf_node(self, parser):

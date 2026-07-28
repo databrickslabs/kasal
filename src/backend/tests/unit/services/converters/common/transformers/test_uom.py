@@ -5,8 +5,9 @@ Tests unit of measure conversion logic for SQL and DAX measure generation.
 """
 
 import pytest
-from src.services.converters.common.transformers.uom import UnitOfMeasureConverter
+
 from src.services.converters.base.models import KPI
+from src.services.converters.common.transformers.uom import UnitOfMeasureConverter
 
 
 class TestUnitOfMeasureConverter:
@@ -26,7 +27,7 @@ class TestUnitOfMeasureConverter:
             formula="SUM(products.weight)",
             uom_fixed_unit="LB",
             target_uom="KG",
-            uom_preset="mass"
+            uom_preset="mass",
         )
 
     @pytest.fixture
@@ -39,7 +40,7 @@ class TestUnitOfMeasureConverter:
             source_table="products",
             uom_column="weight_unit",
             target_uom="KG",
-            uom_preset="mass"
+            uom_preset="mass",
         )
 
     @pytest.fixture
@@ -48,7 +49,7 @@ class TestUnitOfMeasureConverter:
         return KPI(
             description="Simple Count",
             technical_name="simple_count",
-            formula="COUNT(products.id)"
+            formula="COUNT(products.id)",
         )
 
     # ========== Initialization Tests ==========
@@ -99,7 +100,9 @@ class TestUnitOfMeasureConverter:
         """Test UOM conversion is needed for KPI with fixed unit and target"""
         assert converter.should_convert_uom(kpi_with_fixed_uom) is True
 
-    def test_should_convert_uom_with_dynamic_unit(self, converter, kpi_with_dynamic_uom):
+    def test_should_convert_uom_with_dynamic_unit(
+        self, converter, kpi_with_dynamic_uom
+    ):
         """Test UOM conversion is needed for KPI with UOM column and target"""
         assert converter.should_convert_uom(kpi_with_dynamic_uom) is True
 
@@ -110,7 +113,7 @@ class TestUnitOfMeasureConverter:
             technical_name="weight",
             formula="SUM(weight)",
             target_uom="KG",  # Has target but no source
-            uom_preset="mass"
+            uom_preset="mass",
         )
 
         assert converter.should_convert_uom(kpi) is False
@@ -121,7 +124,7 @@ class TestUnitOfMeasureConverter:
             description="Weight",
             technical_name="weight",
             formula="SUM(weight)",
-            uom_fixed_unit="LB"  # Has source but no target
+            uom_fixed_unit="LB",  # Has source but no target
         )
 
         assert converter.should_convert_uom(kpi) is False
@@ -133,7 +136,7 @@ class TestUnitOfMeasureConverter:
             technical_name="weight",
             formula="SUM(weight)",
             uom_fixed_unit="LB",
-            target_uom="KG"  # Has source and target but no preset
+            target_uom="KG",  # Has source and target but no preset
         )
 
         assert converter.should_convert_uom(kpi) is False
@@ -174,20 +177,18 @@ class TestUnitOfMeasureConverter:
             formula="SUM(products.weight)",
             uom_fixed_unit="LB",
             target_uom="KG",
-            uom_preset="mass"
+            uom_preset="mass",
         )
 
         # Create derived KPI that references base KPI
         derived_kpi = KPI(
             description="Derived Weight",
             technical_name="derived_weight",
-            formula="[base_weight] * 1.1"  # References base_weight
+            formula="[base_weight] * 1.1",  # References base_weight
             # No direct UOM info
         )
 
-        kpi_lookup = {
-            "base_weight": base_kpi
-        }
+        kpi_lookup = {"base_weight": base_kpi}
 
         uom_type, uom_value = converter.get_kbi_uom_recursive(derived_kpi, kpi_lookup)
 
@@ -201,7 +202,7 @@ class TestUnitOfMeasureConverter:
             description="Base",
             technical_name="base",
             formula="SUM(amount)",
-            uom_fixed_unit="LB"
+            uom_fixed_unit="LB",
         )
 
         # This KPI has both direct UOM and a dependency with different UOM
@@ -209,7 +210,7 @@ class TestUnitOfMeasureConverter:
             description="Derived",
             technical_name="derived",
             formula="[base] * 2",
-            uom_column="my_uom"  # Direct dynamic UOM
+            uom_column="my_uom",  # Direct dynamic UOM
         )
 
         kpi_lookup = {"base": base_kpi}
@@ -276,7 +277,7 @@ class TestUnitOfMeasureConverter:
             preset="mass",
             source_unit="LB",
             target_unit="KG",
-            uom_type="fixed"
+            uom_type="fixed",
         )
 
         assert "weight_value" in sql
@@ -290,7 +291,7 @@ class TestUnitOfMeasureConverter:
             preset="mass",
             source_unit="KG",
             target_unit="KG",
-            uom_type="fixed"
+            uom_type="fixed",
         )
 
         # Should return original expression without conversion
@@ -304,7 +305,7 @@ class TestUnitOfMeasureConverter:
             source_unit=None,
             target_unit="KG",
             uom_type="dynamic",
-            uom_column="weight_unit"
+            uom_column="weight_unit",
         )
 
         # Dynamic conversion returns a CASE statement
@@ -322,7 +323,7 @@ class TestUnitOfMeasureConverter:
             source_unit=None,
             target_unit="KG",
             uom_type="dynamic",
-            uom_column="unit_col"
+            uom_column="unit_col",
         )
 
         # Should include common mass units
@@ -337,7 +338,7 @@ class TestUnitOfMeasureConverter:
             preset="invalid",
             source_unit="X",
             target_unit="Y",
-            uom_type="fixed"
+            uom_type="fixed",
         )
 
         assert sql == "value"
@@ -351,7 +352,7 @@ class TestUnitOfMeasureConverter:
             preset="mass",
             source_unit="LB",
             target_unit="KG",
-            uom_type="fixed"
+            uom_type="fixed",
         )
 
         assert "[Weight]" in dax
@@ -365,7 +366,7 @@ class TestUnitOfMeasureConverter:
             preset="mass",
             source_unit="KG",
             target_unit="KG",
-            uom_type="fixed"
+            uom_type="fixed",
         )
 
         # Should return original expression without conversion
@@ -379,7 +380,7 @@ class TestUnitOfMeasureConverter:
             source_unit=None,
             target_unit="KG",
             uom_type="dynamic",
-            uom_column="WeightUnit"
+            uom_column="WeightUnit",
         )
 
         # Dynamic conversion returns a SWITCH statement
@@ -395,7 +396,7 @@ class TestUnitOfMeasureConverter:
             source_unit=None,
             target_unit="KG",
             uom_type="dynamic",
-            uom_column="Unit"
+            uom_column="Unit",
         )
 
         # Should include common mass units
@@ -457,7 +458,7 @@ class TestUnitOfMeasureConverter:
             kpi_with_fixed_uom.uom_preset,
             uom_value,
             kpi_with_fixed_uom.target_uom,
-            uom_type
+            uom_type,
         )
         assert "LB" in sql or "0.453592" in sql
 
@@ -467,7 +468,7 @@ class TestUnitOfMeasureConverter:
             kpi_with_fixed_uom.uom_preset,
             uom_value,
             kpi_with_fixed_uom.target_uom,
-            uom_type
+            uom_type,
         )
         assert "0.453592" in dax
 
@@ -488,7 +489,7 @@ class TestUnitOfMeasureConverter:
             None,
             kpi_with_dynamic_uom.target_uom,
             uom_type,
-            uom_column=uom_value
+            uom_column=uom_value,
         )
         assert "CASE" in sql
         assert "weight_unit" in sql
@@ -500,7 +501,7 @@ class TestUnitOfMeasureConverter:
             None,
             kpi_with_dynamic_uom.target_uom,
             uom_type,
-            uom_column=uom_value
+            uom_column=uom_value,
         )
         assert "SWITCH" in dax
         assert "weight_unit" in dax or "WeightUnit" in dax

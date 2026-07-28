@@ -3,6 +3,7 @@
 Crew executions pass trace_label="crew_kickoff" so they aren't mislabeled as
 "flow_kickoff" in MLflow; flows keep the default.
 """
+
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
@@ -36,10 +37,12 @@ def _capture_root_trace(store):
 @pytest.mark.asyncio
 async def test_trace_label_used_in_trace_name():
     store = {}
-    with _capture_root_trace(store) as factory, \
-         patch("src.services.mlflow.tracing.start_root_trace", factory), \
-         patch.object(mlflow_setup, "set_trace_attributes"), \
-         patch.object(mlflow_setup, "extract_trace_outputs", return_value=None):
+    with (
+        _capture_root_trace(store) as factory,
+        patch("src.services.mlflow.tracing.start_root_trace", factory),
+        patch.object(mlflow_setup, "set_trace_attributes"),
+        patch.object(mlflow_setup, "extract_trace_outputs", return_value=None),
+    ):
 
         async def kickoff():
             return "ok"
@@ -58,10 +61,12 @@ async def test_trace_label_used_in_trace_name():
 @pytest.mark.asyncio
 async def test_default_trace_label_is_flow_kickoff():
     store = {}
-    with _capture_root_trace(store) as factory, \
-         patch("src.services.mlflow.tracing.start_root_trace", factory), \
-         patch.object(mlflow_setup, "set_trace_attributes"), \
-         patch.object(mlflow_setup, "extract_trace_outputs", return_value=None):
+    with (
+        _capture_root_trace(store) as factory,
+        patch("src.services.mlflow.tracing.start_root_trace", factory),
+        patch.object(mlflow_setup, "set_trace_attributes"),
+        patch.object(mlflow_setup, "extract_trace_outputs", return_value=None),
+    ):
 
         async def kickoff():
             return "ok"
@@ -78,6 +83,7 @@ async def test_default_trace_label_is_flow_kickoff():
 @pytest.mark.asyncio
 async def test_no_tracing_just_awaits_kickoff():
     """When tracing isn't ready, the coroutine is awaited directly (no trace)."""
+
     async def kickoff():
         return "direct"
 

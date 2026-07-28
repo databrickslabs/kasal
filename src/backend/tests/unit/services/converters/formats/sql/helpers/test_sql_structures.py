@@ -6,15 +6,16 @@ Focuses on key public methods and critical workflows.
 """
 
 import pytest
+
+from src.services.converters.base.models import KPI, KPIDefinition
 from src.services.converters.formats.sql.helpers.sql_structures import (
     SQLStructureExpander,
-    SQLTimeIntelligenceHelper
+    SQLTimeIntelligenceHelper,
 )
-from src.services.converters.base.models import KPI, KPIDefinition
 from src.services.converters.formats.sql.models import (
     SQLDialect,
+    SQLStructure,
     SQLTranslationOptions,
-    SQLStructure
 )
 
 
@@ -43,9 +44,9 @@ class TestSQLStructureExpander:
                     technical_name="revenue",
                     formula="amount",
                     aggregation_type="SUM",
-                    source_table="Sales"
+                    source_table="Sales",
                 )
-            ]
+            ],
         )
 
     # ========== Initialization Tests ==========
@@ -66,7 +67,7 @@ class TestSQLStructureExpander:
             description="Revenue",
             technical_name="revenue",
             formula="amount",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
         assert standard_expander._is_base_kbi(kbi) is True
 
@@ -77,13 +78,13 @@ class TestSQLStructureExpander:
             description="Revenue",
             technical_name="revenue",
             formula="amount",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
         cost_kbi = KPI(
             description="Cost",
             technical_name="cost",
             formula="cost_amount",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         # Build KBI lookup so dependencies can be resolved
@@ -94,7 +95,7 @@ class TestSQLStructureExpander:
             description="Profit",
             technical_name="profit",
             formula="[revenue] - [cost]",
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
         assert standard_expander._is_base_kbi(kbi) is False
 
@@ -105,7 +106,9 @@ class TestSQLStructureExpander:
 
     def test_is_simple_column_reference_false(self, standard_expander):
         """Test detecting complex formula (not simple column)"""
-        assert standard_expander._is_simple_column_reference("[revenue] - [cost]") is False
+        assert (
+            standard_expander._is_simple_column_reference("[revenue] - [cost]") is False
+        )
         assert standard_expander._is_simple_column_reference("SUM(amount)") is False
 
     # ========== Technical Name Generation Tests ==========
@@ -144,18 +147,21 @@ class TestSQLStructureExpander:
     def test_map_to_sql_aggregation_type_sum(self, standard_expander):
         """Test mapping SUM aggregation type"""
         from src.services.converters.formats.sql.models import SQLAggregationType
+
         result = standard_expander._map_to_sql_aggregation_type("SUM")
         assert result == SQLAggregationType.SUM
 
     def test_map_to_sql_aggregation_type_count(self, standard_expander):
         """Test mapping COUNT aggregation type"""
         from src.services.converters.formats.sql.models import SQLAggregationType
+
         result = standard_expander._map_to_sql_aggregation_type("COUNT")
         assert result == SQLAggregationType.COUNT
 
     def test_map_to_sql_aggregation_type_average(self, standard_expander):
         """Test mapping AVERAGE to AVG aggregation type"""
         from src.services.converters.formats.sql.models import SQLAggregationType
+
         result = standard_expander._map_to_sql_aggregation_type("AVERAGE")
         assert result == SQLAggregationType.AVG
 
@@ -164,20 +170,22 @@ class TestSQLStructureExpander:
     def test_is_time_intelligence_structure_ytd(self, standard_expander):
         """Test detecting YTD time intelligence structure"""
         from src.services.converters.base.models import Structure
-        struct = Structure(
-            description="Year to Date",
-            formula=None
+
+        struct = Structure(description="Year to Date", formula=None)
+        assert (
+            standard_expander._is_time_intelligence_structure("ytd_revenue", struct)
+            is True
         )
-        assert standard_expander._is_time_intelligence_structure("ytd_revenue", struct) is True
 
     def test_is_time_intelligence_structure_not_ti(self, standard_expander):
         """Test non-time-intelligence structure"""
         from src.services.converters.base.models import Structure
-        struct = Structure(
-            description="Custom Structure",
-            formula="[base] * 2"
+
+        struct = Structure(description="Custom Structure", formula="[base] * 2")
+        assert (
+            standard_expander._is_time_intelligence_structure("custom_struct", struct)
+            is False
         )
-        assert standard_expander._is_time_intelligence_structure("custom_struct", struct) is False
 
     # ========== Process Definition Tests ==========
 
@@ -189,11 +197,12 @@ class TestSQLStructureExpander:
         assert result.description == "Sales Metrics"
         assert result.technical_name == "sales_metrics"
 
-    def test_process_definition_with_options(self, standard_expander, simple_definition):
+    def test_process_definition_with_options(
+        self, standard_expander, simple_definition
+    ):
         """Test processing definition with translation options"""
         options = SQLTranslationOptions(
-            target_dialect=SQLDialect.STANDARD,
-            format_output=True
+            target_dialect=SQLDialect.STANDARD, format_output=True
         )
         result = standard_expander.process_definition(simple_definition, options)
 
@@ -204,20 +213,22 @@ class TestSQLStructureExpander:
 
     def test_generate_sql_queries_from_definition(self, standard_expander):
         """Test generating SQL queries from definition"""
-        from src.services.converters.formats.sql.models import SQLDefinition, SQLMeasure, SQLAggregationType
+        from src.services.converters.formats.sql.models import (
+            SQLAggregationType,
+            SQLDefinition,
+            SQLMeasure,
+        )
 
         sql_measure = SQLMeasure(
             name="Revenue",
             description="Total Revenue",
             sql_expression='SUM("Sales"."amount")',
             aggregation_type=SQLAggregationType.SUM,
-            source_table="Sales"
+            source_table="Sales",
         )
 
         sql_definition = SQLDefinition(
-            description="Test",
-            technical_name="test",
-            sql_measures=[sql_measure]
+            description="Test", technical_name="test", sql_measures=[sql_measure]
         )
 
         queries = standard_expander.generate_sql_queries_from_definition(sql_definition)
@@ -229,11 +240,7 @@ class TestSQLStructureExpander:
 
     def test_process_definition_empty_kpis(self, standard_expander):
         """Test processing definition with no KPIs"""
-        definition = KPIDefinition(
-            description="Empty",
-            technical_name="empty",
-            kpis=[]
-        )
+        definition = KPIDefinition(description="Empty", technical_name="empty", kpis=[])
         result = standard_expander.process_definition(definition)
 
         assert result is not None
@@ -271,16 +278,23 @@ class TestSQLTimeIntelligenceHelper:
 
         assert isinstance(result, SQLStructure)
         assert result.description is not None
-        assert "ytd" in result.description.lower() or "year" in result.description.lower()
+        assert (
+            "ytd" in result.description.lower() or "year" in result.description.lower()
+        )
 
     def test_create_ytd_sql_structure_custom_date_column(self, standard_helper):
         """Test creating YTD structure with custom date column"""
-        result = standard_helper.create_ytd_sql_structure(date_column="transaction_date")
+        result = standard_helper.create_ytd_sql_structure(
+            date_column="transaction_date"
+        )
 
         assert isinstance(result, SQLStructure)
         # Check that custom date column is used
         if result.sql_template:
-            assert "transaction_date" in result.sql_template or result.date_column == "transaction_date"
+            assert (
+                "transaction_date" in result.sql_template
+                or result.date_column == "transaction_date"
+            )
 
     # ========== YTG Structure Tests ==========
 
@@ -305,11 +319,17 @@ class TestSQLTimeIntelligenceHelper:
 
         assert isinstance(result, SQLStructure)
         assert result.description is not None
-        assert "prior" in result.description.lower() or "previous" in result.description.lower() or "year" in result.description.lower()
+        assert (
+            "prior" in result.description.lower()
+            or "previous" in result.description.lower()
+            or "year" in result.description.lower()
+        )
 
     def test_create_prior_year_custom_date_column(self, standard_helper):
         """Test creating prior year structure with custom date column"""
-        result = standard_helper.create_prior_year_sql_structure(date_column="fiscal_date")
+        result = standard_helper.create_prior_year_sql_structure(
+            date_column="fiscal_date"
+        )
 
         assert isinstance(result, SQLStructure)
 
@@ -322,7 +342,10 @@ class TestSQLTimeIntelligenceHelper:
 
         assert isinstance(result, SQLStructure)
         assert result.description is not None
-        assert "variance" in result.description.lower() or "difference" in result.description.lower()
+        assert (
+            "variance" in result.description.lower()
+            or "difference" in result.description.lower()
+        )
 
     def test_create_variance_empty_measures(self, standard_helper):
         """Test creating variance structure with empty measures list"""
@@ -368,9 +391,9 @@ class TestIntegration:
                     technical_name="total_sales",
                     formula="amount",
                     aggregation_type="SUM",
-                    source_table="FactSales"
+                    source_table="FactSales",
                 )
-            ]
+            ],
         )
 
         # Process definition
@@ -392,15 +415,12 @@ class TestIntegration:
                     technical_name="count",
                     formula="id",
                     aggregation_type="COUNT",
-                    source_table="Data"
+                    source_table="Data",
                 )
-            ]
+            ],
         )
 
-        options = SQLTranslationOptions(
-            format_output=True,
-            include_comments=True
-        )
+        options = SQLTranslationOptions(format_output=True, include_comments=True)
 
         sql_def = expander.process_definition(definition, options)
         assert sql_def is not None

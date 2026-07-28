@@ -21,13 +21,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from src.services.memory.engine import MemoryRecord, ScopeInfo
-
 from src.core.logger import LoggerManager
 from src.repositories.databricks_vector_index_repository import (
     DatabricksVectorIndexRepository,
 )
 from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
+from src.services.memory.engine import MemoryRecord, ScopeInfo
 
 # Ensure asyncpg NullPool is enabled before any DB connections exist in this module.
 if not os.environ.get("USE_NULLPOOL"):

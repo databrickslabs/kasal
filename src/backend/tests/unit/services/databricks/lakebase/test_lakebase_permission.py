@@ -2,16 +2,17 @@
 Coverage tests for services/lakebase_permission_service.py
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from src.services.databricks.lakebase.permission import (
     LakebasePermissionService,
     _quote_pg_role,
 )
 
-
 # ---- _quote_pg_role ----
+
 
 def test_quote_pg_role_valid_email():
     assert _quote_pg_role("admin@example.com") == '"admin@example.com"'
@@ -39,12 +40,14 @@ def test_quote_pg_role_none_raises():
 
 # ---- Service initialization ----
 
+
 def test_init():
     svc = LakebasePermissionService()
     assert svc is not None
 
 
 # ---- grant_schema_permissions_async ----
+
 
 @pytest.mark.asyncio
 async def test_grant_schema_permissions_async_success():
@@ -82,6 +85,7 @@ async def test_grant_schema_permissions_async_invalid_email():
 
 # ---- grant_schema_permissions_sync ----
 
+
 def test_grant_schema_permissions_sync_success():
     svc = LakebasePermissionService()
     mock_conn = MagicMock()
@@ -105,6 +109,7 @@ def test_grant_schema_permissions_sync_invalid_email():
 
 
 # ---- grant_default_privileges_async ----
+
 
 @pytest.mark.asyncio
 async def test_grant_default_privileges_async_success():
@@ -134,6 +139,7 @@ async def test_grant_default_privileges_async_error_not_raised():
 
 # ---- grant_default_privileges_sync ----
 
+
 def test_grant_default_privileges_sync_success():
     svc = LakebasePermissionService()
     mock_conn = MagicMock()
@@ -151,6 +157,7 @@ def test_grant_default_privileges_sync_error_not_raised():
 
 # ---- grant_all_permissions_async ----
 
+
 @pytest.mark.asyncio
 async def test_grant_all_permissions_async():
     svc = LakebasePermissionService()
@@ -160,11 +167,16 @@ async def test_grant_all_permissions_async():
     mock_engine = MagicMock()
     await svc.grant_all_permissions_async(mock_engine, "admin@example.com")
 
-    svc.grant_schema_permissions_async.assert_awaited_once_with(mock_engine, "admin@example.com")
-    svc.grant_default_privileges_async.assert_awaited_once_with(mock_engine, "admin@example.com")
+    svc.grant_schema_permissions_async.assert_awaited_once_with(
+        mock_engine, "admin@example.com"
+    )
+    svc.grant_default_privileges_async.assert_awaited_once_with(
+        mock_engine, "admin@example.com"
+    )
 
 
 # ---- grant_all_permissions_sync ----
+
 
 def test_grant_all_permissions_sync():
     svc = LakebasePermissionService()
@@ -174,5 +186,9 @@ def test_grant_all_permissions_sync():
     mock_conn = MagicMock()
     svc.grant_all_permissions_sync(mock_conn, "admin@example.com")
 
-    svc.grant_schema_permissions_sync.assert_called_once_with(mock_conn, "admin@example.com")
-    svc.grant_default_privileges_sync.assert_called_once_with(mock_conn, "admin@example.com")
+    svc.grant_schema_permissions_sync.assert_called_once_with(
+        mock_conn, "admin@example.com"
+    )
+    svc.grant_default_privileges_sync.assert_called_once_with(
+        mock_conn, "admin@example.com"
+    )

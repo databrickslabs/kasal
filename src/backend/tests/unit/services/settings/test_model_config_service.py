@@ -1,10 +1,13 @@
 """
 Comprehensive tests for ModelConfigService.
 """
-import pytest
+
 from unittest.mock import AsyncMock, Mock, patch
-from src.services.settings.models import ModelConfigService
+
+import pytest
+
 from src.models.model_config import ModelConfig
+from src.services.settings.models import ModelConfigService
 
 
 class TestModelConfigServiceInit:
@@ -14,7 +17,7 @@ class TestModelConfigServiceInit:
         """Test initialization with group_id."""
         session = AsyncMock()
         service = ModelConfigService(session=session, group_id="test-group")
-        
+
         assert service.group_id == "test-group"
         assert service.repository is not None
 
@@ -22,7 +25,7 @@ class TestModelConfigServiceInit:
         """Test initialization without group_id."""
         session = AsyncMock()
         service = ModelConfigService(session=session)
-        
+
         assert service.group_id is None
         assert service.repository is not None
 
@@ -35,15 +38,15 @@ class TestModelConfigServiceFindAll:
         """Test finding all model configurations."""
         session = AsyncMock()
         service = ModelConfigService(session=session)
-        
+
         mock_models = [
             Mock(id=1, key="gpt-4", name="GPT-4"),
-            Mock(id=2, key="claude-3", name="Claude 3")
+            Mock(id=2, key="claude-3", name="Claude 3"),
         ]
         service.repository.find_all = AsyncMock(return_value=mock_models)
-        
+
         result = await service.find_all()
-        
+
         assert len(result) == 2
         assert result[0].key == "gpt-4"
         assert result[1].key == "claude-3"
@@ -54,11 +57,11 @@ class TestModelConfigServiceFindAll:
         """Test finding all when no models exist."""
         session = AsyncMock()
         service = ModelConfigService(session=session)
-        
+
         service.repository.find_all = AsyncMock(return_value=[])
-        
+
         result = await service.find_all()
-        
+
         assert len(result) == 0
         service.repository.find_all.assert_called_once()
 
@@ -71,15 +74,15 @@ class TestModelConfigServiceFindEnabledModels:
         """Test finding enabled model configurations."""
         session = AsyncMock()
         service = ModelConfigService(session=session)
-        
+
         mock_models = [
             Mock(id=1, key="gpt-4", enabled=True),
-            Mock(id=2, key="claude-3", enabled=True)
+            Mock(id=2, key="claude-3", enabled=True),
         ]
         service.repository.find_enabled_models = AsyncMock(return_value=mock_models)
-        
+
         result = await service.find_enabled_models()
-        
+
         assert len(result) == 2
         assert all(m.enabled for m in result)
         service.repository.find_enabled_models.assert_called_once()
@@ -89,11 +92,11 @@ class TestModelConfigServiceFindEnabledModels:
         """Test finding enabled models when none exist."""
         session = AsyncMock()
         service = ModelConfigService(session=session)
-        
+
         service.repository.find_enabled_models = AsyncMock(return_value=[])
-        
+
         result = await service.find_enabled_models()
-        
+
         assert len(result) == 0
 
 
@@ -120,11 +123,11 @@ class TestModelConfigServiceFindByKey:
         """Test finding model by key when not found."""
         session = AsyncMock()
         service = ModelConfigService(session=session)
-        
+
         service.repository.find_by_key = AsyncMock(return_value=None)
-        
+
         result = await service.find_by_key("nonexistent")
-        
+
         assert result is None
         service.repository.find_by_key.assert_called_once_with("nonexistent")
 
@@ -137,17 +140,19 @@ class TestModelConfigServiceCreateModelConfig:
         """Test creating a new model configuration."""
         session = AsyncMock()
         service = ModelConfigService(session=session)
-        
+
         # Mock model data with model_dump method
         model_data = Mock()
         model_data.key = "new-model"
-        model_data.model_dump = Mock(return_value={"key": "new-model", "name": "New Model"})
-        
+        model_data.model_dump = Mock(
+            return_value={"key": "new-model", "name": "New Model"}
+        )
+
         service.repository.find_by_key = AsyncMock(return_value=None)
         service.repository.create = AsyncMock(return_value=Mock(id=1, key="new-model"))
-        
+
         result = await service.create_model_config(model_data)
-        
+
         assert result.key == "new-model"
         service.repository.find_by_key.assert_called_once_with("new-model")
         service.repository.create.assert_called_once()
@@ -157,13 +162,17 @@ class TestModelConfigServiceCreateModelConfig:
         """Test creating model when key already exists."""
         session = AsyncMock()
         service = ModelConfigService(session=session)
-        
+
         model_data = Mock()
         model_data.key = "existing-model"
-        
-        service.repository.find_by_key = AsyncMock(return_value=Mock(key="existing-model"))
-        
-        with pytest.raises(ValueError, match="Model with key existing-model already exists"):
+
+        service.repository.find_by_key = AsyncMock(
+            return_value=Mock(key="existing-model")
+        )
+
+        with pytest.raises(
+            ValueError, match="Model with key existing-model already exists"
+        ):
             await service.create_model_config(model_data)
 
     @pytest.mark.asyncio
@@ -171,18 +180,18 @@ class TestModelConfigServiceCreateModelConfig:
         """Test creating model with dict method (legacy Pydantic)."""
         session = AsyncMock()
         service = ModelConfigService(session=session)
-        
+
         model_data = Mock()
         model_data.key = "new-model"
         model_data.dict = Mock(return_value={"key": "new-model", "name": "New Model"})
         # Remove model_dump to test dict fallback
-        delattr(model_data, 'model_dump') if hasattr(model_data, 'model_dump') else None
-        
+        delattr(model_data, "model_dump") if hasattr(model_data, "model_dump") else None
+
         service.repository.find_by_key = AsyncMock(return_value=None)
         service.repository.create = AsyncMock(return_value=Mock(id=1, key="new-model"))
-        
+
         result = await service.create_model_config(model_data)
-        
+
         assert result.key == "new-model"
         model_data.dict.assert_called_once()
 
@@ -196,7 +205,9 @@ class TestModelConfigServiceCreateModelConfig:
         model_data = Mock()
         model_data.key = "new-model"
         # Make it iterable like a dict
-        model_data.__iter__ = Mock(return_value=iter([("key", "new-model"), ("name", "New Model")]))
+        model_data.__iter__ = Mock(
+            return_value=iter([("key", "new-model"), ("name", "New Model")])
+        )
 
         service.repository.find_by_key = AsyncMock(return_value=None)
         service.repository.create = AsyncMock(return_value=Mock(id=1, key="new-model"))
@@ -220,7 +231,9 @@ class TestModelConfigServiceUpdateModelConfig:
         update_data.model_dump = Mock(return_value={"name": "GPT-4 Updated"})
 
         service.repository.find_by_key = AsyncMock(return_value=existing_model)
-        service.repository.update = AsyncMock(return_value=Mock(id=1, key="gpt-4", name="GPT-4 Updated"))
+        service.repository.update = AsyncMock(
+            return_value=Mock(id=1, key="gpt-4", name="GPT-4 Updated")
+        )
 
         result = await service.update_model_config("gpt-4", update_data)
 
@@ -259,7 +272,7 @@ class TestModelConfigServiceDeleteModelConfig:
         service.repository.find_by_key = AsyncMock(return_value=mock_model)
         service.repository.delete_by_key = AsyncMock(return_value=True)
 
-        with patch('src.services.settings.models.model_config_cache') as mock_cache:
+        with patch("src.services.settings.models.model_config_cache") as mock_cache:
             mock_cache.invalidate = AsyncMock()
             result = await service.delete_model_config("gpt-4")
 
@@ -277,11 +290,10 @@ class TestModelConfigServiceDeleteModelConfig:
         service.repository.find_by_key = AsyncMock(return_value=None)
         service.repository.delete_by_key = AsyncMock(return_value=False)
 
-        with patch('src.services.settings.models.model_config_cache') as mock_cache:
+        with patch("src.services.settings.models.model_config_cache") as mock_cache:
             mock_cache.invalidate = AsyncMock()
             result = await service.delete_model_config("nonexistent")
 
         assert result is False
         service.repository.find_by_key.assert_called_once_with("nonexistent")
         service.repository.delete_by_key.assert_called_once_with("nonexistent")
-

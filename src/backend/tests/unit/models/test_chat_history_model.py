@@ -4,9 +4,11 @@ Unit tests for ChatHistory model.
 Tests the functionality of the ChatHistory database model including
 field validation, relationships, and data integrity.
 """
-import pytest
+
 from datetime import datetime
 from unittest.mock import MagicMock
+
+import pytest
 
 from src.models.chat_history import ChatHistory, generate_uuid
 
@@ -24,7 +26,7 @@ class TestChatHistory:
         timestamp = datetime.utcnow()
         group_id = "group-789"
         group_email = "test@example.com"
-        
+
         # Act
         chat_history = ChatHistory(
             session_id=session_id,
@@ -33,9 +35,9 @@ class TestChatHistory:
             content=content,
             timestamp=timestamp,
             group_id=group_id,
-            group_email=group_email
+            group_email=group_email,
         )
-        
+
         # Assert
         assert chat_history.session_id == session_id
         assert chat_history.user_id == user_id
@@ -58,7 +60,7 @@ class TestChatHistory:
         intent = "generate_agent"
         confidence = "0.95"
         generation_result = {"agent_name": "Research Agent", "tools": ["web_search"]}
-        
+
         # Act
         chat_history = ChatHistory(
             session_id=session_id,
@@ -67,9 +69,9 @@ class TestChatHistory:
             content=content,
             intent=intent,
             confidence=confidence,
-            generation_result=generation_result
+            generation_result=generation_result,
         )
-        
+
         # Assert
         assert chat_history.intent == intent
         assert chat_history.confidence == confidence
@@ -83,9 +85,9 @@ class TestChatHistory:
             session_id="test-session",
             user_id="test-user",
             message_type="user",
-            content="Test message"
+            content="Test message",
         )
-        
+
         # Assert
         # Note: id and timestamp are only generated when saved to database
         assert chat_history.intent is None
@@ -103,18 +105,18 @@ class TestChatHistory:
         """Test that the model has the expected database indexes."""
         # Act
         indexes = ChatHistory.__table_args__
-        
+
         # Assert
         assert len(indexes) == 3
-        
+
         # Check index names
-        index_names = [index.name for index in indexes if hasattr(index, 'name')]
+        index_names = [index.name for index in indexes if hasattr(index, "name")]
         expected_indexes = [
-            'idx_chat_history_session_timestamp',
-            'idx_chat_history_user_timestamp', 
-            'idx_chat_history_group_timestamp'
+            "idx_chat_history_session_timestamp",
+            "idx_chat_history_user_timestamp",
+            "idx_chat_history_group_timestamp",
         ]
-        
+
         for expected_index in expected_indexes:
             assert expected_index in index_names
 
@@ -123,7 +125,7 @@ class TestChatHistory:
         # Act
         uuid1 = generate_uuid()
         uuid2 = generate_uuid()
-        
+
         # Assert
         assert uuid1 is not None
         assert uuid2 is not None
@@ -140,12 +142,12 @@ class TestChatHistory:
             session_id="test-session",
             user_id="test-user",
             message_type="user",
-            content="Test message"
+            content="Test message",
         )
-        
+
         # Act
         repr_str = repr(chat_history)
-        
+
         # Assert
         assert "ChatHistory" in repr_str
 
@@ -154,7 +156,7 @@ class TestChatHistory:
         # Arrange
         group_id = "group-123"
         group_email = "admin@company.com"
-        
+
         # Act
         chat_history = ChatHistory(
             session_id="test-session",
@@ -162,9 +164,9 @@ class TestChatHistory:
             message_type="user",
             content="Test message",
             group_id=group_id,
-            group_email=group_email
+            group_email=group_email,
         )
-        
+
         # Assert
         assert chat_history.group_id == group_id
         assert chat_history.group_email == group_email
@@ -178,26 +180,20 @@ class TestChatHistory:
                 "name": "Data Analyst",
                 "role": "Senior Data Analyst",
                 "tools": ["python", "sql", "tableau"],
-                "config": {
-                    "max_iter": 50,
-                    "verbose": True
-                }
+                "config": {"max_iter": 50, "verbose": True},
             },
-            "metadata": {
-                "created_at": "2023-01-01T00:00:00Z",
-                "confidence": 0.98
-            }
+            "metadata": {"created_at": "2023-01-01T00:00:00Z", "confidence": 0.98},
         }
-        
+
         # Act
         chat_history = ChatHistory(
             session_id="test-session",
             user_id="test-user",
             message_type="assistant",
             content="Created a data analyst agent",
-            generation_result=complex_result
+            generation_result=complex_result,
         )
-        
+
         # Assert
         assert chat_history.generation_result == complex_result
         assert chat_history.generation_result["type"] == "agent"
@@ -212,16 +208,16 @@ class TestChatHistory:
             session_id="test-session",
             user_id="test-user",
             message_type="user",
-            content="Create an agent for me"
+            content="Create an agent for me",
         )
         assert user_message.message_type == "user"
-        
-        # Test assistant message  
+
+        # Test assistant message
         assistant_message = ChatHistory(
             session_id="test-session",
             user_id="test-user",
             message_type="assistant",
-            content="I've created an agent for you"
+            content="I've created an agent for you",
         )
         assert assistant_message.message_type == "assistant"
 
@@ -229,15 +225,15 @@ class TestChatHistory:
         """Test ChatHistory with long text content."""
         # Arrange
         long_content = "This is a very long message. " * 100  # 2900 characters
-        
+
         # Act
         chat_history = ChatHistory(
             session_id="test-session",
             user_id="test-user",
             message_type="user",
-            content=long_content
+            content=long_content,
         )
-        
+
         # Assert
         assert chat_history.content == long_content
         assert len(chat_history.content) == 2900

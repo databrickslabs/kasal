@@ -1,9 +1,9 @@
-from typing import Annotated, List, Dict, Any
+import logging
+from typing import Annotated, Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
-import logging
 
-from src.core.dependencies import SessionDep, GroupContextDep
+from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.permissions import check_role_in_context
 from src.models.task import Task
 from src.schemas.task import Task as TaskSchema
@@ -20,6 +20,7 @@ router = APIRouter(
 # Set up logging
 logger = logging.getLogger(__name__)
 
+
 async def get_task_service(session: SessionDep) -> TaskService:
     """
     Dependency provider for TaskService.
@@ -35,9 +36,9 @@ async def get_task_service(session: SessionDep) -> TaskService:
     """
     return TaskService(session=session)
 
+
 # Type alias for cleaner function signatures
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
-
 
 
 @router.post("", response_model=TaskSchema, status_code=status.HTTP_201_CREATED)
@@ -62,7 +63,7 @@ async def create_task(
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only editors and admins can create tasks"
+            detail="Only editors and admins can create tasks",
         )
 
     try:
@@ -79,11 +80,11 @@ async def list_tasks(
 ):
     """
     Retrieve all tasks for the current group.
-    
+
     Args:
         service: Task service injected by dependency
         group_context: Group context from headers
-        
+
     Returns:
         List of tasks for the current group
     """
@@ -102,15 +103,15 @@ async def get_task(
 ):
     """
     Get a specific task by ID with group isolation.
-    
+
     Args:
         task_id: ID of the task to get
         service: Task service injected by dependency
         group_context: Group context from headers
-        
+
     Returns:
         Task if found and belongs to user's group
-        
+
     Raises:
         HTTPException: If task not found or not authorized
     """
@@ -121,13 +122,15 @@ async def get_task(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Task not found",
             )
-        
+
         # Debug logging for tool_configs (with sensitive data masked)
-        if hasattr(task, 'tool_configs'):
-            logger.info(f"GET task {task_id} - {safe_log_tool_configs(task.tool_configs)}")
+        if hasattr(task, "tool_configs"):
+            logger.info(
+                f"GET task {task_id} - {safe_log_tool_configs(task.tool_configs)}"
+            )
         else:
             logger.warning(f"GET task {task_id} - no tool_configs attribute found")
-        
+
         return task
     except HTTPException as he:
         raise he
@@ -163,11 +166,13 @@ async def update_task_full(
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only editors and admins can update tasks"
+            detail="Only editors and admins can update tasks",
         )
 
     try:
-        task = await service.update_full_with_group_check(task_id, task_in, group_context)
+        task = await service.update_full_with_group_check(
+            task_id, task_in, group_context
+        )
         if not task:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -209,7 +214,7 @@ async def update_task(
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only editors and admins can update tasks"
+            detail="Only editors and admins can update tasks",
         )
 
     try:
@@ -250,7 +255,7 @@ async def delete_task(
     if not check_role_in_context(group_context, ["admin", "editor"]):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only editors and admins can delete tasks"
+            detail="Only editors and admins can delete tasks",
         )
 
     try:
@@ -285,11 +290,11 @@ async def delete_all_tasks(
     if not check_role_in_context(group_context, ["admin"]):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only admins can delete all tasks"
+            detail="Only admins can delete all tasks",
         )
 
     try:
         await service.delete_all_for_group(group_context)
     except Exception as e:
         logger.error(f"Error deleting all tasks: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))

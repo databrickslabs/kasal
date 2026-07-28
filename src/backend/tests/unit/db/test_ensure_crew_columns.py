@@ -4,8 +4,10 @@ create_all never ALTERs an existing table, so deployed DBs created before the
 reasoning_config column need this idempotent ALTER on startup. Verifies it adds
 the column on SQLite and is safe to run repeatedly.
 """
-import pytest
+
 from unittest.mock import MagicMock, patch
+
+import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.db import session as sess
@@ -23,12 +25,22 @@ async def test_ensure_crew_columns_adds_reasoning_config_and_is_idempotent():
             fake_settings.DATABASE_URI = "sqlite+aiosqlite://"
             with patch.object(sess, "settings", fake_settings):
                 await sess._ensure_crew_columns(conn)
-                cols = {r[1] for r in (await conn.exec_driver_sql("PRAGMA table_info(crews)")).fetchall()}
+                cols = {
+                    r[1]
+                    for r in (
+                        await conn.exec_driver_sql("PRAGMA table_info(crews)")
+                    ).fetchall()
+                }
                 assert "reasoning_config" in cols
 
                 # idempotent: second run must not raise or duplicate the column
                 await sess._ensure_crew_columns(conn)
-                cols2 = [r[1] for r in (await conn.exec_driver_sql("PRAGMA table_info(crews)")).fetchall()]
+                cols2 = [
+                    r[1]
+                    for r in (
+                        await conn.exec_driver_sql("PRAGMA table_info(crews)")
+                    ).fetchall()
+                ]
                 assert cols2.count("reasoning_config") == 1
     finally:
         await engine.dispose()

@@ -8,34 +8,37 @@ database transactions and repository lifecycle.
 import logging
 from typing import Optional
 
-from src.repositories.tool_repository import ToolRepository
 from src.repositories.api_key_repository import ApiKeyRepository
-from src.repositories.model_config_repository import ModelConfigRepository
-from src.repositories.template_repository import TemplateRepository
-from src.repositories.schema_repository import SchemaRepository
-from src.repositories.databricks_config_repository import DatabricksConfigRepository
-from src.repositories.powerbi_config_repository import PowerBIConfigRepository
-from src.repositories.mcp_repository import MCPServerRepository, MCPSettingsRepository
-from src.repositories.engine_config_repository import EngineConfigRepository
-from src.repositories.memory_backend_repository import MemoryBackendRepository
-from src.repositories.documentation_embedding_repository import DocumentationEmbeddingRepository
 from src.repositories.conversion_repository import (
     ConversionHistoryRepository,
     ConversionJobRepository,
     SavedConverterConfigurationRepository,
 )
+from src.repositories.databricks_config_repository import DatabricksConfigRepository
+from src.repositories.documentation_embedding_repository import (
+    DocumentationEmbeddingRepository,
+)
+from src.repositories.engine_config_repository import EngineConfigRepository
+from src.repositories.mcp_repository import MCPServerRepository, MCPSettingsRepository
+from src.repositories.memory_backend_repository import MemoryBackendRepository
+from src.repositories.model_config_repository import ModelConfigRepository
+from src.repositories.powerbi_config_repository import PowerBIConfigRepository
+from src.repositories.schema_repository import SchemaRepository
+from src.repositories.template_repository import TemplateRepository
+from src.repositories.tool_repository import ToolRepository
 
 logger = logging.getLogger(__name__)
+
 
 class UnitOfWork:
     """
     Manages repositories and transactions as a unit.
-    
+
     This class implements the Unit of Work pattern to ensure that all
     database operations within a transaction are atomic and consistent.
     All repositories share the same session within a single unit of work.
     """
-    
+
     def __init__(self):
         self._session = None
         self.tool_repository: Optional[ToolRepository] = None
@@ -49,11 +52,15 @@ class UnitOfWork:
         self.mcp_settings_repository: Optional[MCPSettingsRepository] = None
         self.engine_config_repository: Optional[EngineConfigRepository] = None
         self.memory_backend_repository: Optional[MemoryBackendRepository] = None
-        self.documentation_embedding_repository: Optional[DocumentationEmbeddingRepository] = None
+        self.documentation_embedding_repository: Optional[
+            DocumentationEmbeddingRepository
+        ] = None
         self.conversion_history_repository: Optional[ConversionHistoryRepository] = None
         self.conversion_job_repository: Optional[ConversionJobRepository] = None
-        self.saved_converter_config_repository: Optional[SavedConverterConfigurationRepository] = None
-    
+        self.saved_converter_config_repository: Optional[
+            SavedConverterConfigurationRepository
+        ] = None
+
     async def __aenter__(self):
         """
         Enter async context and create all repositories with a single session.
@@ -62,9 +69,10 @@ class UnitOfWork:
             UnitOfWork: Self reference with all repositories initialized
         """
         from src.db.session import async_session_factory
+
         self._session = async_session_factory()
         session = await self._session.__aenter__()
-        
+
         # Create repositories with the shared session
         self.tool_repository = ToolRepository(session)
         self.api_key_repository = ApiKeyRepository(session)
@@ -77,10 +85,14 @@ class UnitOfWork:
         self.mcp_settings_repository = MCPSettingsRepository(session)
         self.engine_config_repository = EngineConfigRepository(session)
         self.memory_backend_repository = MemoryBackendRepository(session)
-        self.documentation_embedding_repository = DocumentationEmbeddingRepository(session)
+        self.documentation_embedding_repository = DocumentationEmbeddingRepository(
+            session
+        )
         self.conversion_history_repository = ConversionHistoryRepository(session)
         self.conversion_job_repository = ConversionJobRepository(session)
-        self.saved_converter_config_repository = SavedConverterConfigurationRepository(session)
+        self.saved_converter_config_repository = SavedConverterConfigurationRepository(
+            session
+        )
 
         logger.debug("UnitOfWork initialized with repositories")
         return self
@@ -97,7 +109,9 @@ class UnitOfWork:
         try:
             # If there was an exception, rollback
             if exc_type is not None:
-                logger.debug(f"UnitOfWork exiting with exception, rolling back: {exc_type.__name__}: {exc_val}")
+                logger.debug(
+                    f"UnitOfWork exiting with exception, rolling back: {exc_type.__name__}: {exc_val}"
+                )
                 await self._session.rollback()
             else:
                 # If no exception, commit any pending changes that weren't explicitly committed
@@ -105,7 +119,9 @@ class UnitOfWork:
                     await self._session.commit()
                     logger.debug("UnitOfWork context committed on exit")
                 except Exception as commit_error:
-                    logger.error(f"Error committing in UnitOfWork.__aexit__: {commit_error}")
+                    logger.error(
+                        f"Error committing in UnitOfWork.__aexit__: {commit_error}"
+                    )
                     await self._session.rollback()
                     raise
         finally:
@@ -128,7 +144,7 @@ class UnitOfWork:
             self.conversion_history_repository = None
             self.conversion_job_repository = None
             self.saved_converter_config_repository = None
-    
+
     async def commit(self):
         """
         Explicitly commit the current transaction.
@@ -140,28 +156,29 @@ class UnitOfWork:
             logger.error(f"Error committing UnitOfWork transaction: {str(e)}")
             raise
 
+
 class SyncUnitOfWork:
     """
     Synchronous version of UnitOfWork for non-async contexts.
-    
+
     This class implements the Unit of Work pattern for synchronous operations
     used in callbacks and other non-async contexts.
     """
-    
+
     _instance = None
-    
+
     @classmethod
     def get_instance(cls):
         """
         Get or create a singleton instance of SyncUnitOfWork.
-        
+
         Returns:
             SyncUnitOfWork: Singleton instance
         """
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
-    
+
     def __init__(self):
         """Initialize the unit of work with repository references."""
         self._session = None
@@ -181,38 +198,47 @@ class SyncUnitOfWork:
         self.conversion_job_repository = None
         self.saved_converter_config_repository = None
         self._initialized = False
-    
+
     def initialize(self):
         """Initialize repositories with a session."""
         if not self._initialized:
             from src.db.session import sync_session_factory
+
             self._session = sync_session_factory()
-            
+
             # Initialize repositories with the sync session
             self.tool_repository = ToolRepository(self._session)
             self.api_key_repository = ApiKeyRepository(self._session)
             self.model_config_repository = ModelConfigRepository(self._session)
             self.template_repository = TemplateRepository(self._session)
             self.schema_repository = SchemaRepository(self._session)
-            self.databricks_config_repository = DatabricksConfigRepository(self._session)
+            self.databricks_config_repository = DatabricksConfigRepository(
+                self._session
+            )
             self.powerbi_config_repository = PowerBIConfigRepository(self._session)
             self.mcp_server_repository = MCPServerRepository(self._session)
             self.mcp_settings_repository = MCPSettingsRepository(self._session)
             self.engine_config_repository = EngineConfigRepository(self._session)
             self.memory_backend_repository = MemoryBackendRepository(self._session)
-            self.documentation_embedding_repository = DocumentationEmbeddingRepository(self._session)
-            self.conversion_history_repository = ConversionHistoryRepository(self._session)
+            self.documentation_embedding_repository = DocumentationEmbeddingRepository(
+                self._session
+            )
+            self.conversion_history_repository = ConversionHistoryRepository(
+                self._session
+            )
             self.conversion_job_repository = ConversionJobRepository(self._session)
-            self.saved_converter_config_repository = SavedConverterConfigurationRepository(self._session)
+            self.saved_converter_config_repository = (
+                SavedConverterConfigurationRepository(self._session)
+            )
 
             self._initialized = True
             logger.debug("SyncUnitOfWork initialized with repositories")
-    
+
     def commit(self):
         """Commit the current transaction."""
         if not self._initialized:
             raise RuntimeError("SyncUnitOfWork not initialized")
-        
+
         try:
             self._session.commit()
             logger.debug("SyncUnitOfWork transaction committed")
@@ -220,19 +246,19 @@ class SyncUnitOfWork:
             self._session.rollback()
             logger.error(f"Error committing SyncUnitOfWork transaction: {str(e)}")
             raise
-    
+
     def rollback(self):
         """Rollback the current transaction."""
         if not self._initialized:
             raise RuntimeError("SyncUnitOfWork not initialized")
-        
+
         try:
             self._session.rollback()
             logger.debug("SyncUnitOfWork transaction rolled back")
         except Exception as e:
             logger.error(f"Error rolling back SyncUnitOfWork transaction: {str(e)}")
             raise
-    
+
     def cleanup(self):
         """Clean up resources."""
         if self._initialized and self._session is not None:
@@ -240,7 +266,7 @@ class SyncUnitOfWork:
             self._session = None
             self._initialized = False
             logger.debug("SyncUnitOfWork resources cleaned up")
-            
+
     def __del__(self):
         """Ensure resources are cleaned up on deletion."""
-        self.cleanup() 
+        self.cleanup()

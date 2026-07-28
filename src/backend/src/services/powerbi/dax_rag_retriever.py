@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from src.utils.telemetry import get_user_agent_header, KasalProduct
+from src.utils.telemetry import KasalProduct, get_user_agent_header
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,9 @@ class DaxRagRetriever:
                 dax_idx = column_names.index("dax")
                 score_idx = len(column_names)  # score appended as last column by VS
             except ValueError:
-                logger.debug("[DaxRagRetriever] Unexpected column schema in VS response")
+                logger.debug(
+                    "[DaxRagRetriever] Unexpected column schema in VS response"
+                )
                 return []
 
             for row in rows:
@@ -109,11 +111,13 @@ class DaxRagRetriever:
                 score_val = float(row[score_idx]) if score_idx < len(row) else 0.0
                 if score_val < threshold:
                     continue
-                results.append({
-                    "question": str(row[q_idx]),
-                    "dax": str(row[dax_idx]),
-                    "score": round(score_val, 4),
-                })
+                results.append(
+                    {
+                        "question": str(row[q_idx]),
+                        "dax": str(row[dax_idx]),
+                        "score": round(score_val, 4),
+                    }
+                )
         except Exception as exc:
             logger.debug(f"[DaxRagRetriever] Response parse error (fail-open): {exc}")
             return []
@@ -159,14 +163,16 @@ class DaxRagRetriever:
 
         url = f"{workspace_url}/api/2.0/vector-search/indexes/{index_name}/upsert"
         payload = {
-            "inputs_json": json.dumps([
-                {
-                    "id": record_id,
-                    "question": question,
-                    "dax": dax,
-                    "dataset_id": dataset_id or "",
-                }
-            ])
+            "inputs_json": json.dumps(
+                [
+                    {
+                        "id": record_id,
+                        "question": question,
+                        "dax": dax,
+                        "dataset_id": dataset_id or "",
+                    }
+                ]
+            )
         }
 
         try:

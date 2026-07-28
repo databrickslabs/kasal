@@ -123,7 +123,9 @@ def _emit_surface_event(
             from src.services.trace.writer import write_rows
 
             components = None
-            if isinstance(surface, dict) and isinstance(surface.get("components"), (list, tuple)):
+            if isinstance(surface, dict) and isinstance(
+                surface.get("components"), (list, tuple)
+            ):
                 components = len(surface["components"])
 
             metadata = {
@@ -145,7 +147,14 @@ def _emit_surface_event(
             _asyncio.get_running_loop().create_task(
                 write_rows(
                     execution_id,
-                    [("a2ui_surface", "kasal.a2ui.compose", reason or outcome, metadata)],
+                    [
+                        (
+                            "a2ui_surface",
+                            "kasal.a2ui.compose",
+                            reason or outcome,
+                            metadata,
+                        )
+                    ],
                     fallback_source="A2UI",
                     fallback_context=reason or outcome,
                     group_context=group_context,
@@ -317,7 +326,9 @@ async def compose_surface(
 
     started_at = _time.monotonic()
 
-    def _skip(outcome: str, reason: str, surface: Optional[Dict[str, Any]] = None) -> None:
+    def _skip(
+        outcome: str, reason: str, surface: Optional[Dict[str, Any]] = None
+    ) -> None:
         _emit_surface_event(
             outcome,
             reason=reason,
@@ -425,7 +436,9 @@ async def compose_surface(
                                 text,
                                 {
                                     **shared,
-                                    "duration_ms": round((_t.monotonic() - began) * 1000, 2),
+                                    "duration_ms": round(
+                                        (_t.monotonic() - began) * 1000, 2
+                                    ),
                                 },
                             ),
                         ],

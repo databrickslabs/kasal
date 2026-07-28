@@ -3,21 +3,22 @@ Conversion Pipeline Orchestrator
 Connects inbound connectors to outbound converters for end-to-end conversion
 """
 
-from typing import Dict, Any, List, Optional, Union
-from enum import Enum
 import logging
+from enum import Enum
+from typing import Any, Dict, List, Optional, Union
 
-from .base.models import KPIDefinition
 from .base.connectors import BaseInboundConnector, ConnectorType
+from .base.models import KPIDefinition
 from .formats.powerbi import PowerBIConnector
 from .formats.powerbi.helpers.dax_smart import SmartDAXGenerator
-from .formats.sql import SQLGenerator, SQLDialect
+from .formats.sql import SQLDialect, SQLGenerator
 from .formats.uc_metrics import UCMetricsGenerator
 from .formats.uc_metrics.helpers.uc_metrics_smart import SmartUCMetricsGenerator
 
 
 class OutboundFormat(str, Enum):
     """Supported outbound conversion formats"""
+
     DAX = "dax"
     SQL = "sql"
     UC_METRICS = "uc_metrics"
@@ -56,9 +57,7 @@ class ConversionPipeline:
         self.logger = logging.getLogger(__name__)
 
     def create_inbound_connector(
-        self,
-        connector_type: ConnectorType,
-        connection_params: Dict[str, Any]
+        self, connector_type: ConnectorType, connection_params: Dict[str, Any]
     ) -> BaseInboundConnector:
         """
         Factory method to create inbound connector.
@@ -127,8 +126,7 @@ class ConversionPipeline:
                 # Step 2: Extract measures to KPIDefinition
                 self.logger.info("Extracting measures")
                 definition = connector.extract_to_definition(
-                    definition_name=definition_name,
-                    **extract_params
+                    definition_name=definition_name, **extract_params
                 )
 
                 self.logger.info(f"Extracted {len(definition.kpis)} measures")
@@ -139,7 +137,7 @@ class ConversionPipeline:
                     definition,
                     outbound_format,
                     outbound_params,
-                    inbound_type=inbound_type  # Pass inbound type for path detection
+                    inbound_type=inbound_type,  # Pass inbound type for path detection
                 )
 
             metadata = connector.get_metadata()
@@ -150,7 +148,7 @@ class ConversionPipeline:
                 "output": output,
                 "metadata": metadata.__dict__,
                 "errors": errors,
-                "measure_count": len(definition.kpis)
+                "measure_count": len(definition.kpis),
             }
 
         except Exception as e:
@@ -162,7 +160,7 @@ class ConversionPipeline:
                 "output": output,
                 "metadata": {},
                 "errors": errors,
-                "measure_count": len(definition.kpis) if definition else 0
+                "measure_count": len(definition.kpis) if definition else 0,
             }
 
     def _convert_to_format(
@@ -170,7 +168,7 @@ class ConversionPipeline:
         definition: KPIDefinition,
         format: OutboundFormat,
         params: Dict[str, Any],
-        inbound_type: ConnectorType = None
+        inbound_type: ConnectorType = None,
     ) -> Union[str, Dict[str, Any], List[Any]]:
         """
         Convert KPIDefinition to target format.
@@ -189,24 +187,36 @@ class ConversionPipeline:
             Converted output (format depends on target)
         """
         # Detect if we should use transpilation path (PowerBI source)
-        use_transpilation = (inbound_type == ConnectorType.POWERBI and
-                            format in [OutboundFormat.SQL, OutboundFormat.UC_METRICS])
+        use_transpilation = inbound_type == ConnectorType.POWERBI and format in [
+            OutboundFormat.SQL,
+            OutboundFormat.UC_METRICS,
+        ]
 
         if use_transpilation:
-            self.logger.info(f"🔄 Using TRANSPILATION path: PowerBI DAX → {format.value.upper()} (via dax_parser.parse_advanced)")
+            self.logger.info(
+                f"🔄 Using TRANSPILATION path: PowerBI DAX → {format.value.upper()} (via dax_parser.parse_advanced)"
+            )
         else:
-            self.logger.info(f"🔨 Using GENERATION path: YAML → {format.value.upper()} (via generators)")
+            self.logger.info(
+                f"🔨 Using GENERATION path: YAML → {format.value.upper()} (via generators)"
+            )
 
         if format == OutboundFormat.DAX:
             return self._convert_to_dax(definition, params)
         elif format == OutboundFormat.SQL:
-            return self._convert_to_sql(definition, params, use_transpilation=use_transpilation)
+            return self._convert_to_sql(
+                definition, params, use_transpilation=use_transpilation
+            )
         elif format == OutboundFormat.UC_METRICS:
-            return self._convert_to_uc_metrics(definition, params, use_transpilation=use_transpilation)
+            return self._convert_to_uc_metrics(
+                definition, params, use_transpilation=use_transpilation
+            )
         else:
             raise ValueError(f"Unsupported output format: {format}")
 
-    def _convert_to_dax(self, definition: KPIDefinition, params: Dict[str, Any]) -> List[Dict[str, str]]:
+    def _convert_to_dax(
+        self, definition: KPIDefinition, params: Dict[str, Any]
+    ) -> List[Dict[str, str]]:
         """
         Convert to DAX measures with automatic dependency resolution.
 
@@ -225,21 +235,27 @@ class ConversionPipeline:
             # Convert to output format
             measures = []
             for dax_measure in dax_measures:
-                measures.append({
-                    "name": dax_measure.name,
-                    "expression": dax_measure.dax_formula,
-                    "description": dax_measure.description,
-                    "table": dax_measure.table,
-                })
+                measures.append(
+                    {
+                        "name": dax_measure.name,
+                        "expression": dax_measure.dax_formula,
+                        "description": dax_measure.description,
+                        "table": dax_measure.table,
+                    }
+                )
 
-            self.logger.info(f"Generated {len(measures)} DAX measures with dependency resolution")
+            self.logger.info(
+                f"Generated {len(measures)} DAX measures with dependency resolution"
+            )
             return measures
 
         except Exception as e:
             self.logger.error(f"Failed to generate DAX measures: {e}")
             raise
 
-    def _format_transpiled_sql(self, definition: KPIDefinition, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _format_transpiled_sql(
+        self, definition: KPIDefinition, params: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
         """
         Extract transpiled SQL from KPI definitions (populated by parse_advanced in connector)
         and format as output.
@@ -258,28 +274,34 @@ class ConversionPipeline:
 
         for kpi in definition.kpis:
             # Check if this KPI has advanced parsing metadata (from PowerBI connector)
-            if not hasattr(kpi, '_advanced_parsing'):
-                self.logger.warning(f"KPI {kpi.technical_name} missing _advanced_parsing metadata")
+            if not hasattr(kpi, "_advanced_parsing"):
+                self.logger.warning(
+                    f"KPI {kpi.technical_name} missing _advanced_parsing metadata"
+                )
                 continue
 
             advanced = kpi._advanced_parsing
 
             # Extract transpiled SQL
-            transpiled_sql = advanced.get('transpiled_sql', '')
-            is_transpilable = advanced.get('is_transpilable', False)
+            transpiled_sql = advanced.get("transpiled_sql", "")
+            is_transpilable = advanced.get("is_transpilable", False)
 
-            measures.append({
-                "name": kpi.technical_name,
-                "sql": transpiled_sql if is_transpilable else kpi.formula,
-                "description": kpi.description,
-                "is_transpilable": is_transpilable,
-                "signature": advanced.get('signature', ''),
-                "source_table": kpi.source_table,
-            })
+            measures.append(
+                {
+                    "name": kpi.technical_name,
+                    "sql": transpiled_sql if is_transpilable else kpi.formula,
+                    "description": kpi.description,
+                    "is_transpilable": is_transpilable,
+                    "signature": advanced.get("signature", ""),
+                    "source_table": kpi.source_table,
+                }
+            )
 
         return measures
 
-    def _format_transpiled_uc_metrics(self, definition: KPIDefinition, params: Dict[str, Any]) -> str:
+    def _format_transpiled_uc_metrics(
+        self, definition: KPIDefinition, params: Dict[str, Any]
+    ) -> str:
         """
         Wrap transpiled SQL in UC Metrics YAML format.
 
@@ -293,7 +315,9 @@ class ConversionPipeline:
         Returns:
             UC Metrics YAML string
         """
-        self.logger.info(f"✨ Formatting {len(definition.kpis)} transpiled SQL measures as UC Metrics YAML")
+        self.logger.info(
+            f"✨ Formatting {len(definition.kpis)} transpiled SQL measures as UC Metrics YAML"
+        )
 
         # Extract metadata
         catalog = params.get("catalog", "main")
@@ -316,7 +340,7 @@ class ConversionPipeline:
 
         if source_table:
             # Build fully qualified source reference
-            if '.' in source_table:
+            if "." in source_table:
                 source = source_table
             else:
                 source = f"{catalog}.{schema}.{source_table}"
@@ -328,13 +352,15 @@ class ConversionPipeline:
 
         for kpi in definition.kpis:
             # Check if this KPI has advanced parsing metadata
-            if not hasattr(kpi, '_advanced_parsing'):
-                self.logger.warning(f"KPI {kpi.technical_name} missing _advanced_parsing metadata")
+            if not hasattr(kpi, "_advanced_parsing"):
+                self.logger.warning(
+                    f"KPI {kpi.technical_name} missing _advanced_parsing metadata"
+                )
                 continue
 
             advanced = kpi._advanced_parsing
-            transpiled_sql = advanced.get('transpiled_sql', '')
-            is_transpilable = advanced.get('is_transpilable', False)
+            transpiled_sql = advanced.get("transpiled_sql", "")
+            is_transpilable = advanced.get("is_transpilable", False)
 
             # Use transpiled SQL if available, otherwise use original formula
             measure_expr = transpiled_sql if is_transpilable else kpi.formula
@@ -345,12 +371,19 @@ class ConversionPipeline:
             if kpi.description:
                 lines.append(f"    # {kpi.description}")
             if not is_transpilable:
-                lines.append(f"    # WARNING: Not transpilable - using original DAX formula")
+                lines.append(
+                    f"    # WARNING: Not transpilable - using original DAX formula"
+                )
             lines.append("")
 
         return "\n".join(lines)
 
-    def _convert_to_sql(self, definition: KPIDefinition, params: Dict[str, Any], use_transpilation: bool = False) -> Union[str, List[Dict[str, Any]]]:
+    def _convert_to_sql(
+        self,
+        definition: KPIDefinition,
+        params: Dict[str, Any],
+        use_transpilation: bool = False,
+    ) -> Union[str, List[Dict[str, Any]]]:
         """
         Convert to SQL queries.
 
@@ -375,7 +408,12 @@ class ConversionPipeline:
                 return result.to_output_string(formatted=True)
             return ""
 
-    def _convert_to_uc_metrics(self, definition: KPIDefinition, params: Dict[str, Any], use_transpilation: bool = False) -> str:
+    def _convert_to_uc_metrics(
+        self,
+        definition: KPIDefinition,
+        params: Dict[str, Any],
+        use_transpilation: bool = False,
+    ) -> str:
         """
         Convert to UC Metrics YAML with automatic dependency resolution.
 
@@ -404,7 +442,9 @@ class ConversionPipeline:
 
             try:
                 # Generate with automatic dependency resolution
-                uc_metrics = generator.generate_consolidated_uc_metrics(definition, metadata)
+                uc_metrics = generator.generate_consolidated_uc_metrics(
+                    definition, metadata
+                )
 
                 # Format as YAML string
                 # Note: SmartUCMetricsGenerator returns dict, need to format it
@@ -412,7 +452,9 @@ class ConversionPipeline:
                 basic_gen = UCMetricsGenerator()
                 yaml_output = basic_gen.format_consolidated_uc_metrics_yaml(uc_metrics)
 
-                self.logger.info(f"Generated UC Metrics with dependency resolution: {len(uc_metrics.get('measures', []))} measures")
+                self.logger.info(
+                    f"Generated UC Metrics with dependency resolution: {len(uc_metrics.get('measures', []))} measures"
+                )
                 return yaml_output
 
             except Exception as e:
@@ -429,11 +471,9 @@ class ConversionPipeline:
 
 # Convenience functions for direct usage
 
+
 def convert_powerbi_to_dax(
-    semantic_model_id: str,
-    group_id: str,
-    access_token: str,
-    **kwargs
+    semantic_model_id: str, group_id: str, access_token: str, **kwargs
 ) -> Dict[str, Any]:
     """
     Convert Power BI measures to DAX.
@@ -456,7 +496,7 @@ def convert_powerbi_to_dax(
             "access_token": access_token,
         },
         outbound_format=OutboundFormat.DAX,
-        extract_params=kwargs
+        extract_params=kwargs,
     )
 
 
@@ -465,7 +505,7 @@ def convert_powerbi_to_sql(
     group_id: str,
     access_token: str,
     dialect: str = "databricks",
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """Convert Power BI measures to SQL."""
     pipeline = ConversionPipeline()
@@ -478,7 +518,7 @@ def convert_powerbi_to_sql(
         },
         outbound_format=OutboundFormat.SQL,
         outbound_params={"dialect": dialect},
-        extract_params=kwargs
+        extract_params=kwargs,
     )
 
 
@@ -488,7 +528,7 @@ def convert_powerbi_to_uc_metrics(
     access_token: str,
     catalog: str = "main",
     schema: str = "default",
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """Convert Power BI measures to UC Metrics."""
     pipeline = ConversionPipeline()
@@ -501,5 +541,5 @@ def convert_powerbi_to_uc_metrics(
         },
         outbound_format=OutboundFormat.UC_METRICS,
         outbound_params={"catalog": catalog, "schema": schema},
-        extract_params=kwargs
+        extract_params=kwargs,
     )

@@ -4,6 +4,7 @@ Implements context-aware filter tracking similar to reference KbiProvider patter
 """
 
 from typing import List, Optional, Set
+
 from ....base.models import KPI
 
 
@@ -34,14 +35,18 @@ class SQLBaseKBIContext:
         self._parent_kbis: List[KPI] = parent_kbis or []
 
     def __repr__(self):
-        parent_names = " → ".join([p.technical_name for p in self._parent_kbis]) if self._parent_kbis else "ROOT"
+        parent_names = (
+            " → ".join([p.technical_name for p in self._parent_kbis])
+            if self._parent_kbis
+            else "ROOT"
+        )
         return f"SQLContext[{parent_names} → {self.kbi.technical_name}]"
 
     def __eq__(self, other):
         if isinstance(other, SQLBaseKBIContext):
             return (
-                self.kbi.technical_name == other.kbi.technical_name and
-                self.parent_kbis_chain == other.parent_kbis_chain
+                self.kbi.technical_name == other.kbi.technical_name
+                and self.parent_kbis_chain == other.parent_kbis_chain
             )
         return False
 
@@ -62,7 +67,9 @@ class SQLBaseKBIContext:
             - Base KBI "revenue" with parent "ytd_revenue": "revenue_ytd_revenue"
             - Base KBI "revenue" with parents ["ytd_revenue", "gross_profit"]: "revenue_ytd_revenue_gross_profit"
         """
-        context_path = "_".join([k.technical_name for k in self._parent_kbis if k is not self.kbi])
+        context_path = "_".join(
+            [k.technical_name for k in self._parent_kbis if k is not self.kbi]
+        )
         if context_path:
             return f"{self.kbi.technical_name}_{context_path}"
         else:
@@ -139,10 +146,8 @@ class SQLBaseKBIContext:
 
     @classmethod
     def get_kbi_context(
-        cls,
-        kbi: KPI,
-        parent_kbis: Optional[List[KPI]] = None
-    ) -> 'SQLBaseKBIContext':
+        cls, kbi: KPI, parent_kbis: Optional[List[KPI]] = None
+    ) -> "SQLBaseKBIContext":
         """
         Factory method to create a context for a KBI
 
@@ -157,9 +162,7 @@ class SQLBaseKBIContext:
 
     @classmethod
     def append_dependency(
-        cls,
-        kbi: KPI,
-        parent_kbis: Optional[List[KPI]]
+        cls, kbi: KPI, parent_kbis: Optional[List[KPI]]
     ) -> Optional[List[KPI]]:
         """
         Append a KBI to the parent chain if it's valid for context tracking
@@ -194,9 +197,9 @@ class SQLBaseKBIContext:
             True if KBI should be part of context chain
         """
         return bool(
-            kbi.filters or
-            kbi.fields_for_constant_selection or
-            kbi.fields_for_exception_aggregation
+            kbi.filters
+            or kbi.fields_for_constant_selection
+            or kbi.fields_for_exception_aggregation
         )
 
     def get_sql_where_clause(self) -> str:
@@ -212,7 +215,9 @@ class SQLBaseKBIContext:
         # Join all filters with AND
         return " AND ".join([f"({f})" for f in self.combined_filters])
 
-    def get_target_columns_for_calculation(self, base_target_columns: Set[str]) -> Set[str]:
+    def get_target_columns_for_calculation(
+        self, base_target_columns: Set[str]
+    ) -> Set[str]:
         """
         Determine actual target columns for calculation considering constant selection
 
@@ -267,7 +272,9 @@ class SQLKBIContextCache:
 
     def get_contexts_for_kbi(self, kbi_technical_name: str) -> List[SQLBaseKBIContext]:
         """Get all contexts for a specific KBI"""
-        return [ctx for ctx in self._cache if ctx.kbi.technical_name == kbi_technical_name]
+        return [
+            ctx for ctx in self._cache if ctx.kbi.technical_name == kbi_technical_name
+        ]
 
     def get_unique_filter_combinations(self) -> List[str]:
         """Get unique filter combinations across all contexts"""

@@ -630,7 +630,10 @@ async def get_isolated_db_session():
     pooled checkout is already private, it falls through to the normal (possibly
     Lakebase-swapped) factory.
     """
-    if str(settings.DATABASE_URI).startswith("sqlite") and not async_session_factory.is_lakebase:
+    if (
+        str(settings.DATABASE_URI).startswith("sqlite")
+        and not async_session_factory.is_lakebase
+    ):
         # The global Lakebase swap (main.py lifespan / activate_lakebase_in_subprocess)
         # is PER-PROCESS and can fail or lag, leaving THIS process's
         # async_session_factory on local SQLite even though Lakebase is enabled in
@@ -871,7 +874,9 @@ async def _ensure_crew_columns(conn) -> None:
             if not existing:
                 return  # table not created yet (create_all handles fresh DBs)
             if "reasoning_config" not in existing:
-                await conn.exec_driver_sql("ALTER TABLE crews ADD COLUMN reasoning_config TEXT")
+                await conn.exec_driver_sql(
+                    "ALTER TABLE crews ADD COLUMN reasoning_config TEXT"
+                )
                 logger.info("Added crews.reasoning_config column (SQLite self-heal)")
         else:
             await conn.exec_driver_sql(
@@ -919,7 +924,8 @@ async def _ensure_ui_config_columns(conn) -> None:
     """Idempotently add the Predefined-UI columns to ui_config. The table itself is
     created via create_all, but create_all never ALTERs an existing table — so DBs
     created before catalog_json/style_json existed would silently drop a workspace's
-    A2UI catalog + branding on save/reload. Safe to run every startup (nullable TEXT)."""
+    A2UI catalog + branding on save/reload. Safe to run every startup (nullable TEXT).
+    """
     is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
     columns = ("catalog_json", "style_json")
     try:
@@ -969,7 +975,9 @@ async def _ensure_hot_polling_indexes(conn) -> None:
         try:
             await conn.exec_driver_sql(stmt)
         except Exception as e:
-            logger.warning(f"Could not ensure polling index ({stmt.split(' ON ', 1)[0]}): {e}")
+            logger.warning(
+                f"Could not ensure polling index ({stmt.split(' ON ', 1)[0]}): {e}"
+            )
     logger.info("Ensured hot-polling indexes on executionhistory/execution_trace")
 
 
@@ -1005,7 +1013,9 @@ async def _heal_engine_config_names(conn) -> None:
         )
         renamed = getattr(res, "rowcount", 0) or 0
         if renamed > 0:
-            logger.info(f"Renamed {renamed} engineconfig row(s) from 'crewai' to 'kasal'")
+            logger.info(
+                f"Renamed {renamed} engineconfig row(s) from 'crewai' to 'kasal'"
+            )
     except Exception as e:
         logger.warning(f"Could not heal engine_config engine names: {e}")
 

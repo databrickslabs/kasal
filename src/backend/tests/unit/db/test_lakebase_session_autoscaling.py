@@ -1,20 +1,23 @@
 """Tests for LakebaseSessionFactory._refresh_token and get_connection_string autoscaling fallback."""
-import sys
-import os
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-import uuid
 
+import os
+import sys
+import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 @pytest.fixture
 def factory():
     from src.db.lakebase_session import LakebaseSessionFactory
+
     f = LakebaseSessionFactory(instance_name="test-inst", user_email="u@example.com")
     return f
 
 
 # ---- _refresh_token ----
+
 
 @pytest.mark.asyncio
 async def test_refresh_token_provisioned(factory):
@@ -59,7 +62,9 @@ async def test_refresh_token_fallback_autoscaling(factory):
 async def test_refresh_token_provisioned_non_not_found_error(factory):
     """_refresh_token raises if provisioned error is not 'not found'."""
     mock_w = MagicMock()
-    mock_w.database.generate_database_credential.side_effect = RuntimeError("internal error")
+    mock_w.database.generate_database_credential.side_effect = RuntimeError(
+        "internal error"
+    )
     factory._get_workspace_client = AsyncMock(return_value=mock_w)
 
     with pytest.raises(RuntimeError, match="internal error"):
@@ -79,6 +84,7 @@ async def test_refresh_token_autoscaling_no_endpoints(factory):
 
 
 # ---- get_connection_string ----
+
 
 @pytest.mark.asyncio
 async def test_get_connection_string_provisioned(factory):

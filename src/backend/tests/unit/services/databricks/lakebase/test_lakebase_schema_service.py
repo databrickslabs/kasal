@@ -2,20 +2,21 @@
 Comprehensive unit tests for services/lakebase_schema_service.py
 """
 
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock, call
 from sqlalchemy import text
 
 from src.services.databricks.lakebase.schema import (
     LakebaseSchemaService,
-    _validate_identifier,
     _quote_pg_role,
+    _validate_identifier,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper / utility function tests
 # ---------------------------------------------------------------------------
+
 
 class TestValidateIdentifier:
     """Tests for _validate_identifier."""
@@ -97,12 +98,13 @@ class TestLakebaseSchemaServiceInit:
 
 def _make_async_engine_with_conn(mock_conn):
     """Create a properly mock async engine using MagicMock context manager."""
-    from unittest.mock import MagicMock
     import asyncio
+    from unittest.mock import MagicMock
 
     class AsyncCtxMgr:
         async def __aenter__(self):
             return mock_conn
+
         async def __aexit__(self, *args):
             return False
 
@@ -144,6 +146,7 @@ class TestCreateSchemaAsync:
         class AsyncCtxMgrTracked:
             async def __aenter__(self):
                 return mock_conn
+
             async def __aexit__(self, *args):
                 return False
 
@@ -152,7 +155,9 @@ class TestCreateSchemaAsync:
 
         # Should not raise
         try:
-            await service.create_schema_async(mock_engine, "user@example.com", recreate=True)
+            await service.create_schema_async(
+                mock_engine, "user@example.com", recreate=True
+            )
         except Exception:
             pass  # Some calls may not be fully mockable
 
@@ -161,7 +166,9 @@ class TestCreateSchemaAsync:
         """Grant errors are caught internally."""
         mock_conn = AsyncMock()
         # First execute succeeds (CREATE SCHEMA), subsequent ones fail
-        mock_conn.execute = AsyncMock(side_effect=[None, Exception("grant failed"), None])
+        mock_conn.execute = AsyncMock(
+            side_effect=[None, Exception("grant failed"), None]
+        )
         mock_engine = _make_async_engine_with_conn(mock_conn)
 
         # Should not raise because grant errors are caught
@@ -187,6 +194,7 @@ class TestCreateSchemaSync:
         class SyncCtxMgr:
             def __enter__(self):
                 return mock_conn
+
             def __exit__(self, *args):
                 return False
 
@@ -201,6 +209,7 @@ class TestCreateSchemaSync:
         class SyncCtxMgr:
             def __enter__(self):
                 return mock_conn
+
             def __exit__(self, *args):
                 return False
 
@@ -276,6 +285,7 @@ class TestCreateTablesAsync:
         class FailingCtxMgr:
             async def __aenter__(self):
                 raise RuntimeError("engine down")
+
             async def __aexit__(self, *args):
                 return False
 
@@ -410,6 +420,7 @@ class TestCreateTablesBatchSync:
         class SyncCtxMgr:
             def __enter__(self):
                 return mock_conn
+
             def __exit__(self, *args):
                 return False
 
@@ -437,6 +448,7 @@ class TestCreateTablesBatchSync:
         class SyncCtxMgr:
             def __enter__(self):
                 return mock_conn
+
             def __exit__(self, *args):
                 return False
 
@@ -469,6 +481,7 @@ class TestCreateDocEmbeddingsSync:
         class SyncCtxMgr:
             def __enter__(self):
                 return mock_conn
+
             def __exit__(self, *args):
                 return False
 
@@ -501,6 +514,7 @@ class TestCreateTablesSyncStream:
         class SyncCtxMgr:
             def __enter__(self):
                 return mock_conn
+
             def __exit__(self, *args):
                 return False
 
@@ -524,6 +538,7 @@ class TestCreateTablesSyncStream:
         class SyncCtxMgr:
             def __enter__(self):
                 return mock_conn
+
             def __exit__(self, *args):
                 return False
 
@@ -548,6 +563,7 @@ class TestCreateTablesSyncStream:
         class SyncCtxMgr:
             def __enter__(self):
                 return mock_conn
+
             def __exit__(self, *args):
                 return False
 
@@ -555,7 +571,11 @@ class TestCreateTablesSyncStream:
 
         with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
             mock_base.metadata.sorted_tables = [mock_table]
-            with patch.object(service, "_create_tables_batch_sync", side_effect=RuntimeError("db down")):
+            with patch.object(
+                service,
+                "_create_tables_batch_sync",
+                side_effect=RuntimeError("db down"),
+            ):
                 with pytest.raises(RuntimeError):
                     events = list(service.create_tables_sync_stream(mock_engine))
 
@@ -564,7 +584,10 @@ class TestCreateTablesSyncStream:
 # Orphaned table-owner tolerance (Postgres 42501 "must be owner")
 # ---------------------------------------------------------------------------
 
-from src.services.databricks.lakebase.schema import _is_not_owner_error, _owner_remediation
+from src.services.databricks.lakebase.schema import (
+    _is_not_owner_error,
+    _owner_remediation,
+)
 
 
 class TestOwnershipTolerance:
@@ -573,7 +596,11 @@ class TestOwnershipTolerance:
     that statement rather than abort with 'Error creating tables'."""
 
     def test_is_not_owner_error_detects_42501_and_message(self):
-        assert _is_not_owner_error(Exception("{'C': '42501', 'M': 'must be owner of table documentation_embeddings'}"))
+        assert _is_not_owner_error(
+            Exception(
+                "{'C': '42501', 'M': 'must be owner of table documentation_embeddings'}"
+            )
+        )
         assert _is_not_owner_error(Exception("must be owner of table crews"))
 
     def test_is_not_owner_error_ignores_other_errors(self):
@@ -592,7 +619,9 @@ class TestOwnershipTolerance:
         conn = MagicMock()
         cm = MagicMock()
         cm.__aenter__ = AsyncMock(return_value=None)
-        cm.__aexit__ = AsyncMock(return_value=False)  # don't suppress — let errors propagate
+        cm.__aexit__ = AsyncMock(
+            return_value=False
+        )  # don't suppress — let errors propagate
         conn.begin_nested = MagicMock(return_value=cm)
         conn.execute = AsyncMock(side_effect=execute_side_effect)
         return conn
@@ -600,11 +629,14 @@ class TestOwnershipTolerance:
     @pytest.mark.asyncio
     async def test_tolerant_async_skips_owner_error(self):
         conn = self._async_savepoint_conn(
-            Exception("{'C': '42501', 'M': 'must be owner of table documentation_embeddings'}")
+            Exception(
+                "{'C': '42501', 'M': 'must be owner of table documentation_embeddings'}"
+            )
         )
         # Must NOT raise — ownership error is tolerated.
         await LakebaseSchemaService._exec_ddl_tolerant_async(
-            conn, "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS group_id VARCHAR(100)"
+            conn,
+            "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS group_id VARCHAR(100)",
         )
 
     @pytest.mark.asyncio
@@ -621,8 +653,13 @@ class TestOwnershipTolerance:
         cm.__enter__ = MagicMock(return_value=None)
         cm.__exit__ = MagicMock(return_value=False)
         conn.begin_nested = MagicMock(return_value=cm)
-        conn.execute = MagicMock(side_effect=Exception("42501 must be owner of table documentation_embeddings"))
+        conn.execute = MagicMock(
+            side_effect=Exception(
+                "42501 must be owner of table documentation_embeddings"
+            )
+        )
         # Must NOT raise.
         LakebaseSchemaService._exec_ddl_tolerant_sync(
-            conn, "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS group_id VARCHAR(100)"
+            conn,
+            "ALTER TABLE documentation_embeddings ADD COLUMN IF NOT EXISTS group_id VARCHAR(100)",
         )

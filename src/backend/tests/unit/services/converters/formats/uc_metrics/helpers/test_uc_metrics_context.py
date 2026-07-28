@@ -6,11 +6,12 @@ Mirrors SQL context patterns but adapted for UC Metrics specifics.
 """
 
 import pytest
+
+from src.services.converters.base.models import KPI
 from src.services.converters.formats.uc_metrics.helpers.uc_metrics_context import (
     UCBaseKBIContext,
-    UCKBIContextCache
+    UCKBIContextCache,
 )
-from src.services.converters.base.models import KPI
 
 
 class TestUCBaseKBIContext:
@@ -23,7 +24,7 @@ class TestUCBaseKBIContext:
             description="Revenue",
             technical_name="revenue",
             formula="amount",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
     @pytest.fixture
@@ -34,7 +35,7 @@ class TestUCBaseKBIContext:
             technical_name="filtered_revenue",
             formula="amount",
             aggregation_type="SUM",
-            filters=["status = 'active'", "region = 'US'"]
+            filters=["status = 'active'", "region = 'US'"],
         )
 
     @pytest.fixture
@@ -45,7 +46,7 @@ class TestUCBaseKBIContext:
             technical_name="inventory",
             formula="stock_level",
             aggregation_type="SUM",
-            fields_for_constant_selection=["fiscal_period", "product_id"]
+            fields_for_constant_selection=["fiscal_period", "product_id"],
         )
 
     @pytest.fixture
@@ -56,7 +57,7 @@ class TestUCBaseKBIContext:
             technical_name="balance",
             formula="balance_amount",
             aggregation_type="SUM",
-            fields_for_exception_aggregation=["fiscal_period"]
+            fields_for_exception_aggregation=["fiscal_period"],
         )
 
     @pytest.fixture
@@ -67,7 +68,7 @@ class TestUCBaseKBIContext:
             technical_name="ytd_revenue",
             formula="[revenue]",
             aggregation_type="SUM",
-            filters=["year = 2023"]
+            filters=["year = 2023"],
         )
 
     # ========== Initialization Tests ==========
@@ -91,7 +92,7 @@ class TestUCBaseKBIContext:
             description="QTD Revenue",
             technical_name="qtd_revenue",
             formula="[revenue]",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
         context = UCBaseKBIContext(kbi=simple_kbi, parent_kbis=[parent_kbi, parent2])
         assert len(context.parent_kbis) == 2
@@ -172,7 +173,7 @@ class TestUCBaseKBIContext:
             description="QTD Revenue",
             technical_name="qtd_revenue",
             formula="[revenue]",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
         context = UCBaseKBIContext(kbi=simple_kbi, parent_kbis=[parent_kbi, parent2])
         chain = context.parent_kbis_chain
@@ -228,7 +229,7 @@ class TestUCBaseKBIContext:
             technical_name="parent",
             formula="amount",
             aggregation_type="SUM",
-            fields_for_constant_selection=["warehouse_id"]
+            fields_for_constant_selection=["warehouse_id"],
         )
         context = UCBaseKBIContext(kbi=simple_kbi, parent_kbis=[parent])
         fields = context.fields_for_constant_selection
@@ -239,7 +240,9 @@ class TestUCBaseKBIContext:
         context = UCBaseKBIContext(kbi=simple_kbi)
         assert len(context.fields_for_exception_aggregation) == 0
 
-    def test_fields_for_exception_aggregation_kbi_only(self, kbi_with_exception_aggregation):
+    def test_fields_for_exception_aggregation_kbi_only(
+        self, kbi_with_exception_aggregation
+    ):
         """Test exception aggregation fields from KBI only"""
         context = UCBaseKBIContext(kbi=kbi_with_exception_aggregation)
         fields = context.fields_for_exception_aggregation
@@ -253,7 +256,7 @@ class TestUCBaseKBIContext:
             technical_name="parent",
             formula="amount",
             aggregation_type="SUM",
-            fields_for_exception_aggregation=["product_id"]
+            fields_for_exception_aggregation=["product_id"],
         )
         context = UCBaseKBIContext(kbi=simple_kbi, parent_kbis=[parent])
         fields = context.fields_for_exception_aggregation
@@ -269,7 +272,9 @@ class TestUCBaseKBIContext:
 
     def test_get_kbi_context_with_parents(self, simple_kbi, parent_kbi):
         """Test factory method with parent KBIs"""
-        context = UCBaseKBIContext.get_kbi_context(kbi=simple_kbi, parent_kbis=[parent_kbi])
+        context = UCBaseKBIContext.get_kbi_context(
+            kbi=simple_kbi, parent_kbis=[parent_kbi]
+        )
         assert len(context.parent_kbis) == 1
 
     def test_is_valid_for_context_no_criteria(self, simple_kbi):
@@ -280,13 +285,22 @@ class TestUCBaseKBIContext:
         """Test validity check for KBI with filters"""
         assert UCBaseKBIContext.is_valid_for_context(kbi_with_filters) is True
 
-    def test_is_valid_for_context_with_constant_selection(self, kbi_with_constant_selection):
+    def test_is_valid_for_context_with_constant_selection(
+        self, kbi_with_constant_selection
+    ):
         """Test validity check for KBI with constant selection"""
-        assert UCBaseKBIContext.is_valid_for_context(kbi_with_constant_selection) is True
+        assert (
+            UCBaseKBIContext.is_valid_for_context(kbi_with_constant_selection) is True
+        )
 
-    def test_is_valid_for_context_with_exception_aggregation(self, kbi_with_exception_aggregation):
+    def test_is_valid_for_context_with_exception_aggregation(
+        self, kbi_with_exception_aggregation
+    ):
         """Test validity check for KBI with exception aggregation"""
-        assert UCBaseKBIContext.is_valid_for_context(kbi_with_exception_aggregation) is True
+        assert (
+            UCBaseKBIContext.is_valid_for_context(kbi_with_exception_aggregation)
+            is True
+        )
 
     def test_append_dependency_valid_kbi(self, kbi_with_filters):
         """Test appending valid KBI to dependency chain"""
@@ -325,7 +339,7 @@ class TestUCBaseKBIContext:
             technical_name="test",
             formula="amount",
             aggregation_type="SUM",
-            filters=["status = 'active'"]
+            filters=["status = 'active'"],
         )
         context = UCBaseKBIContext(kbi=kbi)
         expr = context.get_filter_expression()
@@ -346,7 +360,9 @@ class TestUCBaseKBIContext:
         result = context.get_target_columns_for_calculation(base_columns)
         assert result == base_columns
 
-    def test_get_target_columns_for_calculation_with_constant_selection(self, kbi_with_constant_selection):
+    def test_get_target_columns_for_calculation_with_constant_selection(
+        self, kbi_with_constant_selection
+    ):
         """Test target columns excluding constant selection fields"""
         context = UCBaseKBIContext(kbi=kbi_with_constant_selection)
         base_columns = {"fiscal_period", "product_id", "region", "warehouse_id"}
@@ -357,19 +373,25 @@ class TestUCBaseKBIContext:
         assert "fiscal_period" not in result
         assert "product_id" not in result
 
-    def test_needs_exception_aggregation_expansion_no_exception_fields(self, simple_kbi):
+    def test_needs_exception_aggregation_expansion_no_exception_fields(
+        self, simple_kbi
+    ):
         """Test exception aggregation expansion need with no exception fields"""
         context = UCBaseKBIContext(kbi=simple_kbi)
         target_columns = {"fiscal_period", "product_id"}
         assert context.needs_exception_aggregation_expansion(target_columns) is False
 
-    def test_needs_exception_aggregation_expansion_fields_in_target(self, kbi_with_exception_aggregation):
+    def test_needs_exception_aggregation_expansion_fields_in_target(
+        self, kbi_with_exception_aggregation
+    ):
         """Test exception aggregation expansion when fields already in target"""
         context = UCBaseKBIContext(kbi=kbi_with_exception_aggregation)
         target_columns = {"fiscal_period", "product_id", "region"}
         assert context.needs_exception_aggregation_expansion(target_columns) is False
 
-    def test_needs_exception_aggregation_expansion_fields_not_in_target(self, kbi_with_exception_aggregation):
+    def test_needs_exception_aggregation_expansion_fields_not_in_target(
+        self, kbi_with_exception_aggregation
+    ):
         """Test exception aggregation expansion when fields not in target"""
         context = UCBaseKBIContext(kbi=kbi_with_exception_aggregation)
         target_columns = {"product_id", "region"}
@@ -392,7 +414,7 @@ class TestUCKBIContextCache:
             technical_name="revenue",
             formula="amount",
             aggregation_type="SUM",
-            filters=["status = 'active'"]
+            filters=["status = 'active'"],
         )
         return UCBaseKBIContext(kbi=kbi)
 
@@ -404,7 +426,7 @@ class TestUCKBIContextCache:
             technical_name="cost",
             formula="cost_amount",
             aggregation_type="SUM",
-            filters=["region = 'US'"]
+            filters=["region = 'US'"],
         )
         return UCBaseKBIContext(kbi=kbi)
 
@@ -475,13 +497,13 @@ class TestUCKBIContextCache:
             technical_name="revenue",
             formula="amount",
             aggregation_type="SUM",
-            filters=["status = 'active'"]
+            filters=["status = 'active'"],
         )
         parent = KPI(
             description="Parent",
             technical_name="parent",
             formula="[revenue]",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         context1 = UCBaseKBIContext(kbi=kbi)
@@ -506,7 +528,9 @@ class TestUCKBIContextCache:
         combinations = cache.get_unique_filter_combinations()
         assert len(combinations) == 1
 
-    def test_get_unique_filter_combinations_multiple_different(self, cache, simple_context, another_context):
+    def test_get_unique_filter_combinations_multiple_different(
+        self, cache, simple_context, another_context
+    ):
         """Test getting multiple different filter combinations"""
         cache.add_context(simple_context)
         cache.add_context(another_context)
@@ -520,14 +544,14 @@ class TestUCKBIContextCache:
             technical_name="revenue1",
             formula="amount",
             aggregation_type="SUM",
-            filters=["status = 'active'"]
+            filters=["status = 'active'"],
         )
         kbi2 = KPI(
             description="Revenue2",
             technical_name="revenue2",
             formula="amount",
             aggregation_type="SUM",
-            filters=["status = 'active'"]
+            filters=["status = 'active'"],
         )
 
         cache.add_context(UCBaseKBIContext(kbi=kbi1))
@@ -543,7 +567,7 @@ class TestUCKBIContextCache:
             description="Revenue",
             technical_name="revenue",
             formula="amount",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
         cache.add_context(UCBaseKBIContext(kbi=kbi))
         combinations = cache.get_unique_filter_combinations()

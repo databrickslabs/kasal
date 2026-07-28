@@ -6,14 +6,15 @@ and one that silently did nothing unless every independent task got it. The crew
 now carries process="parallel" and the engine opts the independent tasks in.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.execution.runtime import Process
-from src.services.execution.config_adapter import adapt_config
-from src.services.execution.config.crew_config_builder import CrewConfigBuilder
-from src.services.agent_builder.crew_preparation import CrewPreparation
+import pytest
+
 from src.schemas.execution import CrewConfig
+from src.services.agent_builder.crew_preparation import CrewPreparation
+from src.services.execution.config.crew_config_builder import CrewConfigBuilder
+from src.services.execution.config_adapter import adapt_config
+from src.services.execution.runtime import Process
 
 
 class TestProcessSurvivesTheRunPayload:
@@ -25,7 +26,9 @@ class TestProcessSurvivesTheRunPayload:
         return adapt_config(
             CrewConfig(
                 agents_yaml={"a1": {"role": "r", "goal": "g", "backstory": "b"}},
-                tasks_yaml={"t1": {"description": "d", "expected_output": "e", "agent": "a1"}},
+                tasks_yaml={
+                    "t1": {"description": "d", "expected_output": "e", "agent": "a1"}
+                },
                 inputs=inputs,
                 model="gpt-5-nano",
             )
@@ -35,8 +38,13 @@ class TestProcessSurvivesTheRunPayload:
         assert self._adapted({"process": "parallel"})["crew"]["process"] == "parallel"
 
     def test_hierarchical_and_sequential_still_reach_it(self):
-        assert self._adapted({"process": "hierarchical"})["crew"]["process"] == "hierarchical"
-        assert self._adapted({"process": "sequential"})["crew"]["process"] == "sequential"
+        assert (
+            self._adapted({"process": "hierarchical"})["crew"]["process"]
+            == "hierarchical"
+        )
+        assert (
+            self._adapted({"process": "sequential"})["crew"]["process"] == "sequential"
+        )
 
     def test_missing_process_defaults_to_sequential(self):
         assert self._adapted({})["crew"]["process"] == "sequential"
@@ -53,10 +61,15 @@ class TestDetermineProcessType:
         assert self._builder("parallel").determine_process_type() == Process.sequential
 
     def test_hierarchical_is_untouched(self):
-        assert self._builder("hierarchical").determine_process_type() == Process.hierarchical
+        assert (
+            self._builder("hierarchical").determine_process_type()
+            == Process.hierarchical
+        )
 
     def test_sequential_and_unknown_stay_sequential(self):
-        assert self._builder("sequential").determine_process_type() == Process.sequential
+        assert (
+            self._builder("sequential").determine_process_type() == Process.sequential
+        )
         assert self._builder("nonsense").determine_process_type() == Process.sequential
 
     def test_case_is_ignored(self):
@@ -104,9 +117,24 @@ class TestParallelCrewMarksIndependentTasksAsync:
             _config(
                 "parallel",
                 [
-                    {"name": "t1", "agent": "a1", "description": "d", "expected_output": "e"},
-                    {"name": "t2", "agent": "a1", "description": "d", "expected_output": "e"},
-                    {"name": "t3", "agent": "a1", "description": "d", "expected_output": "e"},
+                    {
+                        "name": "t1",
+                        "agent": "a1",
+                        "description": "d",
+                        "expected_output": "e",
+                    },
+                    {
+                        "name": "t2",
+                        "agent": "a1",
+                        "description": "d",
+                        "expected_output": "e",
+                    },
+                    {
+                        "name": "t3",
+                        "agent": "a1",
+                        "description": "d",
+                        "expected_output": "e",
+                    },
                 ],
             )
         )
@@ -119,7 +147,12 @@ class TestParallelCrewMarksIndependentTasksAsync:
             _config(
                 "parallel",
                 [
-                    {"name": "t1", "agent": "a1", "description": "d", "expected_output": "e"},
+                    {
+                        "name": "t1",
+                        "agent": "a1",
+                        "description": "d",
+                        "expected_output": "e",
+                    },
                     {
                         "name": "t2",
                         "agent": "a1",
@@ -139,8 +172,18 @@ class TestParallelCrewMarksIndependentTasksAsync:
             _config(
                 "sequential",
                 [
-                    {"name": "t1", "agent": "a1", "description": "d", "expected_output": "e"},
-                    {"name": "t2", "agent": "a1", "description": "d", "expected_output": "e"},
+                    {
+                        "name": "t1",
+                        "agent": "a1",
+                        "description": "d",
+                        "expected_output": "e",
+                    },
+                    {
+                        "name": "t2",
+                        "agent": "a1",
+                        "description": "d",
+                        "expected_output": "e",
+                    },
                 ],
             )
         )
@@ -176,10 +219,20 @@ class TestParallelCrewMarksIndependentTasksAsync:
             _config(
                 "parallel",
                 [
-                    {"name": "t1", "agent": "a1", "description": "d",
-                     "expected_output": "e", "async_execution": False},
-                    {"name": "t2", "agent": "a1", "description": "d",
-                     "expected_output": "e", "async_execution": False},
+                    {
+                        "name": "t1",
+                        "agent": "a1",
+                        "description": "d",
+                        "expected_output": "e",
+                        "async_execution": False,
+                    },
+                    {
+                        "name": "t2",
+                        "agent": "a1",
+                        "description": "d",
+                        "expected_output": "e",
+                        "async_execution": False,
+                    },
                 ],
             )
         )

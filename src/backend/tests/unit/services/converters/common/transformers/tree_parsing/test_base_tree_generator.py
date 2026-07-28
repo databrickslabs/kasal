@@ -5,8 +5,11 @@ Tests abstract base tree parsing generator and dependency resolution.
 """
 
 import pytest
-from src.services.converters.common.transformers.tree_parsing.base_tree_generator import BaseTreeParsingGenerator
+
 from src.services.converters.base.models import KPI, KPIDefinition
+from src.services.converters.common.transformers.tree_parsing.base_tree_generator import (
+    BaseTreeParsingGenerator,
+)
 
 
 # Concrete implementation for testing
@@ -45,15 +48,15 @@ class TestBaseTreeParsingGenerator:
                     description="Total Sales",
                     technical_name="total_sales",
                     formula="SUM(transactions.revenue)",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Total Cost",
                     technical_name="total_cost",
                     formula="SUM(expenses.amount)",
-                    aggregation_type="SUM"
-                )
-            ]
+                    aggregation_type="SUM",
+                ),
+            ],
         )
 
     @pytest.fixture
@@ -67,27 +70,27 @@ class TestBaseTreeParsingGenerator:
                     description="Sales",
                     technical_name="sales",
                     formula="SUM(transactions.revenue)",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Cost",
                     technical_name="cost",
                     formula="SUM(expenses.amount)",
-                    aggregation_type="SUM"
+                    aggregation_type="SUM",
                 ),
                 KPI(
                     description="Profit",
                     technical_name="profit",
                     formula="[sales] - [cost]",
-                    aggregation_type="CALCULATED"
+                    aggregation_type="CALCULATED",
                 ),
                 KPI(
                     description="Profit Margin",
                     technical_name="profit_margin",
                     formula="[profit] / [sales]",
-                    aggregation_type="CALCULATED"
-                )
-            ]
+                    aggregation_type="CALCULATED",
+                ),
+            ],
         )
 
     @pytest.fixture
@@ -101,15 +104,15 @@ class TestBaseTreeParsingGenerator:
                     description="A",
                     technical_name="measure_a",
                     formula="[measure_b] + 100",
-                    aggregation_type="CALCULATED"
+                    aggregation_type="CALCULATED",
                 ),
                 KPI(
                     description="B",
                     technical_name="measure_b",
                     formula="[measure_a] * 2",
-                    aggregation_type="CALCULATED"
-                )
-            ]
+                    aggregation_type="CALCULATED",
+                ),
+            ],
         )
 
     # ========== Initialization Tests ==========
@@ -117,7 +120,7 @@ class TestBaseTreeParsingGenerator:
     def test_generator_initialization(self, generator):
         """Test generator initializes with dependency resolver"""
         assert generator.dependency_resolver is not None
-        assert hasattr(generator.dependency_resolver, 'register_measures')
+        assert hasattr(generator.dependency_resolver, "register_measures")
 
     # ========== generate_all_measures Tests ==========
 
@@ -128,16 +131,22 @@ class TestBaseTreeParsingGenerator:
         assert len(measures) == 2
         assert all(m.startswith("LEAF:") for m in measures)
 
-    def test_generate_all_measures_with_dependencies(self, generator, dependency_definition):
+    def test_generate_all_measures_with_dependencies(
+        self, generator, dependency_definition
+    ):
         """Test generating measures with dependencies in correct order"""
         measures = generator.generate_all_measures(dependency_definition)
 
         assert len(measures) == 4
 
         # Find indices
-        sales_idx = next(i for i, m in enumerate(measures) if "sales" in m and "profit" not in m)
+        sales_idx = next(
+            i for i, m in enumerate(measures) if "sales" in m and "profit" not in m
+        )
         cost_idx = next(i for i, m in enumerate(measures) if "cost" in m)
-        profit_idx = next(i for i, m in enumerate(measures) if m.startswith("CALC_INLINE:profit="))
+        profit_idx = next(
+            i for i, m in enumerate(measures) if m.startswith("CALC_INLINE:profit=")
+        )
         margin_idx = next(i for i, m in enumerate(measures) if "profit_margin" in m)
 
         # Dependencies should come before dependents
@@ -145,7 +154,9 @@ class TestBaseTreeParsingGenerator:
         assert cost_idx < profit_idx
         assert profit_idx < margin_idx
 
-    def test_generate_all_measures_circular_dependency_error(self, generator, circular_definition):
+    def test_generate_all_measures_circular_dependency_error(
+        self, generator, circular_definition
+    ):
         """Test circular dependencies raise ValueError"""
         with pytest.raises(ValueError) as exc_info:
             generator.generate_all_measures(circular_definition)
@@ -153,7 +164,9 @@ class TestBaseTreeParsingGenerator:
         assert "Circular dependencies detected" in str(exc_info.value)
         assert "measure_a" in str(exc_info.value) or "measure_b" in str(exc_info.value)
 
-    def test_generate_all_measures_preserves_leaf_types(self, generator, dependency_definition):
+    def test_generate_all_measures_preserves_leaf_types(
+        self, generator, dependency_definition
+    ):
         """Test leaf measures use leaf generation method"""
         measures = generator.generate_all_measures(dependency_definition)
 
@@ -164,7 +177,9 @@ class TestBaseTreeParsingGenerator:
         assert any("sales" in m for m in leaf_measures)
         assert any("cost" in m for m in leaf_measures)
 
-    def test_generate_all_measures_calculated_inline(self, generator, dependency_definition):
+    def test_generate_all_measures_calculated_inline(
+        self, generator, dependency_definition
+    ):
         """Test calculated measures use inline generation"""
         measures = generator.generate_all_measures(dependency_definition)
 
@@ -177,11 +192,12 @@ class TestBaseTreeParsingGenerator:
 
     # ========== generate_measure_with_separate_dependencies Tests ==========
 
-    def test_generate_measure_with_separate_dependencies(self, generator, dependency_definition):
+    def test_generate_measure_with_separate_dependencies(
+        self, generator, dependency_definition
+    ):
         """Test generating measure with its dependencies separately"""
         measures = generator.generate_measure_with_separate_dependencies(
-            dependency_definition,
-            "profit_margin"
+            dependency_definition, "profit_margin"
         )
 
         # Should have: sales, cost, profit, profit_margin
@@ -194,43 +210,49 @@ class TestBaseTreeParsingGenerator:
 
         assert profit_idx < margin_idx
 
-    def test_generate_measure_with_separate_dependencies_leaf_only(self, generator, simple_definition):
+    def test_generate_measure_with_separate_dependencies_leaf_only(
+        self, generator, simple_definition
+    ):
         """Test generating leaf measure returns only that measure"""
         measures = generator.generate_measure_with_separate_dependencies(
-            simple_definition,
-            "total_sales"
+            simple_definition, "total_sales"
         )
 
         assert len(measures) == 1
         assert "total_sales" in measures[0]
 
-    def test_generate_measure_with_separate_dependencies_uses_references(self, generator, dependency_definition):
+    def test_generate_measure_with_separate_dependencies_uses_references(
+        self, generator, dependency_definition
+    ):
         """Test calculated measures use reference generation in separate mode"""
         measures = generator.generate_measure_with_separate_dependencies(
-            dependency_definition,
-            "profit"
+            dependency_definition, "profit"
         )
 
         # Profit should use CALC_REF (references) not CALC_INLINE
-        profit_measure = next(m for m in measures if "profit" in m and "margin" not in m)
+        profit_measure = next(
+            m for m in measures if "profit" in m and "margin" not in m
+        )
         assert profit_measure.startswith("CALC_REF:")
 
-    def test_generate_measure_with_separate_dependencies_not_found(self, generator, simple_definition):
+    def test_generate_measure_with_separate_dependencies_not_found(
+        self, generator, simple_definition
+    ):
         """Test error when target measure not found"""
         with pytest.raises(ValueError) as exc_info:
             generator.generate_measure_with_separate_dependencies(
-                simple_definition,
-                "nonexistent"
+                simple_definition, "nonexistent"
             )
 
         assert "not found" in str(exc_info.value).lower()
 
-    def test_generate_measure_with_separate_dependencies_partial_tree(self, generator, dependency_definition):
+    def test_generate_measure_with_separate_dependencies_partial_tree(
+        self, generator, dependency_definition
+    ):
         """Test only required dependencies are generated"""
         # Generate only profit (needs sales and cost, but not profit_margin)
         measures = generator.generate_measure_with_separate_dependencies(
-            dependency_definition,
-            "profit"
+            dependency_definition, "profit"
         )
 
         measure_names = [m.split(":", 1)[1].split("=")[0] for m in measures]
@@ -251,7 +273,9 @@ class TestBaseTreeParsingGenerator:
         assert len(analysis["dependency_order"]) == 2
         assert analysis["circular_dependencies"] == []
 
-    def test_get_dependency_analysis_with_dependencies(self, generator, dependency_definition):
+    def test_get_dependency_analysis_with_dependencies(
+        self, generator, dependency_definition
+    ):
         """Test dependency analysis shows dependencies"""
         analysis = generator.get_dependency_analysis(dependency_definition)
 
@@ -271,7 +295,9 @@ class TestBaseTreeParsingGenerator:
         assert sales_idx < profit_idx
         assert cost_idx < profit_idx
 
-    def test_get_dependency_analysis_includes_trees(self, generator, dependency_definition):
+    def test_get_dependency_analysis_includes_trees(
+        self, generator, dependency_definition
+    ):
         """Test dependency analysis includes measure trees"""
         analysis = generator.get_dependency_analysis(dependency_definition)
 
@@ -307,7 +333,9 @@ class TestBaseTreeParsingGenerator:
         assert report["summary"]["calculated_measures"] == 0
         assert report["summary"]["max_dependency_depth"] == 0
 
-    def test_get_measure_complexity_report_with_dependencies(self, generator, dependency_definition):
+    def test_get_measure_complexity_report_with_dependencies(
+        self, generator, dependency_definition
+    ):
         """Test complexity report shows dependency depth"""
         report = generator.get_measure_complexity_report(dependency_definition)
 
@@ -323,7 +351,9 @@ class TestBaseTreeParsingGenerator:
         assert report["measures"]["profit"]["is_leaf"] is False
         assert report["measures"]["profit"]["total_dependencies"] == 2
 
-    def test_get_measure_complexity_report_max_depth(self, generator, dependency_definition):
+    def test_get_measure_complexity_report_max_depth(
+        self, generator, dependency_definition
+    ):
         """Test complexity report identifies max depth"""
         report = generator.get_measure_complexity_report(dependency_definition)
 
@@ -332,7 +362,9 @@ class TestBaseTreeParsingGenerator:
         assert report["summary"]["max_dependency_depth"] >= 1
         assert report["summary"]["most_complex_measure"] is not None
 
-    def test_get_measure_complexity_report_measure_details(self, generator, dependency_definition):
+    def test_get_measure_complexity_report_measure_details(
+        self, generator, dependency_definition
+    ):
         """Test complexity report includes measure details"""
         report = generator.get_measure_complexity_report(dependency_definition)
 
@@ -341,7 +373,9 @@ class TestBaseTreeParsingGenerator:
         assert profit_margin["name"] == "profit_margin"
         assert profit_margin["description"] == "Profit Margin"
         assert profit_margin["direct_dependencies"] > 0
-        assert profit_margin["total_dependencies"] > profit_margin["direct_dependencies"]
+        assert (
+            profit_margin["total_dependencies"] > profit_margin["direct_dependencies"]
+        )
 
     # ========== Dependency Depth Calculation Tests ==========
 
@@ -367,7 +401,9 @@ class TestBaseTreeParsingGenerator:
         # profit_margin depends on profit (depth 2)
         assert generator._calculate_dependency_depth("profit_margin") == 2
 
-    def test_calculate_dependency_depth_handles_circular(self, generator, circular_definition):
+    def test_calculate_dependency_depth_handles_circular(
+        self, generator, circular_definition
+    ):
         """Test depth calculation handles circular dependencies gracefully"""
         generator.dependency_resolver.register_measures(circular_definition)
 
@@ -407,8 +443,7 @@ class TestBaseTreeParsingGenerator:
 
         # Generate specific measure with dependencies
         profit_measures = generator.generate_measure_with_separate_dependencies(
-            dependency_definition,
-            "profit"
+            dependency_definition, "profit"
         )
         assert len(profit_measures) == 3  # sales, cost, profit
 

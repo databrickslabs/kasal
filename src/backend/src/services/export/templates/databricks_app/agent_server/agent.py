@@ -21,27 +21,24 @@ import uuid
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-import yaml
+import agent_server.conversation as conversation
 import mlflow
-from crewai import Agent, Crew, Task, Process, LLM
+import yaml
+from agent_server import a2ui_store, cancel, crew_progress, progress
+
+# The ONE shared, stdlib-only A2UI composer (vendored verbatim from Kasal's
+# src.services.a2ui into agent_server/a2ui/) — the SAME code live Kasal chat runs,
+# so generative UI never forks into a second implementation.
+from agent_server.a2ui.compose import compose_a2ui as _compose_surface
+from agent_server.a2ui.compose import guidance_for as _a2ui_guidance_for
+from agent_server.a2ui.compose import load_catalog as _load_a2ui_catalog
+from agent_server.utils import get_session_id, get_user_id, get_user_workspace_client
+from crewai import LLM, Agent, Crew, Process, Task
 from mlflow.genai.agent_server import invoke, stream
 from mlflow.types.responses import (
     ResponsesAgentRequest,
     ResponsesAgentResponse,
     ResponsesAgentStreamEvent,
-)
-
-import agent_server.conversation as conversation
-from agent_server import a2ui_store, cancel, crew_progress, progress
-from agent_server.utils import get_session_id, get_user_id, get_user_workspace_client
-
-# The ONE shared, stdlib-only A2UI composer (vendored verbatim from Kasal's
-# src.services.a2ui into agent_server/a2ui/) — the SAME code live Kasal chat runs,
-# so generative UI never forks into a second implementation.
-from agent_server.a2ui.compose import (
-    compose_a2ui as _compose_surface,
-    guidance_for as _a2ui_guidance_for,
-    load_catalog as _load_a2ui_catalog,
 )
 
 # --- Runaway / hang guards (so a stuck turn can't burn tokens forever) ---------

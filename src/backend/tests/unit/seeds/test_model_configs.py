@@ -3,15 +3,17 @@ Unit tests for model configs seed module.
 
 Tests the DEFAULT_MODELS data structure, data integrity, and seed functions.
 """
+
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from src.seeds.model_configs import (
     DEFAULT_MODELS,
     MODEL_CONFIGS,
     REMOVED_MODEL_KEYS,
-    seed_async,
     seed,
+    seed_async,
 )
 
 
@@ -101,64 +103,67 @@ class TestDefaultModelsDataStructure:
     def test_required_fields_present(self):
         """Test that every model has the required fields."""
         required_fields = [
-            "name", "temperature", "provider",
-            "context_window", "max_output_tokens",
+            "name",
+            "temperature",
+            "provider",
+            "context_window",
+            "max_output_tokens",
         ]
         for model_key, model_data in DEFAULT_MODELS.items():
             for field in required_fields:
-                assert field in model_data, (
-                    f"Model '{model_key}' missing required field '{field}'"
-                )
+                assert (
+                    field in model_data
+                ), f"Model '{model_key}' missing required field '{field}'"
 
     def test_temperature_types(self):
         """Test that temperature values are numeric."""
         for model_key, model_data in DEFAULT_MODELS.items():
-            assert isinstance(model_data["temperature"], (int, float)), (
-                f"Model '{model_key}' has non-numeric temperature"
-            )
+            assert isinstance(
+                model_data["temperature"], (int, float)
+            ), f"Model '{model_key}' has non-numeric temperature"
 
     def test_temperature_range(self):
         """Test that temperature values are in a reasonable range."""
         for model_key, model_data in DEFAULT_MODELS.items():
             temp = model_data["temperature"]
-            assert 0.0 <= temp <= 2.0, (
-                f"Model '{model_key}' has temperature {temp} outside [0, 2]"
-            )
+            assert (
+                0.0 <= temp <= 2.0
+            ), f"Model '{model_key}' has temperature {temp} outside [0, 2]"
 
     def test_context_window_type(self):
         """Test that context_window values are integers."""
         for model_key, model_data in DEFAULT_MODELS.items():
-            assert isinstance(model_data["context_window"], int), (
-                f"Model '{model_key}' has non-integer context_window"
-            )
+            assert isinstance(
+                model_data["context_window"], int
+            ), f"Model '{model_key}' has non-integer context_window"
 
     def test_context_window_positive(self):
         """Test that context_window values are positive."""
         for model_key, model_data in DEFAULT_MODELS.items():
-            assert model_data["context_window"] > 0, (
-                f"Model '{model_key}' has non-positive context_window"
-            )
+            assert (
+                model_data["context_window"] > 0
+            ), f"Model '{model_key}' has non-positive context_window"
 
     def test_max_output_tokens_type(self):
         """Test that max_output_tokens values are integers."""
         for model_key, model_data in DEFAULT_MODELS.items():
-            assert isinstance(model_data["max_output_tokens"], int), (
-                f"Model '{model_key}' has non-integer max_output_tokens"
-            )
+            assert isinstance(
+                model_data["max_output_tokens"], int
+            ), f"Model '{model_key}' has non-integer max_output_tokens"
 
     def test_max_output_tokens_positive(self):
         """Test that max_output_tokens values are positive."""
         for model_key, model_data in DEFAULT_MODELS.items():
-            assert model_data["max_output_tokens"] > 0, (
-                f"Model '{model_key}' has non-positive max_output_tokens"
-            )
+            assert (
+                model_data["max_output_tokens"] > 0
+            ), f"Model '{model_key}' has non-positive max_output_tokens"
 
     def test_provider_type(self):
         """Test that provider values are strings."""
         for model_key, model_data in DEFAULT_MODELS.items():
-            assert isinstance(model_data["provider"], str), (
-                f"Model '{model_key}' has non-string provider"
-            )
+            assert isinstance(
+                model_data["provider"], str
+            ), f"Model '{model_key}' has non-string provider"
 
     def test_valid_providers(self):
         """Test that all providers are known.
@@ -171,40 +176,36 @@ class TestDefaultModelsDataStructure:
 
         valid_providers = {provider.value for provider in ModelProvider}
         for model_key, model_data in DEFAULT_MODELS.items():
-            assert model_data["provider"] in valid_providers, (
-                f"Model '{model_key}' has unknown provider '{model_data['provider']}'"
-            )
+            assert (
+                model_data["provider"] in valid_providers
+            ), f"Model '{model_key}' has unknown provider '{model_data['provider']}'"
 
     def test_name_type(self):
         """Test that name values are non-empty strings."""
         for model_key, model_data in DEFAULT_MODELS.items():
             assert isinstance(model_data["name"], str)
-            assert len(model_data["name"]) > 0, (
-                f"Model '{model_key}' has empty name"
-            )
+            assert len(model_data["name"]) > 0, f"Model '{model_key}' has empty name"
 
     def test_extended_thinking_field_is_optional_boolean(self):
         """extended_thinking is optional (the Claude 3.7 thinking model was
         removed); when a model declares it, it must be a boolean."""
         for k, v in DEFAULT_MODELS.items():
             if "extended_thinking" in v:
-                assert isinstance(v["extended_thinking"], bool), (
-                    f"Model {k} extended_thinking must be a bool"
-                )
+                assert isinstance(
+                    v["extended_thinking"], bool
+                ), f"Model {k} extended_thinking must be a bool"
 
     def test_databricks_models_exist(self):
         """Test that Databricks models are present."""
         databricks_models = [
-            k for k, v in DEFAULT_MODELS.items()
-            if v["provider"] == "databricks"
+            k for k, v in DEFAULT_MODELS.items() if v["provider"] == "databricks"
         ]
         assert len(databricks_models) > 0
 
     def test_ollama_models_exist(self):
         """Test that Ollama models are present."""
         ollama_models = [
-            k for k, v in DEFAULT_MODELS.items()
-            if v["provider"] == "ollama"
+            k for k, v in DEFAULT_MODELS.items() if v["provider"] == "ollama"
         ]
         assert len(ollama_models) > 0
 
@@ -224,7 +225,9 @@ class TestSeedAsyncFunction:
         mock_context.__aenter__.return_value = mock_session
         mock_context.__aexit__.return_value = None
 
-        with patch("src.seeds.model_configs.async_session_factory", return_value=mock_context):
+        with patch(
+            "src.seeds.model_configs.async_session_factory", return_value=mock_context
+        ):
             await seed_async()
 
         mock_session.commit.assert_awaited_once()
@@ -242,7 +245,9 @@ class TestSeedAsyncFunction:
         mock_context.__aenter__.return_value = mock_session
         mock_context.__aexit__.return_value = None
 
-        with patch("src.seeds.model_configs.async_session_factory", return_value=mock_context):
+        with patch(
+            "src.seeds.model_configs.async_session_factory", return_value=mock_context
+        ):
             await seed_async()
 
         added = [c.args[0] for c in mock_session.add.call_args_list]
@@ -251,7 +256,9 @@ class TestSeedAsyncFunction:
             if mc.provider == "databricks":
                 assert mc.enabled is True, f"{mc.key} (databricks) should be enabled"
             else:
-                assert mc.enabled is False, f"{mc.key} ({mc.provider}) should be disabled"
+                assert (
+                    mc.enabled is False
+                ), f"{mc.key} ({mc.provider}) should be disabled"
         # sanity: the dataset contains both databricks and non-databricks models
         assert any(mc.provider == "databricks" for mc in added)
         assert any(mc.provider != "databricks" for mc in added)
@@ -271,7 +278,9 @@ class TestSeedAsyncFunction:
         mock_context.__aenter__.return_value = mock_session
         mock_context.__aexit__.return_value = None
 
-        with patch("src.seeds.model_configs.async_session_factory", return_value=mock_context):
+        with patch(
+            "src.seeds.model_configs.async_session_factory", return_value=mock_context
+        ):
             await seed_async()
 
         mock_session.commit.assert_awaited_once()
@@ -291,7 +300,9 @@ class TestSeedAsyncFunction:
         mock_context.__aenter__.return_value = mock_session
         mock_context.__aexit__.return_value = None
 
-        with patch("src.seeds.model_configs.async_session_factory", return_value=mock_context):
+        with patch(
+            "src.seeds.model_configs.async_session_factory", return_value=mock_context
+        ):
             await seed_async()
 
         assert mock_session.delete.await_count == len(REMOVED_MODEL_KEYS)
@@ -310,7 +321,9 @@ class TestSeedAsyncFunction:
         mock_context.__aenter__.return_value = mock_session
         mock_context.__aexit__.return_value = None
 
-        with patch("src.seeds.model_configs.async_session_factory", return_value=mock_context):
+        with patch(
+            "src.seeds.model_configs.async_session_factory", return_value=mock_context
+        ):
             with pytest.raises(Exception, match="DB error"):
                 await seed_async()
 
@@ -323,14 +336,18 @@ class TestSeedEntryPoint:
     @pytest.mark.asyncio
     async def test_seed_calls_seed_async(self):
         """Test that seed() delegates to seed_async()."""
-        with patch("src.seeds.model_configs.seed_async", new_callable=AsyncMock) as mock:
+        with patch(
+            "src.seeds.model_configs.seed_async", new_callable=AsyncMock
+        ) as mock:
             await seed()
             mock.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_seed_does_not_raise_on_error(self):
         """Test that seed() suppresses exceptions and logs them."""
-        with patch("src.seeds.model_configs.seed_async", new_callable=AsyncMock) as mock:
+        with patch(
+            "src.seeds.model_configs.seed_async", new_callable=AsyncMock
+        ) as mock:
             mock.side_effect = Exception("Seed failure")
             # Should not raise
             await seed()
@@ -351,13 +368,19 @@ class TestSeedAsyncValidation:
     async def test_seed_async_skips_model_missing_fields(self):
         """Test that seed_async skips models with missing required fields."""
         bad_models = {
-            "bad-model": {"name": "bad", "temperature": 0.7},  # missing provider, context_window, max_output_tokens
+            "bad-model": {
+                "name": "bad",
+                "temperature": 0.7,
+            },  # missing provider, context_window, max_output_tokens
         }
         mock_session = AsyncMock()
         mock_context = self._make_session_context(mock_session)
 
         with (
-            patch("src.seeds.model_configs.async_session_factory", return_value=mock_context),
+            patch(
+                "src.seeds.model_configs.async_session_factory",
+                return_value=mock_context,
+            ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
         ):
             await seed_async()
@@ -370,8 +393,10 @@ class TestSeedAsyncValidation:
         """Test that seed_async skips models with non-numeric temperature."""
         bad_models = {
             "bad-temp": {
-                "name": "bad", "temperature": "not_a_number",
-                "provider": "openai", "context_window": 128000,
+                "name": "bad",
+                "temperature": "not_a_number",
+                "provider": "openai",
+                "context_window": 128000,
                 "max_output_tokens": 4096,
             },
         }
@@ -379,7 +404,10 @@ class TestSeedAsyncValidation:
         mock_context = self._make_session_context(mock_session)
 
         with (
-            patch("src.seeds.model_configs.async_session_factory", return_value=mock_context),
+            patch(
+                "src.seeds.model_configs.async_session_factory",
+                return_value=mock_context,
+            ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
         ):
             await seed_async()
@@ -391,8 +419,10 @@ class TestSeedAsyncValidation:
         """Test that seed_async skips models with non-integer context_window."""
         bad_models = {
             "bad-ctx": {
-                "name": "bad", "temperature": 0.7,
-                "provider": "openai", "context_window": "big",
+                "name": "bad",
+                "temperature": 0.7,
+                "provider": "openai",
+                "context_window": "big",
                 "max_output_tokens": 4096,
             },
         }
@@ -400,7 +430,10 @@ class TestSeedAsyncValidation:
         mock_context = self._make_session_context(mock_session)
 
         with (
-            patch("src.seeds.model_configs.async_session_factory", return_value=mock_context),
+            patch(
+                "src.seeds.model_configs.async_session_factory",
+                return_value=mock_context,
+            ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
         ):
             await seed_async()
@@ -412,8 +445,10 @@ class TestSeedAsyncValidation:
         """Test that seed_async skips models with non-integer max_output_tokens."""
         bad_models = {
             "bad-tokens": {
-                "name": "bad", "temperature": 0.7,
-                "provider": "openai", "context_window": 128000,
+                "name": "bad",
+                "temperature": 0.7,
+                "provider": "openai",
+                "context_window": 128000,
                 "max_output_tokens": 40.96,
             },
         }
@@ -421,7 +456,10 @@ class TestSeedAsyncValidation:
         mock_context = self._make_session_context(mock_session)
 
         with (
-            patch("src.seeds.model_configs.async_session_factory", return_value=mock_context),
+            patch(
+                "src.seeds.model_configs.async_session_factory",
+                return_value=mock_context,
+            ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", bad_models),
         ):
             await seed_async()
@@ -438,14 +476,19 @@ class TestSeedAsyncValidation:
 
         single_model = {
             "test-model": {
-                "name": "test", "temperature": 0.7,
-                "provider": "openai", "context_window": 128000,
+                "name": "test",
+                "temperature": 0.7,
+                "provider": "openai",
+                "context_window": 128000,
                 "max_output_tokens": 4096,
             },
         }
 
         with (
-            patch("src.seeds.model_configs.async_session_factory", return_value=mock_context),
+            patch(
+                "src.seeds.model_configs.async_session_factory",
+                return_value=mock_context,
+            ),
             patch("src.seeds.model_configs.DEFAULT_MODELS", single_model),
         ):
             await seed_async()
@@ -464,6 +507,7 @@ class TestMainBlock:
             patch("src.seeds.model_configs.__name__", "__main__"),
         ):
             import asyncio
+
             asyncio.run(mock_seed())
             mock_seed.assert_awaited_once()
 
@@ -502,7 +546,9 @@ class TestAuditedDatabricksModels:
     def test_broken_models_pruned(self):
         """Each broken endpoint is gone from DEFAULT_MODELS and listed for pruning."""
         for key in self.AUDIT_REMOVED:
-            assert key not in DEFAULT_MODELS, f"{key} should be removed from DEFAULT_MODELS"
+            assert (
+                key not in DEFAULT_MODELS
+            ), f"{key} should be removed from DEFAULT_MODELS"
             assert key in REMOVED_MODEL_KEYS, f"{key} must be registered for DB pruning"
 
     def test_new_working_models_added(self):
@@ -530,7 +576,9 @@ class TestAuditedDatabricksModels:
         """The qwen3-next endpoint caps output at 10000 ('max_tokens cannot
         exceed 10000'); the seed must not exceed it or real runs 400."""
         assert (
-            DEFAULT_MODELS["databricks-qwen3-next-80b-a3b-instruct"]["max_output_tokens"]
+            DEFAULT_MODELS["databricks-qwen3-next-80b-a3b-instruct"][
+                "max_output_tokens"
+            ]
             <= 10000
         )
 
@@ -565,13 +613,20 @@ class TestDeepSeekModels:
         """The API call uses `name`, not the key (llm_manager builds
         f"deepseek/{name}"), so an agent still on a v3.1 key must land on a v4
         endpoint rather than a model that no longer exists."""
-        assert DEFAULT_MODELS["deepseek-v3.1-non-thinking"]["name"] == "deepseek-v4-flash"
+        assert (
+            DEFAULT_MODELS["deepseek-v3.1-non-thinking"]["name"] == "deepseek-v4-flash"
+        )
         assert DEFAULT_MODELS["deepseek-v3.1-thinking"]["name"] == "deepseek-v4-pro"
 
     def test_deprecated_models_are_pruned_not_merely_dropped(self):
         """Dropping a key from DEFAULT_MODELS leaves it in already-seeded DBs —
         it has to be listed for pruning to leave the model picker."""
-        for key in ("deepseek-chat", "deepseek-reasoner", "deepseek-coder-v2", "deepseek-v3"):
+        for key in (
+            "deepseek-chat",
+            "deepseek-reasoner",
+            "deepseek-coder-v2",
+            "deepseek-v3",
+        ):
             assert key not in DEFAULT_MODELS, key
             assert key in REMOVED_MODEL_KEYS, key
 

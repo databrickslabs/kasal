@@ -1,10 +1,11 @@
 """Tests for database_management_router list_lakebase_instances pagination and enable endpoint."""
-import sys
-import os
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from fastapi.testclient import TestClient
 
+import os
+import sys
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture
@@ -18,7 +19,8 @@ def client(mock_lakebase_service):
     """Create a test client with mocked dependencies."""
     from fastapi import FastAPI
     from fastapi.responses import JSONResponse
-    from src.api.database_management_router import router, get_lakebase_service
+
+    from src.api.database_management_router import get_lakebase_service, router
     from src.core.exceptions import KasalError
     from src.dependencies.admin_auth import get_system_admin_user
 
@@ -34,19 +36,29 @@ def client(mock_lakebase_service):
     # Override the dependency
     app.dependency_overrides[get_lakebase_service] = lambda: mock_lakebase_service
     # /lakebase/* endpoints now require a system admin (SECURITY): supply one.
-    app.dependency_overrides[get_system_admin_user] = lambda: MagicMock(is_system_admin=True)
+    app.dependency_overrides[get_system_admin_user] = lambda: MagicMock(
+        is_system_admin=True
+    )
 
     return TestClient(app), mock_lakebase_service
 
 
 # ---- list_lakebase_instances ----
 
+
 def test_list_instances_default_params(client):
     """GET /lakebase/instances passes default search=None, page=1, page_size=30."""
     test_client, mock_svc = client
-    mock_svc.list_instances = AsyncMock(return_value={
-        "items": [], "total": 0, "page": 1, "page_size": 30, "total_pages": 0, "has_more": False
-    })
+    mock_svc.list_instances = AsyncMock(
+        return_value={
+            "items": [],
+            "total": 0,
+            "page": 1,
+            "page_size": 30,
+            "total_pages": 0,
+            "has_more": False,
+        }
+    )
 
     resp = test_client.get("/database-management/lakebase/instances")
     assert resp.status_code == 200
@@ -56,9 +68,16 @@ def test_list_instances_default_params(client):
 def test_list_instances_with_search(client):
     """GET /lakebase/instances?search=foo passes search param."""
     test_client, mock_svc = client
-    mock_svc.list_instances = AsyncMock(return_value={
-        "items": [{"name": "foo-inst"}], "total": 1, "page": 1, "page_size": 30, "total_pages": 1, "has_more": False
-    })
+    mock_svc.list_instances = AsyncMock(
+        return_value={
+            "items": [{"name": "foo-inst"}],
+            "total": 1,
+            "page": 1,
+            "page_size": 30,
+            "total_pages": 1,
+            "has_more": False,
+        }
+    )
 
     resp = test_client.get("/database-management/lakebase/instances?search=foo")
     assert resp.status_code == 200
@@ -69,11 +88,20 @@ def test_list_instances_with_search(client):
 def test_list_instances_with_pagination(client):
     """GET /lakebase/instances?page=2&page_size=10 passes pagination params."""
     test_client, mock_svc = client
-    mock_svc.list_instances = AsyncMock(return_value={
-        "items": [{"name": "inst-10"}], "total": 15, "page": 2, "page_size": 10, "total_pages": 2, "has_more": False
-    })
+    mock_svc.list_instances = AsyncMock(
+        return_value={
+            "items": [{"name": "inst-10"}],
+            "total": 15,
+            "page": 2,
+            "page_size": 10,
+            "total_pages": 2,
+            "has_more": False,
+        }
+    )
 
-    resp = test_client.get("/database-management/lakebase/instances?page=2&page_size=10")
+    resp = test_client.get(
+        "/database-management/lakebase/instances?page=2&page_size=10"
+    )
     assert resp.status_code == 200
     mock_svc.list_instances.assert_called_once_with(search=None, page=2, page_size=10)
     data = resp.json()
@@ -83,6 +111,7 @@ def test_list_instances_with_pagination(client):
 
 # ---- enable endpoint auto-resolves endpoint ----
 
+
 def test_enable_with_explicit_endpoint(client):
     """POST /lakebase/enable with endpoint skips instance lookup."""
     test_client, mock_svc = client
@@ -90,7 +119,7 @@ def test_enable_with_explicit_endpoint(client):
 
     resp = test_client.post(
         "/database-management/lakebase/enable",
-        json={"instance_name": "my-inst", "endpoint": "my-dns.example.com"}
+        json={"instance_name": "my-inst", "endpoint": "my-dns.example.com"},
     )
     assert resp.status_code == 200
     mock_svc.get_instance.assert_not_called()
@@ -104,12 +133,13 @@ def test_enable_with_explicit_endpoint(client):
 def test_enable_auto_resolves_endpoint(client):
     """POST /lakebase/enable without endpoint calls get_instance to resolve."""
     test_client, mock_svc = client
-    mock_svc.get_instance = AsyncMock(return_value={"read_write_dns": "resolved-dns.example.com"})
+    mock_svc.get_instance = AsyncMock(
+        return_value={"read_write_dns": "resolved-dns.example.com"}
+    )
     mock_svc.enable_lakebase = AsyncMock(return_value={"success": True})
 
     resp = test_client.post(
-        "/database-management/lakebase/enable",
-        json={"instance_name": "auto-inst"}
+        "/database-management/lakebase/enable", json={"instance_name": "auto-inst"}
     )
     assert resp.status_code == 200
     mock_svc.get_instance.assert_called_once_with("auto-inst")
@@ -145,10 +175,7 @@ def test_enable_no_instance_name_returns_400(client):
     """POST /lakebase/enable without instance_name returns 400."""
     test_client, mock_svc = client
 
-    resp = test_client.post(
-        "/database-management/lakebase/enable",
-        json={}
-    )
+    resp = test_client.post("/database-management/lakebase/enable", json={})
     assert resp.status_code == 400
 
 
@@ -158,7 +185,6 @@ def test_enable_unresolvable_endpoint_returns_400(client):
     mock_svc.get_instance = AsyncMock(return_value={"read_write_dns": None})
 
     resp = test_client.post(
-        "/database-management/lakebase/enable",
-        json={"instance_name": "no-dns-inst"}
+        "/database-management/lakebase/enable", json={"instance_name": "no-dns-inst"}
     )
     assert resp.status_code == 400

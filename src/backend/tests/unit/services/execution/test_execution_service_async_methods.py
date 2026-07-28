@@ -4,20 +4,21 @@ Tests the actual API of ExecutionService including execute_flow, list_executions
 get_execution_status, create_execution, and stop_execution.
 """
 
-import pytest
+import json
 import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
-import json
 
-from src.services.execution.service import ExecutionService
+import pytest
+
 from src.schemas.execution import ExecutionStatus
+from src.services.execution.service import ExecutionService
 from src.utils.user_context import GroupContext
-
 
 # ============================================================================
 # Fixtures
 # ============================================================================
+
 
 @pytest.fixture
 def mock_session():
@@ -35,14 +36,16 @@ def mock_group_context():
     return GroupContext(
         group_ids=["group_123"],
         group_email="test@example.com",
-        access_token="test_token"
+        access_token="test_token",
     )
 
 
 @pytest.fixture
 def execution_service(mock_session):
     """Create an ExecutionService instance with mocked dependencies."""
-    with patch("src.services.execution.service.ExecutionNameService") as MockNameService:
+    with patch(
+        "src.services.execution.service.ExecutionNameService"
+    ) as MockNameService:
         mock_name_service = MagicMock()
         mock_name_service.generate_execution_name = AsyncMock(
             return_value=MagicMock(name="Test Execution Run")
@@ -59,7 +62,9 @@ def cleanup_executions():
     """Clean up executions after each test."""
     yield
     # Clean up any test executions
-    keys_to_remove = [k for k in ExecutionService.executions.keys() if k.startswith("test_")]
+    keys_to_remove = [
+        k for k in ExecutionService.executions.keys() if k.startswith("test_")
+    ]
     for key in keys_to_remove:
         del ExecutionService.executions[key]
 
@@ -67,6 +72,7 @@ def cleanup_executions():
 # ============================================================================
 # Test Class: Get Execution (Static Method)
 # ============================================================================
+
 
 class TestGetExecution:
     """Tests for get_execution static method."""
@@ -99,6 +105,7 @@ class TestGetExecution:
 # Test Class: Create Execution ID
 # ============================================================================
 
+
 class TestCreateExecutionId:
     """Tests for create_execution_id static method."""
 
@@ -120,6 +127,7 @@ class TestCreateExecutionId:
 # Test Class: Add Execution To Memory
 # ============================================================================
 
+
 class TestAddExecutionToMemory:
     """Tests for add_execution_to_memory static method."""
 
@@ -129,9 +137,7 @@ class TestAddExecutionToMemory:
 
         try:
             ExecutionService.add_execution_to_memory(
-                execution_id=exec_id,
-                status="running",
-                run_name="Test Run"
+                execution_id=exec_id, status="running", run_name="Test Run"
             )
 
             result = ExecutionService.executions.get(exec_id)
@@ -149,15 +155,11 @@ class TestAddExecutionToMemory:
 
         try:
             ExecutionService.add_execution_to_memory(
-                execution_id=exec_id,
-                status="running",
-                run_name="Run 1"
+                execution_id=exec_id, status="running", run_name="Run 1"
             )
 
             ExecutionService.add_execution_to_memory(
-                execution_id=exec_id,
-                status="completed",
-                run_name="Run 2"
+                execution_id=exec_id, status="completed", run_name="Run 2"
             )
 
             result = ExecutionService.executions.get(exec_id)
@@ -171,6 +173,7 @@ class TestAddExecutionToMemory:
 # ============================================================================
 # Test Class: Sanitize For Database
 # ============================================================================
+
 
 class TestSanitizeForDatabase:
     """Tests for sanitize_for_database static method."""
@@ -224,6 +227,7 @@ class TestSanitizeForDatabase:
 # Test Class: Execute Flow
 # ============================================================================
 
+
 class TestExecuteFlow:
     """Tests for execute_flow method."""
 
@@ -240,9 +244,7 @@ class TestExecuteFlow:
         )
 
         result = await execution_service.execute_flow(
-            flow_id=flow_id,
-            job_id=job_id,
-            config={}
+            flow_id=flow_id, job_id=job_id, config={}
         )
 
         assert result == mock_result
@@ -260,7 +262,9 @@ class TestExecuteFlow:
 
         result = await execution_service.execute_flow(flow_id=flow_id)
 
-        call_args = execution_service.kasal_execution_service.run_flow_execution.call_args
+        call_args = (
+            execution_service.kasal_execution_service.run_flow_execution.call_args
+        )
         assert call_args.kwargs["job_id"] is not None
 
     @pytest.mark.asyncio
@@ -298,6 +302,7 @@ class TestExecuteFlow:
 # Test Class: Get Executions By Flow
 # ============================================================================
 
+
 class TestGetExecutionsByFlow:
     """Tests for get_executions_by_flow method."""
 
@@ -308,8 +313,8 @@ class TestGetExecutionsByFlow:
         mock_result = {"executions": [{"id": 1}, {"id": 2}]}
 
         execution_service.kasal_execution_service = MagicMock()
-        execution_service.kasal_execution_service.get_flow_executions_by_flow = AsyncMock(
-            return_value=mock_result
+        execution_service.kasal_execution_service.get_flow_executions_by_flow = (
+            AsyncMock(return_value=mock_result)
         )
 
         result = await execution_service.get_executions_by_flow(flow_id)
@@ -322,8 +327,8 @@ class TestGetExecutionsByFlow:
         from src.core.exceptions import KasalError
 
         execution_service.kasal_execution_service = MagicMock()
-        execution_service.kasal_execution_service.get_flow_executions_by_flow = AsyncMock(
-            side_effect=ValueError("Database error")
+        execution_service.kasal_execution_service.get_flow_executions_by_flow = (
+            AsyncMock(side_effect=ValueError("Database error"))
         )
 
         with pytest.raises(KasalError) as exc_info:
@@ -338,8 +343,8 @@ class TestGetExecutionsByFlow:
         mock_result = {"executions": []}
 
         execution_service.kasal_execution_service = MagicMock()
-        execution_service.kasal_execution_service.get_flow_executions_by_flow = AsyncMock(
-            return_value=mock_result
+        execution_service.kasal_execution_service.get_flow_executions_by_flow = (
+            AsyncMock(return_value=mock_result)
         )
 
         result = await execution_service.get_executions_by_flow(flow_id)
@@ -350,6 +355,7 @@ class TestGetExecutionsByFlow:
 # ============================================================================
 # Test Class: Generate Execution Name
 # ============================================================================
+
 
 class TestGenerateExecutionName:
     """Tests for generate_execution_name method."""
@@ -362,7 +368,7 @@ class TestGenerateExecutionName:
         request = ExecutionNameGenerationRequest(
             agents_yaml={"agent1": {"role": "researcher"}},
             tasks_yaml={"task1": {"name": "Research"}},
-            model="gpt-4"
+            model="gpt-4",
         )
 
         mock_response = MagicMock()
@@ -382,9 +388,7 @@ class TestGenerateExecutionName:
         from src.schemas.execution import ExecutionNameGenerationRequest
 
         request = ExecutionNameGenerationRequest(
-            agents_yaml={},
-            tasks_yaml={"task1": {"name": "Task"}},
-            model="gpt-4"
+            agents_yaml={}, tasks_yaml={"task1": {"name": "Task"}}, model="gpt-4"
         )
 
         mock_response = MagicMock()
@@ -402,45 +406,55 @@ class TestGenerateExecutionName:
 # Test Class: Class Attributes
 # ============================================================================
 
+
 class TestExecutionServiceClassAttributes:
     """Tests for ExecutionService class attributes."""
 
     def test_executions_dict_exists(self):
         """Test that executions class variable exists."""
-        assert hasattr(ExecutionService, 'executions')
+        assert hasattr(ExecutionService, "executions")
         assert isinstance(ExecutionService.executions, dict)
 
     def test_thread_pool_exists(self):
         """Test that _thread_pool class variable exists."""
-        assert hasattr(ExecutionService, '_thread_pool')
+        assert hasattr(ExecutionService, "_thread_pool")
 
 
 # ============================================================================
 # Test Class: Service Initialization
 # ============================================================================
 
+
 class TestExecutionServiceInit:
     """Tests for ExecutionService initialization."""
 
     def test_init_with_session(self, mock_session):
         """Test initialization with database session."""
-        with patch("src.services.execution.service.ExecutionNameService") as MockNameService:
+        with patch(
+            "src.services.execution.service.ExecutionNameService"
+        ) as MockNameService:
             MockNameService.create.return_value = MagicMock()
             service = ExecutionService(session=mock_session)
             assert service.session is mock_session
 
     def test_init_without_session(self):
         """Test initialization without database session."""
-        with patch("src.services.execution.service.ExecutionNameService") as MockNameService:
+        with patch(
+            "src.services.execution.service.ExecutionNameService"
+        ) as MockNameService:
             MockNameService.create.return_value = MagicMock()
             service = ExecutionService(session=None)
             assert service.session is None
 
     def test_init_creates_kasal_execution_service(self, mock_session):
         """Test that KasalExecutionService is created."""
-        with patch("src.services.execution.service.ExecutionNameService") as MockNameService:
+        with patch(
+            "src.services.execution.service.ExecutionNameService"
+        ) as MockNameService:
             MockNameService.create.return_value = MagicMock()
-            with patch("src.services.execution.service.KasalExecutionService") as MockCrewAI:
+            with patch(
+                "src.services.execution.service.KasalExecutionService"
+            ) as MockCrewAI:
                 MockCrewAI.return_value = MagicMock()
                 service = ExecutionService(session=mock_session)
                 assert service.kasal_execution_service is not None
@@ -449,6 +463,7 @@ class TestExecutionServiceInit:
 # ============================================================================
 # Test Class: Extract Agents Tasks From Flow Config
 # ============================================================================
+
 
 class TestExtractAgentsTasksFromFlowConfig:
     """Tests for _extract_agents_tasks_from_flow_config method."""
@@ -466,14 +481,20 @@ class TestExtractAgentsTasksFromFlowConfig:
                         {"id": "agent1", "role": "Researcher", "goal": "Research"},
                     ],
                     "allTasks": [
-                        {"id": "task1", "name": "Research Task", "description": "Do research"},
-                    ]
-                }
+                        {
+                            "id": "task1",
+                            "name": "Research Task",
+                            "description": "Do research",
+                        },
+                    ],
+                },
             }
         ]
         config.flow_config = {}
 
-        agents_yaml, tasks_yaml = execution_service._extract_agents_tasks_from_flow_config(config)
+        agents_yaml, tasks_yaml = (
+            execution_service._extract_agents_tasks_from_flow_config(config)
+        )
 
         assert len(agents_yaml) >= 1
         assert len(tasks_yaml) >= 1
@@ -484,7 +505,9 @@ class TestExtractAgentsTasksFromFlowConfig:
         config.nodes = []
         config.flow_config = {}
 
-        agents_yaml, tasks_yaml = execution_service._extract_agents_tasks_from_flow_config(config)
+        agents_yaml, tasks_yaml = (
+            execution_service._extract_agents_tasks_from_flow_config(config)
+        )
 
         assert agents_yaml == {}
         assert tasks_yaml == {}
@@ -495,7 +518,9 @@ class TestExtractAgentsTasksFromFlowConfig:
         config.nodes = None
         config.flow_config = {}
 
-        agents_yaml, tasks_yaml = execution_service._extract_agents_tasks_from_flow_config(config)
+        agents_yaml, tasks_yaml = (
+            execution_service._extract_agents_tasks_from_flow_config(config)
+        )
 
         assert agents_yaml == {}
         assert tasks_yaml == {}
@@ -504,6 +529,7 @@ class TestExtractAgentsTasksFromFlowConfig:
 # ============================================================================
 # Test Class: _update_execution_status Memory Cleanup
 # ============================================================================
+
 
 class TestUpdateExecutionStatusCleanup:
     """Tests for _update_execution_status cleaning up in-memory entries on terminal status."""
@@ -514,7 +540,11 @@ class TestUpdateExecutionStatusCleanup:
         exec_id = "test_cleanup_completed"
         ExecutionService.executions[exec_id] = {"status": "RUNNING"}
 
-        with patch("src.services.execution.service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=True):
+        with patch(
+            "src.services.execution.service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
             await ExecutionService._update_execution_status(
                 exec_id, "COMPLETED", {"output": "done"}
             )
@@ -527,7 +557,11 @@ class TestUpdateExecutionStatusCleanup:
         exec_id = "test_cleanup_failed"
         ExecutionService.executions[exec_id] = {"status": "RUNNING"}
 
-        with patch("src.services.execution.service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=True):
+        with patch(
+            "src.services.execution.service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
             await ExecutionService._update_execution_status(
                 exec_id, "FAILED", {"error": "something went wrong"}
             )
@@ -540,10 +574,12 @@ class TestUpdateExecutionStatusCleanup:
         exec_id = "test_cleanup_stopped"
         ExecutionService.executions[exec_id] = {"status": "RUNNING"}
 
-        with patch("src.services.execution.service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=True):
-            await ExecutionService._update_execution_status(
-                exec_id, "STOPPED"
-            )
+        with patch(
+            "src.services.execution.service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            await ExecutionService._update_execution_status(exec_id, "STOPPED")
 
         assert exec_id not in ExecutionService.executions
 
@@ -553,10 +589,12 @@ class TestUpdateExecutionStatusCleanup:
         exec_id = "test_cleanup_cancelled"
         ExecutionService.executions[exec_id] = {"status": "RUNNING"}
 
-        with patch("src.services.execution.service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=True):
-            await ExecutionService._update_execution_status(
-                exec_id, "CANCELLED"
-            )
+        with patch(
+            "src.services.execution.service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            await ExecutionService._update_execution_status(exec_id, "CANCELLED")
 
         assert exec_id not in ExecutionService.executions
 
@@ -566,10 +604,12 @@ class TestUpdateExecutionStatusCleanup:
         exec_id = "test_cleanup_rejected"
         ExecutionService.executions[exec_id] = {"status": "WAITING_FOR_APPROVAL"}
 
-        with patch("src.services.execution.service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=True):
-            await ExecutionService._update_execution_status(
-                exec_id, "REJECTED"
-            )
+        with patch(
+            "src.services.execution.service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            await ExecutionService._update_execution_status(exec_id, "REJECTED")
 
         assert exec_id not in ExecutionService.executions
 
@@ -579,10 +619,12 @@ class TestUpdateExecutionStatusCleanup:
         exec_id = "test_cleanup_running"
         ExecutionService.executions[exec_id] = {"status": "PENDING"}
 
-        with patch("src.services.execution.service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=True):
-            await ExecutionService._update_execution_status(
-                exec_id, "RUNNING"
-            )
+        with patch(
+            "src.services.execution.service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            await ExecutionService._update_execution_status(exec_id, "RUNNING")
 
         assert exec_id in ExecutionService.executions
 
@@ -592,7 +634,11 @@ class TestUpdateExecutionStatusCleanup:
         exec_id = "test_cleanup_db_fail"
         ExecutionService.executions[exec_id] = {"status": "RUNNING"}
 
-        with patch("src.services.execution.service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=False):
+        with patch(
+            "src.services.execution.service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
             await ExecutionService._update_execution_status(
                 exec_id, "COMPLETED", {"output": "done"}
             )
@@ -606,7 +652,11 @@ class TestUpdateExecutionStatusCleanup:
         exec_id = "test_cleanup_already_gone"
         # Don't add to executions — simulate already removed
 
-        with patch("src.services.execution.service.ExecutionStatusService.update_status", new_callable=AsyncMock, return_value=True):
+        with patch(
+            "src.services.execution.service.ExecutionStatusService.update_status",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
             # Should not raise
             await ExecutionService._update_execution_status(
                 exec_id, "COMPLETED", {"output": "done"}

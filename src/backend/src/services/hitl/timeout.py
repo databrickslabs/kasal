@@ -82,9 +82,9 @@ class HITLTimeoutService:
         4. Sends webhook notifications for timeouts
         """
         from src.db.session import async_session_factory
+        from src.repositories.hitl_repository import HITLApprovalRepository
         from src.services.hitl.service import HITLService
         from src.services.hitl.webhook import HITLWebhookService
-        from src.repositories.hitl_repository import HITLApprovalRepository
 
         try:
             async with async_session_factory() as session:
@@ -108,7 +108,9 @@ class HITLTimeoutService:
                     try:
                         approval = await approval_repo.get_by_id(approval_id)
                         if approval:
-                            await webhook_service.send_gate_timeout_notification(approval)
+                            await webhook_service.send_gate_timeout_notification(
+                                approval
+                            )
                     except Exception as e:
                         logger.error(
                             f"Error sending timeout notification for approval {approval_id}: {e}"

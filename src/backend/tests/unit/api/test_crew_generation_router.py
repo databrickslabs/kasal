@@ -4,9 +4,10 @@ Unit tests for crew generation API router.
 Tests the /crew/create-crew POST endpoint and /crew/create-crew-streaming
 POST endpoint with mocked CrewGenerationService and dependency overrides.
 """
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -260,12 +261,15 @@ class TestCreateCrewStreaming:
         app.dependency_overrides[get_group_context] = override_group_context
         app.dependency_overrides[get_smart_db_session] = override_session
 
-        with patch(
-            "src.api.crew_generation_router.CrewGenerationService",
-            return_value=mock_crew_service,
-        ), patch(
-            "src.api.crew_generation_router.asyncio.create_task"
-        ) as mock_create_task:
+        with (
+            patch(
+                "src.api.crew_generation_router.CrewGenerationService",
+                return_value=mock_crew_service,
+            ),
+            patch(
+                "src.api.crew_generation_router.asyncio.create_task"
+            ) as mock_create_task,
+        ):
             test_client = TestClient(app)
             response = test_client.post(
                 "/crew/create-crew-streaming",

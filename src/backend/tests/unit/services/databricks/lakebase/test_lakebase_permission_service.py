@@ -11,16 +11,17 @@ Tests for LakebasePermissionService methods:
 - grant_all_permissions_sync
 """
 
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 
 from src.services.databricks.lakebase.permission import (
     LakebasePermissionService,
     _quote_pg_role,
 )
 
-
 # ---- _quote_pg_role ----
+
 
 def test_quote_pg_role_email():
     result = _quote_pg_role("admin@example.com")
@@ -54,12 +55,14 @@ def test_quote_pg_role_email_with_dots():
 
 # ---- LakebasePermissionService initialization ----
 
+
 def test_init():
     svc = LakebasePermissionService()
     assert svc is not None
 
 
 # ---- grant_schema_permissions_async ----
+
 
 @pytest.mark.asyncio
 async def test_grant_schema_permissions_async_success():
@@ -105,6 +108,7 @@ async def test_grant_schema_permissions_async_invalid_email_logs():
 
 # ---- grant_schema_permissions_sync ----
 
+
 def test_grant_schema_permissions_sync_success():
     """Test successful sync schema permission grant."""
     svc = LakebasePermissionService()
@@ -136,6 +140,7 @@ def test_grant_schema_permissions_sync_invalid_email():
 
 
 # ---- grant_default_privileges_async ----
+
 
 @pytest.mark.asyncio
 async def test_grant_default_privileges_async_success():
@@ -170,6 +175,7 @@ async def test_grant_default_privileges_async_exception_logged():
 
 # ---- grant_default_privileges_sync ----
 
+
 def test_grant_default_privileges_sync_success():
     """Test successful sync default privileges grant."""
     svc = LakebasePermissionService()
@@ -193,6 +199,7 @@ def test_grant_default_privileges_sync_exception_logged():
 
 # ---- grant_all_permissions_async ----
 
+
 @pytest.mark.asyncio
 async def test_grant_all_permissions_async():
     """Test grant_all_permissions_async calls both sub-methods."""
@@ -203,11 +210,16 @@ async def test_grant_all_permissions_async():
     mock_engine = MagicMock()
     await svc.grant_all_permissions_async(mock_engine, "admin@example.com")
 
-    svc.grant_schema_permissions_async.assert_awaited_once_with(mock_engine, "admin@example.com")
-    svc.grant_default_privileges_async.assert_awaited_once_with(mock_engine, "admin@example.com")
+    svc.grant_schema_permissions_async.assert_awaited_once_with(
+        mock_engine, "admin@example.com"
+    )
+    svc.grant_default_privileges_async.assert_awaited_once_with(
+        mock_engine, "admin@example.com"
+    )
 
 
 # ---- grant_all_permissions_sync ----
+
 
 def test_grant_all_permissions_sync():
     """Test grant_all_permissions_sync calls both sub-methods."""
@@ -218,5 +230,9 @@ def test_grant_all_permissions_sync():
     mock_conn = MagicMock()
     svc.grant_all_permissions_sync(mock_conn, "admin@example.com")
 
-    svc.grant_schema_permissions_sync.assert_called_once_with(mock_conn, "admin@example.com")
-    svc.grant_default_privileges_sync.assert_called_once_with(mock_conn, "admin@example.com")
+    svc.grant_schema_permissions_sync.assert_called_once_with(
+        mock_conn, "admin@example.com"
+    )
+    svc.grant_default_privileges_sync.assert_called_once_with(
+        mock_conn, "admin@example.com"
+    )

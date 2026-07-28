@@ -1,14 +1,16 @@
 """Shared agent tool-sourcing + assembly (common/agent_tools) used by BOTH the
 crew path (tool_service id→name) and the flow path (ToolFactory by id + flow
 graph). Pins the unified behavior so the two paths can't diverge."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.services.execution.kernel.agent_tools import (
-    resolve_tool_override,
-    resolve_agent_tools,
     add_mcp_tools,
     build_agent_with_tools,
+    resolve_agent_tools,
+    resolve_tool_override,
 )
 
 
@@ -19,7 +21,9 @@ class TestResolveToolOverride:
     def test_title_based_match(self):
         factory = MagicMock()
         factory.get_tool_info.return_value = MagicMock(title="GenieTool")
-        assert resolve_tool_override(factory, "35", {"GenieTool": {"spaceId": "s"}}) == {"spaceId": "s"}
+        assert resolve_tool_override(
+            factory, "35", {"GenieTool": {"spaceId": "s"}}
+        ) == {"spaceId": "s"}
 
     def test_no_match_returns_none(self):
         factory = MagicMock()
@@ -46,11 +50,16 @@ class TestResolveAgentToolsFlowMode:
         factory.get_tool_info.return_value = MagicMock(title="GenieTool")
 
         tools = await resolve_agent_tools(
-            ["35"], factory, tool_configs={"GenieTool": {"spaceId": "agent-space"}}, tool_service=None
+            ["35"],
+            factory,
+            tool_configs={"GenieTool": {"spaceId": "agent-space"}},
+            tool_service=None,
         )
         assert tools == [fake]
         factory.create_tool.assert_called_once_with(
-            "35", result_as_answer=False, tool_config_override={"spaceId": "agent-space"}
+            "35",
+            result_as_answer=False,
+            tool_config_override={"spaceId": "agent-space"},
         )
 
     @pytest.mark.asyncio
@@ -59,9 +68,13 @@ class TestResolveAgentToolsFlowMode:
         factory = MagicMock()
         factory.create_tool.return_value = fake
         factory.get_tool_info.return_value = None
-        tools = await resolve_agent_tools(["10"], factory, tool_configs=None, tool_service=None)
+        tools = await resolve_agent_tools(
+            ["10"], factory, tool_configs=None, tool_service=None
+        )
         assert tools == [fake]
-        factory.create_tool.assert_called_once_with("10", result_as_answer=False, tool_config_override={})
+        factory.create_tool.assert_called_once_with(
+            "10", result_as_answer=False, tool_config_override={}
+        )
 
     @pytest.mark.asyncio
     async def test_no_tool_ids_returns_empty(self):
@@ -91,10 +104,16 @@ class TestResolveAgentToolsCrewMode:
         fake = MagicMock()
         factory = MagicMock()
         factory.create_tool.return_value = fake
-        with patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock, return_value=["GenieTool"]):
+        with patch(
+            "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+            new_callable=AsyncMock,
+            return_value=["GenieTool"],
+        ):
             tools = await resolve_agent_tools(
-                ["35"], factory, tool_configs={"GenieTool": {"spaceId": "s"}}, tool_service=svc
+                ["35"],
+                factory,
+                tool_configs={"GenieTool": {"spaceId": "s"}},
+                tool_service=svc,
             )
         assert tools == [fake]
         factory.create_tool.assert_called_once_with(
@@ -108,16 +127,22 @@ class TestResolveAgentToolsCrewMode:
         svc.get_tool_config_by_name = AsyncMock(return_value={})
         factory = MagicMock()
         factory.create_tool.return_value = (True, [sub1, sub2])
-        with patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock, return_value=["MCPTool"]):
+        with patch(
+            "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+            new_callable=AsyncMock,
+            return_value=["MCPTool"],
+        ):
             tools = await resolve_agent_tools(["x"], factory, tool_service=svc)
         assert sub1 in tools and sub2 in tools
 
     @pytest.mark.asyncio
     async def test_no_factory_falls_back_to_names(self):
         svc = MagicMock()
-        with patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock, return_value=["SomeTool"]):
+        with patch(
+            "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+            new_callable=AsyncMock,
+            return_value=["SomeTool"],
+        ):
             tools = await resolve_agent_tools(["id"], None, tool_service=svc)
         assert tools == ["SomeTool"]
 
@@ -125,8 +150,11 @@ class TestResolveAgentToolsCrewMode:
     async def test_resolution_exception_does_not_raise(self):
         svc = MagicMock()
         factory = MagicMock()
-        with patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock, side_effect=Exception("boom")):
+        with patch(
+            "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
+            new_callable=AsyncMock,
+            side_effect=Exception("boom"),
+        ):
             tools = await resolve_agent_tools(["id"], factory, tool_service=svc)
         assert tools == []
 
@@ -156,10 +184,18 @@ class TestBuildAgentWithTools:
         factory.get_tool_info.return_value = None
         agent_obj = MagicMock()
 
-        with patch("src.services.execution.kernel.agent_tools.add_mcp_tools",
-                   new_callable=AsyncMock, return_value=[]), \
-             patch("src.services.execution.kernel.agent_tools.build_agent",
-                   new_callable=AsyncMock, return_value=agent_obj) as mock_build:
+        with (
+            patch(
+                "src.services.execution.kernel.agent_tools.add_mcp_tools",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                "src.services.execution.kernel.agent_tools.build_agent",
+                new_callable=AsyncMock,
+                return_value=agent_obj,
+            ) as mock_build,
+        ):
             out = await build_agent_with_tools(
                 {"role": "R", "goal": "G", "backstory": "B"},
                 group_id="g1",

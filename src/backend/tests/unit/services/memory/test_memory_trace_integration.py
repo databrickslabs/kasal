@@ -19,11 +19,11 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 
 from src.services.memory.engine import Memory
 from src.services.memory.engine_storage_adapter import EngineStorageAdapter
-from src.services.memory.local_storage_backend import LocalMemoryStorage
 from src.services.memory.hooks import (
     inject_task_memory,
     register_task_output_persistence,
 )
+from src.services.memory.local_storage_backend import LocalMemoryStorage
 from src.services.otel_tracing.event_bridge import OTelEventBridge
 
 

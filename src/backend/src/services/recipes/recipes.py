@@ -186,7 +186,9 @@ class WorkflowRecipeService:
         self.trial_repository = WorkflowRecipeTrialRepository(session)
         # Cross-domain READS go through the owning repository, never a raw query
         # on another table (see tests/unit/architecture/).
-        from src.repositories.execution_history_repository import ExecutionHistoryRepository
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
         from src.repositories.execution_trace_repository import ExecutionTraceRepository
 
         self.history_repository = ExecutionHistoryRepository(session)
@@ -319,10 +321,10 @@ class WorkflowRecipeService:
         allowed to fail a mining sweep or a crew generation.
         """
         try:
-            from src.services.llm.manager import LLMManager
             from src.services.knowledge.embedder import (
                 resolve_knowledge_embedder_config,
             )
+            from src.services.llm.manager import LLMManager
 
             config = await resolve_knowledge_embedder_config(group_id=group_id)
             return await LLMManager.get_embedding(text, embedder_config=config)
@@ -598,7 +600,9 @@ class WorkflowRecipeService:
             await self.session.commit()
         return deleted
 
-    async def delete_for_groups(self, group_ids: Optional[List[str]] = None) -> Dict[str, int]:
+    async def delete_for_groups(
+        self, group_ids: Optional[List[str]] = None
+    ) -> Dict[str, int]:
         """Drop the recipe library and its trial ledger for these workspaces.
 
         Called when run history is deleted: recipes are distilled FROM runs and

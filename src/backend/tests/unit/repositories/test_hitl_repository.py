@@ -5,21 +5,24 @@ Tests the functionality of HITL repositories including CRUD operations,
 status updates, filtering, pagination, and webhook management.
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from sqlalchemy.ext.asyncio import AsyncSession
+import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.repositories.hitl_repository import HITLApprovalRepository, HITLWebhookRepository
 from src.models.hitl_approval import (
     HITLApproval,
-    HITLWebhook,
     HITLApprovalStatus,
+    HITLRejectionAction,
     HITLTimeoutAction,
-    HITLRejectionAction
+    HITLWebhook,
+)
+from src.repositories.hitl_repository import (
+    HITLApprovalRepository,
+    HITLWebhookRepository,
 )
 
 
@@ -48,7 +51,7 @@ class MockHITLApproval:
         webhook_sent_at: Optional[datetime] = None,
         webhook_response: Optional[dict] = None,
         created_at: Optional[datetime] = None,
-        group_id: str = "test-group"
+        group_id: str = "test-group",
     ):
         self.id = id
         self.execution_id = execution_id
@@ -56,7 +59,10 @@ class MockHITLApproval:
         self.gate_node_id = gate_node_id
         self.crew_sequence = crew_sequence
         self.status = status
-        self.gate_config = gate_config or {"message": "Review required", "timeout_seconds": 3600}
+        self.gate_config = gate_config or {
+            "message": "Review required",
+            "timeout_seconds": 3600,
+        }
         self.previous_crew_name = previous_crew_name
         self.previous_crew_output = previous_crew_output
         self.flow_state_snapshot = flow_state_snapshot or {}
@@ -88,7 +94,7 @@ class MockHITLWebhook:
         headers: Optional[dict] = None,
         secret: Optional[str] = None,
         created_at: Optional[datetime] = None,
-        updated_at: Optional[datetime] = None
+        updated_at: Optional[datetime] = None,
     ):
         self.id = id
         self.group_id = group_id
@@ -127,7 +133,7 @@ class MockResult:
 
     def scalar(self):
         """Return scalar value for count queries."""
-        return self.results[0] if hasattr(self, 'results') and self.results else 0
+        return self.results[0] if hasattr(self, "results") and self.results else 0
 
 
 class MockCountResult:
@@ -191,7 +197,9 @@ def sample_webhook():
 def sample_webhooks():
     """Create multiple sample HITL webhooks for testing."""
     return [
-        MockHITLWebhook(id=1, name="Webhook 1", events=["gate_reached", "gate_approved"]),
+        MockHITLWebhook(
+            id=1, name="Webhook 1", events=["gate_reached", "gate_approved"]
+        ),
         MockHITLWebhook(id=2, name="Webhook 2", events=["gate_rejected"]),
         MockHITLWebhook(id=3, name="Webhook 3", enabled=False, events=["gate_reached"]),
     ]
@@ -215,7 +223,9 @@ class TestHITLApprovalRepositoryCreate:
     """Test cases for create method."""
 
     @pytest.mark.asyncio
-    async def test_create_success(self, hitl_approval_repository, mock_async_session, sample_approval):
+    async def test_create_success(
+        self, hitl_approval_repository, mock_async_session, sample_approval
+    ):
         """Test successful creation of HITL approval."""
         result = await hitl_approval_repository.create(sample_approval)
 
@@ -229,11 +239,15 @@ class TestHITLApprovalRepositoryCreate:
         """Test create raises RuntimeError without session."""
         repository = HITLApprovalRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLApprovalRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLApprovalRepository requires a session"
+        ):
             await repository.create(sample_approval)
 
     @pytest.mark.asyncio
-    async def test_create_with_full_approval_data(self, hitl_approval_repository, mock_async_session):
+    async def test_create_with_full_approval_data(
+        self, hitl_approval_repository, mock_async_session
+    ):
         """Test creation with complete approval data."""
         approval = MockHITLApproval(
             execution_id="exec-full",
@@ -245,12 +259,12 @@ class TestHITLApprovalRepositoryCreate:
                 "timeout_seconds": 7200,
                 "timeout_action": HITLTimeoutAction.FAIL,
                 "require_comment": True,
-                "allowed_approvers": ["admin@example.com"]
+                "allowed_approvers": ["admin@example.com"],
             },
             previous_crew_name="Analysis Crew",
             previous_crew_output="Complete analysis...",
             flow_state_snapshot={"state": "paused", "completed_crews": 2},
-            group_id="production-group"
+            group_id="production-group",
         )
 
         result = await hitl_approval_repository.create(approval)
@@ -264,7 +278,9 @@ class TestHITLApprovalRepositoryGetById:
     """Test cases for get_by_id method."""
 
     @pytest.mark.asyncio
-    async def test_get_by_id_success(self, hitl_approval_repository, mock_async_session, sample_approval):
+    async def test_get_by_id_success(
+        self, hitl_approval_repository, mock_async_session, sample_approval
+    ):
         """Test successful retrieval by ID."""
         mock_result = MockResult([sample_approval])
         mock_async_session.execute.return_value = mock_result
@@ -275,7 +291,9 @@ class TestHITLApprovalRepositoryGetById:
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_by_id_not_found(self, hitl_approval_repository, mock_async_session):
+    async def test_get_by_id_not_found(
+        self, hitl_approval_repository, mock_async_session
+    ):
         """Test retrieval when ID not found."""
         mock_result = MockResult([])
         mock_async_session.execute.return_value = mock_result
@@ -286,7 +304,9 @@ class TestHITLApprovalRepositoryGetById:
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_by_id_with_group_filter(self, hitl_approval_repository, mock_async_session, sample_approval):
+    async def test_get_by_id_with_group_filter(
+        self, hitl_approval_repository, mock_async_session, sample_approval
+    ):
         """Test retrieval with group_id filtering."""
         mock_result = MockResult([sample_approval])
         mock_async_session.execute.return_value = mock_result
@@ -297,7 +317,9 @@ class TestHITLApprovalRepositoryGetById:
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_by_id_with_wrong_group_returns_none(self, hitl_approval_repository, mock_async_session):
+    async def test_get_by_id_with_wrong_group_returns_none(
+        self, hitl_approval_repository, mock_async_session
+    ):
         """Test retrieval with mismatched group_id returns None."""
         mock_result = MockResult([])
         mock_async_session.execute.return_value = mock_result
@@ -311,7 +333,9 @@ class TestHITLApprovalRepositoryGetById:
         """Test get_by_id raises RuntimeError without session."""
         repository = HITLApprovalRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLApprovalRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLApprovalRepository requires a session"
+        ):
             await repository.get_by_id(1)
 
 
@@ -334,12 +358,16 @@ class TestHITLApprovalRepositoryGetPendingForExecution:
         mock_async_session.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_pending_for_execution_not_found(self, hitl_approval_repository, mock_async_session):
+    async def test_get_pending_for_execution_not_found(
+        self, hitl_approval_repository, mock_async_session
+    ):
         """Test retrieval when no pending approval exists."""
         mock_result = MockResult([])
         mock_async_session.execute.return_value = mock_result
 
-        result = await hitl_approval_repository.get_pending_for_execution("exec-nonexistent")
+        result = await hitl_approval_repository.get_pending_for_execution(
+            "exec-nonexistent"
+        )
 
         assert result is None
 
@@ -365,9 +393,7 @@ class TestHITLApprovalRepositoryGetPendingForExecution:
         older_approval = MockHITLApproval(
             id=1, created_at=datetime.now(timezone.utc) - timedelta(hours=2)
         )
-        newer_approval = MockHITLApproval(
-            id=2, created_at=datetime.now(timezone.utc)
-        )
+        newer_approval = MockHITLApproval(id=2, created_at=datetime.now(timezone.utc))
         # Mocking returns first result which should be newest due to ordering
         mock_result = MockResult([newer_approval])
         mock_async_session.execute.return_value = mock_result
@@ -381,7 +407,9 @@ class TestHITLApprovalRepositoryGetPendingForExecution:
         """Test get_pending_for_execution raises RuntimeError without session."""
         repository = HITLApprovalRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLApprovalRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLApprovalRepository requires a session"
+        ):
             await repository.get_pending_for_execution("exec-123")
 
 
@@ -393,29 +421,34 @@ class TestHITLApprovalRepositoryGetPendingForGroup:
         self, hitl_approval_repository, mock_async_session, sample_approvals
     ):
         """Test successful retrieval of pending approvals for group."""
-        pending_approvals = [a for a in sample_approvals if a.status == HITLApprovalStatus.PENDING]
+        pending_approvals = [
+            a for a in sample_approvals if a.status == HITLApprovalStatus.PENDING
+        ]
 
         # First call returns count, second returns results
         mock_async_session.execute.side_effect = [
             MockCountResult(len(pending_approvals)),
-            MockResult(pending_approvals)
+            MockResult(pending_approvals),
         ]
 
-        approvals, total = await hitl_approval_repository.get_pending_for_group("test-group")
+        approvals, total = await hitl_approval_repository.get_pending_for_group(
+            "test-group"
+        )
 
         assert len(approvals) == len(pending_approvals)
         assert total == len(pending_approvals)
         assert mock_async_session.execute.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_get_pending_for_group_empty(self, hitl_approval_repository, mock_async_session):
+    async def test_get_pending_for_group_empty(
+        self, hitl_approval_repository, mock_async_session
+    ):
         """Test retrieval when no pending approvals exist."""
-        mock_async_session.execute.side_effect = [
-            MockCountResult(0),
-            MockResult([])
-        ]
+        mock_async_session.execute.side_effect = [MockCountResult(0), MockResult([])]
 
-        approvals, total = await hitl_approval_repository.get_pending_for_group("empty-group")
+        approvals, total = await hitl_approval_repository.get_pending_for_group(
+            "empty-group"
+        )
 
         assert approvals == []
         assert total == 0
@@ -428,7 +461,7 @@ class TestHITLApprovalRepositoryGetPendingForGroup:
         pending_approval = MockHITLApproval()
         mock_async_session.execute.side_effect = [
             MockCountResult(10),
-            MockResult([pending_approval])
+            MockResult([pending_approval]),
         ]
 
         approvals, total = await hitl_approval_repository.get_pending_for_group(
@@ -443,7 +476,9 @@ class TestHITLApprovalRepositoryGetPendingForGroup:
         """Test get_pending_for_group raises RuntimeError without session."""
         repository = HITLApprovalRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLApprovalRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLApprovalRepository requires a session"
+        ):
             await repository.get_pending_for_group("test-group")
 
 
@@ -468,12 +503,16 @@ class TestHITLApprovalRepositoryGetAllForExecution:
         assert all(a.execution_id == "exec-1" for a in result)
 
     @pytest.mark.asyncio
-    async def test_get_all_for_execution_empty(self, hitl_approval_repository, mock_async_session):
+    async def test_get_all_for_execution_empty(
+        self, hitl_approval_repository, mock_async_session
+    ):
         """Test retrieval when no approvals exist for execution."""
         mock_result = MockResult([])
         mock_async_session.execute.return_value = mock_result
 
-        result = await hitl_approval_repository.get_all_for_execution("exec-nonexistent")
+        result = await hitl_approval_repository.get_all_for_execution(
+            "exec-nonexistent"
+        )
 
         assert result == []
 
@@ -517,7 +556,9 @@ class TestHITLApprovalRepositoryGetAllForExecution:
         """Test get_all_for_execution raises RuntimeError without session."""
         repository = HITLApprovalRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLApprovalRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLApprovalRepository requires a session"
+        ):
             await repository.get_all_for_execution("exec-1")
 
 
@@ -536,7 +577,7 @@ class TestHITLApprovalRepositoryUpdateStatus:
             1,
             HITLApprovalStatus.APPROVED,
             responded_by="user@example.com",
-            approval_comment="Looks good!"
+            approval_comment="Looks good!",
         )
 
         assert result is True
@@ -559,7 +600,7 @@ class TestHITLApprovalRepositoryUpdateStatus:
             HITLApprovalStatus.REJECTED,
             responded_by="reviewer@example.com",
             rejection_reason="Quality not sufficient",
-            rejection_action=HITLRejectionAction.RETRY
+            rejection_action=HITLRejectionAction.RETRY,
         )
 
         assert result is True
@@ -576,22 +617,22 @@ class TestHITLApprovalRepositoryUpdateStatus:
         mock_async_session.execute.return_value = mock_result
 
         result = await hitl_approval_repository.update_status(
-            1,
-            HITLApprovalStatus.TIMEOUT
+            1, HITLApprovalStatus.TIMEOUT
         )
 
         assert result is True
         assert sample_approval.status == HITLApprovalStatus.TIMEOUT
 
     @pytest.mark.asyncio
-    async def test_update_status_not_found(self, hitl_approval_repository, mock_async_session):
+    async def test_update_status_not_found(
+        self, hitl_approval_repository, mock_async_session
+    ):
         """Test status update when approval not found."""
         mock_result = MockResult([])
         mock_async_session.execute.return_value = mock_result
 
         result = await hitl_approval_repository.update_status(
-            999,
-            HITLApprovalStatus.APPROVED
+            999, HITLApprovalStatus.APPROVED
         )
 
         assert result is False
@@ -602,7 +643,9 @@ class TestHITLApprovalRepositoryUpdateStatus:
         """Test update_status raises RuntimeError without session."""
         repository = HITLApprovalRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLApprovalRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLApprovalRepository requires a session"
+        ):
             await repository.update_status(1, HITLApprovalStatus.APPROVED)
 
     @pytest.mark.asyncio
@@ -632,7 +675,7 @@ class TestHITLApprovalRepositoryGetExpiredPending:
         """Test successful retrieval of expired pending approvals."""
         expired_approval = MockHITLApproval(
             expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
-            status=HITLApprovalStatus.PENDING
+            status=HITLApprovalStatus.PENDING,
         )
         mock_result = MockResult([expired_approval])
         mock_async_session.execute.return_value = mock_result
@@ -643,7 +686,9 @@ class TestHITLApprovalRepositoryGetExpiredPending:
         assert result[0].status == HITLApprovalStatus.PENDING
 
     @pytest.mark.asyncio
-    async def test_get_expired_pending_empty(self, hitl_approval_repository, mock_async_session):
+    async def test_get_expired_pending_empty(
+        self, hitl_approval_repository, mock_async_session
+    ):
         """Test retrieval when no expired approvals exist."""
         mock_result = MockResult([])
         mock_async_session.execute.return_value = mock_result
@@ -670,7 +715,9 @@ class TestHITLApprovalRepositoryGetExpiredPending:
         """Test get_expired_pending raises RuntimeError without session."""
         repository = HITLApprovalRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLApprovalRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLApprovalRepository requires a session"
+        ):
             await repository.get_expired_pending()
 
 
@@ -701,13 +748,17 @@ class TestHITLApprovalRepositoryMarkWebhookSent:
         mock_async_session.execute.return_value = mock_result
         webhook_response = {"status": 200, "message": "Received"}
 
-        result = await hitl_approval_repository.mark_webhook_sent(1, response=webhook_response)
+        result = await hitl_approval_repository.mark_webhook_sent(
+            1, response=webhook_response
+        )
 
         assert result is True
         assert sample_approval.webhook_response == webhook_response
 
     @pytest.mark.asyncio
-    async def test_mark_webhook_sent_not_found(self, hitl_approval_repository, mock_async_session):
+    async def test_mark_webhook_sent_not_found(
+        self, hitl_approval_repository, mock_async_session
+    ):
         """Test marking webhook sent when approval not found."""
         mock_result = MockResult([])
         mock_async_session.execute.return_value = mock_result
@@ -721,7 +772,9 @@ class TestHITLApprovalRepositoryMarkWebhookSent:
         """Test mark_webhook_sent raises RuntimeError without session."""
         repository = HITLApprovalRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLApprovalRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLApprovalRepository requires a session"
+        ):
             await repository.mark_webhook_sent(1)
 
 
@@ -749,7 +802,9 @@ class TestHITLApprovalRepositoryDeleteByExecutionId:
         mock_result = MockDeleteResult(rowcount=0)
         mock_async_session.execute.return_value = mock_result
 
-        result = await hitl_approval_repository.delete_by_execution_id("exec-nonexistent")
+        result = await hitl_approval_repository.delete_by_execution_id(
+            "exec-nonexistent"
+        )
 
         assert result == 0
 
@@ -758,7 +813,9 @@ class TestHITLApprovalRepositoryDeleteByExecutionId:
         """Test delete_by_execution_id raises RuntimeError without session."""
         repository = HITLApprovalRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLApprovalRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLApprovalRepository requires a session"
+        ):
             await repository.delete_by_execution_id("exec-123")
 
 
@@ -796,11 +853,15 @@ class TestHITLWebhookRepositoryCreate:
         """Test create raises RuntimeError without session."""
         repository = HITLWebhookRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLWebhookRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLWebhookRepository requires a session"
+        ):
             await repository.create(sample_webhook)
 
     @pytest.mark.asyncio
-    async def test_create_with_custom_events(self, hitl_webhook_repository, mock_async_session):
+    async def test_create_with_custom_events(
+        self, hitl_webhook_repository, mock_async_session
+    ):
         """Test creation with custom events list."""
         webhook = MockHITLWebhook(
             events=["gate_reached", "gate_approved", "gate_rejected", "gate_timeout"]
@@ -828,7 +889,9 @@ class TestHITLWebhookRepositoryGetById:
         assert result == sample_webhook
 
     @pytest.mark.asyncio
-    async def test_get_by_id_not_found(self, hitl_webhook_repository, mock_async_session):
+    async def test_get_by_id_not_found(
+        self, hitl_webhook_repository, mock_async_session
+    ):
         """Test retrieval when webhook not found."""
         mock_result = MockResult([])
         mock_async_session.execute.return_value = mock_result
@@ -854,7 +917,9 @@ class TestHITLWebhookRepositoryGetById:
         """Test get_by_id raises RuntimeError without session."""
         repository = HITLWebhookRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLWebhookRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLWebhookRepository requires a session"
+        ):
             await repository.get_by_id(1)
 
 
@@ -882,12 +947,16 @@ class TestHITLWebhookRepositoryGetForGroup:
         mock_result = MockResult(sample_webhooks)
         mock_async_session.execute.return_value = mock_result
 
-        result = await hitl_webhook_repository.get_for_group("test-group", enabled_only=False)
+        result = await hitl_webhook_repository.get_for_group(
+            "test-group", enabled_only=False
+        )
 
         assert len(result) == len(sample_webhooks)
 
     @pytest.mark.asyncio
-    async def test_get_for_group_empty(self, hitl_webhook_repository, mock_async_session):
+    async def test_get_for_group_empty(
+        self, hitl_webhook_repository, mock_async_session
+    ):
         """Test retrieval when no webhooks exist for group."""
         mock_result = MockResult([])
         mock_async_session.execute.return_value = mock_result
@@ -901,7 +970,9 @@ class TestHITLWebhookRepositoryGetForGroup:
         """Test get_for_group raises RuntimeError without session."""
         repository = HITLWebhookRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLWebhookRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLWebhookRepository requires a session"
+        ):
             await repository.get_for_group("test-group")
 
 
@@ -918,7 +989,9 @@ class TestHITLWebhookRepositoryGetForEvent:
         mock_result = MockResult(enabled_webhooks)
         mock_async_session.execute.return_value = mock_result
 
-        result = await hitl_webhook_repository.get_for_event("test-group", "gate_approved")
+        result = await hitl_webhook_repository.get_for_event(
+            "test-group", "gate_approved"
+        )
 
         # Filter should return only webhooks with gate_approved event
         assert all("gate_approved" in w.events for w in result)
@@ -932,7 +1005,9 @@ class TestHITLWebhookRepositoryGetForEvent:
         mock_result = MockResult([webhook])
         mock_async_session.execute.return_value = mock_result
 
-        result = await hitl_webhook_repository.get_for_event("test-group", "gate_timeout")
+        result = await hitl_webhook_repository.get_for_event(
+            "test-group", "gate_timeout"
+        )
 
         assert result == []
 
@@ -948,7 +1023,9 @@ class TestHITLWebhookRepositoryGetForEvent:
         mock_result = MockResult(webhooks)
         mock_async_session.execute.return_value = mock_result
 
-        result = await hitl_webhook_repository.get_for_event("test-group", "gate_reached")
+        result = await hitl_webhook_repository.get_for_event(
+            "test-group", "gate_reached"
+        )
 
         assert len(result) == 2
 
@@ -957,7 +1034,9 @@ class TestHITLWebhookRepositoryGetForEvent:
         """Test get_for_event raises RuntimeError without session."""
         repository = HITLWebhookRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLWebhookRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLWebhookRepository requires a session"
+        ):
             await repository.get_for_event("test-group", "gate_reached")
 
 
@@ -973,8 +1052,7 @@ class TestHITLWebhookRepositoryUpdate:
         mock_async_session.execute.return_value = mock_result
 
         result = await hitl_webhook_repository.update(
-            1,
-            {"name": "Updated Webhook", "enabled": False}
+            1, {"name": "Updated Webhook", "enabled": False}
         )
 
         assert result is True
@@ -1001,9 +1079,7 @@ class TestHITLWebhookRepositoryUpdate:
         mock_async_session.execute.return_value = mock_result
 
         result = await hitl_webhook_repository.update(
-            1,
-            {"url": "https://example.com/new-webhook"},
-            group_id="test-group"
+            1, {"url": "https://example.com/new-webhook"}, group_id="test-group"
         )
 
         assert result is True
@@ -1033,20 +1109,24 @@ class TestHITLWebhookRepositoryUpdate:
         original_name = sample_webhook.name
 
         result = await hitl_webhook_repository.update(
-            1,
-            {"unknown_field": "value", "name": "New Name"}
+            1, {"unknown_field": "value", "name": "New Name"}
         )
 
         assert result is True
         assert sample_webhook.name == "New Name"
-        assert not hasattr(sample_webhook, "unknown_field") or getattr(sample_webhook, "unknown_field", None) is None
+        assert (
+            not hasattr(sample_webhook, "unknown_field")
+            or getattr(sample_webhook, "unknown_field", None) is None
+        )
 
     @pytest.mark.asyncio
     async def test_update_without_session_raises_error(self):
         """Test update raises RuntimeError without session."""
         repository = HITLWebhookRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLWebhookRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLWebhookRepository requires a session"
+        ):
             await repository.update(1, {"name": "New Name"})
 
 
@@ -1096,7 +1176,9 @@ class TestHITLWebhookRepositoryDelete:
         """Test delete raises RuntimeError without session."""
         repository = HITLWebhookRepository(session=None)
 
-        with pytest.raises(RuntimeError, match="HITLWebhookRepository requires a session"):
+        with pytest.raises(
+            RuntimeError, match="HITLWebhookRepository requires a session"
+        ):
             await repository.delete(1)
 
 
@@ -1104,7 +1186,9 @@ class TestHITLApprovalRepositoryEdgeCases:
     """Edge case tests for HITLApprovalRepository."""
 
     @pytest.mark.asyncio
-    async def test_create_with_minimal_data(self, hitl_approval_repository, mock_async_session):
+    async def test_create_with_minimal_data(
+        self, hitl_approval_repository, mock_async_session
+    ):
         """Test creation with minimal required data."""
         minimal_approval = MockHITLApproval(
             execution_id="exec-min",
@@ -1112,7 +1196,7 @@ class TestHITLApprovalRepositoryEdgeCases:
             gate_node_id="gate-min",
             crew_sequence=0,
             previous_crew_name=None,
-            previous_crew_output=None
+            previous_crew_output=None,
         )
 
         result = await hitl_approval_repository.create(minimal_approval)
@@ -1131,7 +1215,7 @@ class TestHITLApprovalRepositoryEdgeCases:
         result = await hitl_approval_repository.update_status(
             1,
             HITLApprovalStatus.APPROVED,
-            responded_by="user@example.com"
+            responded_by="user@example.com",
             # No approval_comment
         )
 
@@ -1144,10 +1228,7 @@ class TestHITLApprovalRepositoryEdgeCases:
         self, hitl_approval_repository, mock_async_session
     ):
         """Test pagination with large limit."""
-        mock_async_session.execute.side_effect = [
-            MockCountResult(100),
-            MockResult([])
-        ]
+        mock_async_session.execute.side_effect = [MockCountResult(100), MockResult([])]
 
         approvals, total = await hitl_approval_repository.get_pending_for_group(
             "test-group", limit=1000, offset=0
@@ -1202,7 +1283,9 @@ class TestHITLWebhookRepositoryEdgeCases:
         mock_result = MockResult([webhook])
         mock_async_session.execute.return_value = mock_result
 
-        result = await hitl_webhook_repository.get_for_event("test-group", "gate_reached")
+        result = await hitl_webhook_repository.get_for_event(
+            "test-group", "gate_reached"
+        )
 
         # None events should be treated as empty list
         assert result == []
@@ -1212,12 +1295,16 @@ class TestHITLWebhookRepositoryEdgeCases:
         self, hitl_webhook_repository, mock_async_session
     ):
         """Test that get_for_event correctly filters webhooks by event."""
-        webhook_with_event = MockHITLWebhook(id=1, events=["gate_reached", "gate_approved"])
+        webhook_with_event = MockHITLWebhook(
+            id=1, events=["gate_reached", "gate_approved"]
+        )
         webhook_without_event = MockHITLWebhook(id=2, events=["gate_rejected"])
         mock_result = MockResult([webhook_with_event, webhook_without_event])
         mock_async_session.execute.return_value = mock_result
 
-        result = await hitl_webhook_repository.get_for_event("test-group", "gate_approved")
+        result = await hitl_webhook_repository.get_for_event(
+            "test-group", "gate_approved"
+        )
 
         assert len(result) == 1
         assert result[0].id == 1
@@ -1228,9 +1315,7 @@ class TestHITLWebhookRepositoryEdgeCases:
     ):
         """Test that webhooks with flow_id=None (global) apply to all flows."""
         global_webhook = MockHITLWebhook(
-            id=1,
-            flow_id=None,  # Global webhook
-            events=["gate_reached"]
+            id=1, flow_id=None, events=["gate_reached"]  # Global webhook
         )
         mock_result = MockResult([global_webhook])
         mock_async_session.execute.return_value = mock_result
@@ -1251,7 +1336,7 @@ class TestHITLWebhookRepositoryEdgeCases:
         flow_webhook = MockHITLWebhook(
             id=1,
             flow_id="flow_policies",  # Flow-specific webhook
-            events=["gate_reached"]
+            events=["gate_reached"],
         )
         mock_result = MockResult([flow_webhook])
         mock_async_session.execute.return_value = mock_result
@@ -1272,7 +1357,7 @@ class TestHITLWebhookRepositoryEdgeCases:
         flow_webhook = MockHITLWebhook(
             id=1,
             flow_id="flow_policies",  # Flow-specific webhook
-            events=["gate_reached"]
+            events=["gate_reached"],
         )
         mock_result = MockResult([flow_webhook])
         mock_async_session.execute.return_value = mock_result
@@ -1291,8 +1376,12 @@ class TestHITLWebhookRepositoryEdgeCases:
         """Test filtering with mix of global and flow-specific webhooks."""
         webhooks = [
             MockHITLWebhook(id=1, flow_id=None, events=["gate_reached"]),  # Global
-            MockHITLWebhook(id=2, flow_id="flow_policies", events=["gate_reached"]),  # Specific to policies
-            MockHITLWebhook(id=3, flow_id="flow_orders", events=["gate_reached"]),  # Specific to orders
+            MockHITLWebhook(
+                id=2, flow_id="flow_policies", events=["gate_reached"]
+            ),  # Specific to policies
+            MockHITLWebhook(
+                id=3, flow_id="flow_orders", events=["gate_reached"]
+            ),  # Specific to orders
         ]
         mock_result = MockResult(webhooks)
         mock_async_session.execute.return_value = mock_result

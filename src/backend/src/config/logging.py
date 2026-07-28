@@ -15,15 +15,20 @@ import sys
 import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
 
 # Suppress known deprecation warnings from third-party libraries
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="httpx")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
-warnings.filterwarnings("ignore", message=".*Use 'content=.*' to upload raw bytes/text content.*")
-warnings.filterwarnings("ignore", message=".*Accessing the 'model_fields' attribute on the instance is deprecated.*")
+warnings.filterwarnings(
+    "ignore", message=".*Use 'content=.*' to upload raw bytes/text content.*"
+)
+warnings.filterwarnings(
+    "ignore",
+    message=".*Accessing the 'model_fields' attribute on the instance is deprecated.*",
+)
 warnings.filterwarnings("ignore", message=".*remove second argument of ws_handler.*")
 
 # Log file naming
@@ -32,7 +37,9 @@ log_filename = f"backend.{current_date}.log"
 error_log_filename = f"backend.error.{current_date}.log"
 
 # Log formatting
-VERBOSE_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
+VERBOSE_FORMAT = (
+    "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
+)
 SIMPLE_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
 
 
@@ -66,12 +73,8 @@ def get_logging_config(env: str = "development") -> Dict[str, Any]:
         "version": 1,
         "disable_existing_loggers": False,
         "formatters": {
-            "verbose": {
-                "format": VERBOSE_FORMAT
-            },
-            "simple": {
-                "format": SIMPLE_FORMAT
-            },
+            "verbose": {"format": VERBOSE_FORMAT},
+            "simple": {"format": SIMPLE_FORMAT},
         },
         "handlers": {
             "console": {
@@ -180,36 +183,43 @@ class CentralizedLoggingConfig:
     # Logger hierarchy mapping
     LOGGER_HIERARCHY = {
         # Application modules
-        'app': ['src'],
-        'api': ['src.api'],
-        'services': ['src.services'],
-        'repositories': ['src.repositories'],
-        'seeds': ['src.seeds'],
-        'utils': ['src.utils'],
-        'core': ['src.core'],
-        'models': ['src.models'],
-        'schemas': ['src.schemas'],
-        'config': ['src.config'],
-        'db': ['src.db'],
-        'dependencies': ['src.dependencies'],
-
+        "app": ["src"],
+        "api": ["src.api"],
+        "services": ["src.services"],
+        "repositories": ["src.repositories"],
+        "seeds": ["src.seeds"],
+        "utils": ["src.utils"],
+        "core": ["src.core"],
+        "models": ["src.models"],
+        "schemas": ["src.schemas"],
+        "config": ["src.config"],
+        "db": ["src.db"],
+        "dependencies": ["src.dependencies"],
         # Special domains
-        'crew': ['crew'],
-        'system': ['system'],
-        'llm': ['llm', 'LiteLLM', 'backendcrew.llm_config'],
-        'scheduler': ['scheduler', 'backendcrew.scheduler',
-                     'apscheduler.scheduler', 'apscheduler.executors'],
-        'database': ['database'],
-
+        "crew": ["crew"],
+        "system": ["system"],
+        "llm": ["llm", "LiteLLM", "backendcrew.llm_config"],
+        "scheduler": [
+            "scheduler",
+            "backendcrew.scheduler",
+            "apscheduler.scheduler",
+            "apscheduler.executors",
+        ],
+        "database": ["database"],
         # Third-party libraries
-        'sqlalchemy': ['sqlalchemy', 'sqlalchemy.engine', 'sqlalchemy.pool',
-                      'aiosqlite', 'alembic'],
-        'uvicorn': ['uvicorn', 'uvicorn.error', 'uvicorn.access'],
-        'httpx': ['httpx', 'httpcore'],
-        'urllib3': ['urllib3', 'requests'],
-        'crewai': ['crewai', 'kasal_engine'],
-        'mlflow': ['mlflow', 'mlflow.tracing', 'mlflow.models'],
-        'litellm': ['litellm', 'LiteLLM'],
+        "sqlalchemy": [
+            "sqlalchemy",
+            "sqlalchemy.engine",
+            "sqlalchemy.pool",
+            "aiosqlite",
+            "alembic",
+        ],
+        "uvicorn": ["uvicorn", "uvicorn.error", "uvicorn.access"],
+        "httpx": ["httpx", "httpcore"],
+        "urllib3": ["urllib3", "requests"],
+        "crewai": ["crewai", "kasal_engine"],
+        "mlflow": ["mlflow", "mlflow.tracing", "mlflow.models"],
+        "litellm": ["litellm", "LiteLLM"],
     }
 
     @classmethod
@@ -243,11 +253,13 @@ class CentralizedLoggingConfig:
         """
         # Get configuration from environment
         global_level = cls.parse_log_level(
-            os.getenv('KASAL_LOG_LEVEL', os.getenv('LOG_LEVEL', 'INFO'))
+            os.getenv("KASAL_LOG_LEVEL", os.getenv("LOG_LEVEL", "INFO"))
         )
-        debug_all = os.getenv('KASAL_DEBUG_ALL', '').lower() in ['true', '1', 'yes']
-        app_level = cls.parse_log_level(os.getenv('KASAL_LOG_APP'))
-        third_party_level = cls.parse_log_level(os.getenv('KASAL_LOG_THIRD_PARTY', 'WARNING'))
+        debug_all = os.getenv("KASAL_DEBUG_ALL", "").lower() in ["true", "1", "yes"]
+        app_level = cls.parse_log_level(os.getenv("KASAL_LOG_APP"))
+        third_party_level = cls.parse_log_level(
+            os.getenv("KASAL_LOG_THIRD_PARTY", "WARNING")
+        )
 
         # Configure root logger
         if debug_all:
@@ -255,27 +267,43 @@ class CentralizedLoggingConfig:
         else:
             root_level = global_level or logging.INFO
 
-        logging.basicConfig(
-            level=root_level,
-            format=SIMPLE_FORMAT,
-            force=True
-        )
+        logging.basicConfig(level=root_level, format=SIMPLE_FORMAT, force=True)
 
         # Configure application modules
         if app_level is not None or debug_all:
-            level = logging.DEBUG if debug_all else (app_level or global_level or logging.INFO)
-            for module in ['src', 'backend', 'backendcrew']:
+            level = (
+                logging.DEBUG
+                if debug_all
+                else (app_level or global_level or logging.INFO)
+            )
+            for module in ["src", "backend", "backendcrew"]:
                 logger = logging.getLogger(module)
                 logger.setLevel(level)
 
         # Configure third-party libraries
         third_party_libs = [
-            'sqlalchemy', 'sqlalchemy.engine', 'sqlalchemy.pool', 'aiosqlite',
-            'uvicorn', 'uvicorn.error', 'uvicorn.access',
-            'httpx', 'httpcore', 'urllib3', 'requests',
-            'crewai', 'kasal_engine', 'mlflow', 'litellm', 'LiteLLM',
-            'asyncio', 'PIL', 'matplotlib', 'langchain', 'opentelemetry',
-            'websockets'
+            "sqlalchemy",
+            "sqlalchemy.engine",
+            "sqlalchemy.pool",
+            "aiosqlite",
+            "uvicorn",
+            "uvicorn.error",
+            "uvicorn.access",
+            "httpx",
+            "httpcore",
+            "urllib3",
+            "requests",
+            "crewai",
+            "kasal_engine",
+            "mlflow",
+            "litellm",
+            "LiteLLM",
+            "asyncio",
+            "PIL",
+            "matplotlib",
+            "langchain",
+            "opentelemetry",
+            "websockets",
         ]
 
         for lib in third_party_libs:
@@ -291,13 +319,17 @@ class CentralizedLoggingConfig:
                 logger.propagate = False
 
         # Configure domain-specific loggers
-        domains = ['crew', 'system', 'llm', 'api', 'database', 'scheduler']
+        domains = ["crew", "system", "llm", "api", "database", "scheduler"]
         for domain in domains:
-            env_var = f'KASAL_LOG_{domain.upper()}'
+            env_var = f"KASAL_LOG_{domain.upper()}"
             domain_level = cls.parse_log_level(os.getenv(env_var))
 
             if domain_level is not None or debug_all:
-                level = logging.DEBUG if debug_all else (domain_level or global_level or logging.INFO)
+                level = (
+                    logging.DEBUG
+                    if debug_all
+                    else (domain_level or global_level or logging.INFO)
+                )
 
                 # Get logger names for this domain
                 logger_names = cls.LOGGER_HIERARCHY.get(domain, [domain])
@@ -312,21 +344,27 @@ class CentralizedLoggingConfig:
                         logger.propagate = False
 
         # In Databricks Apps, ALWAYS enable console logging (for /logz)
-        in_databricks_apps = os.getenv('DATABRICKS_RUNTIME_VERSION') or os.getenv('DATABRICKS_APP_NAME')
+        in_databricks_apps = os.getenv("DATABRICKS_RUNTIME_VERSION") or os.getenv(
+            "DATABRICKS_APP_NAME"
+        )
 
         if in_databricks_apps:
             # Force console logging for Databricks Apps /logz endpoint
             root = logging.getLogger()
-            has_console = any(isinstance(h, logging.StreamHandler) for h in root.handlers)
+            has_console = any(
+                isinstance(h, logging.StreamHandler) for h in root.handlers
+            )
             if not has_console:
                 console_handler = logging.StreamHandler(sys.stdout)
                 console_handler.setLevel(logging.INFO)
                 console_handler.setFormatter(logging.Formatter(SIMPLE_FORMAT))
                 root.addHandler(console_handler)
-        elif os.getenv('KASAL_LOG_CONSOLE', 'true').lower() == 'false':
+        elif os.getenv("KASAL_LOG_CONSOLE", "true").lower() == "false":
             # Only suppress console in non-Databricks environments
             root = logging.getLogger()
-            root.handlers = [h for h in root.handlers if not isinstance(h, logging.StreamHandler)]
+            root.handlers = [
+                h for h in root.handlers if not isinstance(h, logging.StreamHandler)
+            ]
 
     @classmethod
     def get_configuration_summary(cls) -> str:
@@ -343,8 +381,8 @@ class CentralizedLoggingConfig:
 
         # Check for domain overrides
         overrides = []
-        for domain in ['crew', 'system', 'llm', 'api', 'database', 'scheduler']:
-            env_var = f'KASAL_LOG_{domain.upper()}'
+        for domain in ["crew", "system", "llm", "api", "database", "scheduler"]:
+            env_var = f"KASAL_LOG_{domain.upper()}"
             if os.getenv(env_var):
                 overrides.append(f"{domain}={os.getenv(env_var)}")
 

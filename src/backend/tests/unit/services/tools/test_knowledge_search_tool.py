@@ -13,19 +13,20 @@ before it plans, a chat turn answering from an attached file).
 """
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from concurrent.futures import TimeoutError as FuturesTimeoutError
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 from src.services.tools.databricks_knowledge_search_tool import (
     DatabricksKnowledgeSearchInput,
     DatabricksKnowledgeSearchTool,
 )
 
-
 # ---------------------------------------------------------------------------
 # DatabricksKnowledgeSearchInput
 # ---------------------------------------------------------------------------
+
 
 class TestDatabricksKnowledgeSearchInput:
     def test_minimal_required_query(self):
@@ -39,7 +40,9 @@ class TestDatabricksKnowledgeSearchInput:
         assert inp.limit == 5
 
     def test_file_paths_provided(self):
-        inp = DatabricksKnowledgeSearchInput(query="q", file_paths=["/Volumes/a/b/c.pdf"])
+        inp = DatabricksKnowledgeSearchInput(
+            query="q", file_paths=["/Volumes/a/b/c.pdf"]
+        )
         assert inp.file_paths == ["/Volumes/a/b/c.pdf"]
 
     def test_limit_min_boundary(self):
@@ -62,6 +65,7 @@ class TestDatabricksKnowledgeSearchInput:
 # ---------------------------------------------------------------------------
 # DatabricksKnowledgeSearchTool.__init__
 # ---------------------------------------------------------------------------
+
 
 class TestDatabricksKnowledgeSearchToolInit:
     def test_defaults(self):
@@ -92,6 +96,7 @@ class TestDatabricksKnowledgeSearchToolInit:
 # ---------------------------------------------------------------------------
 # _resolve_file_paths
 # ---------------------------------------------------------------------------
+
 
 class TestResolveFilePaths:
     def _make_tool(self, configured_paths=None):
@@ -146,9 +151,7 @@ class TestResolveFilePaths:
         assert "/Volumes/cat/sch/vol/b.pdf" in result
 
     def test_relative_path_with_dir_matched_by_filename(self):
-        tool = self._make_tool(
-            configured_paths=["/Volumes/cat/sch/vol/sub/file.txt"]
-        )
+        tool = self._make_tool(configured_paths=["/Volumes/cat/sch/vol/sub/file.txt"])
         result = tool._resolve_file_paths(["folder/file.txt"])
         assert result == ["/Volumes/cat/sch/vol/sub/file.txt"]
 
@@ -156,6 +159,7 @@ class TestResolveFilePaths:
 # ---------------------------------------------------------------------------
 # _run — uses ThreadPoolExecutor internally
 # ---------------------------------------------------------------------------
+
 
 class TestRun:
     """The tool's own contract: budget, path resolution, delegation."""
@@ -169,16 +173,23 @@ class TestRun:
 
     def test_returns_what_the_search_answered(self):
         tool = self._make_tool()
-        with patch.object(tool, "_search_in_thread", return_value="Found 1 relevant results:"):
-            assert tool._run("revenue query", limit=5).startswith("Found 1 relevant results:")
+        with patch.object(
+            tool, "_search_in_thread", return_value="Found 1 relevant results:"
+        ):
+            assert tool._run("revenue query", limit=5).startswith(
+                "Found 1 relevant results:"
+            )
 
     def test_agent_file_paths_override_configured(self):
         """The agent knows what it wants; its paths are resolved and used."""
         tool = self._make_tool()
         seen = []
 
-        with patch.object(tool, "_search_in_thread",
-                          side_effect=lambda q, l, paths: seen.append(paths) or ""):
+        with patch.object(
+            tool,
+            "_search_in_thread",
+            side_effect=lambda q, l, paths: seen.append(paths) or "",
+        ):
             tool._run("query", limit=5, file_paths=["c.pdf"])
 
         assert seen[0] is not None
@@ -187,8 +198,11 @@ class TestRun:
         tool = self._make_tool()
         seen = []
 
-        with patch.object(tool, "_search_in_thread",
-                          side_effect=lambda q, l, paths: seen.append(paths) or ""):
+        with patch.object(
+            tool,
+            "_search_in_thread",
+            side_effect=lambda q, l, paths: seen.append(paths) or "",
+        ):
             tool._run("query")
 
         assert seen[0] == ["/Volumes/a/b/c.pdf"]
@@ -200,8 +214,11 @@ class TestRun:
         tool = self._make_tool()
         calls = []
 
-        with patch.object(tool, "_search_in_thread",
-                          side_effect=lambda q, l, paths: calls.append(q) or "twenty chunks"):
+        with patch.object(
+            tool,
+            "_search_in_thread",
+            side_effect=lambda q, l, paths: calls.append(q) or "twenty chunks",
+        ):
             first = tool._run("expense policy")
             second = tool._run("expense policy")
 

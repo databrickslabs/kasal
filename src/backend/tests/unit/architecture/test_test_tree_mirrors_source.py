@@ -97,14 +97,15 @@ def test_no_new_test_file_is_misfiled():
         "these test files do not live where the module they test lives:\n  "
         + "\n  ".join(new)
         + "\n\nMove the file beside its module, or if it genuinely spans several "
-          "modules, that is what the baseline is for — add it with a reason."
+        "modules, that is what the baseline is for — add it with a reason."
     )
 
 
 def test_structure_baseline_has_no_stale_entries():
     """A file fixed but left listed hides the next regression in it."""
     stale = sorted(_BASELINE - _offenders())
-    assert not stale, (
-        "these now mirror their source — delete them from _BASELINE:\n  "
-        + "\n  ".join(stale)
+    assert (
+        not stale
+    ), "these now mirror their source — delete them from _BASELINE:\n  " + "\n  ".join(
+        stale
     )

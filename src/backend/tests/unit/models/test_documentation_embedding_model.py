@@ -4,10 +4,12 @@ Unit tests for documentation_embedding model.
 Tests the functionality of the DocumentationEmbedding database model including
 field validation, Vector type handling, and data integrity.
 """
-import pytest
+
 import json
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
+
+import pytest
 
 from src.models.documentation_embedding import DocumentationEmbedding, Vector
 
@@ -20,7 +22,7 @@ class TestVector:
         # Test default dimension
         vector_default = Vector()
         assert vector_default.dim == 1024
-        
+
         # Test custom dimension
         vector_custom = Vector(dim=512)
         assert vector_custom.dim == 512
@@ -29,10 +31,10 @@ class TestVector:
         """Test Vector column specification."""
         # Arrange
         vector = Vector(dim=1024)
-        
+
         # Act
         col_spec = vector.get_col_spec()
-        
+
         # Assert
         # Should return vector(1024) for PostgreSQL or TEXT for SQLite
         assert "vector(1024)" in col_spec or "TEXT" in col_spec
@@ -41,23 +43,23 @@ class TestVector:
         """Test Vector bind processor for different dialects."""
         # Arrange
         vector = Vector(dim=3)
-        
+
         # Test with mock SQLite dialect
         mock_sqlite_dialect = MagicMock()
         mock_sqlite_dialect.name = "sqlite"
-        
+
         # Act
         sqlite_processor = vector.bind_processor(mock_sqlite_dialect)
-        
+
         # Assert
         assert callable(sqlite_processor)
-        
+
         # Test processing list value for SQLite
         test_list = [1.0, 2.0, 3.0]
         result = sqlite_processor(test_list)
         assert isinstance(result, str)
         assert json.loads(result) == test_list
-        
+
         # Test processing None value
         none_result = sqlite_processor(None)
         assert none_result is None
@@ -66,22 +68,22 @@ class TestVector:
         """Test Vector result processor for different dialects."""
         # Arrange
         vector = Vector(dim=3)
-        
+
         # Test with mock SQLite dialect
         mock_sqlite_dialect = MagicMock()
         mock_sqlite_dialect.name = "sqlite"
-        
+
         # Act
         sqlite_processor = vector.result_processor(mock_sqlite_dialect, None)
-        
+
         # Assert
         assert callable(sqlite_processor)
-        
+
         # Test processing JSON string for SQLite
         test_json = json.dumps([1.0, 2.0, 3.0])
         result = sqlite_processor(test_json)
         assert result == [1.0, 2.0, 3.0]
-        
+
         # Test processing None value
         none_result = sqlite_processor(None)
         assert none_result is None
@@ -89,7 +91,7 @@ class TestVector:
     def test_vector_different_dimensions(self):
         """Test Vector with different dimensions."""
         dimensions = [128, 256, 512, 768, 1024, 1536]
-        
+
         for dim in dimensions:
             vector = Vector(dim=dim)
             assert vector.dim == dim
@@ -109,48 +111,60 @@ class TestDocumentationEmbedding:
         """Test DocumentationEmbedding model column structure."""
         # Act
         columns = DocumentationEmbedding.__table__.columns
-        
+
         # Assert - Check that all expected columns exist
         expected_columns = [
-            'id', 'source', 'title', 'content', 'embedding', 
-            'doc_metadata', 'created_at', 'updated_at'
+            "id",
+            "source",
+            "title",
+            "content",
+            "embedding",
+            "doc_metadata",
+            "created_at",
+            "updated_at",
         ]
         for col_name in expected_columns:
-            assert col_name in columns, f"Column {col_name} should exist in DocumentationEmbedding model"
+            assert (
+                col_name in columns
+            ), f"Column {col_name} should exist in DocumentationEmbedding model"
 
     def test_documentation_embedding_column_types_and_constraints(self):
         """Test that columns have correct data types and constraints."""
         # Act
         columns = DocumentationEmbedding.__table__.columns
-        
+
         # Assert
         # Primary key
-        assert columns['id'].primary_key is True
-        assert columns['id'].index is True
-        assert "INTEGER" in str(columns['id'].type)
-        
+        assert columns["id"].primary_key is True
+        assert columns["id"].index is True
+        assert "INTEGER" in str(columns["id"].type)
+
         # Required indexed string fields
-        indexed_string_fields = ['source', 'title']
+        indexed_string_fields = ["source", "title"]
         for field in indexed_string_fields:
             assert columns[field].nullable is False
             assert columns[field].index is True
-            assert "VARCHAR" in str(columns[field].type) or "STRING" in str(columns[field].type)
-        
+            assert "VARCHAR" in str(columns[field].type) or "STRING" in str(
+                columns[field].type
+            )
+
         # Content field (required text)
-        assert columns['content'].nullable is False
-        assert "TEXT" in str(columns['content'].type)
-        
+        assert columns["content"].nullable is False
+        assert "TEXT" in str(columns["content"].type)
+
         # Embedding field (required vector)
-        assert columns['embedding'].nullable is False
+        assert columns["embedding"].nullable is False
         # Vector type should be configured
-        assert hasattr(columns['embedding'].type, 'dim') or "TEXT" in str(columns['embedding'].type)
-        
+        assert hasattr(columns["embedding"].type, "dim") or "TEXT" in str(
+            columns["embedding"].type
+        )
+
         # Optional JSON metadata field
-        assert columns['doc_metadata'].nullable is True
-        assert "JSON" in str(columns['doc_metadata'].type)
-        
+        assert columns["doc_metadata"].nullable is True
+        assert "JSON" in str(columns["doc_metadata"].type)
+
         # DateTime fields with server defaults
-        datetime_fields = ['created_at', 'updated_at']
+        datetime_fields = ["created_at", "updated_at"]
         for field in datetime_fields:
             assert "DATETIME" in str(columns[field].type)
             # Should have server defaults
@@ -160,9 +174,9 @@ class TestDocumentationEmbedding:
         """Test that the model has the expected database indexes."""
         # Act
         columns = DocumentationEmbedding.__table__.columns
-        
+
         # Assert indexed columns
-        indexed_columns = ['id', 'source', 'title']
+        indexed_columns = ["id", "source", "title"]
         for col_name in indexed_columns:
             assert columns[col_name].index is True
 
@@ -170,8 +184,8 @@ class TestDocumentationEmbedding:
         """Test DocumentationEmbedding __repr__ method structure."""
         # Act & Assert
         # Test that the repr method is defined and accessible
-        assert hasattr(DocumentationEmbedding, '__repr__')
-        assert callable(getattr(DocumentationEmbedding, '__repr__'))
+        assert hasattr(DocumentationEmbedding, "__repr__")
+        assert callable(getattr(DocumentationEmbedding, "__repr__"))
 
     def test_documentation_embedding_source_scenarios(self):
         """Test documentation source field scenarios."""
@@ -182,9 +196,9 @@ class TestDocumentationEmbedding:
             "user_guide",
             "tutorials",
             "examples",
-            "best_practices"
+            "best_practices",
         ]
-        
+
         for source in valid_sources:
             # Assert source format
             assert isinstance(source, str)
@@ -200,9 +214,9 @@ class TestDocumentationEmbedding:
             "Task Management Best Practices",
             "Crew Orchestration Tutorial",
             "API Reference - Agents",
-            "Tools Integration Guide"
+            "Tools Integration Guide",
         ]
-        
+
         for title in valid_titles:
             # Assert title format
             assert isinstance(title, str)
@@ -217,9 +231,9 @@ class TestDocumentationEmbedding:
             "# Markdown Content\n\nThis is a longer markdown content with **bold** text and `code` examples.",
             "```python\nfrom crewai import Agent\nagent = Agent(name='test')\n```",
             "A" * 5000,  # Long content
-            "Multi-line\ncontent\nwith\nnewlines"
+            "Multi-line\ncontent\nwith\nnewlines",
         ]
-        
+
         for content in content_examples:
             # Assert content format
             assert isinstance(content, str)
@@ -232,9 +246,9 @@ class TestDocumentationEmbedding:
             [0.1, 0.2, 0.3] * 341 + [0.4],  # 1024 dimensions
             [0.5] * 512,  # 512 dimensions
             [0.0] * 768,  # 768 dimensions (common for some models)
-            [-0.1, 0.2, -0.3, 0.4, 0.5]  # Small vector for testing
+            [-0.1, 0.2, -0.3, 0.4, 0.5],  # Small vector for testing
         ]
-        
+
         for vector in vector_examples:
             # Assert vector format
             assert isinstance(vector, list)
@@ -246,7 +260,7 @@ class TestDocumentationEmbedding:
         # Test different metadata structures
         metadata_examples = [
             None,  # No metadata
-            {},    # Empty metadata
+            {},  # Empty metadata
             {"author": "system", "version": "1.0"},
             {
                 "source_file": "docs/agents.md",
@@ -254,16 +268,16 @@ class TestDocumentationEmbedding:
                 "tags": ["agent", "config", "tutorial"],
                 "difficulty": "beginner",
                 "last_updated": "2023-12-01",
-                "word_count": 1250
+                "word_count": 1250,
             },
             {
                 "api_endpoint": "/agents",
                 "http_method": "POST",
                 "parameters": ["name", "role", "goal"],
-                "response_format": "json"
-            }
+                "response_format": "json",
+            },
         ]
-        
+
         for metadata in metadata_examples:
             if metadata is not None:
                 # Assert metadata format
@@ -275,11 +289,11 @@ class TestDocumentationEmbedding:
         """Test timestamp behavior in DocumentationEmbedding."""
         # Act
         columns = DocumentationEmbedding.__table__.columns
-        
+
         # Assert server defaults for timestamps
-        assert columns['created_at'].server_default is not None
-        assert columns['updated_at'].server_default is not None
-        assert columns['updated_at'].onupdate is not None
+        assert columns["created_at"].server_default is not None
+        assert columns["updated_at"].server_default is not None
+        assert columns["updated_at"].onupdate is not None
 
     def test_documentation_embedding_model_documentation(self):
         """Test DocumentationEmbedding model documentation."""
@@ -294,8 +308,10 @@ class TestDocumentationEmbeddingEdgeCases:
     def test_documentation_embedding_very_long_content(self):
         """Test DocumentationEmbedding with very long content."""
         # Arrange
-        long_content = "This is a very long documentation content. " * 1000  # ~43,000 characters
-        
+        long_content = (
+            "This is a very long documentation content. " * 1000
+        )  # ~43,000 characters
+
         # Assert
         assert isinstance(long_content, str)
         assert len(long_content) > 40000
@@ -304,7 +320,7 @@ class TestDocumentationEmbeddingEdgeCases:
         """Test DocumentationEmbedding with minimal content."""
         # Arrange
         minimal_content = "Minimal doc."
-        
+
         # Assert
         assert isinstance(minimal_content, str)
         assert len(minimal_content) > 0
@@ -323,7 +339,7 @@ class TestDocumentationEmbeddingEdgeCases:
         - Quotes: "double" and 'single'
         - Accents: café, naïve, résumé
         """
-        
+
         # Assert
         assert isinstance(special_content, str)
         assert "🤖" in special_content
@@ -367,7 +383,7 @@ class TestDocumentationEmbeddingEdgeCases:
         
         > **Note**: Always provide clear and specific goals for better agent performance.
         """
-        
+
         # Assert
         assert isinstance(markdown_content, str)
         assert "# Agent Configuration" in markdown_content
@@ -411,7 +427,7 @@ class TestDocumentationEmbeddingEdgeCases:
         print(result)
         ```
         """
-        
+
         # Assert
         assert isinstance(code_content, str)
         assert "from crewai import" in code_content
@@ -458,7 +474,7 @@ class TestDocumentationEmbeddingEdgeCases:
         - `401 Unauthorized`: Authentication required
         - `422 Unprocessable Entity`: Validation errors
         """
-        
+
         # Assert
         assert isinstance(api_content, str)
         assert "POST /api/agents" in api_content
@@ -473,26 +489,26 @@ class TestDocumentationEmbeddingEdgeCases:
                 "source_file": "docs/advanced/agents.md",
                 "section_hierarchy": ["Advanced", "Agents", "Configuration"],
                 "word_count": 2500,
-                "reading_time_minutes": 10
+                "reading_time_minutes": 10,
             },
             "content_analysis": {
                 "topics": ["agent_creation", "configuration", "best_practices"],
                 "difficulty_level": "intermediate",
                 "code_examples": 5,
-                "has_diagrams": False
+                "has_diagrams": False,
             },
             "indexing_info": {
                 "indexed_at": "2023-12-01T15:30:00Z",
                 "embedding_model": "text-embedding-ada-002",
                 "chunk_size": 1000,
-                "overlap": 200
+                "overlap": 200,
             },
             "references": [
                 {"type": "internal", "target": "/docs/basics/getting-started"},
-                {"type": "external", "target": "https://crewai.io/docs"}
-            ]
+                {"type": "external", "target": "https://crewai.io/docs"},
+            ],
         }
-        
+
         # Assert
         assert isinstance(complex_metadata, dict)
         assert "document_info" in complex_metadata
@@ -507,12 +523,12 @@ class TestDocumentationEmbeddingEdgeCases:
         edge_case_vectors = [
             [0.0] * 1024,  # All zeros
             [1.0] * 1024,  # All ones
-            [-1.0] * 1024, # All negative ones
-            [float('inf')] * 1024,  # All infinity (might cause issues)
-            [0.999999999] * 1024,   # Very close to 1
+            [-1.0] * 1024,  # All negative ones
+            [float("inf")] * 1024,  # All infinity (might cause issues)
+            [0.999999999] * 1024,  # Very close to 1
             [-0.999999999] * 1024,  # Very close to -1
         ]
-        
+
         for vector in edge_case_vectors[:-1]:  # Skip infinity case
             # Assert vector properties
             assert isinstance(vector, list)
@@ -526,9 +542,9 @@ class TestDocumentationEmbeddingEdgeCases:
             "official_docs": ["crewai_official", "api_reference", "user_guide"],
             "tutorials": ["getting_started", "advanced_tutorial", "examples"],
             "community": ["community_guides", "blog_posts", "forum_answers"],
-            "code": ["source_code", "inline_docs", "comments"]
+            "code": ["source_code", "inline_docs", "comments"],
         }
-        
+
         for category, sources in source_categories.items():
             for source in sources:
                 # Assert source categorization
@@ -540,26 +556,26 @@ class TestDocumentationEmbeddingEdgeCases:
         """Test data integrity constraints."""
         # Act
         table = DocumentationEmbedding.__table__
-        
+
         # Assert primary key
         primary_keys = [col for col in table.columns if col.primary_key]
         assert len(primary_keys) == 1
-        assert primary_keys[0].name == 'id'
-        
+        assert primary_keys[0].name == "id"
+
         # Assert required fields
-        required_fields = ['source', 'title', 'content', 'embedding']
+        required_fields = ["source", "title", "content", "embedding"]
         for field_name in required_fields:
             field = table.columns[field_name]
             assert field.nullable is False
-        
+
         # Assert optional fields
-        optional_fields = ['doc_metadata']
+        optional_fields = ["doc_metadata"]
         for field_name in optional_fields:
             field = table.columns[field_name]
             assert field.nullable is True
-        
+
         # Assert indexed fields
-        indexed_fields = ['id', 'source', 'title']
+        indexed_fields = ["id", "source", "title"]
         for field_name in indexed_fields:
             field = table.columns[field_name]
             assert field.index is True

@@ -1,13 +1,15 @@
 """Unit tests for DatabricksVolumeRepository."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.repositories.databricks_volume_repository import DatabricksVolumeRepository
+import pytest
 
+from src.repositories.databricks_volume_repository import DatabricksVolumeRepository
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def repo():
@@ -17,6 +19,7 @@ def repo():
 # ===========================================================================
 # Existing tests (preserved)
 # ===========================================================================
+
 
 class TestInit:
 
@@ -49,7 +52,9 @@ class TestEnsureClient:
 
     @pytest.mark.asyncio
     @patch("src.repositories.databricks_volume_repository.get_workspace_client")
-    async def test_returns_false_when_client_creation_fails(self, mock_get_client, repo):
+    async def test_returns_false_when_client_creation_fails(
+        self, mock_get_client, repo
+    ):
         mock_get_client.return_value = None
         result = await repo._ensure_client()
         assert result is False
@@ -98,7 +103,11 @@ class TestCreateVolumeIfNotExists:
 
         with patch("asyncio.get_event_loop") as mock_loop:
             mock_loop.return_value.run_in_executor = AsyncMock(
-                return_value={"success": True, "exists": True, "message": "Volume already exists"}
+                return_value={
+                    "success": True,
+                    "exists": True,
+                    "message": "Volume already exists",
+                }
             )
             result = await repo.create_volume_if_not_exists("cat", "sch", "vol")
 
@@ -111,11 +120,15 @@ class TestUploadFileToVolume:
     @pytest.mark.asyncio
     @patch.object(DatabricksVolumeRepository, "create_volume_if_not_exists")
     @patch.object(DatabricksVolumeRepository, "_get_client_with_group_context")
-    async def test_returns_error_when_no_client(self, mock_get_client, mock_create_vol, repo):
+    async def test_returns_error_when_no_client(
+        self, mock_get_client, mock_create_vol, repo
+    ):
         mock_create_vol.return_value = {"success": True}
         mock_get_client.return_value = (None, None)
 
-        result = await repo.upload_file_to_volume("cat", "sch", "vol", "file.db", b"content")
+        result = await repo.upload_file_to_volume(
+            "cat", "sch", "vol", "file.db", b"content"
+        )
 
         assert result["success"] is False
 
@@ -129,16 +142,24 @@ class TestUploadFileToVolume:
 
         with patch("asyncio.get_event_loop") as mock_loop:
             mock_loop.return_value.run_in_executor = AsyncMock(
-                return_value={"success": True, "path": "/Volumes/cat/sch/vol/file.db", "size": 7}
+                return_value={
+                    "success": True,
+                    "path": "/Volumes/cat/sch/vol/file.db",
+                    "size": 7,
+                }
             )
-            result = await repo.upload_file_to_volume("cat", "sch", "vol", "file.db", b"content")
+            result = await repo.upload_file_to_volume(
+                "cat", "sch", "vol", "file.db", b"content"
+            )
 
         assert result["success"] is True
 
     @pytest.mark.asyncio
     @patch.object(DatabricksVolumeRepository, "create_volume_if_not_exists")
     @patch.object(DatabricksVolumeRepository, "_get_client_with_group_context")
-    async def test_falls_back_to_rest_api_on_network_error(self, mock_get_client, mock_create_vol, repo):
+    async def test_falls_back_to_rest_api_on_network_error(
+        self, mock_get_client, mock_create_vol, repo
+    ):
         mock_create_vol.return_value = {"success": True}
         mock_client = MagicMock()
         mock_get_client.return_value = (mock_client, None)
@@ -147,8 +168,14 @@ class TestUploadFileToVolume:
             mock_loop.return_value.run_in_executor = AsyncMock(
                 return_value={"_use_rest_api": True, "error": "network zone error"}
             )
-            with patch.object(repo, "_upload_via_rest_api", return_value={"success": True, "path": "/p", "size": 1}):
-                result = await repo.upload_file_to_volume("cat", "sch", "vol", "f.db", b"x")
+            with patch.object(
+                repo,
+                "_upload_via_rest_api",
+                return_value={"success": True, "path": "/p", "size": 1},
+            ):
+                result = await repo.upload_file_to_volume(
+                    "cat", "sch", "vol", "f.db", b"x"
+                )
 
         assert result["success"] is True
 
@@ -172,9 +199,16 @@ class TestDownloadFileFromVolume:
 
         with patch("asyncio.get_event_loop") as mock_loop:
             mock_loop.return_value.run_in_executor = AsyncMock(
-                return_value={"success": True, "path": "/Volumes/cat/sch/vol/file.db", "content": b"data", "size": 4}
+                return_value={
+                    "success": True,
+                    "path": "/Volumes/cat/sch/vol/file.db",
+                    "content": b"data",
+                    "size": 4,
+                }
             )
-            result = await repo.download_file_from_volume("cat", "sch", "vol", "file.db")
+            result = await repo.download_file_from_volume(
+                "cat", "sch", "vol", "file.db"
+            )
 
         assert result["success"] is True
         assert result["content"] == b"data"
@@ -189,8 +223,14 @@ class TestDownloadFileFromVolume:
             mock_loop.return_value.run_in_executor = AsyncMock(
                 return_value={"_use_rest_api": True, "error": "network zone"}
             )
-            with patch.object(repo, "_download_via_rest_api", return_value={"success": True, "content": b"data", "size": 4}):
-                result = await repo.download_file_from_volume("cat", "sch", "vol", "f.db")
+            with patch.object(
+                repo,
+                "_download_via_rest_api",
+                return_value={"success": True, "content": b"data", "size": 4},
+            ):
+                result = await repo.download_file_from_volume(
+                    "cat", "sch", "vol", "f.db"
+                )
 
         assert result["success"] is True
 
@@ -214,7 +254,11 @@ class TestListVolumeContents:
 
         with patch("asyncio.get_event_loop") as mock_loop:
             mock_loop.return_value.run_in_executor = AsyncMock(
-                return_value={"success": True, "path": "/Volumes/cat/sch/vol", "files": []}
+                return_value={
+                    "success": True,
+                    "path": "/Volumes/cat/sch/vol",
+                    "files": [],
+                }
             )
             result = await repo.list_volume_contents("cat", "sch", "vol")
 
@@ -252,7 +296,9 @@ class TestGetDatabricksUrl:
     @pytest.mark.asyncio
     @patch("src.utils.databricks_auth._databricks_auth")
     async def test_generates_volume_url(self, mock_auth):
-        mock_auth.get_workspace_url = AsyncMock(return_value="https://workspace.databricks.com")
+        mock_auth.get_workspace_url = AsyncMock(
+            return_value="https://workspace.databricks.com"
+        )
         repo = DatabricksVolumeRepository()
 
         result = await repo.get_databricks_url("cat", "sch", "vol")
@@ -263,7 +309,9 @@ class TestGetDatabricksUrl:
     @pytest.mark.asyncio
     @patch("src.utils.databricks_auth._databricks_auth")
     async def test_generates_file_url(self, mock_auth):
-        mock_auth.get_workspace_url = AsyncMock(return_value="https://workspace.databricks.com")
+        mock_auth.get_workspace_url = AsyncMock(
+            return_value="https://workspace.databricks.com"
+        )
         repo = DatabricksVolumeRepository()
 
         result = await repo.get_databricks_url("cat", "sch", "vol", "file.db")
@@ -275,7 +323,9 @@ class TestGetDatabricksUrl:
     @patch("src.utils.databricks_auth._databricks_auth")
     async def test_fallback_when_no_workspace_url(self, mock_auth, mock_ctx):
         mock_auth.get_workspace_url = AsyncMock(return_value=None)
-        mock_ctx.return_value = MagicMock(workspace_url="https://fallback.databricks.com")
+        mock_ctx.return_value = MagicMock(
+            workspace_url="https://fallback.databricks.com"
+        )
 
         repo = DatabricksVolumeRepository()
         result = await repo.get_databricks_url("cat", "sch", "vol")
@@ -287,10 +337,13 @@ class TestGetDatabricksUrl:
 # Additional tests for expanded coverage
 # ===========================================================================
 
+
 class TestGetClientWithGroupContext:
 
     @pytest.mark.asyncio
-    @patch("src.repositories.databricks_volume_repository.get_workspace_client_with_fallback")
+    @patch(
+        "src.repositories.databricks_volume_repository.get_workspace_client_with_fallback"
+    )
     async def test_without_group_id(self, mock_fallback):
         """When no group_id, calls fallback directly."""
         repo = DatabricksVolumeRepository(user_token="tok")  # no group_id
@@ -302,7 +355,9 @@ class TestGetClientWithGroupContext:
         mock_fallback.assert_awaited_once()
 
     @pytest.mark.asyncio
-    @patch("src.repositories.databricks_volume_repository.get_workspace_client_with_fallback")
+    @patch(
+        "src.repositories.databricks_volume_repository.get_workspace_client_with_fallback"
+    )
     async def test_with_group_id_sets_user_context(self, mock_fallback):
         """When group_id is set, UserContext is configured before auth."""
         repo = DatabricksVolumeRepository(user_token="tok", group_id="g-1")
@@ -310,8 +365,10 @@ class TestGetClientWithGroupContext:
         mock_fallback.return_value = (mock_client, None)
 
         # UserContext and GroupContext are imported locally inside the method
-        with patch("src.utils.user_context.UserContext") as mock_uc, \
-             patch("src.utils.user_context.GroupContext") as mock_gc:
+        with (
+            patch("src.utils.user_context.UserContext") as mock_uc,
+            patch("src.utils.user_context.GroupContext") as mock_gc,
+        ):
             mock_gc.return_value = MagicMock()
             client, retry = await repo._get_client_with_group_context(user_token="tok")
 
@@ -346,19 +403,31 @@ class TestUploadViaRestApi:
         session_cm.__aexit__ = AsyncMock(return_value=None)
 
         # Both _upload and _download import get_auth_context locally from src.utils.databricks_auth
-        with patch("src.utils.databricks_auth.get_auth_context",
-                   new_callable=AsyncMock, return_value=auth), \
-             patch("aiohttp.ClientSession", return_value=session_cm):
-            result = await repo._upload_via_rest_api("/Volumes/cat/sch/vol/f.db", b"content")
+        with (
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=auth,
+            ),
+            patch("aiohttp.ClientSession", return_value=session_cm),
+        ):
+            result = await repo._upload_via_rest_api(
+                "/Volumes/cat/sch/vol/f.db", b"content"
+            )
 
         assert result["success"] is True
 
     @pytest.mark.asyncio
     async def test_upload_rest_auth_failure(self, repo):
         """_upload_via_rest_api returns error when auth fails."""
-        with patch("src.utils.databricks_auth.get_auth_context",
-                   new_callable=AsyncMock, return_value=None):
-            result = await repo._upload_via_rest_api("/Volumes/cat/sch/vol/f.db", b"content")
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = await repo._upload_via_rest_api(
+                "/Volumes/cat/sch/vol/f.db", b"content"
+            )
 
         assert result["success"] is False
 
@@ -384,10 +453,17 @@ class TestUploadViaRestApi:
         session_cm.__aenter__ = AsyncMock(return_value=session)
         session_cm.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("src.utils.databricks_auth.get_auth_context",
-                   new_callable=AsyncMock, return_value=auth), \
-             patch("aiohttp.ClientSession", return_value=session_cm):
-            result = await repo._upload_via_rest_api("/Volumes/cat/sch/vol/f.db", b"content")
+        with (
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=auth,
+            ),
+            patch("aiohttp.ClientSession", return_value=session_cm),
+        ):
+            result = await repo._upload_via_rest_api(
+                "/Volumes/cat/sch/vol/f.db", b"content"
+            )
 
         assert result["success"] is False
 
@@ -416,9 +492,14 @@ class TestDownloadViaRestApi:
         session_cm.__aenter__ = AsyncMock(return_value=session)
         session_cm.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("src.utils.databricks_auth.get_auth_context",
-                   new_callable=AsyncMock, return_value=auth), \
-             patch("aiohttp.ClientSession", return_value=session_cm):
+        with (
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=auth,
+            ),
+            patch("aiohttp.ClientSession", return_value=session_cm),
+        ):
             result = await repo._download_via_rest_api("/Volumes/cat/sch/vol/f.db")
 
         assert result["success"] is True
@@ -445,18 +526,28 @@ class TestDownloadViaRestApi:
         session_cm.__aenter__ = AsyncMock(return_value=session)
         session_cm.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("src.utils.databricks_auth.get_auth_context",
-                   new_callable=AsyncMock, return_value=auth), \
-             patch("aiohttp.ClientSession", return_value=session_cm):
-            result = await repo._download_via_rest_api("/Volumes/cat/sch/vol/missing.db")
+        with (
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=auth,
+            ),
+            patch("aiohttp.ClientSession", return_value=session_cm),
+        ):
+            result = await repo._download_via_rest_api(
+                "/Volumes/cat/sch/vol/missing.db"
+            )
 
         assert result["success"] is False
         assert "not found" in result["error"].lower()
 
     @pytest.mark.asyncio
     async def test_download_rest_no_auth(self, repo):
-        with patch("src.utils.databricks_auth.get_auth_context",
-                   new_callable=AsyncMock, return_value=None):
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
             result = await repo._download_via_rest_api("/Volumes/cat/sch/vol/f.db")
 
         assert result["success"] is False
@@ -499,7 +590,9 @@ class TestUploadFailures:
     @pytest.mark.asyncio
     @patch.object(DatabricksVolumeRepository, "create_volume_if_not_exists")
     @patch.object(DatabricksVolumeRepository, "_get_client_with_group_context")
-    async def test_upload_exception_returns_error(self, mock_get_client, mock_create_vol, repo):
+    async def test_upload_exception_returns_error(
+        self, mock_get_client, mock_create_vol, repo
+    ):
         mock_create_vol.side_effect = Exception("volume creation crash")
         result = await repo.upload_file_to_volume("cat", "sch", "vol", "f.db", b"data")
         assert result["success"] is False
@@ -515,12 +608,20 @@ class TestListVolumeContentsWithFiles:
         mock_get_client.return_value = (mock_client, None)
 
         expected_files = [
-            {"name": "backup.db", "path": "/Volumes/cat/sch/vol/backup.db",
-             "file_size": 1024, "is_directory": False},
+            {
+                "name": "backup.db",
+                "path": "/Volumes/cat/sch/vol/backup.db",
+                "file_size": 1024,
+                "is_directory": False,
+            },
         ]
         with patch("asyncio.get_event_loop") as mock_loop:
             mock_loop.return_value.run_in_executor = AsyncMock(
-                return_value={"success": True, "path": "/Volumes/cat/sch/vol", "files": expected_files}
+                return_value={
+                    "success": True,
+                    "path": "/Volumes/cat/sch/vol",
+                    "files": expected_files,
+                }
             )
             result = await repo.list_volume_contents("cat", "sch", "vol")
 
@@ -561,10 +662,16 @@ class TestInnerClosuresCoverage:
         mock_get_client.return_value = (mock_client, None)
 
         # Create a real volume exists response
-        with patch.object(repo, "create_volume_if_not_exists", new_callable=AsyncMock,
-                          return_value={"success": True}):
+        with patch.object(
+            repo,
+            "create_volume_if_not_exists",
+            new_callable=AsyncMock,
+            return_value={"success": True},
+        ):
             # Allow real run_in_executor (uses real thread pool)
-            result = await repo.upload_file_to_volume("cat", "sch", "vol", "f.db", b"data")
+            result = await repo.upload_file_to_volume(
+                "cat", "sch", "vol", "f.db", b"data"
+            )
 
         # The upload either succeeds or fails, but closure ran
         assert "success" in result
@@ -579,11 +686,23 @@ class TestInnerClosuresCoverage:
         )
         mock_get_client.return_value = (mock_client, None)
 
-        with patch.object(repo, "create_volume_if_not_exists", new_callable=AsyncMock,
-                          return_value={"success": True}), \
-             patch.object(repo, "_upload_via_rest_api", new_callable=AsyncMock,
-                          return_value={"success": True, "path": "/p", "size": 4}):
-            result = await repo.upload_file_to_volume("cat", "sch", "vol", "f.db", b"data")
+        with (
+            patch.object(
+                repo,
+                "create_volume_if_not_exists",
+                new_callable=AsyncMock,
+                return_value={"success": True},
+            ),
+            patch.object(
+                repo,
+                "_upload_via_rest_api",
+                new_callable=AsyncMock,
+                return_value={"success": True, "path": "/p", "size": 4},
+            ),
+        ):
+            result = await repo.upload_file_to_volume(
+                "cat", "sch", "vol", "f.db", b"data"
+            )
 
         assert result["success"] is True
 
@@ -601,7 +720,9 @@ class TestInnerClosuresCoverage:
 
     @pytest.mark.asyncio
     @patch.object(DatabricksVolumeRepository, "_get_client_with_group_context")
-    async def test_download_closure_with_download_response_object(self, mock_get_client, repo):
+    async def test_download_closure_with_download_response_object(
+        self, mock_get_client, repo
+    ):
         """Test download when SDK returns a DownloadResponse with .contents."""
         mock_client = MagicMock()
         # Return an object with .contents attribute
@@ -647,7 +768,9 @@ class TestInnerClosuresCoverage:
     async def test_delete_closure_not_found(self, mock_get_client, repo):
         """Delete closure returns not found when file missing."""
         mock_client = MagicMock()
-        mock_client.files.delete.side_effect = Exception("not found: file does not exist")
+        mock_client.files.delete.side_effect = Exception(
+            "not found: file does not exist"
+        )
         mock_get_client.return_value = (mock_client, None)
 
         result = await repo.delete_volume_file("cat", "sch", "vol", "missing.db")
@@ -655,17 +778,27 @@ class TestInnerClosuresCoverage:
 
     @pytest.mark.asyncio
     @patch.object(DatabricksVolumeRepository, "_get_client_with_group_context")
-    async def test_create_volume_closure_creates_new_volume(self, mock_get_client, repo):
+    async def test_create_volume_closure_creates_new_volume(
+        self, mock_get_client, repo
+    ):
         """Create volume closure creates when volume doesn't exist."""
         from unittest.mock import MagicMock
 
         mock_client = MagicMock()
         # read raises (volume doesn't exist), create succeeds
-        mock_client.volumes.read.side_effect = Exception("NOT_FOUND: Volume does not exist")
+        mock_client.volumes.read.side_effect = Exception(
+            "NOT_FOUND: Volume does not exist"
+        )
         mock_client.volumes.create.return_value = MagicMock()
         mock_get_client.return_value = (mock_client, None)
 
-        with patch("src.repositories.databricks_volume_repository.VolumeType", MagicMock()) if False else MagicMock():
+        with (
+            patch(
+                "src.repositories.databricks_volume_repository.VolumeType", MagicMock()
+            )
+            if False
+            else MagicMock()
+        ):
             result = await repo.create_volume_if_not_exists("cat", "sch", "vol")
 
         assert "success" in result

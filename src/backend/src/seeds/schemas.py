@@ -11,8 +11,10 @@ Content-generation schemas (article/email/report bodies, free-text summaries) we
 intentionally left out: their fields are prose you cannot route on. Add those per
 task as needed; this seed set targets decision/outcome workloads.
 """
+
 import logging
 from datetime import datetime
+
 from sqlalchemy import select
 
 from src.db.session import async_session_factory
@@ -23,8 +25,15 @@ logger = logging.getLogger(__name__)
 # Schema names that earlier seed versions created but that don't describe a routable
 # whole-crew outcome. Removed from the DB on seed so the picker stays focused.
 OBSOLETE_SCHEMA_NAMES = [
-    "Article", "Summary", "Analysis", "SearchResults", "Recommendation",
-    "ActionItems", "Email", "Report", "QA",
+    "Article",
+    "Summary",
+    "Analysis",
+    "SearchResults",
+    "Recommendation",
+    "ActionItems",
+    "Email",
+    "Report",
+    "QA",
 ]
 
 # Whole-crew workload outcomes with routing-friendly fields.
@@ -42,10 +51,10 @@ SAMPLE_SCHEMAS = [
                 "rows_affected": {"type": "integer"},
                 "records_processed": {"type": "integer"},
                 "error_count": {"type": "integer"},
-                "message": {"type": "string"}
+                "message": {"type": "string"},
             },
-            "required": ["status", "success"]
-        }
+            "required": ["status", "success"],
+        },
     },
     {
         "name": "DataLoadResult",
@@ -59,12 +68,11 @@ SAMPLE_SCHEMAS = [
                 "rows_updated": {"type": "integer"},
                 "rows_failed": {"type": "integer"},
                 "status": {"type": "string"},
-                "success": {"type": "boolean"}
+                "success": {"type": "boolean"},
             },
-            "required": ["status", "rows_inserted"]
-        }
+            "required": ["status", "rows_inserted"],
+        },
     },
-
     # ── Classification / triage outcomes ────────────────────────────────────────
     {
         "name": "SupportTicketTriage",
@@ -77,10 +85,10 @@ SAMPLE_SCHEMAS = [
                 "priority": {"type": "string"},
                 "sentiment": {"type": "string"},
                 "requires_human": {"type": "boolean"},
-                "suggested_team": {"type": "string"}
+                "suggested_team": {"type": "string"},
             },
-            "required": ["category", "priority"]
-        }
+            "required": ["category", "priority"],
+        },
     },
     {
         "name": "SentimentAnalysis",
@@ -90,10 +98,10 @@ SAMPLE_SCHEMAS = [
             "type": "object",
             "properties": {
                 "sentiment": {"type": "string"},
-                "score": {"type": "number"}
+                "score": {"type": "number"},
             },
-            "required": ["sentiment"]
-        }
+            "required": ["sentiment"],
+        },
     },
     {
         "name": "IntentClassification",
@@ -104,10 +112,10 @@ SAMPLE_SCHEMAS = [
             "properties": {
                 "intent": {"type": "string"},
                 "confidence": {"type": "number"},
-                "fallback": {"type": "boolean"}
+                "fallback": {"type": "boolean"},
             },
-            "required": ["intent"]
-        }
+            "required": ["intent"],
+        },
     },
     {
         "name": "CustomerFeedback",
@@ -119,12 +127,11 @@ SAMPLE_SCHEMAS = [
                 "category": {"type": "string"},
                 "sentiment": {"type": "string"},
                 "nps_score": {"type": "integer"},
-                "action_required": {"type": "boolean"}
+                "action_required": {"type": "boolean"},
             },
-            "required": ["sentiment"]
-        }
+            "required": ["sentiment"],
+        },
     },
-
     # ── Research / retrieval outcomes ───────────────────────────────────────────
     {
         "name": "WebSearchResult",
@@ -139,12 +146,11 @@ SAMPLE_SCHEMAS = [
                 "answer_found": {"type": "boolean"},
                 "top_result_url": {"type": "string"},
                 "top_result_title": {"type": "string"},
-                "relevance_score": {"type": "number"}
+                "relevance_score": {"type": "number"},
             },
-            "required": ["query", "results_found", "has_results"]
-        }
+            "required": ["query", "results_found", "has_results"],
+        },
     },
-
     # ── Decision / approval outcomes ────────────────────────────────────────────
     {
         "name": "ApprovalDecision",
@@ -154,10 +160,10 @@ SAMPLE_SCHEMAS = [
             "type": "object",
             "properties": {
                 "decision": {"type": "string"},
-                "confidence": {"type": "number"}
+                "confidence": {"type": "number"},
             },
-            "required": ["decision"]
-        }
+            "required": ["decision"],
+        },
     },
     {
         "name": "LeadQualification",
@@ -169,10 +175,10 @@ SAMPLE_SCHEMAS = [
                 "qualified": {"type": "boolean"},
                 "score": {"type": "integer"},
                 "tier": {"type": "string"},
-                "estimated_value": {"type": "number"}
+                "estimated_value": {"type": "number"},
             },
-            "required": ["qualified", "score"]
-        }
+            "required": ["qualified", "score"],
+        },
     },
     {
         "name": "ResumeScreening",
@@ -184,10 +190,10 @@ SAMPLE_SCHEMAS = [
                 "candidate_name": {"type": "string"},
                 "match_score": {"type": "integer"},
                 "recommended": {"type": "boolean"},
-                "decision": {"type": "string"}
+                "decision": {"type": "string"},
             },
-            "required": ["match_score", "decision"]
-        }
+            "required": ["match_score", "decision"],
+        },
     },
     {
         "name": "Evaluation",
@@ -198,12 +204,11 @@ SAMPLE_SCHEMAS = [
             "properties": {
                 "subject": {"type": "string"},
                 "score": {"type": "integer"},
-                "verdict": {"type": "string"}
+                "verdict": {"type": "string"},
             },
-            "required": ["verdict"]
-        }
+            "required": ["verdict"],
+        },
     },
-
     # ── Risk / compliance / finance outcomes ────────────────────────────────────
     {
         "name": "RiskAssessment",
@@ -214,10 +219,10 @@ SAMPLE_SCHEMAS = [
             "properties": {
                 "risk_level": {"type": "string"},
                 "risk_score": {"type": "integer"},
-                "requires_escalation": {"type": "boolean"}
+                "requires_escalation": {"type": "boolean"},
             },
-            "required": ["risk_level"]
-        }
+            "required": ["risk_level"],
+        },
     },
     {
         "name": "ContentModeration",
@@ -229,10 +234,10 @@ SAMPLE_SCHEMAS = [
                 "flagged": {"type": "boolean"},
                 "category": {"type": "string"},
                 "severity": {"type": "string"},
-                "action": {"type": "string"}
+                "action": {"type": "string"},
             },
-            "required": ["flagged", "action"]
-        }
+            "required": ["flagged", "action"],
+        },
     },
     {
         "name": "FraudCheck",
@@ -243,10 +248,10 @@ SAMPLE_SCHEMAS = [
             "properties": {
                 "is_fraud": {"type": "boolean"},
                 "risk_score": {"type": "integer"},
-                "recommended_action": {"type": "string"}
+                "recommended_action": {"type": "string"},
             },
-            "required": ["is_fraud", "recommended_action"]
-        }
+            "required": ["is_fraud", "recommended_action"],
+        },
     },
     {
         "name": "ExpenseApproval",
@@ -258,10 +263,10 @@ SAMPLE_SCHEMAS = [
                 "amount": {"type": "number"},
                 "category": {"type": "string"},
                 "policy_compliant": {"type": "boolean"},
-                "approval_status": {"type": "string"}
+                "approval_status": {"type": "string"},
             },
-            "required": ["amount", "approval_status"]
-        }
+            "required": ["amount", "approval_status"],
+        },
     },
     {
         "name": "InvoiceData",
@@ -274,11 +279,11 @@ SAMPLE_SCHEMAS = [
                 "invoice_number": {"type": "string"},
                 "total_amount": {"type": "number"},
                 "currency": {"type": "string"},
-                "status": {"type": "string"}
+                "status": {"type": "string"},
             },
-            "required": ["vendor", "total_amount"]
-        }
-    }
+            "required": ["vendor", "total_amount"],
+        },
+    },
 ]
 
 
@@ -311,7 +316,7 @@ async def seed_async():
                         schema_type=schema_data["schema_type"],
                         schema_definition=schema_data["schema_definition"],
                         created_at=datetime.now().replace(tzinfo=None),
-                        updated_at=datetime.now().replace(tzinfo=None)
+                        updated_at=datetime.now().replace(tzinfo=None),
                     )
                     session.add(schema)
                     schemas_added += 1
@@ -350,4 +355,5 @@ async def seed():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(seed())

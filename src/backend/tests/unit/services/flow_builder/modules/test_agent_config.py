@@ -3,9 +3,12 @@ Unit tests for AgentConfig module.
 
 Tests the functionality of agent configuration for CrewAI flows.
 """
-import pytest
+
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from src.services.flow_builder.modules.agent_adapter import AgentConfig
 
 
@@ -34,16 +37,8 @@ def mock_flow_data():
     """Create mock flow data."""
     flow = MagicMock()
     flow.nodes = [
-        {
-            "id": "agent-agent-123",
-            "data": {
-                "tools": ["tool-3", "tool-4"]
-            }
-        },
-        {
-            "id": "other-node",
-            "data": {}
-        }
+        {"id": "agent-agent-123", "data": {"tools": ["tool-3", "tool-4"]}},
+        {"id": "other-node", "data": {}},
     ]
     return flow
 
@@ -85,16 +80,21 @@ def mock_llm():
 class TestAgentConfig:
     """Test cases for AgentConfig class."""
 
-    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
+    @patch("src.services.flow_builder.modules.agent_adapter.ToolFactory")
     @pytest.mark.asyncio
-    async def test_configure_agent_and_tools_success(self, mock_tool_factory_class, mock_agent_data, mock_tool_factory, mock_llm):
+    async def test_configure_agent_and_tools_success(
+        self, mock_tool_factory_class, mock_agent_data, mock_tool_factory, mock_llm
+    ):
         """Test successful agent configuration with tools (delegates to the shared
         build_agent — flow only sources tools + normalizes the spec)."""
         mock_tool_factory_class.return_value = mock_tool_factory
         mock_agent_instance = MagicMock()
 
-        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
-                   new_callable=AsyncMock, return_value=mock_agent_instance) as mock_build:
+        with patch(
+            "src.services.execution.kernel.agent_tools.build_agent_with_tools",
+            new_callable=AsyncMock,
+            return_value=mock_agent_instance,
+        ) as mock_build:
             result = await AgentConfig.configure_agent_and_tools(mock_agent_data)
 
         assert result == mock_agent_instance
@@ -107,24 +107,31 @@ class TestAgentConfig:
         result = await AgentConfig.configure_agent_and_tools(None)
         assert result is None
 
-    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
+    @patch("src.services.flow_builder.modules.agent_adapter.ToolFactory")
     @pytest.mark.asyncio
-    async def test_configure_agent_and_tools_tool_factory_error(self, mock_tool_factory_class, mock_agent_data):
+    async def test_configure_agent_and_tools_tool_factory_error(
+        self, mock_tool_factory_class, mock_agent_data
+    ):
         """Test agent configuration when tool factory initialization fails."""
         mock_tool_factory = AsyncMock()
         mock_tool_factory.initialize.side_effect = Exception("Tool factory error")
         mock_tool_factory_class.return_value = mock_tool_factory
 
-        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
-                   new_callable=AsyncMock, return_value=MagicMock()):
+        with patch(
+            "src.services.execution.kernel.agent_tools.build_agent_with_tools",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ):
             result = await AgentConfig.configure_agent_and_tools(mock_agent_data)
 
         assert result is not None
         mock_tool_factory.initialize.assert_called_once()
 
-    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
+    @patch("src.services.flow_builder.modules.agent_adapter.ToolFactory")
     @pytest.mark.asyncio
-    async def test_configure_agent_and_tools_from_flow_nodes(self, mock_tool_factory_class, mock_flow_data, mock_tool_factory):
+    async def test_configure_agent_and_tools_from_flow_nodes(
+        self, mock_tool_factory_class, mock_flow_data, mock_tool_factory
+    ):
         """Test agent configuration using tools from flow nodes."""
         mock_tool_factory_class.return_value = mock_tool_factory
 
@@ -137,15 +144,22 @@ class TestAgentConfig:
         agent_data.backstory = "An experienced data analyst"
         agent_data.tools = []  # No direct tools
 
-        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
-                   new_callable=AsyncMock, return_value=MagicMock()):
-            result = await AgentConfig.configure_agent_and_tools(agent_data, mock_flow_data)
+        with patch(
+            "src.services.execution.kernel.agent_tools.build_agent_with_tools",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ):
+            result = await AgentConfig.configure_agent_and_tools(
+                agent_data, mock_flow_data
+            )
 
         assert result is not None
 
-    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
+    @patch("src.services.flow_builder.modules.agent_adapter.ToolFactory")
     @pytest.mark.asyncio
-    async def test_configure_agent_and_tools_exception(self, mock_tool_factory_class, mock_agent_data):
+    async def test_configure_agent_and_tools_exception(
+        self, mock_tool_factory_class, mock_agent_data
+    ):
         """Test agent configuration with exception."""
         mock_tool_factory_class.side_effect = Exception("Configuration error")
 
@@ -167,7 +181,7 @@ class TestAgentConfig:
 
     def test_normalize_tools_list_invalid_string(self):
         """Test normalizing tools list from invalid JSON string."""
-        tools_data = 'invalid json'
+        tools_data = "invalid json"
         result = AgentConfig._normalize_tools_list(tools_data)
         assert result == []
 
@@ -191,7 +205,7 @@ class TestAgentConfig:
         result = AgentConfig._normalize_tools_list({"tool1": "value"})
         assert result == []
 
-    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
+    @patch("src.services.flow_builder.modules.agent_adapter.ToolFactory")
     @pytest.mark.asyncio
     async def test_configure_agent_no_tools_attribute(self, mock_tool_factory_class):
         """Test configuring agent without tools attribute."""
@@ -206,13 +220,16 @@ class TestAgentConfig:
         agent_data.backstory = "Backstory"
         del agent_data.tools  # No tools attribute
 
-        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
-                   new_callable=AsyncMock, return_value=MagicMock()):
+        with patch(
+            "src.services.execution.kernel.agent_tools.build_agent_with_tools",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ):
             result = await AgentConfig.configure_agent_and_tools(agent_data)
 
         assert result is not None
 
-    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
+    @patch("src.services.flow_builder.modules.agent_adapter.ToolFactory")
     @pytest.mark.asyncio
     async def test_configure_agent_none_tools_attribute(self, mock_tool_factory_class):
         """Test configuring agent with None tools attribute."""
@@ -227,15 +244,20 @@ class TestAgentConfig:
         agent_data.backstory = "Backstory"
         agent_data.tools = None  # None tools
 
-        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
-                   new_callable=AsyncMock, return_value=MagicMock()):
+        with patch(
+            "src.services.execution.kernel.agent_tools.build_agent_with_tools",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ):
             result = await AgentConfig.configure_agent_and_tools(agent_data)
 
         assert result is not None
 
-    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
+    @patch("src.services.flow_builder.modules.agent_adapter.ToolFactory")
     @pytest.mark.asyncio
-    async def test_configure_agent_flow_with_no_nodes_attr(self, mock_tool_factory_class):
+    async def test_configure_agent_flow_with_no_nodes_attr(
+        self, mock_tool_factory_class
+    ):
         """Test configuring agent with flow data that has no nodes attribute."""
         mock_tool_factory = AsyncMock()
         mock_tool_factory.initialize = AsyncMock()
@@ -251,8 +273,11 @@ class TestAgentConfig:
         flow_data = MagicMock()
         del flow_data.nodes  # No nodes attribute
 
-        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
-                   new_callable=AsyncMock, return_value=MagicMock()):
+        with patch(
+            "src.services.execution.kernel.agent_tools.build_agent_with_tools",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ):
             result = await AgentConfig.configure_agent_and_tools(agent_data, flow_data)
 
         assert result is not None
@@ -261,10 +286,12 @@ class TestAgentConfig:
 class TestAgentConfigIntegration:
     """Integration tests for AgentConfig."""
 
-    @patch('src.services.flow_builder.modules.agent_adapter.LoggerManager')
-    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
+    @patch("src.services.flow_builder.modules.agent_adapter.LoggerManager")
+    @patch("src.services.flow_builder.modules.agent_adapter.ToolFactory")
     @pytest.mark.asyncio
-    async def test_full_agent_configuration_flow(self, mock_tool_factory_class, mock_logger_manager):
+    async def test_full_agent_configuration_flow(
+        self, mock_tool_factory_class, mock_logger_manager
+    ):
         """Test the complete agent configuration flow (delegates to shared build_agent)."""
         # Setup mocks
         mock_logger = MagicMock()
@@ -292,18 +319,23 @@ class TestAgentConfigIntegration:
         agent_data.max_rpm = 5
         agent_data.config = {"temperature": 0.7}
 
-        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
-                   new_callable=AsyncMock, return_value=mock_agent_instance) as mock_build:
+        with patch(
+            "src.services.execution.kernel.agent_tools.build_agent_with_tools",
+            new_callable=AsyncMock,
+            return_value=mock_agent_instance,
+        ) as mock_build:
             result = await AgentConfig.configure_agent_and_tools(agent_data)
 
         assert result == mock_agent_instance
         mock_tool_factory.initialize.assert_called_once()
         mock_build.assert_called_once()
 
-    @patch('src.services.flow_builder.modules.agent_adapter.LoggerManager')
-    @patch('src.services.flow_builder.modules.agent_adapter.ToolFactory')
+    @patch("src.services.flow_builder.modules.agent_adapter.LoggerManager")
+    @patch("src.services.flow_builder.modules.agent_adapter.ToolFactory")
     @pytest.mark.asyncio
-    async def test_full_agent_configuration_with_date_awareness(self, mock_tool_factory_class, mock_logger_manager):
+    async def test_full_agent_configuration_with_date_awareness(
+        self, mock_tool_factory_class, mock_logger_manager
+    ):
         """Date awareness params flow through the spec into the shared build_agent."""
         # Setup mocks
         mock_logger = MagicMock()
@@ -333,8 +365,11 @@ class TestAgentConfigIntegration:
         agent_data.inject_date = True
         agent_data.date_format = "%Y-%m-%d"
 
-        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
-                   new_callable=AsyncMock, return_value=mock_agent_instance) as mock_build:
+        with patch(
+            "src.services.execution.kernel.agent_tools.build_agent_with_tools",
+            new_callable=AsyncMock,
+            return_value=mock_agent_instance,
+        ) as mock_build:
             result = await AgentConfig.configure_agent_and_tools(agent_data)
 
         assert result == mock_agent_instance

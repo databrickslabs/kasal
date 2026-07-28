@@ -5,43 +5,76 @@ toggle_server_enabled, toggle_server_global_enabled, get_effective_servers,
 get_settings error path, update_settings error path, get_servers_by_names
 decrypt error, enable_server_for_group error paths.
 """
+
 import asyncio
-import pytest
-from types import SimpleNamespace
 from datetime import datetime
-from unittest.mock import AsyncMock, patch, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.mcp.service import MCPService
+import pytest
+
+from src.core.exceptions import ConflictError, KasalError, NotFoundError
 from src.schemas.mcp import (
-    MCPServerCreate, MCPServerUpdate, MCPTestConnectionRequest,
-    MCPSettingsUpdate
+    MCPServerCreate,
+    MCPServerUpdate,
+    MCPSettingsUpdate,
+    MCPTestConnectionRequest,
 )
-from src.core.exceptions import NotFoundError, ConflictError, KasalError
+from src.services.mcp.service import MCPService
 
 
-def mk_server(id=1, name="s1", group_id=None, encrypted_api_key=None,
-              server_url="https://example.com", server_type="sse", auth_type="api_key",
-              enabled=True, global_enabled=False, timeout_seconds=30, max_retries=3,
-              model_mapping_enabled=False, rate_limit=60, additional_config=None):
+def mk_server(
+    id=1,
+    name="s1",
+    group_id=None,
+    encrypted_api_key=None,
+    server_url="https://example.com",
+    server_type="sse",
+    auth_type="api_key",
+    enabled=True,
+    global_enabled=False,
+    timeout_seconds=30,
+    max_retries=3,
+    model_mapping_enabled=False,
+    rate_limit=60,
+    additional_config=None,
+):
     now = datetime.utcnow()
     return SimpleNamespace(
-        id=id, name=name, group_id=group_id, encrypted_api_key=encrypted_api_key,
-        server_url=server_url, server_type=server_type, auth_type=auth_type,
-        enabled=enabled, global_enabled=global_enabled, timeout_seconds=timeout_seconds,
-        max_retries=max_retries, model_mapping_enabled=model_mapping_enabled, rate_limit=rate_limit,
-        additional_config=additional_config or {}, created_at=now, updated_at=now
+        id=id,
+        name=name,
+        group_id=group_id,
+        encrypted_api_key=encrypted_api_key,
+        server_url=server_url,
+        server_type=server_type,
+        auth_type=auth_type,
+        enabled=enabled,
+        global_enabled=global_enabled,
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+        model_mapping_enabled=model_mapping_enabled,
+        rate_limit=rate_limit,
+        additional_config=additional_config or {},
+        created_at=now,
+        updated_at=now,
     )
 
 
 def mk_settings(id=1, global_enabled=True, individual_enabled=True):
     now = datetime.utcnow()
-    return SimpleNamespace(id=id, global_enabled=global_enabled, individual_enabled=individual_enabled,
-                           created_at=now, updated_at=now)
+    return SimpleNamespace(
+        id=id,
+        global_enabled=global_enabled,
+        individual_enabled=individual_enabled,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 # ---------------------------------------------------------------------------
 # get_server_by_id
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_server_by_id_not_found():
@@ -73,6 +106,7 @@ async def test_get_server_by_id_found_with_api_key(monkeypatch):
     svc.server_repository.get = AsyncMock(return_value=server)
 
     import src.services.mcp.service as module
+
     monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "decrypted")
 
     result = await svc.get_server_by_id(1)
@@ -87,8 +121,12 @@ async def test_get_server_by_id_decrypt_error(monkeypatch):
     svc.server_repository.get = AsyncMock(return_value=server)
 
     import src.services.mcp.service as module
-    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value",
-                        lambda v: (_ for _ in ()).throw(Exception("decrypt fail")))
+
+    monkeypatch.setattr(
+        module.EncryptionUtils,
+        "decrypt_value",
+        lambda v: (_ for _ in ()).throw(Exception("decrypt fail")),
+    )
 
     result = await svc.get_server_by_id(1)
     assert result.api_key == ""
@@ -97,6 +135,7 @@ async def test_get_server_by_id_decrypt_error(monkeypatch):
 # ---------------------------------------------------------------------------
 # create_server
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_create_server_conflict(monkeypatch):
@@ -110,7 +149,7 @@ async def test_create_server_conflict(monkeypatch):
         server_url="https://example.com",
         server_type="sse",
         auth_type="api_key",
-        api_key=""
+        api_key="",
     )
     with pytest.raises(ConflictError):
         await svc.create_server(server_data)
@@ -126,6 +165,7 @@ async def test_create_server_success(monkeypatch):
     svc.server_repository.create = AsyncMock(return_value=created)
 
     import src.services.mcp.service as module
+
     monkeypatch.setattr(module.EncryptionUtils, "encrypt_value", lambda v: "enc")
 
     server_data = MCPServerCreate(
@@ -133,7 +173,7 @@ async def test_create_server_success(monkeypatch):
         server_url="https://example.com",
         server_type="sse",
         auth_type="api_key",
-        api_key="mykey"
+        api_key="mykey",
     )
     result = await svc.create_server(server_data)
     assert result.name == "new"
@@ -150,6 +190,7 @@ async def test_create_server_with_group_id(monkeypatch):
     svc.server_repository.create = AsyncMock(return_value=created)
 
     import src.services.mcp.service as module
+
     monkeypatch.setattr(module.EncryptionUtils, "encrypt_value", lambda v: "enc")
 
     server_data = MCPServerCreate(
@@ -157,7 +198,7 @@ async def test_create_server_with_group_id(monkeypatch):
         server_url="https://example.com",
         server_type="sse",
         auth_type="api_key",
-        api_key=""
+        api_key="",
     )
     result = await svc.create_server(server_data, group_id="g1")
     assert result.name == "grouped"
@@ -171,6 +212,7 @@ async def test_create_server_generic_exception(monkeypatch):
     svc.server_repository.create = AsyncMock(side_effect=RuntimeError("DB error"))
 
     import src.services.mcp.service as module
+
     monkeypatch.setattr(module.EncryptionUtils, "encrypt_value", lambda v: "enc")
 
     server_data = MCPServerCreate(
@@ -178,7 +220,7 @@ async def test_create_server_generic_exception(monkeypatch):
         server_url="https://example.com",
         server_type="sse",
         auth_type="api_key",
-        api_key=""
+        api_key="",
     )
     with pytest.raises(KasalError):
         await svc.create_server(server_data)
@@ -187,6 +229,7 @@ async def test_create_server_generic_exception(monkeypatch):
 # ---------------------------------------------------------------------------
 # update_server
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_update_server_not_found():
@@ -223,8 +266,11 @@ async def test_update_server_with_new_api_key(monkeypatch):
     svc.server_repository.update = AsyncMock(return_value=updated)
 
     import src.services.mcp.service as module
+
     monkeypatch.setattr(module.EncryptionUtils, "encrypt_value", lambda v: "newenc")
-    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "decrypted_new")
+    monkeypatch.setattr(
+        module.EncryptionUtils, "decrypt_value", lambda v: "decrypted_new"
+    )
 
     update_data = MCPServerUpdate(name="old", api_key="new_plain_key")
     result = await svc.update_server(1, update_data)
@@ -241,9 +287,13 @@ async def test_update_server_decrypt_error(monkeypatch):
     svc.server_repository.update = AsyncMock(return_value=updated)
 
     import src.services.mcp.service as module
+
     monkeypatch.setattr(module.EncryptionUtils, "encrypt_value", lambda v: "broken")
-    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value",
-                        lambda v: (_ for _ in ()).throw(Exception("decrypt fail")))
+    monkeypatch.setattr(
+        module.EncryptionUtils,
+        "decrypt_value",
+        lambda v: (_ for _ in ()).throw(Exception("decrypt fail")),
+    )
 
     update_data = MCPServerUpdate(name="old", api_key="trigger_encrypt")
     result = await svc.update_server(1, update_data)
@@ -266,6 +316,7 @@ async def test_update_server_exception():
 # ---------------------------------------------------------------------------
 # delete_server
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_delete_server_not_found():
@@ -305,6 +356,7 @@ async def test_delete_server_exception():
 # toggle_server_enabled
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_toggle_server_enabled_not_found():
     svc = MCPService(session=SimpleNamespace())
@@ -343,7 +395,9 @@ async def test_toggle_server_disabled():
 async def test_toggle_server_enabled_exception():
     svc = MCPService(session=SimpleNamespace())
     svc.server_repository = AsyncMock()
-    svc.server_repository.toggle_enabled = AsyncMock(side_effect=RuntimeError("DB error"))
+    svc.server_repository.toggle_enabled = AsyncMock(
+        side_effect=RuntimeError("DB error")
+    )
 
     with pytest.raises(KasalError):
         await svc.toggle_server_enabled(1)
@@ -352,6 +406,7 @@ async def test_toggle_server_enabled_exception():
 # ---------------------------------------------------------------------------
 # toggle_server_global_enabled
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_toggle_global_not_found():
@@ -391,7 +446,9 @@ async def test_toggle_global_disabled():
 async def test_toggle_global_exception():
     svc = MCPService(session=SimpleNamespace())
     svc.server_repository = AsyncMock()
-    svc.server_repository.toggle_global_enabled = AsyncMock(side_effect=RuntimeError("DB error"))
+    svc.server_repository.toggle_global_enabled = AsyncMock(
+        side_effect=RuntimeError("DB error")
+    )
 
     with pytest.raises(KasalError):
         await svc.toggle_server_global_enabled(1)
@@ -401,19 +458,25 @@ async def test_toggle_global_exception():
 # get_effective_servers
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_effective_servers(monkeypatch):
     svc = MCPService(session=SimpleNamespace())
     svc.server_repository = AsyncMock()
 
     import src.services.mcp.service as module
+
     monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "dec")
 
-    global_server = mk_server(id=1, name="global_srv", global_enabled=True, encrypted_api_key="enc")
+    global_server = mk_server(
+        id=1, name="global_srv", global_enabled=True, encrypted_api_key="enc"
+    )
     explicit_server = mk_server(id=2, name="explicit_srv", encrypted_api_key="enc")
 
     svc.server_repository.find_global_enabled = AsyncMock(return_value=[global_server])
-    svc.server_repository.find_by_names = AsyncMock(return_value=[global_server, explicit_server])
+    svc.server_repository.find_by_names = AsyncMock(
+        return_value=[global_server, explicit_server]
+    )
 
     results = await svc.get_effective_servers(["explicit_srv"])
     assert len(results) == 2
@@ -425,6 +488,7 @@ async def test_get_effective_servers_empty_explicit(monkeypatch):
     svc.server_repository = AsyncMock()
 
     import src.services.mcp.service as module
+
     monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "dec")
 
     global_server = mk_server(id=1, name="global_srv", global_enabled=True)
@@ -438,6 +502,7 @@ async def test_get_effective_servers_empty_explicit(monkeypatch):
 # ---------------------------------------------------------------------------
 # get_servers_by_names - empty list
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_servers_by_names_empty():
@@ -461,8 +526,12 @@ async def test_get_servers_by_names_decrypt_error(monkeypatch):
     svc.server_repository.find_by_names = AsyncMock(return_value=[server])
 
     import src.services.mcp.service as module
-    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value",
-                        lambda v: (_ for _ in ()).throw(Exception("fail")))
+
+    monkeypatch.setattr(
+        module.EncryptionUtils,
+        "decrypt_value",
+        lambda v: (_ for _ in ()).throw(Exception("fail")),
+    )
 
     result = await svc.get_servers_by_names(["s1"])
     assert result[0].api_key == ""
@@ -476,8 +545,12 @@ async def test_get_servers_by_names_group_aware_decrypt_error(monkeypatch):
     svc.server_repository.find_by_names_group_scope = AsyncMock(return_value=[server])
 
     import src.services.mcp.service as module
-    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value",
-                        lambda v: (_ for _ in ()).throw(Exception("fail")))
+
+    monkeypatch.setattr(
+        module.EncryptionUtils,
+        "decrypt_value",
+        lambda v: (_ for _ in ()).throw(Exception("fail")),
+    )
 
     result = await svc.get_servers_by_names_group_aware(["s1"], group_id="g1")
     assert result[0].api_key == ""
@@ -487,11 +560,14 @@ async def test_get_servers_by_names_group_aware_decrypt_error(monkeypatch):
 # get_settings / update_settings error paths
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_settings_error():
     svc = MCPService(session=SimpleNamespace())
     svc.settings_repository = AsyncMock()
-    svc.settings_repository.get_settings = AsyncMock(side_effect=RuntimeError("DB error"))
+    svc.settings_repository.get_settings = AsyncMock(
+        side_effect=RuntimeError("DB error")
+    )
 
     with pytest.raises(KasalError):
         await svc.get_settings()
@@ -501,7 +577,9 @@ async def test_get_settings_error():
 async def test_update_settings_error():
     svc = MCPService(session=SimpleNamespace())
     svc.settings_repository = AsyncMock()
-    svc.settings_repository.get_settings = AsyncMock(side_effect=RuntimeError("DB error"))
+    svc.settings_repository.get_settings = AsyncMock(
+        side_effect=RuntimeError("DB error")
+    )
 
     settings_data = MCPSettingsUpdate(global_enabled=True, individual_enabled=False)
     with pytest.raises(KasalError):
@@ -525,6 +603,7 @@ async def test_update_settings_success():
 # ---------------------------------------------------------------------------
 # enable_server_for_group - exception in disable base
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_enable_server_for_group_disable_base_exception(monkeypatch):
@@ -557,7 +636,9 @@ async def test_enable_server_for_group_update_existing_disable_exception(monkeyp
     svc.server_repository.get = AsyncMock(return_value=base)
     svc.server_repository.find_by_name_and_group = AsyncMock(return_value=existing)
     # First update returns existing, second raises
-    svc.server_repository.update = AsyncMock(side_effect=[existing, RuntimeError("disable failed")])
+    svc.server_repository.update = AsyncMock(
+        side_effect=[existing, RuntimeError("disable failed")]
+    )
 
     result = await svc.enable_server_for_group(6, "g1")
     assert result.id == 7
@@ -567,13 +648,17 @@ async def test_enable_server_for_group_update_existing_disable_exception(monkeyp
 # test_connection routing
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_test_connection_sse_type():
     svc = MCPService(session=SimpleNamespace())
-    req = MCPTestConnectionRequest(server_url="https://example.com", api_key="k", server_type="sse")
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com", api_key="k", server_type="sse"
+    )
 
     with patch.object(svc, "_test_sse_connection", new_callable=AsyncMock) as mock_sse:
         from src.schemas.mcp import MCPTestConnectionResponse
+
         mock_sse.return_value = MCPTestConnectionResponse(success=True, message="ok")
         result = await svc.test_connection(req)
     assert result.success is True
@@ -582,10 +667,15 @@ async def test_test_connection_sse_type():
 @pytest.mark.asyncio
 async def test_test_connection_streamable_type():
     svc = MCPService(session=SimpleNamespace())
-    req = MCPTestConnectionRequest(server_url="https://example.com", api_key="k", server_type="streamable")
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com", api_key="k", server_type="streamable"
+    )
 
-    with patch.object(svc, "_test_streamable_connection", new_callable=AsyncMock) as mock_stream:
+    with patch.object(
+        svc, "_test_streamable_connection", new_callable=AsyncMock
+    ) as mock_stream:
         from src.schemas.mcp import MCPTestConnectionResponse
+
         mock_stream.return_value = MCPTestConnectionResponse(success=True, message="ok")
         result = await svc.test_connection(req)
     assert result.success is True
@@ -594,6 +684,7 @@ async def test_test_connection_streamable_type():
 # ---------------------------------------------------------------------------
 # get_all_servers_effective — OPT-IN workspace model
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_all_servers_effective_inherited_base_shown_disabled():
@@ -617,7 +708,9 @@ async def test_get_all_servers_effective_workspace_override_shown_enabled():
     svc.server_repository = AsyncMock()
     base = mk_server(id=1, name="global_a", group_id=None, enabled=True)
     override = mk_server(id=2, name="global_a", group_id="ws1", enabled=True)
-    svc.server_repository.list_for_group_scope = AsyncMock(return_value=[base, override])
+    svc.server_repository.list_for_group_scope = AsyncMock(
+        return_value=[base, override]
+    )
 
     resp = await svc.get_all_servers_effective("ws1")
     assert resp.count == 1

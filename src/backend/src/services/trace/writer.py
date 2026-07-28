@@ -35,7 +35,9 @@ async def _root_span_id(session: Any, job_id: str) -> Optional[str]:
     try:
         from src.repositories.execution_trace_repository import ExecutionTraceRepository
 
-        by_type = await ExecutionTraceRepository(session).get_span_ids_by_event_type(job_id)
+        by_type = await ExecutionTraceRepository(session).get_span_ids_by_event_type(
+            job_id
+        )
         for event_type in _ROOT_EVENT_TYPES:
             if by_type.get(event_type):
                 return by_type[event_type]
@@ -45,7 +47,9 @@ async def _root_span_id(session: Any, job_id: str) -> Optional[str]:
         # failure for what is simply "no root span yet".
         return None
     except Exception as lookup_err:  # noqa: BLE001
-        logger.debug(f"[trace-writer] root span lookup skipped for {job_id}: {lookup_err}")
+        logger.debug(
+            f"[trace-writer] root span lookup skipped for {job_id}: {lookup_err}"
+        )
         return None
 
 
@@ -61,19 +65,25 @@ async def resolve_attribution(session: Any, job_id: str) -> Dict[str, Any]:
     try:
         from src.repositories.execution_trace_repository import ExecutionTraceRepository
 
-        rows = await ExecutionTraceRepository(session).get_attribution_candidates(job_id)
+        rows = await ExecutionTraceRepository(session).get_attribution_candidates(
+            job_id
+        )
         for source, context, metadata in rows:
             if not source or source in _NON_AGENT_SOURCES:
                 continue
             attribution["event_source"] = source
             if context:
                 attribution["event_context"] = context
-            task_id = (metadata or {}).get("task_id") if isinstance(metadata, dict) else None
+            task_id = (
+                (metadata or {}).get("task_id") if isinstance(metadata, dict) else None
+            )
             if task_id:
                 attribution["task_id"] = task_id
             break
     except Exception as attribution_err:  # noqa: BLE001
-        logger.debug(f"[trace-writer] attribution skipped for {job_id}: {attribution_err}")
+        logger.debug(
+            f"[trace-writer] attribution skipped for {job_id}: {attribution_err}"
+        )
     return attribution
 
 
@@ -118,7 +128,9 @@ async def write_rows(
                     "job_id": job_id,
                     "event_source": attribution.get("event_source") or fallback_source,
                     "event_context": (
-                        attribution.get("event_context") or fallback_context or event_type
+                        attribution.get("event_context")
+                        or fallback_context
+                        or event_type
                     ),
                     "event_type": event_type,
                     "span_name": span_name,

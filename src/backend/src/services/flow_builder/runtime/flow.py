@@ -181,9 +181,7 @@ class Flow(Generic[T]):
         # around the gather, and always close the scope — an unclosed flow scope
         # would leak into whatever ran next in the same context.
         flow_name = type(self).__name__
-        event_bus.emit(
-            self, FlowStartedEvent(flow_name=flow_name, inputs=inputs)
-        )
+        event_bus.emit(self, FlowStartedEvent(flow_name=flow_name, inputs=inputs))
         try:
             await asyncio.gather(
                 *(self._execute_method(name, None) for name in self._start_methods)
@@ -230,7 +228,8 @@ class Flow(Generic[T]):
     async def _execute_method(self, name: str, previous_output: Any) -> None:
         method = getattr(self, name)
         parameters = [
-            p for p in inspect.signature(method).parameters.values()
+            p
+            for p in inspect.signature(method).parameters.values()
             if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
         ]
         args = (previous_output,) if parameters else ()
@@ -274,11 +273,7 @@ class Flow(Generic[T]):
         flow_uuid = self.flow_uuid
         if not flow_uuid:
             return
-        state_data = (
-            dict(self._state)
-            if isinstance(self._state, dict)
-            else self._state
-        )
+        state_data = dict(self._state) if isinstance(self._state, dict) else self._state
         try:
             self._persistence.save_state(flow_uuid, method_name, state_data)
         except Exception:

@@ -6,21 +6,23 @@ Used by all converters (SQL, UC Metrics, DAX) for semantic formula parsing.
 Mirrors the token extraction pattern from reference KbiComponent.
 """
 
-import re
-from typing import List, Set, Dict, Optional, Tuple
-from enum import Enum
 import logging
+import re
+from enum import Enum
+from typing import Dict, List, Optional, Set, Tuple
+
 from ...base.models import KPI
 
 
 class TokenType(Enum):
     """Types of tokens found in formulas"""
-    KBI_REFERENCE = "kbi_reference"      # Reference to another KBI
-    VARIABLE = "variable"                 # Variable reference ($var_name)
-    COLUMN = "column"                     # Database column reference
-    FUNCTION = "function"                 # SQL function call
-    OPERATOR = "operator"                 # Mathematical/logical operator
-    LITERAL = "literal"                   # Numeric or string literal
+
+    KBI_REFERENCE = "kbi_reference"  # Reference to another KBI
+    VARIABLE = "variable"  # Variable reference ($var_name)
+    COLUMN = "column"  # Database column reference
+    FUNCTION = "function"  # SQL function call
+    OPERATOR = "operator"  # Mathematical/logical operator
+    LITERAL = "literal"  # Numeric or string literal
 
 
 class FormulaToken:
@@ -58,10 +60,10 @@ class KbiFormulaParser:
     """
 
     # Regex patterns for token extraction
-    KBI_REFERENCE_PATTERN = r'\[([a-zA-Z_][a-zA-Z0-9_]*)\]|\{([a-zA-Z_][a-zA-Z0-9_]*)\}'
-    VARIABLE_PATTERN = r'\$(?:var_)?([a-zA-Z_][a-zA-Z0-9_]*)'
-    FUNCTION_PATTERN = r'([A-Z_]+)\s*\('
-    IDENTIFIER_PATTERN = r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+    KBI_REFERENCE_PATTERN = r"\[([a-zA-Z_][a-zA-Z0-9_]*)\]|\{([a-zA-Z_][a-zA-Z0-9_]*)\}"
+    VARIABLE_PATTERN = r"\$(?:var_)?([a-zA-Z_][a-zA-Z0-9_]*)"
+    FUNCTION_PATTERN = r"([A-Z_]+)\s*\("
+    IDENTIFIER_PATTERN = r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b"
 
     def __init__(self):
         self.logger = logging.getLogger(__name__)
@@ -94,7 +96,9 @@ class KbiFormulaParser:
         tokens.extend(func_tokens)
 
         # Extract identifiers (column names, etc.)
-        id_tokens = self._extract_identifiers(formula, exclude=kbi_tokens + var_tokens + func_tokens)
+        id_tokens = self._extract_identifiers(
+            formula, exclude=kbi_tokens + var_tokens + func_tokens
+        )
         tokens.extend(id_tokens)
 
         return tokens
@@ -159,9 +163,9 @@ class KbiFormulaParser:
             Dictionary with keys: 'kbis', 'variables', 'columns'
         """
         return {
-            'kbis': self.extract_kbi_references(formula),
-            'variables': self.extract_variables(formula),
-            'columns': self._extract_column_references(formula)
+            "kbis": self.extract_kbi_references(formula),
+            "variables": self.extract_variables(formula),
+            "columns": self._extract_column_references(formula),
         }
 
     def _extract_kbi_references(self, formula: str) -> List[FormulaToken]:
@@ -176,7 +180,7 @@ class KbiFormulaParser:
                 token = FormulaToken(
                     value=kbi_name,
                     token_type=TokenType.KBI_REFERENCE,
-                    position=match.start()
+                    position=match.start(),
                 )
                 tokens.append(token)
 
@@ -194,7 +198,7 @@ class KbiFormulaParser:
                 token = FormulaToken(
                     value=var_name,
                     token_type=TokenType.VARIABLE,
-                    position=match.start()
+                    position=match.start(),
                 )
                 tokens.append(token)
 
@@ -212,13 +216,15 @@ class KbiFormulaParser:
                 token = FormulaToken(
                     value=func_name,
                     token_type=TokenType.FUNCTION,
-                    position=match.start()
+                    position=match.start(),
                 )
                 tokens.append(token)
 
         return tokens
 
-    def _extract_identifiers(self, formula: str, exclude: List[FormulaToken] = None) -> List[FormulaToken]:
+    def _extract_identifiers(
+        self, formula: str, exclude: List[FormulaToken] = None
+    ) -> List[FormulaToken]:
         """Extract identifier tokens (column names, etc.) excluding already found tokens"""
         tokens = []
         exclude_values = {t.value for t in (exclude or [])}
@@ -227,11 +233,15 @@ class KbiFormulaParser:
 
         for match in matches:
             identifier = match.group(1)
-            if identifier and identifier not in exclude_values and not self._is_sql_keyword(identifier):
+            if (
+                identifier
+                and identifier not in exclude_values
+                and not self._is_sql_keyword(identifier)
+            ):
                 token = FormulaToken(
                     value=identifier,
                     token_type=TokenType.COLUMN,
-                    position=match.start()
+                    position=match.start(),
                 )
                 tokens.append(token)
 
@@ -249,10 +259,12 @@ class KbiFormulaParser:
 
         for match in matches:
             identifier = match.group(1)
-            if (identifier and
-                identifier not in exclude and
-                not self._is_sql_keyword(identifier) and
-                not self._is_sql_function(identifier)):
+            if (
+                identifier
+                and identifier not in exclude
+                and not self._is_sql_keyword(identifier)
+                and not self._is_sql_function(identifier)
+            ):
                 columns.append(identifier)
 
         return list(set(columns))  # Deduplicate
@@ -260,11 +272,42 @@ class KbiFormulaParser:
     def _is_sql_keyword(self, word: str) -> bool:
         """Check if word is a SQL keyword"""
         sql_keywords = {
-            'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'BETWEEN',
-            'LIKE', 'IS', 'NULL', 'TRUE', 'FALSE', 'CASE', 'WHEN', 'THEN',
-            'ELSE', 'END', 'AS', 'ON', 'JOIN', 'LEFT', 'RIGHT', 'INNER',
-            'OUTER', 'GROUP', 'BY', 'HAVING', 'ORDER', 'ASC', 'DESC',
-            'LIMIT', 'OFFSET', 'UNION', 'DISTINCT', 'ALL'
+            "SELECT",
+            "FROM",
+            "WHERE",
+            "AND",
+            "OR",
+            "NOT",
+            "IN",
+            "BETWEEN",
+            "LIKE",
+            "IS",
+            "NULL",
+            "TRUE",
+            "FALSE",
+            "CASE",
+            "WHEN",
+            "THEN",
+            "ELSE",
+            "END",
+            "AS",
+            "ON",
+            "JOIN",
+            "LEFT",
+            "RIGHT",
+            "INNER",
+            "OUTER",
+            "GROUP",
+            "BY",
+            "HAVING",
+            "ORDER",
+            "ASC",
+            "DESC",
+            "LIMIT",
+            "OFFSET",
+            "UNION",
+            "DISTINCT",
+            "ALL",
         }
         return word.upper() in sql_keywords
 
@@ -275,13 +318,45 @@ class KbiFormulaParser:
     def _get_sql_functions(self) -> Set[str]:
         """Get set of common SQL functions"""
         return {
-            'SUM', 'COUNT', 'AVG', 'MIN', 'MAX', 'STDDEV', 'VARIANCE',
-            'COALESCE', 'NULLIF', 'CAST', 'CONVERT', 'CASE',
-            'SUBSTR', 'SUBSTRING', 'CONCAT', 'UPPER', 'LOWER', 'TRIM',
-            'DATE', 'YEAR', 'MONTH', 'DAY', 'NOW', 'CURRENT_DATE',
-            'ABS', 'ROUND', 'CEIL', 'FLOOR', 'MOD', 'POWER', 'SQRT',
-            'ROW_NUMBER', 'RANK', 'DENSE_RANK', 'LAG', 'LEAD',
-            'FIRST_VALUE', 'LAST_VALUE', 'PERCENTILE_CONT'
+            "SUM",
+            "COUNT",
+            "AVG",
+            "MIN",
+            "MAX",
+            "STDDEV",
+            "VARIANCE",
+            "COALESCE",
+            "NULLIF",
+            "CAST",
+            "CONVERT",
+            "CASE",
+            "SUBSTR",
+            "SUBSTRING",
+            "CONCAT",
+            "UPPER",
+            "LOWER",
+            "TRIM",
+            "DATE",
+            "YEAR",
+            "MONTH",
+            "DAY",
+            "NOW",
+            "CURRENT_DATE",
+            "ABS",
+            "ROUND",
+            "CEIL",
+            "FLOOR",
+            "MOD",
+            "POWER",
+            "SQRT",
+            "ROW_NUMBER",
+            "RANK",
+            "DENSE_RANK",
+            "LAG",
+            "LEAD",
+            "FIRST_VALUE",
+            "LAST_VALUE",
+            "PERCENTILE_CONT",
         }
 
 
@@ -334,7 +409,9 @@ class KBIDependencyResolver:
             if kbi_name in self._kbi_lookup:
                 referenced_kbi = self._kbi_lookup[kbi_name]
                 resolved_kbis.append(referenced_kbi)
-                self.logger.debug(f"Resolved KBI reference '{kbi_name}' in formula for '{kbi.technical_name}'")
+                self.logger.debug(
+                    f"Resolved KBI reference '{kbi_name}' in formula for '{kbi.technical_name}'"
+                )
             else:
                 self.logger.warning(
                     f"KBI reference '{kbi_name}' in formula for '{kbi.technical_name}' could not be resolved"
@@ -360,7 +437,7 @@ class KBIDependencyResolver:
 
         # Prevent circular dependencies
         if kbi.technical_name in visited:
-            return {'kbi': kbi, 'dependencies': [], 'circular': True}
+            return {"kbi": kbi, "dependencies": [], "circular": True}
 
         visited.add(kbi.technical_name)
 
@@ -374,7 +451,7 @@ class KBIDependencyResolver:
             dependencies.append(child_tree)
 
         return {
-            'kbi': kbi,
-            'dependencies': dependencies,
-            'is_base': len(dependencies) == 0
+            "kbi": kbi,
+            "dependencies": dependencies,
+            "is_base": len(dependencies) == 0,
         }

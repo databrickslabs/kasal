@@ -6,19 +6,21 @@ This module provides functions for CRUD operations on execution traces.
 
 import logging
 from datetime import datetime
-from typing import List, Optional, Dict, Any, Tuple
-from sqlalchemy import delete, update, func
+from typing import Any, Dict, List, Optional, Tuple
+
+from sqlalchemy import delete, func, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.exc import SQLAlchemyError
 
-from src.models.execution_trace import ExecutionTrace
-from src.models.execution_history import ExecutionHistory
-from src.core.logger import LoggerManager
 from src.core.base_repository import BaseRepository
+from src.core.logger import LoggerManager
+from src.models.execution_history import ExecutionHistory
+from src.models.execution_trace import ExecutionTrace
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
+
 
 class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
     """Repository class for handling ExecutionTrace database operations."""
@@ -34,14 +36,14 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         self.session = session
 
     # Methods that require an existing session (primarily for internal use)
-    
+
     async def _create(self, trace_data: Dict[str, Any]) -> ExecutionTrace:
         """
         Create a new execution trace record.
 
         Args:
             trace_data: Dictionary with trace data
-            
+
         Returns:
             Created ExecutionTrace record
         """
@@ -51,29 +53,31 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             # Flush to assign primary key before commit (important for some backends)
             await self.session.flush()
             # Capture id early in case refresh fails
-            _trace_id = getattr(trace, 'id', None)
+            _trace_id = getattr(trace, "id", None)
             # Best-effort refresh; not strictly needed with expire_on_commit=False
             try:
-                if getattr(trace, 'id', None) is None and _trace_id is not None:
+                if getattr(trace, "id", None) is None and _trace_id is not None:
                     # If PK wasn’t populated, set it from pre-commit value
                     trace.id = _trace_id
                 else:
                     await self.session.refresh(trace)
             except Exception as refresh_err:
-                logger.debug(f"Refresh after trace insert failed (non-fatal): {refresh_err}")
+                logger.debug(
+                    f"Refresh after trace insert failed (non-fatal): {refresh_err}"
+                )
             return trace
         except SQLAlchemyError as e:
             await self.session.rollback()
             logger.error(f"Database error creating execution trace: {str(e)}")
             raise
-    
+
     async def _get_by_id(self, trace_id: int) -> Optional[ExecutionTrace]:
         """
         Get an execution trace by ID.
 
         Args:
             trace_id: ID of the trace to retrieve
-            
+
         Returns:
             ExecutionTrace if found, None otherwise
         """
@@ -82,15 +86,17 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             result = await self.session.execute(stmt)
             return result.scalars().first()
         except SQLAlchemyError as e:
-            logger.error(f"Database error retrieving execution trace {trace_id}: {str(e)}")
+            logger.error(
+                f"Database error retrieving execution trace {trace_id}: {str(e)}"
+            )
             raise
-    
+
     async def _get_by_run_id(
         self,
         run_id: int,
         limit: Optional[int] = None,
         offset: Optional[int] = 0,
-        since_id: Optional[int] = None
+        since_id: Optional[int] = None,
     ) -> List[ExecutionTrace]:
         """
         Get execution traces by run_id.
@@ -121,13 +127,15 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                 stmt = stmt.offset(offset)
             if limit is not None:
                 stmt = stmt.limit(limit)
-                
+
             result = await self.session.execute(stmt)
             return result.scalars().all()
         except SQLAlchemyError as e:
-            logger.error(f"Database error retrieving traces for run_id {run_id}: {str(e)}")
+            logger.error(
+                f"Database error retrieving traces for run_id {run_id}: {str(e)}"
+            )
             raise
-    
+
     async def get_span_ids_by_event_type(self, job_id: str) -> Dict[str, str]:
         """event_type -> span_id for a run's spans, earliest occurrence winning.
 
@@ -144,7 +152,9 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         )
         return {event_type: span_id for event_type, span_id in result.all()}
 
-    async def get_attribution_candidates(self, job_id: str) -> List[Tuple[Any, Any, Any]]:
+    async def get_attribution_candidates(
+        self, job_id: str
+    ) -> List[Tuple[Any, Any, Any]]:
         """(event_source, event_context, trace_metadata) newest first.
 
         The caller walks these to attribute an orphan row to the agent and task
@@ -184,7 +194,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         job_id: str,
         limit: Optional[int] = None,
         offset: Optional[int] = 0,
-        since_id: Optional[int] = None
+        since_id: Optional[int] = None,
     ) -> List[ExecutionTrace]:
         """
         Get execution traces by job_id.
@@ -215,17 +225,17 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                 stmt = stmt.offset(offset)
             if limit is not None:
                 stmt = stmt.limit(limit)
-                
+
             result = await self.session.execute(stmt)
             return result.scalars().all()
         except SQLAlchemyError as e:
-            logger.error(f"Database error retrieving traces for job_id {job_id}: {str(e)}")
+            logger.error(
+                f"Database error retrieving traces for job_id {job_id}: {str(e)}"
+            )
             raise
-    
+
     async def _get_all_traces(
-        self,
-        limit: Optional[int] = None,
-        offset: Optional[int] = 0
+        self, limit: Optional[int] = None, offset: Optional[int] = 0
     ) -> Tuple[List[ExecutionTrace], int]:
         """
         Get all execution traces with pagination.
@@ -233,42 +243,39 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         Args:
             limit: Maximum number of traces to return
             offset: Number of traces to skip
-            
+
         Returns:
             Tuple of (list of ExecutionTrace records, total count)
         """
         try:
             # Get all traces
             stmt = select(ExecutionTrace).order_by(ExecutionTrace.created_at.desc())
-            
+
             if offset is not None:
                 stmt = stmt.offset(offset)
             if limit is not None:
                 stmt = stmt.limit(limit)
-                
+
             result = await self.session.execute(stmt)
             traces = result.scalars().all()
-            
+
             # Get total count
             count_stmt = select(func.count()).select_from(ExecutionTrace)
             total_count_result = await self.session.execute(count_stmt)
             total_count = total_count_result.scalar() or 0
-            
+
             return traces, total_count
         except SQLAlchemyError as e:
             logger.error(f"Database error retrieving all traces: {str(e)}")
             raise
-    
-    async def _get_execution_job_id_by_run_id(
-        self,
-        run_id: int
-    ) -> Optional[str]:
+
+    async def _get_execution_job_id_by_run_id(self, run_id: int) -> Optional[str]:
         """
         Get job_id for an execution by run_id.
 
         Args:
             run_id: Run ID to look up
-            
+
         Returns:
             job_id if found, None otherwise
         """
@@ -277,19 +284,18 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             result = await self.session.execute(stmt)
             return result.scalar()
         except SQLAlchemyError as e:
-            logger.error(f"Database error retrieving job_id for run_id {run_id}: {str(e)}")
+            logger.error(
+                f"Database error retrieving job_id for run_id {run_id}: {str(e)}"
+            )
             raise
-    
-    async def _get_execution_run_id_by_job_id(
-        self,
-        job_id: str
-    ) -> Optional[int]:
+
+    async def _get_execution_run_id_by_job_id(self, job_id: str) -> Optional[int]:
         """
         Get run_id for an execution by job_id.
 
         Args:
             job_id: Job ID to look up
-            
+
         Returns:
             run_id if found, None otherwise
         """
@@ -298,16 +304,18 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             result = await self.session.execute(stmt)
             return result.scalar()
         except SQLAlchemyError as e:
-            logger.error(f"Database error retrieving run_id for job_id {job_id}: {str(e)}")
+            logger.error(
+                f"Database error retrieving run_id for job_id {job_id}: {str(e)}"
+            )
             raise
-    
+
     async def _delete_by_id(self, trace_id: int) -> int:
         """
         Delete an execution trace by ID.
 
         Args:
             trace_id: ID of the trace to delete
-            
+
         Returns:
             Number of deleted records (0 or 1)
         """
@@ -320,14 +328,14 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             await self.session.rollback()
             logger.error(f"Database error deleting trace {trace_id}: {str(e)}")
             raise
-    
+
     async def _delete_by_run_id(self, run_id: int) -> int:
         """
         Delete all execution traces by run_id.
 
         Args:
             run_id: Run ID to filter by
-            
+
         Returns:
             Number of deleted records
         """
@@ -338,16 +346,18 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             return result.rowcount
         except SQLAlchemyError as e:
             await self.session.rollback()
-            logger.error(f"Database error deleting traces for run_id {run_id}: {str(e)}")
+            logger.error(
+                f"Database error deleting traces for run_id {run_id}: {str(e)}"
+            )
             raise
-    
+
     async def _delete_by_job_id(self, job_id: str) -> int:
         """
         Delete all execution traces by job_id.
 
         Args:
             job_id: Job ID to filter by
-            
+
         Returns:
             Number of deleted records
         """
@@ -358,9 +368,11 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             return result.rowcount
         except SQLAlchemyError as e:
             await self.session.rollback()
-            logger.error(f"Database error deleting traces for job_id {job_id}: {str(e)}")
+            logger.error(
+                f"Database error deleting traces for job_id {job_id}: {str(e)}"
+            )
             raise
-    
+
     async def _delete_all(self) -> int:
         """
         Delete all execution traces.
@@ -377,9 +389,9 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             await self.session.rollback()
             logger.error(f"Database error deleting all traces: {str(e)}")
             raise
-    
+
     # Public methods that manage their own session lifecycle
-    
+
     async def create(
         self,
         trace_data: Dict[str, Any],
@@ -422,36 +434,40 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             # If job doesn't exist, raise an error instead of creating orphan records
             if not job_exists:
                 logger.warning(f"Attempt to create trace for non-existent job {job_id}")
-                raise ValueError(f"Job {job_id} does not exist in ExecutionHistory. Trace creation aborted.")
+                raise ValueError(
+                    f"Job {job_id} does not exist in ExecutionHistory. Trace creation aborted."
+                )
             else:
                 # Job exists, ensure run_id is set in trace_data
                 if "run_id" not in trace_data and job_exists:
                     trace_data["run_id"] = job_exists.id
-                    logger.info(f"Setting run_id={job_exists.id} for existing job {job_id}")
+                    logger.info(
+                        f"Setting run_id={job_exists.id} for existing job {job_id}"
+                    )
         elif job_id and is_subprocess:
             logger.debug(f"Subprocess mode: skipping job existence check for {job_id}")
 
         # Create the trace with the existing job
         return await self._create(trace_data)
-    
+
     async def get_by_id(self, trace_id: int) -> Optional[ExecutionTrace]:
         """
         Get an execution trace by ID.
-        
+
         Args:
             trace_id: ID of the trace to retrieve
-            
+
         Returns:
             ExecutionTrace if found, None otherwise
         """
         return await self._get_by_id(trace_id)
-    
+
     async def get_by_run_id(
-        self, 
+        self,
         run_id: int,
         limit: Optional[int] = None,
         offset: Optional[int] = 0,
-        since_id: Optional[int] = None
+        since_id: Optional[int] = None,
     ) -> List[ExecutionTrace]:
         """
         Get execution traces by run_id.
@@ -466,13 +482,13 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             List of ExecutionTrace records
         """
         return await self._get_by_run_id(run_id, limit, offset, since_id)
-    
+
     async def get_by_job_id(
         self,
         job_id: str,
         limit: Optional[int] = None,
         offset: Optional[int] = 0,
-        since_id: Optional[int] = None
+        since_id: Optional[int] = None,
     ) -> List[ExecutionTrace]:
         """
         Get execution traces by job_id.
@@ -487,7 +503,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             List of ExecutionTrace records
         """
         return await self._get_by_job_id(job_id, limit, offset, since_id)
-    
+
     async def get_by_group_ids(
         self,
         group_ids: List[str],
@@ -516,7 +532,9 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             result = await self.session.execute(stmt)
             traces = result.scalars().all()
 
-            count_stmt = select(func.count()).select_from(ExecutionTrace).where(group_filter)
+            count_stmt = (
+                select(func.count()).select_from(ExecutionTrace).where(group_filter)
+            )
             total = (await self.session.execute(count_stmt)).scalar() or 0
             return traces, total
         except SQLAlchemyError as e:
@@ -558,86 +576,86 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             result = await self.session.execute(stmt)
             return result.scalars().all()
         except SQLAlchemyError as e:
-            logger.error(f"Database error retrieving state events for job_id {job_id}: {str(e)}")
+            logger.error(
+                f"Database error retrieving state events for job_id {job_id}: {str(e)}"
+            )
             raise
 
     async def get_all_traces(
-        self,
-        limit: Optional[int] = None,
-        offset: Optional[int] = 0
+        self, limit: Optional[int] = None, offset: Optional[int] = 0
     ) -> Tuple[List[ExecutionTrace], int]:
         """
         Get all execution traces with pagination.
-        
+
         Args:
             limit: Maximum number of traces to return
             offset: Number of traces to skip
-            
+
         Returns:
             Tuple of (list of ExecutionTrace records, total count)
         """
         return await self._get_all_traces(limit, offset)
-    
+
     async def get_execution_job_id_by_run_id(self, run_id: int) -> Optional[str]:
         """
         Get job_id for an execution by run_id.
-        
+
         Args:
             run_id: Run ID to look up
-            
+
         Returns:
             job_id if found, None otherwise
         """
         return await self._get_execution_job_id_by_run_id(run_id)
-    
+
     async def get_execution_run_id_by_job_id(self, job_id: str) -> Optional[int]:
         """
         Get run_id for an execution by job_id.
-        
+
         Args:
             job_id: Job ID to look up
-            
+
         Returns:
             run_id if found, None otherwise
         """
         return await self._get_execution_run_id_by_job_id(job_id)
-    
+
     async def delete_by_id(self, trace_id: int) -> int:
         """
         Delete an execution trace by ID.
-        
+
         Args:
             trace_id: ID of the trace to delete
-            
+
         Returns:
             Number of deleted records (0 or 1)
         """
         return await self._delete_by_id(trace_id)
-    
+
     async def delete_by_run_id(self, run_id: int) -> int:
         """
         Delete all execution traces by run_id.
-        
+
         Args:
             run_id: Run ID to filter by
-            
+
         Returns:
             Number of deleted records
         """
         return await self._delete_by_run_id(run_id)
-    
+
     async def delete_by_job_id(self, job_id: str) -> int:
         """
         Delete all execution traces by job_id.
-        
+
         Args:
             job_id: Job ID to filter by
-            
+
         Returns:
             Number of deleted records
         """
         return await self._delete_by_job_id(job_id)
-    
+
     async def delete_all(self) -> int:
         """
         Delete all execution traces.
@@ -664,7 +682,9 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
             return result.rowcount
         except SQLAlchemyError as e:
             await self.session.rollback()
-            logger.error(f"Database error deleting traces older than {cutoff}: {str(e)}")
+            logger.error(
+                f"Database error deleting traces older than {cutoff}: {str(e)}"
+            )
             raise
 
     async def get_max_id_for_job(self, job_id: str) -> int:
@@ -752,10 +772,14 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         """
         try:
             # Query for task_completed events (crews complete when their tasks complete)
-            stmt = select(ExecutionTrace).where(
-                ExecutionTrace.job_id == job_id,
-                ExecutionTrace.event_type == "task_completed"
-            ).order_by(ExecutionTrace.created_at)
+            stmt = (
+                select(ExecutionTrace)
+                .where(
+                    ExecutionTrace.job_id == job_id,
+                    ExecutionTrace.event_type == "task_completed",
+                )
+                .order_by(ExecutionTrace.created_at)
+            )
 
             result = await self.session.execute(stmt)
             traces = result.scalars().all()
@@ -805,34 +829,52 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                 output_preview = ""
                 if trace.output:
                     if isinstance(trace.output, dict):
-                        output_preview = str(trace.output.get("output_content", ""))[:200]
+                        output_preview = str(trace.output.get("output_content", ""))[
+                            :200
+                        ]
                     else:
                         output_preview = str(trace.output)[:200]
 
-                crew_checkpoints.append({
-                    "crew_name": crew_name,
-                    "sequence": sequence,
-                    "status": "completed",
-                    "output_preview": output_preview,
-                    "completed_at": trace.created_at.isoformat() if trace.created_at else None
-                })
+                crew_checkpoints.append(
+                    {
+                        "crew_name": crew_name,
+                        "sequence": sequence,
+                        "status": "completed",
+                        "output_preview": output_preview,
+                        "completed_at": (
+                            trace.created_at.isoformat() if trace.created_at else None
+                        ),
+                    }
+                )
 
-            logger.info(f"Found {len(crew_checkpoints)} crew checkpoints for job {job_id}")
+            logger.info(
+                f"Found {len(crew_checkpoints)} crew checkpoints for job {job_id}"
+            )
             if crew_checkpoints:
                 for cp in crew_checkpoints:
-                    logger.info(f"  Crew checkpoint: {cp['crew_name']} (sequence {cp['sequence']})")
+                    logger.info(
+                        f"  Crew checkpoint: {cp['crew_name']} (sequence {cp['sequence']})"
+                    )
             else:
                 # Log trace info for debugging
-                logger.info(f"No crew checkpoints found. Total task_completed traces: {len(traces)}")
+                logger.info(
+                    f"No crew checkpoints found. Total task_completed traces: {len(traces)}"
+                )
                 if traces:
                     sample_trace = traces[0]
-                    logger.info(f"  Sample trace_metadata keys: {list(sample_trace.trace_metadata.keys()) if sample_trace.trace_metadata else 'None'}")
-                    logger.info(f"  Sample trace_metadata: {sample_trace.trace_metadata}")
+                    logger.info(
+                        f"  Sample trace_metadata keys: {list(sample_trace.trace_metadata.keys()) if sample_trace.trace_metadata else 'None'}"
+                    )
+                    logger.info(
+                        f"  Sample trace_metadata: {sample_trace.trace_metadata}"
+                    )
             return crew_checkpoints
 
         except SQLAlchemyError as e:
-            logger.error(f"Database error getting crew checkpoints for job {job_id}: {str(e)}")
-            return [] 
+            logger.error(
+                f"Database error getting crew checkpoints for job {job_id}: {str(e)}"
+            )
+            return []
 
     async def get_crew_outputs_for_resume(self, job_id: str) -> Dict[str, Any]:
         """
@@ -849,17 +891,21 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
         """
         try:
             # Query for task_completed events (crews complete when their tasks complete)
-            stmt = select(ExecutionTrace).where(
-                ExecutionTrace.job_id == job_id,
-                ExecutionTrace.event_type == "task_completed"
-            ).order_by(ExecutionTrace.created_at)
+            stmt = (
+                select(ExecutionTrace)
+                .where(
+                    ExecutionTrace.job_id == job_id,
+                    ExecutionTrace.event_type == "task_completed",
+                )
+                .order_by(ExecutionTrace.created_at)
+            )
 
             result = await self.session.execute(stmt)
             traces = result.scalars().all()
 
             # Extract crew outputs from traces
             crew_outputs = {}
-            
+
             for trace in traces:
                 # Get crew_name from trace_metadata
                 crew_name = None
@@ -883,7 +929,12 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                         # CRITICAL FIX: Try to get the actual output content
                         # First check for nested "content" key (legacy listener format, after trace_management processing)
                         # Then check for "output_content" or "raw" (legacy formats)
-                        full_output = trace.output.get("content") or trace.output.get("output_content") or trace.output.get("raw") or trace.output
+                        full_output = (
+                            trace.output.get("content")
+                            or trace.output.get("output_content")
+                            or trace.output.get("raw")
+                            or trace.output
+                        )
                     else:
                         # If output is a string (after trace_management processing), use it directly
                         full_output = trace.output
@@ -891,11 +942,17 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                 # Store the output (last task's output for each crew)
                 if crew_name and full_output:
                     crew_outputs[crew_name] = full_output
-                    logger.debug(f"Stored output for crew '{crew_name}': {str(full_output)[:100]}...")
+                    logger.debug(
+                        f"Stored output for crew '{crew_name}': {str(full_output)[:100]}..."
+                    )
 
-            logger.info(f"Retrieved outputs for {len(crew_outputs)} crews for resume: {list(crew_outputs.keys())}")
+            logger.info(
+                f"Retrieved outputs for {len(crew_outputs)} crews for resume: {list(crew_outputs.keys())}"
+            )
             return crew_outputs
 
         except SQLAlchemyError as e:
-            logger.error(f"Database error getting crew outputs for job {job_id}: {str(e)}")
+            logger.error(
+                f"Database error getting crew outputs for job {job_id}: {str(e)}"
+            )
             return {}

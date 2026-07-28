@@ -1,31 +1,38 @@
-from typing import List, Optional, Dict, Any
-from sqlalchemy.ext.asyncio import AsyncSession
 import json
 import logging
 import re
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user import User
 from src.repositories.user_repository import UserRepository
-from src.schemas.user import UserUpdate, UserRole, UserPermissionUpdate
+from src.schemas.user import UserPermissionUpdate, UserRole, UserUpdate
+
 # Removed password hash import - using OAuth proxy authentication
 
 logger = logging.getLogger(__name__)
 
+
 class UserService:
     """Service for user management operations"""
-    
+
     def __init__(self, session: AsyncSession):
         self.session = session
         self.user_repo = UserRepository(User, session)
         # UserProfileRepository removed - display_name moved to User model
         # External identity repository removed - using simplified auth
-    
+
     async def get_user(self, user_id: str) -> Optional[User]:
         """Get a user by ID"""
         return await self.user_repo.get(user_id)
-    
+
     async def get_users(
-        self, skip: int = 0, limit: int = 100, filters: Dict[str, Any] = None, search: Optional[str] = None
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        filters: Dict[str, Any] = None,
+        search: Optional[str] = None,
     ) -> List[User]:
         """Get a list of users with filtering and search"""
         # Handle search parameter
@@ -33,23 +40,19 @@ class UserService:
             # Example of a simple search implementation
             # In a real application, you might want a more sophisticated search
             users = []
-            
+
             # Search by username (exact or partial match)
             username_matches = await self.user_repo.list(
-                filters={"username": {"$like": f"%{search}%"}},
-                skip=skip,
-                limit=limit
+                filters={"username": {"$like": f"%{search}%"}}, skip=skip, limit=limit
             )
             users.extend(username_matches)
-            
+
             # Search by email (exact or partial match)
             email_matches = await self.user_repo.list(
-                filters={"email": {"$like": f"%{search}%"}},
-                skip=skip,
-                limit=limit
+                filters={"email": {"$like": f"%{search}%"}}, skip=skip, limit=limit
             )
             users.extend(email_matches)
-            
+
             # Remove duplicates (users found by both username and email)
             unique_users = []
             user_ids = set()
@@ -57,17 +60,19 @@ class UserService:
                 if user.id not in user_ids:
                     unique_users.append(user)
                     user_ids.add(user.id)
-            
+
             return unique_users[:limit]
-        
+
         # Regular filtering - use simple list method since list_with_filters doesn't exist
         return await self.user_repo.list(skip=skip, limit=limit)
-    
+
     async def get_user_complete(self, user_id: str) -> Optional[User]:
         """Get a user with complete information"""
         return await self.user_repo.get(user_id)
-    
-    async def update_user(self, user_id: str, user_update: UserUpdate) -> Optional[User]:
+
+    async def update_user(
+        self, user_id: str, user_update: UserUpdate
+    ) -> Optional[User]:
         """Update a user"""
         # Check if user exists
         user = await self.user_repo.get(user_id)
@@ -79,7 +84,9 @@ class UserService:
 
         # Check if username is being updated and is unique
         if "username" in update_data:
-            existing_user = await self.user_repo.get_by_username(update_data["username"])
+            existing_user = await self.user_repo.get_by_username(
+                update_data["username"]
+            )
             if existing_user and existing_user.id != user_id:
                 raise ValueError("Username already taken")
 
@@ -94,8 +101,10 @@ class UserService:
 
         # Return updated user
         return await self.user_repo.get(user_id)
-    
-    async def update_user_permissions(self, user_id: str, permission_update: UserPermissionUpdate) -> Optional[User]:
+
+    async def update_user_permissions(
+        self, user_id: str, permission_update: UserPermissionUpdate
+    ) -> Optional[User]:
         """Update user permissions (system admin only)"""
         # Check if user exists
         user = await self.user_repo.get(user_id)
@@ -103,7 +112,9 @@ class UserService:
             return None
 
         # Prepare update data
-        update_data = permission_update.model_dump(exclude_unset=True, exclude_none=True)
+        update_data = permission_update.model_dump(
+            exclude_unset=True, exclude_none=True
+        )
 
         # Update user permissions
         await self.user_repo.update(user_id, update_data)
@@ -112,9 +123,9 @@ class UserService:
         return await self.user_repo.get(user_id)
 
     # update_user_profile removed - display_name is now part of User model
-    
+
     # Password update removed - using OAuth proxy authentication only
-    
+
     async def assign_role(self, user_id: str, role: str) -> Optional[User]:
         """Assign a role to a user"""
         user = await self.user_repo.get(user_id)
@@ -127,7 +138,9 @@ class UserService:
         # Return updated user
         return await self.user_repo.get(user_id)
 
-    async def get_or_create_user_by_email(self, email: str, update_login: bool = False) -> Optional[User]:
+    async def get_or_create_user_by_email(
+        self, email: str, update_login: bool = False
+    ) -> Optional[User]:
         """
         Get or create a user by email address.
         This is used for proxy-based authentication where users are auto-created.
@@ -143,8 +156,10 @@ class UserService:
 
         # Reject partial/invalid emails to prevent junk records from
         # incremental header processing (e.g. "user@", "user@d", etc.)
-        if not email or not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
-            if email and '@localhost' not in email:
+        if not email or not re.match(
+            r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", email
+        ):
+            if email and "@localhost" not in email:
                 logger.warning(f"Rejecting invalid email for user creation: {email!r}")
                 return None
 
@@ -173,7 +188,7 @@ class UserService:
             # Replace dots and other invalid characters with underscores
             username_base = username_base.replace(".", "_").replace("-", "_")
             # Remove any other invalid characters (keep only letters, numbers, underscores)
-            username_base = re.sub(r'[^a-zA-Z0-9_]', '_', username_base)
+            username_base = re.sub(r"[^a-zA-Z0-9_]", "_", username_base)
 
             username = username_base
             i = 1
@@ -185,11 +200,12 @@ class UserService:
 
             # Create user with regular role initially (no password needed for OAuth proxy)
             from src.schemas.user import UserRole
+
             user_data = {
                 "username": username,
                 "email": email,
                 "display_name": username,  # Set display_name directly
-                "role": UserRole.REGULAR
+                "role": UserRole.REGULAR,
             }
 
             try:
@@ -204,8 +220,13 @@ class UserService:
 
             except Exception as create_error:
                 # Handle race condition where user was created between our check and create attempt
-                if "UNIQUE constraint failed" in str(create_error) or "unique constraint" in str(create_error).lower():
-                    logger.warning(f"Race condition detected: User {email} was created by another request. Fetching existing user.")
+                if (
+                    "UNIQUE constraint failed" in str(create_error)
+                    or "unique constraint" in str(create_error).lower()
+                ):
+                    logger.warning(
+                        f"Race condition detected: User {email} was created by another request. Fetching existing user."
+                    )
 
                     # CRITICAL: Rollback the failed transaction to clear session state
                     # SQLite sessions can't see committed data from other connections until rollback
@@ -213,7 +234,9 @@ class UserService:
                         await self.session.rollback()
                         # Expunge all objects to ensure fresh fetch from database
                         self.session.expunge_all()
-                        logger.debug(f"Session rolled back and cleared after UNIQUE constraint error for {email}")
+                        logger.debug(
+                            f"Session rolled back and cleared after UNIQUE constraint error for {email}"
+                        )
                     except Exception as rollback_error:
                         logger.warning(f"Error during rollback: {rollback_error}")
 
@@ -221,12 +244,18 @@ class UserService:
                     # The rollback and expunge allow us to see data committed by other sessions
                     existing_user = await self.user_repo.get_by_email(email)
                     if existing_user:
-                        logger.info(f"Successfully retrieved user created by concurrent request: {email}")
+                        logger.info(
+                            f"Successfully retrieved user created by concurrent request: {email}"
+                        )
                         # Still check for admin setup since this might be needed
-                        await self._handle_first_user_admin_setup(existing_user, is_new_user=False)
+                        await self._handle_first_user_admin_setup(
+                            existing_user, is_new_user=False
+                        )
                         return existing_user
                     else:
-                        logger.error(f"UNIQUE constraint error but user {email} still not found after race condition")
+                        logger.error(
+                            f"UNIQUE constraint error but user {email} still not found after race condition"
+                        )
                         raise
 
                 # Re-raise other errors
@@ -237,7 +266,9 @@ class UserService:
             logger.error(f"Error in get_or_create_user_by_email for {email}: {e}")
             raise
 
-    async def _handle_first_user_admin_setup(self, user: User, is_new_user: bool = False) -> None:
+    async def _handle_first_user_admin_setup(
+        self, user: User, is_new_user: bool = False
+    ) -> None:
         """
         Check if this is the first user in the system.
         If so, grant them system admin permissions.
@@ -246,27 +277,38 @@ class UserService:
             user: The user to potentially grant admin privileges to
             is_new_user: Whether this user was just created (vs existing user login)
         """
-        logger.debug(f"_handle_first_user_admin_setup called for user {user.email}, is_new_user={is_new_user}")
+        logger.debug(
+            f"_handle_first_user_admin_setup called for user {user.email}, is_new_user={is_new_user}"
+        )
         try:
             # If this is an existing user, check if they already have admin privileges
             if not is_new_user:
                 if user.is_system_admin:
-                    logger.debug(f"User {user.email} already has system admin privileges")
+                    logger.debug(
+                        f"User {user.email} already has system admin privileges"
+                    )
                     return
 
                 # Check if any system admins exist
                 admin_count = await self.user_repo.count_system_admins()
 
                 if admin_count == 0:
-                    logger.info(f"No system admins exist. Granting system admin privileges to existing user {user.email}")
+                    logger.info(
+                        f"No system admins exist. Granting system admin privileges to existing user {user.email}"
+                    )
 
                     # Grant system admin permission
-                    await self.user_repo.update(user.id, {
-                        "is_system_admin": True,
-                        "is_personal_workspace_manager": True  # System admins also get personal workspace access
-                    })
+                    await self.user_repo.update(
+                        user.id,
+                        {
+                            "is_system_admin": True,
+                            "is_personal_workspace_manager": True,  # System admins also get personal workspace access
+                        },
+                    )
 
-                    logger.info(f"Granted system admin privileges to existing user {user.email}")
+                    logger.info(
+                        f"Granted system admin privileges to existing user {user.email}"
+                    )
                 return
 
             # For new users, check if this is the first user in the system
@@ -274,13 +316,18 @@ class UserService:
 
             # If this is the only user (count = 1 after creation), make them system admin
             if total_users == 1:
-                logger.info(f"First user in system detected. Granting system admin privileges to {user.email}")
+                logger.info(
+                    f"First user in system detected. Granting system admin privileges to {user.email}"
+                )
 
                 # Grant system admin permission
-                await self.user_repo.update(user.id, {
-                    "is_system_admin": True,
-                    "is_personal_workspace_manager": True  # System admins also get personal workspace access
-                })
+                await self.user_repo.update(
+                    user.id,
+                    {
+                        "is_system_admin": True,
+                        "is_personal_workspace_manager": True,  # System admins also get personal workspace access
+                    },
+                )
 
                 logger.info(f"Granted system admin privileges to {user.email}")
 
@@ -288,7 +335,7 @@ class UserService:
             # Log the error but don't fail user creation
             logger.error(f"Error during first user admin setup: {e}")
             # Don't raise the exception - allow user creation to continue
-    
+
     async def delete_user(self, user_id: str) -> bool:
         """Delete a user"""
         user = await self.user_repo.get(user_id)
@@ -297,6 +344,7 @@ class UserService:
 
         # First, remove user from all groups (to avoid foreign key constraint violations)
         from src.services.groups.groups import GroupService
+
         group_service = GroupService(self.session)
 
         # Get all groups the user belongs to
@@ -310,5 +358,5 @@ class UserService:
         await self.user_repo.delete(user_id)
 
         return True
-    
-    # External identity methods removed - using simplified auth system 
+
+    # External identity methods removed - using simplified auth system

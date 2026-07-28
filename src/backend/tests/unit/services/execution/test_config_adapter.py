@@ -4,15 +4,17 @@ Comprehensive unit tests for src/engines/kasal/config_adapter.py
 Targets: get_execution_logger, adapt_config, normalize_config, normalize_flow_config
 Goal: push coverage from 17.7% to 50%+
 """
+
+from unittest.mock import MagicMock, PropertyMock, patch
+
 import pytest
 
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
-from unittest.mock import MagicMock, patch, PropertyMock
-
 
 # ---------------------------------------------------------------------------
 # Helpers to build minimal CrewConfig objects without touching the DB
 # ---------------------------------------------------------------------------
+
 
 def _make_crew_config(
     agents_yaml=None,
@@ -48,11 +50,13 @@ LOGGER_MANAGER_PATCH = "src.services.execution.config_adapter.LoggerManager"
 # get_execution_logger
 # ============================================================================
 
+
 class TestGetExecutionLogger:
     """Tests for get_execution_logger."""
 
     def test_returns_crew_logger_when_no_config(self):
         from src.services.execution.config_adapter import get_execution_logger
+
         mock_mgr = MagicMock()
         with patch(LOGGER_MANAGER_PATCH) as mock_cls:
             mock_cls.get_instance.return_value = mock_mgr
@@ -61,6 +65,7 @@ class TestGetExecutionLogger:
 
     def test_returns_crew_logger_when_empty_dict(self):
         from src.services.execution.config_adapter import get_execution_logger
+
         mock_mgr = MagicMock()
         with patch(LOGGER_MANAGER_PATCH) as mock_cls:
             mock_cls.get_instance.return_value = mock_mgr
@@ -69,6 +74,7 @@ class TestGetExecutionLogger:
 
     def test_returns_flow_logger_for_dynamic_flow_config(self):
         from src.services.execution.config_adapter import get_execution_logger
+
         mock_mgr = MagicMock()
         with patch(LOGGER_MANAGER_PATCH) as mock_cls:
             mock_cls.get_instance.return_value = mock_mgr
@@ -82,6 +88,7 @@ class TestGetExecutionLogger:
 
     def test_returns_crew_logger_when_flow_keys_missing(self):
         from src.services.execution.config_adapter import get_execution_logger
+
         mock_mgr = MagicMock()
         with patch(LOGGER_MANAGER_PATCH) as mock_cls:
             mock_cls.get_instance.return_value = mock_mgr
@@ -92,6 +99,7 @@ class TestGetExecutionLogger:
     def test_returns_crew_logger_for_partial_flow_keys(self):
         """flow_config present but nodes/edges missing → crew."""
         from src.services.execution.config_adapter import get_execution_logger
+
         mock_mgr = MagicMock()
         with patch(LOGGER_MANAGER_PATCH) as mock_cls:
             mock_cls.get_instance.return_value = mock_mgr
@@ -102,6 +110,7 @@ class TestGetExecutionLogger:
 # ============================================================================
 # adapt_config
 # ============================================================================
+
 
 class TestAdaptConfig:
     """Tests for adapt_config."""
@@ -202,7 +211,9 @@ class TestAdaptConfig:
     def test_hierarchical_process_with_manager_llm(self, mock_extract):
         from src.services.execution.config_adapter import adapt_config
 
-        cfg = _make_crew_config(inputs={"process": "hierarchical", "manager_llm": "gpt-4"})
+        cfg = _make_crew_config(
+            inputs={"process": "hierarchical", "manager_llm": "gpt-4"}
+        )
         result = adapt_config(cfg)
 
         assert result["crew"]["process"] == "hierarchical"
@@ -212,7 +223,9 @@ class TestAdaptConfig:
     def test_hierarchical_process_with_manager_agent(self, mock_extract):
         from src.services.execution.config_adapter import adapt_config
 
-        cfg = _make_crew_config(inputs={"process": "hierarchical", "manager_agent": {"role": "boss"}})
+        cfg = _make_crew_config(
+            inputs={"process": "hierarchical", "manager_agent": {"role": "boss"}}
+        )
         result = adapt_config(cfg)
 
         assert result["crew"]["manager_agent"] == {"role": "boss"}
@@ -278,6 +291,7 @@ class TestAdaptConfig:
 # normalize_config
 # ============================================================================
 
+
 class TestNormalizeConfig:
     """Tests for normalize_config."""
 
@@ -312,6 +326,7 @@ class TestNormalizeConfig:
 # ============================================================================
 # normalize_flow_config
 # ============================================================================
+
 
 class TestNormalizeFlowConfig:
     """Tests for normalize_flow_config."""

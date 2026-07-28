@@ -2,18 +2,19 @@
 Comprehensive unit tests for services/kpi_conversion_service.py
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-from src.services.converters.base.converter import ConversionFormat
-from src.services.powerbi.kpi_conversion import KPIConversionService
+import pytest
+
 from src.schemas.kpi_conversion import (
+    ConversionFormatsResponse,
     ConversionRequest,
     ConversionResponse,
-    ConversionFormatsResponse,
-    ValidationResponse,
     ValidationError,
+    ValidationResponse,
 )
+from src.services.converters.base.converter import ConversionFormat
+from src.services.powerbi.kpi_conversion import KPIConversionService
 
 
 @pytest.fixture
@@ -37,6 +38,7 @@ class TestKPIConversionServiceInit:
 
     def test_factory_type(self):
         from src.services.converters.base.factory import ConverterFactory
+
         svc = KPIConversionService()
         assert isinstance(svc.factory, ConverterFactory)
 
@@ -46,19 +48,27 @@ class TestGetAvailableFormats:
 
     @pytest.mark.asyncio
     async def test_returns_formats_response(self, service):
-        with patch.object(service.factory, "get_available_conversions", return_value=[
-            (ConversionFormat.YAML, ConversionFormat.DAX),
-            (ConversionFormat.YAML, ConversionFormat.SQL),
-        ]):
+        with patch.object(
+            service.factory,
+            "get_available_conversions",
+            return_value=[
+                (ConversionFormat.YAML, ConversionFormat.DAX),
+                (ConversionFormat.YAML, ConversionFormat.SQL),
+            ],
+        ):
             result = await service.get_available_formats()
 
         assert isinstance(result, ConversionFormatsResponse)
 
     @pytest.mark.asyncio
     async def test_formats_contain_yaml_dax(self, service):
-        with patch.object(service.factory, "get_available_conversions", return_value=[
-            (ConversionFormat.YAML, ConversionFormat.DAX),
-        ]):
+        with patch.object(
+            service.factory,
+            "get_available_conversions",
+            return_value=[
+                (ConversionFormat.YAML, ConversionFormat.DAX),
+            ],
+        ):
             result = await service.get_available_formats()
 
         assert ConversionFormat.YAML in result.formats or "yaml" in result.formats
@@ -66,16 +76,22 @@ class TestGetAvailableFormats:
 
     @pytest.mark.asyncio
     async def test_conversion_paths_populated(self, service):
-        with patch.object(service.factory, "get_available_conversions", return_value=[
-            (ConversionFormat.YAML, ConversionFormat.SQL),
-        ]):
+        with patch.object(
+            service.factory,
+            "get_available_conversions",
+            return_value=[
+                (ConversionFormat.YAML, ConversionFormat.SQL),
+            ],
+        ):
             result = await service.get_available_formats()
 
         assert len(result.conversion_paths) == 1
 
     @pytest.mark.asyncio
     async def test_empty_conversions(self, service):
-        with patch.object(service.factory, "get_available_conversions", return_value=[]):
+        with patch.object(
+            service.factory, "get_available_conversions", return_value=[]
+        ):
             result = await service.get_available_formats()
 
         assert result.formats == []
@@ -83,7 +99,11 @@ class TestGetAvailableFormats:
 
     @pytest.mark.asyncio
     async def test_raises_on_factory_error(self, service):
-        with patch.object(service.factory, "get_available_conversions", side_effect=RuntimeError("boom")):
+        with patch.object(
+            service.factory,
+            "get_available_conversions",
+            side_effect=RuntimeError("boom"),
+        ):
             with pytest.raises(RuntimeError):
                 await service.get_available_formats()
 
@@ -189,7 +209,9 @@ class TestConvert:
         mock_converter.convert.return_value = {}
 
         with patch.object(service.factory, "supports_conversion", return_value=True):
-            with patch.object(service.factory, "create", return_value=mock_converter) as mock_create:
+            with patch.object(
+                service.factory, "create", return_value=mock_converter
+            ) as mock_create:
                 config = {"option": "value"}
                 await service.convert(
                     source_format=ConversionFormat.YAML,
@@ -254,7 +276,10 @@ class TestValidate:
 
     @pytest.mark.asyncio
     async def test_raises_value_error_on_unexpected_exception(self, service):
-        with patch("src.services.powerbi.kpi_conversion.isinstance", side_effect=RuntimeError("unexpected")):
+        with patch(
+            "src.services.powerbi.kpi_conversion.isinstance",
+            side_effect=RuntimeError("unexpected"),
+        ):
             with pytest.raises(ValueError, match="Validation failed"):
                 await service.validate(
                     format=ConversionFormat.YAML,

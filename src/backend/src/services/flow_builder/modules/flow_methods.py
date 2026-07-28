@@ -4,14 +4,15 @@ Flow methods module for CrewAI flow execution.
 This module handles dynamic creation of flow methods (starting points, listeners, routers).
 """
 
-import logging
 import asyncio
+import logging
 import uuid
-from typing import Dict, List, Any, Optional, Callable
-from src.services.flow_builder.runtime import listen, router, start, and_, or_
-from src.services.execution.runtime import Crew, Process, Task
+from typing import Any, Callable, Dict, List, Optional
 
 from src.core.logger import LoggerManager
+from src.services.execution.runtime import Crew, Process, Task
+from src.services.flow_builder.runtime import and_, listen, or_, router, start
+
 from .flow_state import FlowStateManager
 
 # Initialize logger - use flow logger for flow execution
@@ -191,9 +192,11 @@ async def configure_flow_crew_memory(
     storage, and attach the configured ``Memory`` to the crew + its agents.
     Falls back gracefully (CrewAI default) when no backend is configured.
     """
-    from src.services.memory.crew_memory import CrewMemoryService
-    from src.services.execution.config.embedder_config_builder import EmbedderConfigBuilder
     from src.schemas.memory_backend import MemoryBackendConfig as MemBackConfig
+    from src.services.execution.config.embedder_config_builder import (
+        EmbedderConfigBuilder,
+    )
+    from src.services.memory.crew_memory import CrewMemoryService
 
     model = None
     if agents and getattr(agents[0], "llm", None) is not None:
@@ -1897,14 +1900,14 @@ class FlowMethodFactory:
         @listen(previous_method_name)
         async def hitl_gate_method(self, previous_output=None):
             """HITL gate method - pauses flow for human approval."""
+            from src.db.session import request_scoped_session
+            from src.models.hitl_approval import HITLApprovalStatus
+            from src.repositories.hitl_repository import HITLApprovalRepository
             from src.services.flow_builder.exceptions import (
                 FlowPausedForApprovalException,
             )
-            from src.db.session import request_scoped_session
             from src.services.hitl.service import HITLService
             from src.services.hitl.webhook import HITLWebhookService
-            from src.repositories.hitl_repository import HITLApprovalRepository
-            from src.models.hitl_approval import HITLApprovalStatus
 
             logger.info("=" * 80)
             logger.info(f"🚦 HITL GATE REACHED: {gate_node_id}")

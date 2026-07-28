@@ -7,20 +7,23 @@ with AI" buttons).
 """
 
 from typing import Dict, Literal, Optional
+
 from pydantic import BaseModel, Field
 
 
 class PromptImprovementRequest(BaseModel):
     """Request to improve one or more prompt fields of an agent/task/template."""
+
     target: Literal["agent", "task", "template", "chat", "crew"] = Field(
-        ..., description="What kind of configuration the fields belong to "
-                         "('chat' improves a free-form chat request; 'crew' improves "
-                         "a whole crew's agent/task prompt fields as one coherent set)"
+        ...,
+        description="What kind of configuration the fields belong to "
+        "('chat' improves a free-form chat request; 'crew' improves "
+        "a whole crew's agent/task prompt fields as one coherent set)",
     )
     fields: Dict[str, str] = Field(
         ...,
         description="Current prompt field texts keyed by field name, e.g. "
-                    "{'role': ..., 'goal': ..., 'backstory': ...}",
+        "{'role': ..., 'goal': ..., 'backstory': ...}",
         min_length=1,
     )
     instructions: Optional[str] = Field(
@@ -33,6 +36,7 @@ class PromptImprovementRequest(BaseModel):
 
 class PromptImprovementResponse(BaseModel):
     """Improved prompt field texts, same keys as the request's fields."""
+
     fields: Dict[str, str] = Field(
         ..., description="Improved prompt field texts keyed by field name"
     )

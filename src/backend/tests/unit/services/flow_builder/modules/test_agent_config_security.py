@@ -1,14 +1,15 @@
 """Flow agents must get the same security hardening + template handling as crew
 agents — both now go through the shared common builders (build_agent_kwargs +
 inject_security_preamble). Regression tests for the flow/crew alignment."""
+
 from types import SimpleNamespace
 
-from src.services.flow_builder.modules.agent_adapter import AgentConfig
 from src.services.execution.kernel.agent_builder import build_agent_kwargs
 from src.services.execution.kernel.agent_security import (
     _build_security_preamble,
     inject_security_preamble,
 )
+from src.services.flow_builder.modules.agent_adapter import AgentConfig
 
 
 def _flow_agent_kwargs(agent_data):
@@ -22,7 +23,9 @@ def _flow_agent_kwargs(agent_data):
 
 class TestFlowAgentSecurityPreamble:
     def test_preamble_prepended_to_backstory_when_no_system_template(self):
-        agent_data = SimpleNamespace(role="R", goal="G", backstory="original backstory", name="A")
+        agent_data = SimpleNamespace(
+            role="R", goal="G", backstory="original backstory", name="A"
+        )
         kwargs = _flow_agent_kwargs(agent_data)
 
         assert kwargs["backstory"].startswith(_build_security_preamble())

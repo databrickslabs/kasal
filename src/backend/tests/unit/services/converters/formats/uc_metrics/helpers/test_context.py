@@ -6,6 +6,7 @@ for Unity Catalog Metrics converter.
 """
 
 import pytest
+
 from src.services.converters.base.models import KPI
 from src.services.converters.formats.uc_metrics.helpers.uc_metrics_context import (
     UCBaseKBIContext,
@@ -23,7 +24,7 @@ class TestUCBaseKBIContext:
             technical_name="revenue",
             formula="sales_amount",
             source_table="fact_sales",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         context = UCBaseKBIContext(kbi=kbi, parent_kbis=None)
@@ -40,7 +41,7 @@ class TestUCBaseKBIContext:
             technical_name="sales",
             formula="sales_amount",
             source_table="fact_sales",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         kbi_filtered = KPI(
@@ -48,7 +49,7 @@ class TestUCBaseKBIContext:
             technical_name="filtered_sales",
             formula="[sales]",
             filters=["region = 'EMEA'"],
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         kbi_ytd = KPI(
@@ -56,7 +57,7 @@ class TestUCBaseKBIContext:
             technical_name="ytd_sales",
             formula="[filtered_sales]",
             filters=["fiscal_year = 2024"],
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         # Context with no parents
@@ -78,7 +79,7 @@ class TestUCBaseKBIContext:
             technical_name="revenue",
             formula="revenue_amount",
             filters=["status = 'ACTIVE'"],
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         kbi_parent1 = KPI(
@@ -86,7 +87,7 @@ class TestUCBaseKBIContext:
             technical_name="emea_revenue",
             formula="[revenue]",
             filters=["region = 'EMEA'"],
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         kbi_parent2 = KPI(
@@ -94,13 +95,10 @@ class TestUCBaseKBIContext:
             technical_name="ytd_emea_revenue",
             formula="[emea_revenue]",
             filters=["fiscal_year = 2024"],
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
-        context = UCBaseKBIContext(
-            kbi=kbi_base,
-            parent_kbis=[kbi_parent1, kbi_parent2]
-        )
+        context = UCBaseKBIContext(kbi=kbi_base, parent_kbis=[kbi_parent1, kbi_parent2])
 
         filters = context.combined_filters
 
@@ -117,7 +115,7 @@ class TestUCBaseKBIContext:
             technical_name="revenue",
             formula="revenue_amount",
             filters=["status = 'ACTIVE'", "region = 'EMEA'"],
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         context = UCBaseKBIContext(kbi)
@@ -134,7 +132,7 @@ class TestUCBaseKBIContext:
             description="Sales",
             technical_name="sales",
             formula="sales_amount",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
 
         parent = KPI(
@@ -142,7 +140,7 @@ class TestUCBaseKBIContext:
             technical_name="filtered",
             formula="[sales]",
             filters=["region = 'EMEA'"],
-            aggregation_type="CALCULATED"
+            aggregation_type="CALCULATED",
         )
 
         ctx1 = UCBaseKBIContext(kbi, [parent])
@@ -161,7 +159,7 @@ class TestUCBaseKBIContext:
             technical_name="filtered",
             formula="sales",
             filters=["region = 'EMEA'"],
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
         assert UCBaseKBIContext.is_valid_for_context(kbi_with_filters) is True
 
@@ -170,7 +168,7 @@ class TestUCBaseKBIContext:
             description="Simple Sales",
             technical_name="simple",
             formula="sales",
-            aggregation_type="SUM"
+            aggregation_type="SUM",
         )
         assert UCBaseKBIContext.is_valid_for_context(kbi_simple) is False
 
@@ -187,8 +185,18 @@ class TestUCKBIContextCache:
         """Test adding and retrieving contexts"""
         cache = UCKBIContextCache()
 
-        kbi1 = KPI(description="Sales", technical_name="sales", formula="sales_amount", aggregation_type="SUM")
-        kbi2 = KPI(description="Revenue", technical_name="revenue", formula="revenue_amount", aggregation_type="SUM")
+        kbi1 = KPI(
+            description="Sales",
+            technical_name="sales",
+            formula="sales_amount",
+            aggregation_type="SUM",
+        )
+        kbi2 = KPI(
+            description="Revenue",
+            technical_name="revenue",
+            formula="revenue_amount",
+            aggregation_type="SUM",
+        )
 
         ctx1 = UCBaseKBIContext(kbi1)
         ctx2 = UCBaseKBIContext(kbi2)
@@ -205,7 +213,12 @@ class TestUCKBIContextCache:
         """Test cache clearing"""
         cache = UCKBIContextCache()
 
-        kbi = KPI(description="Sales", technical_name="sales", formula="sales_amount", aggregation_type="SUM")
+        kbi = KPI(
+            description="Sales",
+            technical_name="sales",
+            formula="sales_amount",
+            aggregation_type="SUM",
+        )
         cache.add_context(UCBaseKBIContext(kbi))
 
         assert len(cache.get_all_contexts()) == 1

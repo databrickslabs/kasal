@@ -3,8 +3,10 @@ Basic tests for execution callback functionality.
 
 Simple tests to verify core callback functionality without complex mocking.
 """
+
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from src.services.execution.kernel.execution_callback import create_execution_callbacks
 

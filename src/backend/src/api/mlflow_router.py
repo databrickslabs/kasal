@@ -62,7 +62,9 @@ async def set_evaluation_status(
     svc = MLflowService(session, group_id=group_ctx.primary_group_id)
     ok = await svc.set_evaluation_enabled(payload.enabled)
     if not ok:
-        raise NotFoundError("No Databricks configuration to attach evaluation setting to")
+        raise NotFoundError(
+            "No Databricks configuration to attach evaluation setting to"
+        )
     return MLflowConfigResponse(enabled=payload.enabled)
 
 

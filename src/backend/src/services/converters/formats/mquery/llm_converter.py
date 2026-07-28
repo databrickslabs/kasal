@@ -13,14 +13,14 @@ Date: 2025
 
 import json
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 from .models import (
-    MQueryExpression,
+    CalculatedColumnResult,
     ConversionResult,
+    MQueryExpression,
     PowerBITable,
     TableColumn,
-    CalculatedColumnResult
 )
 from .parser import MQueryParser
 
@@ -39,7 +39,7 @@ class MQueryLLMConverter:
         self,
         workspace_url: Optional[str] = None,
         token: Optional[str] = None,
-        model: str = "databricks-claude-sonnet-4-5"
+        model: str = "databricks-claude-sonnet-4-5",
     ):
         """
         Initialize the LLM converter.
@@ -106,15 +106,16 @@ Be thorough and accurate. This code will be used in production."""
         expression: MQueryExpression,
         columns: List[Dict[str, str]],
         target_catalog: Optional[str] = None,
-        target_schema: Optional[str] = None
+        target_schema: Optional[str] = None,
     ) -> str:
         """Create the conversion prompt for a specific expression"""
 
         # Build column info
-        column_info = "\n".join([
-            f"  - {col['name']}: {col['data_type']}"
-            for col in columns
-        ]) if columns else "  (columns not available)"
+        column_info = (
+            "\n".join([f"  - {col['name']}: {col['data_type']}" for col in columns])
+            if columns
+            else "  (columns not available)"
+        )
 
         prompt = f"""Convert this Power BI M-Query expression to Databricks SQL.
 
@@ -168,7 +169,7 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
             Dict with response content and usage
         """
         from src.services.llm.manager import LLMManager
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
 
         try:
             content = await LLMManager.completion(
@@ -191,7 +192,9 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         try:
             # Remove markdown code blocks if present
             if response_text.startswith("```json"):
-                response_text = response_text.split("```json")[1].split("```")[0].strip()
+                response_text = (
+                    response_text.split("```json")[1].split("```")[0].strip()
+                )
             elif response_text.startswith("```"):
                 response_text = response_text.split("```")[1].split("```")[0].strip()
 
@@ -201,7 +204,7 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
             return {
                 "success": False,
                 "error": "Failed to parse LLM response",
-                "raw_response": response_text[:500]
+                "raw_response": response_text[:500],
             }
 
     def _rule_based_conversion(
@@ -210,7 +213,7 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         expression: MQueryExpression,
         columns: List[Dict[str, str]],  # noqa: ARG002
         target_catalog: Optional[str] = None,  # noqa: ARG002
-        target_schema: Optional[str] = None  # noqa: ARG002
+        target_schema: Optional[str] = None,  # noqa: ARG002
     ) -> ConversionResult:
         """
         Fallback conversion when LLM is not available.
@@ -221,7 +224,9 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         Note: columns, target_catalog, target_schema are kept for API compatibility
         but not used since LLM is required for actual conversion.
         """
-        logger.warning(f"[LLM_CONVERTER] LLM not available for '{table_name}', returning raw expression")
+        logger.warning(
+            f"[LLM_CONVERTER] LLM not available for '{table_name}', returning raw expression"
+        )
 
         return ConversionResult(
             table_name=table_name,
@@ -237,9 +242,9 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
                 "server": expression.server,
                 "database": expression.database,
                 "catalog": expression.catalog,
-                "warehouse_path": expression.warehouse_path
+                "warehouse_path": expression.warehouse_path,
             },
-            notes="LLM required for M-Query conversion"
+            notes="LLM required for M-Query conversion",
         )
 
     async def convert_expression(
@@ -249,7 +254,7 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         columns: List[Dict[str, str]],
         target_catalog: Optional[str] = None,
         target_schema: Optional[str] = None,
-        use_llm: bool = True
+        use_llm: bool = True,
     ) -> ConversionResult:
         """
         Convert a single M-Query expression to Databricks SQL.
@@ -268,7 +273,9 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         Returns:
             ConversionResult with generated SQL
         """
-        logger.info(f"Converting expression for table '{table_name}' ({expression.expression_type.value})")
+        logger.info(
+            f"Converting expression for table '{table_name}' ({expression.expression_type.value})"
+        )
 
         # LLM-first approach: LLMManager authenticates internally from the
         # group context — no per-instance credentials needed.
@@ -290,7 +297,9 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
                 self.total_tokens += tokens
 
                 if parsed.get("success", False):
-                    logger.info(f"[LLM_CONVERTER] LLM conversion successful for '{table_name}'")
+                    logger.info(
+                        f"[LLM_CONVERTER] LLM conversion successful for '{table_name}'"
+                    )
                     return ConversionResult(
                         table_name=table_name,
                         expression_type=expression.expression_type,
@@ -305,11 +314,13 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
                         llm_model=self.model,
                         tokens_used=tokens,
                         source_connection=parsed.get("source_connection"),
-                        notes=parsed.get("notes")
+                        notes=parsed.get("notes"),
                     )
                 else:
                     # LLM returned an error
-                    logger.warning(f"[LLM_CONVERTER] LLM returned error for '{table_name}': {parsed.get('error')}")
+                    logger.warning(
+                        f"[LLM_CONVERTER] LLM returned error for '{table_name}': {parsed.get('error')}"
+                    )
                     return ConversionResult(
                         table_name=table_name,
                         expression_type=expression.expression_type,
@@ -317,14 +328,18 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
                         original_expression=expression.raw_expression,
                         error_message=parsed.get("error", "LLM conversion failed"),
                         llm_model=self.model,
-                        tokens_used=tokens
+                        tokens_used=tokens,
                     )
             else:
                 # LLM call failed - fall back to rule-based
-                logger.warning(f"[LLM_CONVERTER] LLM call failed for '{table_name}': {llm_response.get('error')}")
+                logger.warning(
+                    f"[LLM_CONVERTER] LLM call failed for '{table_name}': {llm_response.get('error')}"
+                )
                 # Fall through to rule-based conversion
         else:
-            logger.info(f"[LLM_CONVERTER] LLM not available, using rule-based conversion for '{table_name}'")
+            logger.info(
+                f"[LLM_CONVERTER] LLM not available, using rule-based conversion for '{table_name}'"
+            )
 
         # Fallback: Rule-based conversion (when LLM is not configured or failed)
         return self._rule_based_conversion(
@@ -337,7 +352,7 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         target_catalog: Optional[str] = None,
         target_schema: Optional[str] = None,
         use_llm: bool = True,
-        include_calculated_columns: bool = True
+        include_calculated_columns: bool = True,
     ) -> List[ConversionResult]:
         """
         Convert all expressions in a table, including calculated columns.
@@ -372,7 +387,7 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
                 columns=columns,
                 target_catalog=target_catalog,
                 target_schema=target_schema,
-                use_llm=use_llm
+                use_llm=use_llm,
             )
 
             # Convert calculated columns and add to result
@@ -380,20 +395,22 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
                 calc_results = await self.convert_calculated_columns(
                     table_name=table.name,
                     calculated_columns=calculated_cols,
-                    use_llm=use_llm
+                    use_llm=use_llm,
                 )
                 result.calculated_columns = calc_results
 
                 # Enhance the SQL with calculated columns
                 if result.success and result.databricks_sql and calc_results:
                     result.databricks_sql = self._enhance_sql_with_calculated_columns(
-                        result.databricks_sql,
-                        calc_results
+                        result.databricks_sql, calc_results
                     )
-                    result.create_view_sql = self._enhance_sql_with_calculated_columns(
-                        result.create_view_sql,
-                        calc_results
-                    ) if result.create_view_sql else None
+                    result.create_view_sql = (
+                        self._enhance_sql_with_calculated_columns(
+                            result.create_view_sql, calc_results
+                        )
+                        if result.create_view_sql
+                        else None
+                    )
 
             results.append(result)
 
@@ -432,11 +449,7 @@ Always respond with valid JSON in this exact format:
 Be accurate and concise."""
 
     def _create_calculated_column_prompt(
-        self,
-        table_name: str,
-        column_name: str,
-        dax_expression: str,
-        data_type: str
+        self, table_name: str, column_name: str, dax_expression: str, data_type: str
     ) -> str:
         """Create the conversion prompt for a calculated column"""
         return f"""Convert this Power BI DAX calculated column expression to Databricks SQL.
@@ -463,7 +476,7 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         self,
         table_name: str,
         calculated_columns: List[TableColumn],
-        use_llm: bool = True
+        use_llm: bool = True,
     ) -> List[CalculatedColumnResult]:
         """
         Convert calculated column DAX expressions to SQL.
@@ -482,19 +495,19 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
             if not col.expression:
                 continue
 
-            logger.info(f"Converting calculated column '{col.name}' in table '{table_name}'")
+            logger.info(
+                f"Converting calculated column '{col.name}' in table '{table_name}'"
+            )
 
             # Try LLM conversion first — LLMManager authenticates internally
             if use_llm:
                 result = await self._convert_calculated_column_llm(
-                    table_name=table_name,
-                    column=col
+                    table_name=table_name, column=col
                 )
             else:
                 # Fallback to rule-based conversion
                 result = self._convert_calculated_column_rules(
-                    table_name=table_name,
-                    column=col
+                    table_name=table_name, column=col
                 )
 
             results.append(result)
@@ -502,9 +515,7 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         return results
 
     async def _convert_calculated_column_llm(
-        self,
-        table_name: str,
-        column: TableColumn
+        self, table_name: str, column: TableColumn
     ) -> CalculatedColumnResult:
         """Convert a calculated column using LLM"""
         system_prompt = self._get_calculated_column_system_prompt()
@@ -512,7 +523,7 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
             table_name=table_name,
             column_name=column.name,
             dax_expression=column.expression or "",
-            data_type=column.data_type.value
+            data_type=column.data_type.value,
         )
 
         llm_response = await self._call_llm(user_prompt, system_prompt)
@@ -523,33 +534,37 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
             self.total_tokens += tokens
 
             if parsed.get("success", False):
-                logger.info(f"LLM conversion successful for calculated column '{column.name}'")
+                logger.info(
+                    f"LLM conversion successful for calculated column '{column.name}'"
+                )
                 return CalculatedColumnResult(
                     column_name=column.name,
                     original_dax=column.expression or "",
                     sql_expression=parsed.get("sql_expression"),
                     data_type=column.data_type.value,
                     success=True,
-                    notes=parsed.get("notes")
+                    notes=parsed.get("notes"),
                 )
             else:
-                logger.warning(f"LLM returned error for calculated column '{column.name}': {parsed.get('error')}")
+                logger.warning(
+                    f"LLM returned error for calculated column '{column.name}': {parsed.get('error')}"
+                )
                 return CalculatedColumnResult(
                     column_name=column.name,
                     original_dax=column.expression or "",
                     data_type=column.data_type.value,
                     success=False,
-                    error_message=parsed.get("error", "LLM conversion failed")
+                    error_message=parsed.get("error", "LLM conversion failed"),
                 )
 
         # LLM call failed, try rule-based
-        logger.warning(f"LLM call failed for calculated column '{column.name}', falling back to rules")
+        logger.warning(
+            f"LLM call failed for calculated column '{column.name}', falling back to rules"
+        )
         return self._convert_calculated_column_rules(table_name, column)
 
     def _convert_calculated_column_rules(
-        self,
-        table_name: str,
-        column: TableColumn
+        self, table_name: str, column: TableColumn
     ) -> CalculatedColumnResult:
         """
         Rule-based conversion for simple calculated column expressions.
@@ -568,7 +583,7 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
                 original_dax="",
                 data_type=column.data_type.value,
                 success=False,
-                error_message="No DAX expression provided"
+                error_message="No DAX expression provided",
             )
 
         try:
@@ -579,7 +594,7 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
                 sql_expression=sql_expr,
                 data_type=column.data_type.value,
                 success=True,
-                notes="Converted using rule-based conversion"
+                notes="Converted using rule-based conversion",
             )
         except Exception as e:
             logger.warning(f"Rule-based conversion failed for '{column.name}': {e}")
@@ -588,7 +603,7 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
                 original_dax=dax,
                 data_type=column.data_type.value,
                 success=False,
-                error_message=f"Conversion failed: {str(e)}. Consider enabling LLM conversion."
+                error_message=f"Conversion failed: {str(e)}. Consider enabling LLM conversion.",
             )
 
     def _dax_to_sql_basic(self, dax: str, table_name: str) -> str:
@@ -604,28 +619,18 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         import re
 
         # Normalize whitespace
-        sql = ' '.join(dax.split())
+        sql = " ".join(dax.split())
 
         # Remove table references: table_name[column] → column
         # Pattern: table_name[column_name] or 'table name'[column_name]
-        sql = re.sub(
-            rf"'{re.escape(table_name)}'\s*\[([^\]]+)\]",
-            r'`\1`',
-            sql
-        )
-        sql = re.sub(
-            rf"{re.escape(table_name)}\s*\[([^\]]+)\]",
-            r'`\1`',
-            sql
-        )
+        sql = re.sub(rf"'{re.escape(table_name)}'\s*\[([^\]]+)\]", r"`\1`", sql)
+        sql = re.sub(rf"{re.escape(table_name)}\s*\[([^\]]+)\]", r"`\1`", sql)
         # Generic pattern for any table reference
-        sql = re.sub(r"[A-Za-z_][A-Za-z0-9_]*\s*\[([^\]]+)\]", r'`\1`', sql)
+        sql = re.sub(r"[A-Za-z_][A-Za-z0-9_]*\s*\[([^\]]+)\]", r"`\1`", sql)
 
         # Handle SWITCH(TRUE(), ...)
         switch_match = re.match(
-            r'SWITCH\s*\(\s*TRUE\s*\(\s*\)\s*,(.+)\)',
-            sql,
-            re.IGNORECASE | re.DOTALL
+            r"SWITCH\s*\(\s*TRUE\s*\(\s*\)\s*,(.+)\)", sql, re.IGNORECASE | re.DOTALL
         )
         if switch_match:
             args = switch_match.group(1)
@@ -633,9 +638,9 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
 
         # Handle IF(condition, true_val, false_val)
         if_match = re.match(
-            r'IF\s*\(\s*(.+?)\s*,\s*(.+?)\s*,\s*(.+?)\s*\)',
+            r"IF\s*\(\s*(.+?)\s*,\s*(.+?)\s*,\s*(.+?)\s*\)",
             sql,
-            re.IGNORECASE | re.DOTALL
+            re.IGNORECASE | re.DOTALL,
         )
         if if_match:
             condition = if_match.group(1)
@@ -657,19 +662,19 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         depth = 0
         current = []
         for char in args_str:
-            if char == '(':
+            if char == "(":
                 depth += 1
                 current.append(char)
-            elif char == ')':
+            elif char == ")":
                 depth -= 1
                 current.append(char)
-            elif char == ',' and depth == 0:
-                args.append(''.join(current).strip())
+            elif char == "," and depth == 0:
+                args.append("".join(current).strip())
                 current = []
             else:
                 current.append(char)
         if current:
-            args.append(''.join(current).strip())
+            args.append("".join(current).strip())
 
         # Build CASE WHEN statement
         # Args are: cond1, result1, cond2, result2, ..., default
@@ -694,9 +699,7 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
         return " ".join(case_parts)
 
     def _enhance_sql_with_calculated_columns(
-        self,
-        sql: str,
-        calculated_columns: List[CalculatedColumnResult]
+        self, sql: str, calculated_columns: List[CalculatedColumnResult]
     ) -> str:
         """
         Enhance the generated SQL by adding calculated columns to the SELECT clause.
@@ -712,7 +715,9 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
             return sql
 
         # Find successful conversions
-        successful_cols = [c for c in calculated_columns if c.success and c.sql_expression]
+        successful_cols = [
+            c for c in calculated_columns if c.success and c.sql_expression
+        ]
         if not successful_cols:
             return sql
 
@@ -727,12 +732,13 @@ Respond with valid JSON only (no markdown code blocks around the JSON)."""
 
         # Try to inject before FROM clause
         import re
-        from_match = re.search(r'\bFROM\b', sql, re.IGNORECASE)
+
+        from_match = re.search(r"\bFROM\b", sql, re.IGNORECASE)
         if from_match:
             insert_pos = from_match.start()
             # Find the last column before FROM
             pre_from = sql[:insert_pos].rstrip()
-            if pre_from.endswith(','):
+            if pre_from.endswith(","):
                 pre_from = pre_from[:-1]
             enhanced_sql = pre_from + "," + comment + "\n" + sql[insert_pos:]
             return enhanced_sql

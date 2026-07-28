@@ -1,19 +1,21 @@
 """
 Extended tests for user_context module to improve coverage.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.utils.user_context import (
     GroupContext,
     UserContext,
-    extract_user_token_from_request,
+    UserContextMiddleware,
     extract_group_context_from_request,
     extract_user_context_from_request,
-    UserContextMiddleware,
-    user_context_middleware,
+    extract_user_token_from_request,
     is_databricks_app_context,
+    user_context_middleware,
 )
 
 
@@ -124,11 +126,16 @@ class TestGroupContextFromEmail:
     @pytest.mark.asyncio
     async def test_user_with_no_groups_gets_individual_group(self):
         """User not in any groups gets individual workspace group."""
-        mock_user = SimpleNamespace(id="u1", email="solo@example.com",
-                                   is_system_admin=False, is_personal_workspace_manager=False)
+        mock_user = SimpleNamespace(
+            id="u1",
+            email="solo@example.com",
+            is_system_admin=False,
+            is_personal_workspace_manager=False,
+        )
         with patch.object(
-            GroupContext, "_get_user_group_memberships_with_roles",
-            AsyncMock(return_value=(mock_user, []))
+            GroupContext,
+            "_get_user_group_memberships_with_roles",
+            AsyncMock(return_value=(mock_user, [])),
         ):
             ctx = await GroupContext.from_email("solo@example.com")
         assert ctx.primary_group_id is not None
@@ -139,38 +146,57 @@ class TestGroupContextFromEmail:
         """A user in no groups requesting a group that isn't their personal
         workspace is REJECTED — not silently given the personal workspace (which
         would run under personal credentials while the UI shows the other group)."""
-        mock_user = SimpleNamespace(id="u1", email="solo@example.com",
-                                    is_system_admin=False, is_personal_workspace_manager=False)
+        mock_user = SimpleNamespace(
+            id="u1",
+            email="solo@example.com",
+            is_system_admin=False,
+            is_personal_workspace_manager=False,
+        )
         with patch.object(
-            GroupContext, "_get_user_group_memberships_with_roles",
-            AsyncMock(return_value=(mock_user, []))
+            GroupContext,
+            "_get_user_group_memberships_with_roles",
+            AsyncMock(return_value=(mock_user, [])),
         ):
             with pytest.raises(ValueError, match="Access denied"):
-                await GroupContext.from_email("solo@example.com", group_id="bi-specialist")
+                await GroupContext.from_email(
+                    "solo@example.com", group_id="bi-specialist"
+                )
 
     @pytest.mark.asyncio
     async def test_no_groups_own_personal_workspace_id_allowed(self):
         """A user in no groups may explicitly select their OWN personal workspace."""
-        mock_user = SimpleNamespace(id="u1", email="solo@example.com",
-                                    is_system_admin=False, is_personal_workspace_manager=False)
+        mock_user = SimpleNamespace(
+            id="u1",
+            email="solo@example.com",
+            is_system_admin=False,
+            is_personal_workspace_manager=False,
+        )
         personal_id = GroupContext.generate_individual_group_id("solo@example.com")
         with patch.object(
-            GroupContext, "_get_user_group_memberships_with_roles",
-            AsyncMock(return_value=(mock_user, []))
+            GroupContext,
+            "_get_user_group_memberships_with_roles",
+            AsyncMock(return_value=(mock_user, [])),
         ):
-            ctx = await GroupContext.from_email("solo@example.com", group_id=personal_id)
+            ctx = await GroupContext.from_email(
+                "solo@example.com", group_id=personal_id
+            )
         assert ctx.group_ids == [personal_id]
         assert ctx.primary_group_id == personal_id
 
     @pytest.mark.asyncio
     async def test_user_in_groups_gets_group_ids(self):
         """User in groups gets those group IDs."""
-        mock_user = SimpleNamespace(id="u1", email="member@corp.com",
-                                   is_system_admin=False, is_personal_workspace_manager=False)
+        mock_user = SimpleNamespace(
+            id="u1",
+            email="member@corp.com",
+            is_system_admin=False,
+            is_personal_workspace_manager=False,
+        )
         mock_group = SimpleNamespace(id="corp-group", name="Corp Group")
         with patch.object(
-            GroupContext, "_get_user_group_memberships_with_roles",
-            AsyncMock(return_value=(mock_user, [(mock_group, "editor")]))
+            GroupContext,
+            "_get_user_group_memberships_with_roles",
+            AsyncMock(return_value=(mock_user, [(mock_group, "editor")])),
         ):
             ctx = await GroupContext.from_email("member@corp.com")
         assert "corp-group" in ctx.group_ids
@@ -179,13 +205,23 @@ class TestGroupContextFromEmail:
     @pytest.mark.asyncio
     async def test_admin_role_detection(self):
         """Highest role is admin when user is admin in any group."""
-        mock_user = SimpleNamespace(id="u1", email="admin@corp.com",
-                                   is_system_admin=False, is_personal_workspace_manager=False)
+        mock_user = SimpleNamespace(
+            id="u1",
+            email="admin@corp.com",
+            is_system_admin=False,
+            is_personal_workspace_manager=False,
+        )
         mock_group1 = SimpleNamespace(id="g1", name="Group 1")
         mock_group2 = SimpleNamespace(id="g2", name="Group 2")
         with patch.object(
-            GroupContext, "_get_user_group_memberships_with_roles",
-            AsyncMock(return_value=(mock_user, [(mock_group1, "editor"), (mock_group2, "admin")]))
+            GroupContext,
+            "_get_user_group_memberships_with_roles",
+            AsyncMock(
+                return_value=(
+                    mock_user,
+                    [(mock_group1, "editor"), (mock_group2, "admin")],
+                )
+            ),
         ):
             ctx = await GroupContext.from_email("admin@corp.com")
         assert ctx.highest_role == "admin"
@@ -194,8 +230,9 @@ class TestGroupContextFromEmail:
     async def test_fallback_on_lookup_error(self):
         """from_email falls back to individual group on lookup failure."""
         with patch.object(
-            GroupContext, "_get_user_group_memberships_with_roles",
-            AsyncMock(side_effect=Exception("DB error"))
+            GroupContext,
+            "_get_user_group_memberships_with_roles",
+            AsyncMock(side_effect=Exception("DB error")),
         ):
             ctx = await GroupContext.from_email("fallback@test.com")
         assert ctx.primary_group_id is not None
@@ -205,8 +242,9 @@ class TestGroupContextFromEmail:
     async def test_security_error_propagates(self):
         """ValueError from security check propagates (not swallowed)."""
         with patch.object(
-            GroupContext, "_get_user_group_memberships_with_roles",
-            AsyncMock(side_effect=ValueError("Access denied"))
+            GroupContext,
+            "_get_user_group_memberships_with_roles",
+            AsyncMock(side_effect=ValueError("Access denied")),
         ):
             with pytest.raises(ValueError, match="Access denied"):
                 await GroupContext.from_email("bad@test.com")
@@ -214,13 +252,23 @@ class TestGroupContextFromEmail:
     @pytest.mark.asyncio
     async def test_specific_group_id_header_sets_primary(self):
         """Specifying group_id header sets it as primary group."""
-        mock_user = SimpleNamespace(id="u1", email="member@corp.com",
-                                   is_system_admin=False, is_personal_workspace_manager=False)
+        mock_user = SimpleNamespace(
+            id="u1",
+            email="member@corp.com",
+            is_system_admin=False,
+            is_personal_workspace_manager=False,
+        )
         mock_group1 = SimpleNamespace(id="g1", name="Group 1")
         mock_group2 = SimpleNamespace(id="g2", name="Group 2")
         with patch.object(
-            GroupContext, "_get_user_group_memberships_with_roles",
-            AsyncMock(return_value=(mock_user, [(mock_group1, "editor"), (mock_group2, "admin")]))
+            GroupContext,
+            "_get_user_group_memberships_with_roles",
+            AsyncMock(
+                return_value=(
+                    mock_user,
+                    [(mock_group1, "editor"), (mock_group2, "admin")],
+                )
+            ),
         ):
             ctx = await GroupContext.from_email("member@corp.com", group_id="g2")
         assert ctx.group_ids[0] == "g2"
@@ -232,30 +280,44 @@ class TestGroupContextFromEmail:
         Credential/LLM resolution keys off primary_group_id (group_ids[0]); if this
         returned the union, a different workspace's PAT could be used for the
         selected workspace (cross-workspace credential bleed)."""
-        mock_user = SimpleNamespace(id="u1", email="member@corp.com",
-                                    is_system_admin=False, is_personal_workspace_manager=False)
+        mock_user = SimpleNamespace(
+            id="u1",
+            email="member@corp.com",
+            is_system_admin=False,
+            is_personal_workspace_manager=False,
+        )
         g1 = SimpleNamespace(id="g1", name="Group 1")
         g2 = SimpleNamespace(id="g2", name="Group 2")
         with patch.object(
-            GroupContext, "_get_user_group_memberships_with_roles",
-            AsyncMock(return_value=(mock_user, [(g1, "editor"), (g2, "admin")]))
+            GroupContext,
+            "_get_user_group_memberships_with_roles",
+            AsyncMock(return_value=(mock_user, [(g1, "editor"), (g2, "admin")])),
         ):
             ctx = await GroupContext.from_email("member@corp.com", group_id="g2")
-        assert ctx.group_ids == ["g2"], "selected workspace must be the ONLY group (no union/personal)"
+        assert ctx.group_ids == [
+            "g2"
+        ], "selected workspace must be the ONLY group (no union/personal)"
         assert ctx.primary_group_id == "g2"
 
     @pytest.mark.asyncio
     async def test_unauthorized_group_raises(self):
         """Accessing a group user doesn't belong to raises ValueError."""
-        mock_user = SimpleNamespace(id="u1", email="member@corp.com",
-                                   is_system_admin=False, is_personal_workspace_manager=False)
+        mock_user = SimpleNamespace(
+            id="u1",
+            email="member@corp.com",
+            is_system_admin=False,
+            is_personal_workspace_manager=False,
+        )
         mock_group = SimpleNamespace(id="g1", name="Group 1")
         with patch.object(
-            GroupContext, "_get_user_group_memberships_with_roles",
-            AsyncMock(return_value=(mock_user, [(mock_group, "editor")]))
+            GroupContext,
+            "_get_user_group_memberships_with_roles",
+            AsyncMock(return_value=(mock_user, [(mock_group, "editor")])),
         ):
             with pytest.raises(ValueError, match="Access denied"):
-                await GroupContext.from_email("member@corp.com", group_id="g-unauthorized")
+                await GroupContext.from_email(
+                    "member@corp.com", group_id="g-unauthorized"
+                )
 
 
 class TestUserContext:
@@ -329,7 +391,9 @@ class TestExtractUserTokenFromRequest:
 
 
 class TestExtractUserContextFromRequest:
-    def _make_request(self, headers=None, client_host="127.0.0.1", method="GET", url="http://test.com"):
+    def _make_request(
+        self, headers=None, client_host="127.0.0.1", method="GET", url="http://test.com"
+    ):
         mock_req = MagicMock()
         mock_req.headers = headers or {}
         mock_req.client = SimpleNamespace(host=client_host)
@@ -388,7 +452,9 @@ class TestExtractGroupContextFromRequest:
         """Returns None when GroupContext.from_email raises."""
         mock_req = MagicMock()
         mock_req.headers.get = MagicMock(return_value="user@test.com")
-        with patch.object(GroupContext, "from_email", AsyncMock(side_effect=Exception("fail"))):
+        with patch.object(
+            GroupContext, "from_email", AsyncMock(side_effect=Exception("fail"))
+        ):
             result = await extract_group_context_from_request(mock_req)
         assert result is None
 
@@ -408,7 +474,9 @@ class TestExtractGroupContextFromRequest:
         mock_req = MagicMock()
         mock_req.headers.get = MagicMock(return_value="bad@test.com")
         invalid_ctx = GroupContext(group_ids=None, email_domain=None)
-        with patch.object(GroupContext, "from_email", AsyncMock(return_value=invalid_ctx)):
+        with patch.object(
+            GroupContext, "from_email", AsyncMock(return_value=invalid_ctx)
+        ):
             result = await extract_group_context_from_request(mock_req)
         assert result is None
 
@@ -433,10 +501,14 @@ class TestExtractGroupContextFromRequest:
             captured["group_id"] = group_id
             return GroupContext(group_ids=["bi-specialist"], email_domain="test.com")
 
-        with patch.object(GroupContext, "from_email", AsyncMock(side_effect=_from_email)):
+        with patch.object(
+            GroupContext, "from_email", AsyncMock(side_effect=_from_email)
+        ):
             result = await extract_group_context_from_request(mock_req)
 
-        assert captured["group_id"] == "bi-specialist", "group_id header must be forwarded to from_email"
+        assert (
+            captured["group_id"] == "bi-specialist"
+        ), "group_id header must be forwarded to from_email"
         assert result.group_ids == ["bi-specialist"]
 
 
@@ -472,8 +544,16 @@ class TestUserContextMiddleware:
         async def send(event):
             pass
 
-        with patch("src.utils.user_context.extract_group_context_from_request", AsyncMock(return_value=None)), \
-             patch("src.utils.user_context.extract_user_context_from_request", return_value={}):
+        with (
+            patch(
+                "src.utils.user_context.extract_group_context_from_request",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "src.utils.user_context.extract_user_context_from_request",
+                return_value={},
+            ),
+        ):
             await middleware(scope, receive, send)
 
         assert "called" in calls
@@ -502,8 +582,16 @@ class TestUserContextMiddleware:
             pass
 
         UserContext.set_user_token("tok")
-        with patch("src.utils.user_context.extract_group_context_from_request", AsyncMock(return_value=None)), \
-             patch("src.utils.user_context.extract_user_context_from_request", return_value={}):
+        with (
+            patch(
+                "src.utils.user_context.extract_group_context_from_request",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "src.utils.user_context.extract_user_context_from_request",
+                return_value={},
+            ),
+        ):
             await middleware(scope, receive, send)
         # Context should be cleared
         assert UserContext.get_user_token() is None
@@ -519,8 +607,16 @@ class TestLegacyUserContextMiddleware:
         async def call_next(req):
             return response
 
-        with patch("src.utils.user_context.extract_group_context_from_request", AsyncMock(return_value=None)), \
-             patch("src.utils.user_context.extract_user_context_from_request", return_value={}):
+        with (
+            patch(
+                "src.utils.user_context.extract_group_context_from_request",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "src.utils.user_context.extract_user_context_from_request",
+                return_value={},
+            ),
+        ):
             result = await user_context_middleware(mock_request, call_next)
 
         assert result is response
@@ -535,9 +631,16 @@ class TestLegacyUserContextMiddleware:
         async def call_next(req):
             return response
 
-        with patch("src.utils.user_context.extract_group_context_from_request",
-                   AsyncMock(side_effect=Exception("group error"))), \
-             patch("src.utils.user_context.extract_user_context_from_request", return_value={}):
+        with (
+            patch(
+                "src.utils.user_context.extract_group_context_from_request",
+                AsyncMock(side_effect=Exception("group error")),
+            ),
+            patch(
+                "src.utils.user_context.extract_user_context_from_request",
+                return_value={},
+            ),
+        ):
             result = await user_context_middleware(mock_request, call_next)
 
         assert result is response
@@ -551,17 +654,21 @@ class TestIsDatabricksAppContext:
 
     def test_returns_true_with_databricks_headers(self):
         """Returns True when databricks headers present."""
-        UserContext.set_user_context({
-            "access_token": "token",
-            "databricks_headers": {"X-Databricks-Cluster": "abc"},
-        })
+        UserContext.set_user_context(
+            {
+                "access_token": "token",
+                "databricks_headers": {"X-Databricks-Cluster": "abc"},
+            }
+        )
         assert is_databricks_app_context() is True
         UserContext.clear_context()
 
     def test_returns_false_without_access_token(self):
         """Returns False when access_token missing from context."""
-        UserContext.set_user_context({
-            "databricks_headers": {"X-Databricks-Cluster": "abc"},
-        })
+        UserContext.set_user_context(
+            {
+                "databricks_headers": {"X-Databricks-Cluster": "abc"},
+            }
+        )
         assert is_databricks_app_context() is False
         UserContext.clear_context()

@@ -6,7 +6,10 @@ window functions, and documentation generation.
 """
 
 import pytest
-from src.services.converters.formats.uc_metrics.uc_metrics_to_sql import UCMetricsToSqlTranspiler
+
+from src.services.converters.formats.uc_metrics.uc_metrics_to_sql import (
+    UCMetricsToSqlTranspiler,
+)
 
 
 class TestUCMetricsToSqlTranspiler:
@@ -24,12 +27,7 @@ class TestUCMetricsToSqlTranspiler:
             "version": "0.1",
             "description": "Sales metrics",
             "source": "main.sales.transactions",
-            "measures": [
-                {
-                    "name": "total_revenue",
-                    "expr": "SUM(amount)"
-                }
-            ]
+            "measures": [{"name": "total_revenue", "expr": "SUM(amount)"}],
         }
 
     @pytest.fixture
@@ -40,12 +38,7 @@ class TestUCMetricsToSqlTranspiler:
             "description": "Filtered metrics",
             "source": "main.sales.transactions",
             "filter": "year = 2024",
-            "measures": [
-                {
-                    "name": "total_revenue",
-                    "expr": "SUM(amount)"
-                }
-            ]
+            "measures": [{"name": "total_revenue", "expr": "SUM(amount)"}],
         }
 
     @pytest.fixture
@@ -56,19 +49,10 @@ class TestUCMetricsToSqlTranspiler:
             "description": "Multiple metrics",
             "source": "main.sales.transactions",
             "measures": [
-                {
-                    "name": "total_revenue",
-                    "expr": "SUM(amount)"
-                },
-                {
-                    "name": "transaction_count",
-                    "expr": "COUNT(*)"
-                },
-                {
-                    "name": "avg_transaction",
-                    "expr": "AVG(amount)"
-                }
-            ]
+                {"name": "total_revenue", "expr": "SUM(amount)"},
+                {"name": "transaction_count", "expr": "COUNT(*)"},
+                {"name": "avg_transaction", "expr": "AVG(amount)"},
+            ],
         }
 
     # ========== Initialization Tests ==========
@@ -76,7 +60,7 @@ class TestUCMetricsToSqlTranspiler:
     def test_transpiler_initialization(self, transpiler):
         """Test UCMetricsToSqlTranspiler initializes correctly"""
         assert transpiler is not None
-        assert hasattr(transpiler, 'logger')
+        assert hasattr(transpiler, "logger")
 
     # ========== Transpile From YAML Tests ==========
 
@@ -113,7 +97,9 @@ measures:
   - name: "total"
     expr: "SUM(value)"
 """
-        result = transpiler.transpile_from_yaml(yaml_string, table_reference="main.new.table")
+        result = transpiler.transpile_from_yaml(
+            yaml_string, table_reference="main.new.table"
+        )
 
         assert len(result) == 1
         assert "main.new.table" in result[0]
@@ -138,7 +124,9 @@ measures:
         assert len(result) == 1
         assert "WHERE year = 2024" in result[0]
 
-    def test_transpile_multiple_measures(self, transpiler, uc_metrics_multiple_measures):
+    def test_transpile_multiple_measures(
+        self, transpiler, uc_metrics_multiple_measures
+    ):
         """Test transpiling multiple measures"""
         result = transpiler.transpile(uc_metrics_multiple_measures)
 
@@ -149,7 +137,9 @@ measures:
 
     def test_transpile_with_table_override(self, transpiler, simple_uc_metrics):
         """Test transpiling with table reference override"""
-        result = transpiler.transpile(simple_uc_metrics, table_reference="catalog.schema.table")
+        result = transpiler.transpile(
+            simple_uc_metrics, table_reference="catalog.schema.table"
+        )
 
         assert "catalog.schema.table" in result[0]
         assert "main.sales.transactions" not in result[0]
@@ -161,21 +151,14 @@ measures:
 
     def test_transpile_missing_measures(self, transpiler):
         """Test transpiling without measures raises error"""
-        invalid_metrics = {
-            "version": "0.1",
-            "source": "table"
-        }
+        invalid_metrics = {"version": "0.1", "source": "table"}
 
         with pytest.raises(ValueError, match="measures"):
             transpiler.transpile(invalid_metrics)
 
     def test_transpile_empty_measures(self, transpiler):
         """Test transpiling with empty measures list raises error"""
-        invalid_metrics = {
-            "version": "0.1",
-            "source": "table",
-            "measures": []
-        }
+        invalid_metrics = {"version": "0.1", "source": "table", "measures": []}
 
         with pytest.raises(ValueError, match="cannot be empty"):
             transpiler.transpile(invalid_metrics)
@@ -185,9 +168,7 @@ measures:
         invalid_metrics = {
             "version": "0.1",
             "source": "table",
-            "measures": [
-                {"expr": "SUM(value)"}
-            ]
+            "measures": [{"expr": "SUM(value)"}],
         }
 
         with pytest.raises(ValueError, match="name"):
@@ -198,9 +179,7 @@ measures:
         invalid_metrics = {
             "version": "0.1",
             "source": "table",
-            "measures": [
-                {"name": "total"}
-            ]
+            "measures": [{"name": "total"}],
         }
 
         with pytest.raises(ValueError, match="expr"):
@@ -217,7 +196,9 @@ measures:
         assert "SUM(amount) as total_revenue" in result
         assert "FROM main.sales.transactions" in result
 
-    def test_transpile_to_single_query_multiple_measures(self, transpiler, uc_metrics_multiple_measures):
+    def test_transpile_to_single_query_multiple_measures(
+        self, transpiler, uc_metrics_multiple_measures
+    ):
         """Test generating single query with multiple measures"""
         result = transpiler.transpile_to_single_query(uc_metrics_multiple_measures)
 
@@ -227,17 +208,20 @@ measures:
         assert result.count("SELECT") == 1  # Only one SELECT
         assert "," in result  # Measures separated by commas
 
-    def test_transpile_to_single_query_with_filter(self, transpiler, uc_metrics_with_filter):
+    def test_transpile_to_single_query_with_filter(
+        self, transpiler, uc_metrics_with_filter
+    ):
         """Test generating single query with filter"""
         result = transpiler.transpile_to_single_query(uc_metrics_with_filter)
 
         assert "WHERE year = 2024" in result
 
-    def test_transpile_to_single_query_with_table_override(self, transpiler, simple_uc_metrics):
+    def test_transpile_to_single_query_with_table_override(
+        self, transpiler, simple_uc_metrics
+    ):
         """Test generating single query with table override"""
         result = transpiler.transpile_to_single_query(
-            simple_uc_metrics,
-            table_reference="custom.table.name"
+            simple_uc_metrics, table_reference="custom.table.name"
         )
 
         assert "custom.table.name" in result
@@ -257,12 +241,7 @@ measures:
         uc_metrics = {
             "version": "0.1",
             "source": "main.sales.transactions",
-            "measures": [
-                {
-                    "name": "total",
-                    "expr": "SUM(catalog.schema.table.value)"
-                }
-            ]
+            "measures": [{"name": "total", "expr": "SUM(catalog.schema.table.value)"}],
         }
         result = transpiler.extract_table_references(uc_metrics)
 
@@ -273,12 +252,7 @@ measures:
         """Test extracting table references without source"""
         uc_metrics = {
             "version": "0.1",
-            "measures": [
-                {
-                    "name": "total",
-                    "expr": "SUM(value)"
-                }
-            ]
+            "measures": [{"name": "total", "expr": "SUM(value)"}],
         }
         result = transpiler.extract_table_references(uc_metrics)
 
@@ -292,8 +266,8 @@ measures:
             "source": "main.sales.table",
             "measures": [
                 {"name": "m1", "expr": "SUM(main.sales.table.value)"},
-                {"name": "m2", "expr": "COUNT(main.sales.table.id)"}
-            ]
+                {"name": "m2", "expr": "COUNT(main.sales.table.id)"},
+            ],
         }
         result = transpiler.extract_table_references(uc_metrics)
 
@@ -312,7 +286,9 @@ measures:
         assert "Description: Sales metrics" in result
         assert "total_revenue" in result
 
-    def test_generate_sql_documentation_includes_individual_queries(self, transpiler, uc_metrics_multiple_measures):
+    def test_generate_sql_documentation_includes_individual_queries(
+        self, transpiler, uc_metrics_multiple_measures
+    ):
         """Test documentation includes individual queries"""
         result = transpiler.generate_sql_documentation(uc_metrics_multiple_measures)
 
@@ -321,7 +297,9 @@ measures:
         assert "transaction_count" in result
         assert "avg_transaction" in result
 
-    def test_generate_sql_documentation_includes_consolidated_query(self, transpiler, uc_metrics_multiple_measures):
+    def test_generate_sql_documentation_includes_consolidated_query(
+        self, transpiler, uc_metrics_multiple_measures
+    ):
         """Test documentation includes consolidated query"""
         result = transpiler.generate_sql_documentation(uc_metrics_multiple_measures)
 
@@ -331,13 +309,17 @@ measures:
         assert "total_revenue" in consolidated_section
         assert "transaction_count" in consolidated_section
 
-    def test_generate_sql_documentation_with_filter(self, transpiler, uc_metrics_with_filter):
+    def test_generate_sql_documentation_with_filter(
+        self, transpiler, uc_metrics_with_filter
+    ):
         """Test documentation includes filter information"""
         result = transpiler.generate_sql_documentation(uc_metrics_with_filter)
 
         assert "Common Filter: year = 2024" in result
 
-    def test_generate_sql_documentation_includes_table_references(self, transpiler, simple_uc_metrics):
+    def test_generate_sql_documentation_includes_table_references(
+        self, transpiler, simple_uc_metrics
+    ):
         """Test documentation includes table references"""
         result = transpiler.generate_sql_documentation(simple_uc_metrics)
 
@@ -355,12 +337,9 @@ measures:
                 {
                     "name": "last_value",
                     "expr": "SUM(amount)",
-                    "window": {
-                        "order": "date",
-                        "semiadditive": "last"
-                    }
+                    "window": {"order": "date", "semiadditive": "last"},
                 }
-            ]
+            ],
         }
         result = transpiler.transpile(uc_metrics)
 
@@ -376,14 +355,9 @@ measures:
                 {
                     "name": "windowed",
                     "expr": "SUM(value)",
-                    "window": [
-                        {
-                            "order": "timestamp",
-                            "semiadditive": "last"
-                        }
-                    ]
+                    "window": [{"order": "timestamp", "semiadditive": "last"}],
                 }
-            ]
+            ],
         }
         result = transpiler.transpile(uc_metrics)
 
@@ -395,15 +369,7 @@ measures:
 
     def test_transpile_no_source_table(self, transpiler):
         """Test transpiling without source table"""
-        uc_metrics = {
-            "version": "0.1",
-            "measures": [
-                {
-                    "name": "const",
-                    "expr": "42"
-                }
-            ]
-        }
+        uc_metrics = {"version": "0.1", "measures": [{"name": "const", "expr": "42"}]}
         result = transpiler.transpile(uc_metrics)
 
         assert len(result) == 1
@@ -419,9 +385,9 @@ measures:
             "measures": [
                 {
                     "name": "profit_margin",
-                    "expr": "CAST((SUM(revenue) - SUM(cost)) / NULLIF(SUM(revenue), 0) AS DECIMAL(10,2)) * 100"
+                    "expr": "CAST((SUM(revenue) - SUM(cost)) / NULLIF(SUM(revenue), 0) AS DECIMAL(10,2)) * 100",
                 }
-            ]
+            ],
         }
         result = transpiler.transpile(uc_metrics)
 
@@ -434,12 +400,7 @@ measures:
         uc_metrics = {
             "version": "0.1",
             "source": "table",
-            "measures": [
-                {
-                    "name": "total_revenue_usd",
-                    "expr": "SUM(amount)"
-                }
-            ]
+            "measures": [{"name": "total_revenue_usd", "expr": "SUM(amount)"}],
         }
         result = transpiler.transpile(uc_metrics)
 

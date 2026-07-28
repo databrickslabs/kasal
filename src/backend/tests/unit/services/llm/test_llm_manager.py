@@ -11,22 +11,22 @@ Tests cover:
 - get_embedding circuit breaker
 """
 
-import time as _time
-import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock, call
-from typing import Dict, Any, List, Optional
-import os
 import logging
+import os
+import time as _time
+from typing import Any, Dict, List, Optional
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
+import pytest
+
+import src.config.settings as settings_module
 from src.services.llm import embeddings as _embeddings
 from src.services.llm.manager import (
     LLMManager,
-    log_file_path,
-    log_dir,
     _configure_litellm_caching,
+    log_dir,
+    log_file_path,
 )
-import src.config.settings as settings_module
-
 
 # ---------------------------------------------------------------------------
 # Module-level constants
@@ -62,12 +62,21 @@ class TestClassAttributes:
 
     def test_embedding_failures_manipulation(self):
         _embeddings._embedding_failures.clear()
-        _embeddings._embedding_failures["test"] = {"count": 1, "last_failure": _time.time()}
+        _embeddings._embedding_failures["test"] = {
+            "count": 1,
+            "last_failure": _time.time(),
+        }
         assert _embeddings._embedding_failures["test"]["count"] == 1
         _embeddings._embedding_failures.clear()
 
     def test_static_methods_exist(self):
-        for name in ("_get_group_id_from_context", "completion", "configure_kasal_llm", "get_llm", "get_embedding"):
+        for name in (
+            "_get_group_id_from_context",
+            "completion",
+            "configure_kasal_llm",
+            "get_llm",
+            "get_embedding",
+        ):
             assert callable(getattr(LLMManager, name))
 
 
@@ -79,50 +88,77 @@ class TestClassAttributes:
 class TestGetGroupIdFromContext:
     """Test _get_group_id_from_context method."""
 
-    @patch("src.services.llm.manager.LLMManager._get_group_id_from_context.__wrapped__" if False else "builtins.__import__", side_effect=lambda *a, **kw: __import__(*a, **kw))
+    @patch(
+        (
+            "src.services.llm.manager.LLMManager._get_group_id_from_context.__wrapped__"
+            if False
+            else "builtins.__import__"
+        ),
+        side_effect=lambda *a, **kw: __import__(*a, **kw),
+    )
     def _helper(self, _):
         pass
 
     def test_returns_group_id_when_available(self):
         mock_ctx = MagicMock()
         mock_ctx.primary_group_id = "group-abc"
-        with patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx):
+        with patch(
+            "src.utils.user_context.UserContext.get_group_context",
+            return_value=mock_ctx,
+        ):
             result = LLMManager._get_group_id_from_context(required=True)
         assert result == "group-abc"
 
     def test_raises_when_required_and_no_group_id(self):
         mock_ctx = MagicMock()
         mock_ctx.primary_group_id = None
-        with patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx):
+        with patch(
+            "src.utils.user_context.UserContext.get_group_context",
+            return_value=mock_ctx,
+        ):
             with pytest.raises(ValueError, match="group_id is required"):
                 LLMManager._get_group_id_from_context(required=True)
 
     def test_returns_none_when_not_required_and_no_group_id(self):
         mock_ctx = MagicMock()
         mock_ctx.primary_group_id = None
-        with patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx):
+        with patch(
+            "src.utils.user_context.UserContext.get_group_context",
+            return_value=mock_ctx,
+        ):
             result = LLMManager._get_group_id_from_context(required=False)
         assert result is None
 
     def test_returns_none_when_context_is_none(self):
-        with patch("src.utils.user_context.UserContext.get_group_context", return_value=None):
+        with patch(
+            "src.utils.user_context.UserContext.get_group_context", return_value=None
+        ):
             result = LLMManager._get_group_id_from_context(required=False)
         assert result is None
 
     def test_handles_exception_and_raises_when_required(self):
-        with patch("src.utils.user_context.UserContext.get_group_context", side_effect=RuntimeError("boom")):
+        with patch(
+            "src.utils.user_context.UserContext.get_group_context",
+            side_effect=RuntimeError("boom"),
+        ):
             with pytest.raises(ValueError, match="group_id is required"):
                 LLMManager._get_group_id_from_context(required=True)
 
     def test_handles_exception_and_returns_none_when_not_required(self):
-        with patch("src.utils.user_context.UserContext.get_group_context", side_effect=RuntimeError("boom")):
+        with patch(
+            "src.utils.user_context.UserContext.get_group_context",
+            side_effect=RuntimeError("boom"),
+        ):
             result = LLMManager._get_group_id_from_context(required=False)
         assert result is None
 
     def test_returns_none_when_context_has_empty_string_group_id(self):
         mock_ctx = MagicMock()
         mock_ctx.primary_group_id = ""
-        with patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx):
+        with patch(
+            "src.utils.user_context.UserContext.get_group_context",
+            return_value=mock_ctx,
+        ):
             result = LLMManager._get_group_id_from_context(required=False)
         assert result is None
 
@@ -141,9 +177,20 @@ class TestCompletion:
         mock_llm.call.return_value = "response text"
 
         with (
-            patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
-            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
-            patch("src.services.llm.manager._run_llm_blocking", new_callable=AsyncMock, return_value="response text"),
+            patch.object(
+                LLMManager, "_get_group_id_from_context", return_value="group-1"
+            ),
+            patch.object(
+                LLMManager,
+                "configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=mock_llm,
+            ),
+            patch(
+                "src.services.llm.manager._run_llm_blocking",
+                new_callable=AsyncMock,
+                return_value="response text",
+            ),
         ):
             result = await LLMManager.completion(
                 messages=[{"role": "user", "content": "hello"}],
@@ -157,9 +204,20 @@ class TestCompletion:
         mock_llm = MagicMock()
 
         with (
-            patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
-            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
-            patch("src.services.llm.manager._run_llm_blocking", new_callable=AsyncMock, side_effect=RuntimeError("LLM error")),
+            patch.object(
+                LLMManager, "_get_group_id_from_context", return_value="group-1"
+            ),
+            patch.object(
+                LLMManager,
+                "configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=mock_llm,
+            ),
+            patch(
+                "src.services.llm.manager._run_llm_blocking",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("LLM error"),
+            ),
         ):
             with pytest.raises(RuntimeError, match="LLM error"):
                 await LLMManager.completion(
@@ -172,9 +230,20 @@ class TestCompletion:
         mock_llm = MagicMock()
 
         with (
-            patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
-            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
-            patch("src.services.llm.manager._run_llm_blocking", new_callable=AsyncMock, return_value="ok"),
+            patch.object(
+                LLMManager, "_get_group_id_from_context", return_value="group-1"
+            ),
+            patch.object(
+                LLMManager,
+                "configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=mock_llm,
+            ),
+            patch(
+                "src.services.llm.manager._run_llm_blocking",
+                new_callable=AsyncMock,
+                return_value="ok",
+            ),
         ):
             await LLMManager.completion(
                 messages=[{"role": "user", "content": "hello"}],
@@ -192,9 +261,20 @@ class TestCompletion:
         mock_llm = MagicMock()
 
         with (
-            patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
-            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
-            patch("src.services.llm.manager._run_llm_blocking", new_callable=AsyncMock, return_value="ok"),
+            patch.object(
+                LLMManager, "_get_group_id_from_context", return_value="group-1"
+            ),
+            patch.object(
+                LLMManager,
+                "configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=mock_llm,
+            ),
+            patch(
+                "src.services.llm.manager._run_llm_blocking",
+                new_callable=AsyncMock,
+                return_value="ok",
+            ),
         ):
             await LLMManager.completion(
                 messages=[{"role": "user", "content": "ping"}],
@@ -217,14 +297,27 @@ class TestCompletion:
         span_cm.__exit__ = MagicMock(return_value=False)
 
         with (
-            patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
-            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
-            patch("src.services.llm.manager._run_llm_blocking", new_callable=AsyncMock, return_value="response text"),
+            patch.object(
+                LLMManager, "_get_group_id_from_context", return_value="group-1"
+            ),
+            patch.object(
+                LLMManager,
+                "configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=mock_llm,
+            ),
+            patch(
+                "src.services.llm.manager._run_llm_blocking",
+                new_callable=AsyncMock,
+                return_value="response text",
+            ),
             patch("mlflow.get_current_active_span", return_value=MagicMock()),
             patch("mlflow.start_span", return_value=span_cm) as mock_start_span,
         ):
             result = await LLMManager.completion(
-                messages=messages, model="test-model", temperature=0.0,
+                messages=messages,
+                model="test-model",
+                temperature=0.0,
             )
 
         assert result == "response text"
@@ -244,14 +337,26 @@ class TestCompletion:
         mock_llm = MagicMock()
 
         with (
-            patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
-            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
-            patch("src.services.llm.manager._run_llm_blocking", new_callable=AsyncMock, return_value="ok"),
+            patch.object(
+                LLMManager, "_get_group_id_from_context", return_value="group-1"
+            ),
+            patch.object(
+                LLMManager,
+                "configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=mock_llm,
+            ),
+            patch(
+                "src.services.llm.manager._run_llm_blocking",
+                new_callable=AsyncMock,
+                return_value="ok",
+            ),
             patch("mlflow.get_current_active_span", return_value=None),
             patch("mlflow.start_span") as mock_start_span,
         ):
             result = await LLMManager.completion(
-                messages=[{"role": "user", "content": "hi"}], model="test-model",
+                messages=[{"role": "user", "content": "hi"}],
+                model="test-model",
             )
 
         assert result == "ok"
@@ -263,7 +368,9 @@ class TestCompletion:
 # ---------------------------------------------------------------------------
 
 
-def _make_model_config(name, provider, context_window=128000, max_output_tokens=4096, extra=None):
+def _make_model_config(
+    name, provider, context_window=128000, max_output_tokens=4096, extra=None
+):
     """Build a model config dict matching what ModelConfigService returns."""
     config = {
         "name": name,
@@ -325,10 +432,16 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="ds-key"),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="ds-key",
+            ),
             patch("src.services.llm.manager.LLM") as MockLLM,
         ):
-            result = await LLMManager.configure_kasal_llm("deepseek-chat", "group-1", 0.5)
+            result = await LLMManager.configure_kasal_llm(
+                "deepseek-chat", "group-1", 0.5
+            )
             MockLLM.assert_called_once()
             call_kwargs = MockLLM.call_args[1]
             assert call_kwargs["model"] == "deepseek/deepseek-chat"
@@ -342,7 +455,11 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="sk-key"),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="sk-key",
+            ),
             patch("src.services.llm.manager.LLM") as MockLLM,
         ):
             result = await LLMManager.configure_kasal_llm("gpt-4o", "group-1", None)
@@ -364,7 +481,11 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="sk-key"),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="sk-key",
+            ),
             patch("src.services.llm.manager.LLM") as MockLLM,
         ):
             await LLMManager.configure_kasal_llm("gpt-5", "group-1", 0.7)
@@ -384,7 +505,11 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="sk-key"),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="sk-key",
+            ),
             patch("src.services.llm.manager.LLM") as MockLLM,
         ):
             await LLMManager.configure_kasal_llm("gpt-4o", "group-1", 0.3)
@@ -398,7 +523,11 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="kimi-key"),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="kimi-key",
+            ),
             patch("src.services.llm.manager.LLM") as MockLLM,
         ):
             await LLMManager.configure_kasal_llm("kimi-k2.7-code", "group-1", 0.0)
@@ -413,10 +542,16 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="ant-key"),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="ant-key",
+            ),
             patch("src.services.llm.manager.LLM") as MockLLM,
         ):
-            await LLMManager.configure_kasal_llm("claude-3-5-sonnet-20241022", "group-1", 0.3)
+            await LLMManager.configure_kasal_llm(
+                "claude-3-5-sonnet-20241022", "group-1", 0.3
+            )
             call_kwargs = MockLLM.call_args[1]
             assert call_kwargs["model"] == "anthropic/claude-3-5-sonnet-20241022"
 
@@ -436,7 +571,9 @@ class TestConfigureCrewaiLlm:
 
     @pytest.mark.asyncio
     async def test_databricks_standard_model(self):
-        config = _make_model_config("databricks-llama-4-maverick", "databricks", max_output_tokens=8000)
+        config = _make_model_config(
+            "databricks-llama-4-maverick", "databricks", max_output_tokens=8000
+        )
         p_session, p_service = _patch_session_and_config(config)
 
         mock_auth = MagicMock()
@@ -447,12 +584,24 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth),
-            patch("src.utils.user_context.UserContext.get_user_token", return_value="user-tok"),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/serving-endpoints"),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token",
+                return_value="user-tok",
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url",
+                return_value="https://example.com/serving-endpoints",
+            ),
             patch("src.services.llm.manager.DatabricksRetryLLM") as MockRetryLLM,
         ):
-            await LLMManager.configure_kasal_llm("databricks-llama-4-maverick", "group-1", 0.7)
+            await LLMManager.configure_kasal_llm(
+                "databricks-llama-4-maverick", "group-1", 0.7
+            )
             MockRetryLLM.assert_called_once()
             call_kwargs = MockRetryLLM.call_args[1]
             assert call_kwargs["model"] == "databricks/databricks-llama-4-maverick"
@@ -461,7 +610,9 @@ class TestConfigureCrewaiLlm:
 
     @pytest.mark.asyncio
     async def test_databricks_gpt5_model(self):
-        config = _make_model_config("databricks-gpt-5", "databricks", max_output_tokens=128000)
+        config = _make_model_config(
+            "databricks-gpt-5", "databricks", max_output_tokens=128000
+        )
         p_session, p_service = _patch_session_and_config(config)
 
         mock_auth = MagicMock()
@@ -472,9 +623,19 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth),
-            patch("src.utils.user_context.UserContext.get_user_token", return_value="user-tok"),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/serving-endpoints"),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token",
+                return_value="user-tok",
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url",
+                return_value="https://example.com/serving-endpoints",
+            ),
             patch("src.services.llm.manager.DatabricksRetryLLM") as MockRetryLLM,
         ):
             await LLMManager.configure_kasal_llm("databricks-gpt-5", "group-1", None)
@@ -489,7 +650,9 @@ class TestConfigureCrewaiLlm:
     @pytest.mark.asyncio
     async def test_databricks_codex_model(self):
         """gpt-5-3-codex should return DatabricksResponsesLLM."""
-        config = _make_model_config("databricks-gpt-5-3-codex", "databricks", max_output_tokens=128000)
+        config = _make_model_config(
+            "databricks-gpt-5-3-codex", "databricks", max_output_tokens=128000
+        )
         p_session, p_service = _patch_session_and_config(config)
 
         mock_auth = MagicMock()
@@ -504,12 +667,27 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth),
-            patch("src.utils.user_context.UserContext.get_user_token", return_value="user-tok"),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/serving-endpoints"),
-            patch("src.services.llm.handlers.databricks_responses_llm.DatabricksResponsesLLM", mock_codex_cls),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token",
+                return_value="user-tok",
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url",
+                return_value="https://example.com/serving-endpoints",
+            ),
+            patch(
+                "src.services.llm.handlers.databricks_responses_llm.DatabricksResponsesLLM",
+                mock_codex_cls,
+            ),
         ):
-            result = await LLMManager.configure_kasal_llm("databricks-gpt-5-3-codex", "group-1", None)
+            result = await LLMManager.configure_kasal_llm(
+                "databricks-gpt-5-3-codex", "group-1", None
+            )
             mock_codex_cls.assert_called_once()
             call_kwargs = mock_codex_cls.call_args[1]
             assert call_kwargs["model"] == "databricks-gpt-5-3-codex"
@@ -526,11 +704,22 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=None),
-            patch("src.utils.user_context.UserContext.get_user_token", return_value=None),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token", return_value=None
+            ),
         ):
-            with pytest.raises(ValueError, match="No Databricks credentials available for workspace 'group-1'"):
-                await LLMManager.configure_kasal_llm("databricks-llama-4-maverick", "group-1", None)
+            with pytest.raises(
+                ValueError,
+                match="No Databricks credentials available for workspace 'group-1'",
+            ):
+                await LLMManager.configure_kasal_llm(
+                    "databricks-llama-4-maverick", "group-1", None
+                )
 
     @pytest.mark.asyncio
     async def test_databricks_import_error_raises(self):
@@ -541,11 +730,18 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.utils.databricks_auth.get_auth_context", side_effect=ImportError("no module")),
-            patch("src.utils.user_context.UserContext.get_user_token", return_value=None),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                side_effect=ImportError("no module"),
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token", return_value=None
+            ),
         ):
             with pytest.raises(ImportError, match="databricks_auth module is required"):
-                await LLMManager.configure_kasal_llm("databricks-llama-4-maverick", "group-1", None)
+                await LLMManager.configure_kasal_llm(
+                    "databricks-llama-4-maverick", "group-1", None
+                )
 
     @pytest.mark.asyncio
     async def test_gemini_provider(self):
@@ -554,7 +750,11 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="gem-key"),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="gem-key",
+            ),
             patch("src.services.llm.manager.LLM") as MockLLM,
             patch.dict(os.environ, {}, clear=False),
         ):
@@ -569,7 +769,11 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value=None),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
             patch("src.services.llm.manager.LLM") as MockLLM,
             patch.dict(os.environ, {}, clear=False),
         ):
@@ -603,12 +807,23 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth),
-            patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/serving-endpoints"),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token", return_value="tok"
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url",
+                return_value="https://example.com/serving-endpoints",
+            ),
             patch("src.services.llm.manager.DatabricksRetryLLM") as MockRetryLLM,
         ):
-            await LLMManager.configure_kasal_llm("databricks-llama-4-maverick", "group-1", 0.5)
+            await LLMManager.configure_kasal_llm(
+                "databricks-llama-4-maverick", "group-1", 0.5
+            )
             call_kwargs = MockRetryLLM.call_args[1]
             assert call_kwargs["temperature"] == 0.5
 
@@ -619,7 +834,11 @@ class TestConfigureCrewaiLlm:
         with (
             p_session,
             p_service,
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="key"),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="key",
+            ),
             patch("src.services.llm.manager.LLM") as MockLLM,
         ):
             await LLMManager.configure_kasal_llm("gpt-4o", "group-1", None)
@@ -643,8 +862,16 @@ class TestGetLlm:
         mock_llm = MagicMock()
 
         with (
-            patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
-            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_ctx,
+            ),
+            patch.object(
+                LLMManager,
+                "configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=mock_llm,
+            ),
         ):
             result = await LLMManager.get_llm("test-model", temperature=0.5)
             assert result == mock_llm
@@ -654,13 +881,18 @@ class TestGetLlm:
         mock_ctx = MagicMock()
         mock_ctx.primary_group_id = None
 
-        with patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx):
+        with patch(
+            "src.utils.user_context.UserContext.get_group_context",
+            return_value=mock_ctx,
+        ):
             with pytest.raises(ValueError, match="group_id is REQUIRED"):
                 await LLMManager.get_llm("test-model")
 
     @pytest.mark.asyncio
     async def test_get_llm_raises_when_no_context(self):
-        with patch("src.utils.user_context.UserContext.get_group_context", return_value=None):
+        with patch(
+            "src.utils.user_context.UserContext.get_group_context", return_value=None
+        ):
             with pytest.raises(ValueError, match="group_id is REQUIRED"):
                 await LLMManager.get_llm("test-model")
 
@@ -687,7 +919,9 @@ class TestGetEmbeddingCircuitBreaker:
             "last_failure": _time.time(),
         }
 
-        with patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"):
+        with patch(
+            "src.utils.user_context.UserContext.get_user_token", return_value="tok"
+        ):
             result = await LLMManager.get_embedding("test text")
 
         assert result is None
@@ -703,21 +937,35 @@ class TestGetEmbeddingCircuitBreaker:
         # The circuit should be reset, so it will attempt the call.
         # Mock the auth to make it fail gracefully (return None from auth)
         with (
-            patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=None),
-            patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token", return_value="tok"
+            ),
         ):
             result = await LLMManager.get_embedding("test text")
         # Returns None because auth is None, but circuit was reset
         assert result is None
         # Circuit should be reset
-        assert _embeddings._embedding_failures.get("databricks", {}).get("count", 0) == 0
+        assert (
+            _embeddings._embedding_failures.get("databricks", {}).get("count", 0) == 0
+        )
 
     @pytest.mark.asyncio
     async def test_embedding_tracks_failures(self):
         """Exceptions should increment failure count."""
         with (
-            patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, side_effect=RuntimeError("auth boom")),
-            patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("auth boom"),
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token", return_value="tok"
+            ),
         ):
             result = await LLMManager.get_embedding("test text")
         assert result is None
@@ -744,19 +992,29 @@ class TestGetEmbeddingCircuitBreaker:
         mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_http_session)
         mock_session_ctx.__aexit__ = AsyncMock(return_value=None)
 
-        with patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx):
-            result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+        with patch(
+            "src.utils.aiohttp_session.shared_client_session",
+            return_value=mock_session_ctx,
+        ):
+            result = await LLMManager.get_embedding(
+                "test text", embedder_config=embedder_config
+            )
 
         assert result == [0.1, 0.2, 0.3]
 
     @pytest.mark.asyncio
     async def test_embedding_with_google_provider(self):
         """Test embedder_config with google provider routes correctly."""
-        embedder_config = {"provider": "google", "config": {"model": "text-embedding-004"}}
+        embedder_config = {
+            "provider": "google",
+            "config": {"model": "text-embedding-004"},
+        }
 
         mock_response = MagicMock()
         mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={"embedding": {"values": [0.4, 0.5]}})
+        mock_response.json = AsyncMock(
+            return_value={"embedding": {"values": [0.4, 0.5]}}
+        )
 
         mock_post_ctx = MagicMock()
         mock_post_ctx.__aenter__ = AsyncMock(return_value=mock_response)
@@ -773,22 +1031,39 @@ class TestGetEmbeddingCircuitBreaker:
         mock_ctx.primary_group_id = "group-1"
 
         with (
-            patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="gem-key"),
-            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_ctx,
+            ),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="gem-key",
+            ),
+            patch(
+                "src.utils.aiohttp_session.shared_client_session",
+                return_value=mock_session_ctx,
+            ),
         ):
-            result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+            result = await LLMManager.get_embedding(
+                "test text", embedder_config=embedder_config
+            )
 
         assert result == [0.4, 0.5]
 
     @pytest.mark.asyncio
     async def test_embedding_with_openai_provider(self):
         """Test default/openai provider for embeddings."""
-        embedder_config = {"provider": "openai", "config": {"model": "text-embedding-ada-002"}}
+        embedder_config = {
+            "provider": "openai",
+            "config": {"model": "text-embedding-ada-002"},
+        }
 
         mock_response = MagicMock()
         mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={"data": [{"embedding": [0.6, 0.7]}]})
+        mock_response.json = AsyncMock(
+            return_value={"data": [{"embedding": [0.6, 0.7]}]}
+        )
 
         mock_post_ctx = MagicMock()
         mock_post_ctx.__aenter__ = AsyncMock(return_value=mock_response)
@@ -805,11 +1080,23 @@ class TestGetEmbeddingCircuitBreaker:
         mock_ctx.primary_group_id = "group-1"
 
         with (
-            patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="oai-key"),
-            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_ctx,
+            ),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="oai-key",
+            ),
+            patch(
+                "src.utils.aiohttp_session.shared_client_session",
+                return_value=mock_session_ctx,
+            ),
         ):
-            result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+            result = await LLMManager.get_embedding(
+                "test text", embedder_config=embedder_config
+            )
 
         assert result == [0.6, 0.7]
 
@@ -862,13 +1149,34 @@ class TestGetEmbeddingDatabricksPaths:
         )
 
         with (
-            patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth),
-            patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"),
-            patch("src.services.llm.manager.LLMManager._get_group_id_from_context", return_value=None),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/serving-endpoints"),
-            patch("src.services.llm.manager.DatabricksURLUtils.extract_workspace_from_endpoint", return_value="https://example.com"),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_model_invocation_url", return_value="https://example.com/api"),
-            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token", return_value="tok"
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager._get_group_id_from_context",
+                return_value=None,
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url",
+                return_value="https://example.com/serving-endpoints",
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.extract_workspace_from_endpoint",
+                return_value="https://example.com",
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_model_invocation_url",
+                return_value="https://example.com/api",
+            ),
+            patch(
+                "src.utils.aiohttp_session.shared_client_session",
+                return_value=mock_session_ctx,
+            ),
             patch("aiohttp.ClientTimeout", return_value=MagicMock()),
         ):
             result = await LLMManager.get_embedding("test text")
@@ -885,10 +1193,22 @@ class TestGetEmbeddingDatabricksPaths:
         mock_auth.get_headers.return_value = None
 
         with (
-            patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth),
-            patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"),
-            patch("src.services.llm.manager.LLMManager._get_group_id_from_context", return_value=None),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value=None),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token", return_value="tok"
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager._get_group_id_from_context",
+                return_value=None,
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url",
+                return_value=None,
+            ),
         ):
             result = await LLMManager.get_embedding("test text")
         # api_key is set but api_base is None, so should return None
@@ -907,13 +1227,34 @@ class TestGetEmbeddingDatabricksPaths:
         )
 
         with (
-            patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth),
-            patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"),
-            patch("src.services.llm.manager.LLMManager._get_group_id_from_context", return_value=None),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/serving-endpoints"),
-            patch("src.services.llm.manager.DatabricksURLUtils.extract_workspace_from_endpoint", return_value="https://example.com"),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_model_invocation_url", return_value="https://example.com/api"),
-            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token", return_value="tok"
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager._get_group_id_from_context",
+                return_value=None,
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url",
+                return_value="https://example.com/serving-endpoints",
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.extract_workspace_from_endpoint",
+                return_value="https://example.com",
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_model_invocation_url",
+                return_value="https://example.com/api",
+            ),
+            patch(
+                "src.utils.aiohttp_session.shared_client_session",
+                return_value=mock_session_ctx,
+            ),
             patch("aiohttp.ClientTimeout", return_value=MagicMock()),
         ):
             result = await LLMManager.get_embedding("test text")
@@ -927,16 +1268,39 @@ class TestGetEmbeddingDatabricksPaths:
         mock_auth.token = "db-token"
         mock_auth.workspace_url = "https://example.databricks.com"
 
-        mock_session_ctx, _, _ = _make_aiohttp_session_mock(500, text_data="Internal Server Error")
+        mock_session_ctx, _, _ = _make_aiohttp_session_mock(
+            500, text_data="Internal Server Error"
+        )
 
         with (
-            patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth),
-            patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"),
-            patch("src.services.llm.manager.LLMManager._get_group_id_from_context", return_value=None),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/se"),
-            patch("src.services.llm.manager.DatabricksURLUtils.extract_workspace_from_endpoint", return_value="https://example.com"),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_model_invocation_url", return_value="https://example.com/api"),
-            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token", return_value="tok"
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager._get_group_id_from_context",
+                return_value=None,
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url",
+                return_value="https://example.com/se",
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.extract_workspace_from_endpoint",
+                return_value="https://example.com",
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_model_invocation_url",
+                return_value="https://example.com/api",
+            ),
+            patch(
+                "src.utils.aiohttp_session.shared_client_session",
+                return_value=mock_session_ctx,
+            ),
             patch("aiohttp.ClientTimeout", return_value=MagicMock()),
         ):
             result = await LLMManager.get_embedding("test text")
@@ -951,17 +1315,40 @@ class TestGetEmbeddingDatabricksPaths:
         mock_auth.workspace_url = "https://example.databricks.com"
 
         mock_session_ctx = MagicMock()
-        mock_session_ctx.__aenter__ = AsyncMock(side_effect=Exception("connection refused"))
+        mock_session_ctx.__aenter__ = AsyncMock(
+            side_effect=Exception("connection refused")
+        )
         mock_session_ctx.__aexit__ = AsyncMock(return_value=None)
 
         with (
-            patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth),
-            patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"),
-            patch("src.services.llm.manager.LLMManager._get_group_id_from_context", return_value=None),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url", return_value="https://example.com/se"),
-            patch("src.services.llm.manager.DatabricksURLUtils.extract_workspace_from_endpoint", return_value="https://example.com"),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_model_invocation_url", return_value="https://example.com/api"),
-            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token", return_value="tok"
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager._get_group_id_from_context",
+                return_value=None,
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_serving_endpoints_url",
+                return_value="https://example.com/se",
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.extract_workspace_from_endpoint",
+                return_value="https://example.com",
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_model_invocation_url",
+                return_value="https://example.com/api",
+            ),
+            patch(
+                "src.utils.aiohttp_session.shared_client_session",
+                return_value=mock_session_ctx,
+            ),
             patch("aiohttp.ClientTimeout", return_value=MagicMock()),
         ):
             result = await LLMManager.get_embedding("test text")
@@ -984,20 +1371,44 @@ class TestGetEmbeddingDatabricksPaths:
         def post_capture(url, **kwargs):
             captured_urls.append(url)
             return original_post(url, **kwargs)
+
         mock_session.post.side_effect = post_capture
 
         with (
-            patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock, return_value=mock_auth),
-            patch("src.utils.user_context.UserContext.get_user_token", return_value="tok"),
-            patch("src.services.llm.manager.LLMManager._get_group_id_from_context", return_value=None),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_llm_base_url", return_value="https://example.com/se"),
-            patch("src.services.llm.manager.DatabricksURLUtils.extract_workspace_from_endpoint", return_value="https://example.com"),
-            patch("src.services.llm.manager.DatabricksURLUtils.construct_embeddings_url", return_value=("https://example.com/api", None)) as mock_emb_url,
-            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
+            patch(
+                "src.utils.databricks_auth.get_auth_context",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch(
+                "src.utils.user_context.UserContext.get_user_token", return_value="tok"
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager._get_group_id_from_context",
+                return_value=None,
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_llm_base_url",
+                return_value="https://example.com/se",
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.extract_workspace_from_endpoint",
+                return_value="https://example.com",
+            ),
+            patch(
+                "src.services.llm.manager.DatabricksURLUtils.construct_embeddings_url",
+                return_value=("https://example.com/api", None),
+            ) as mock_emb_url,
+            patch(
+                "src.utils.aiohttp_session.shared_client_session",
+                return_value=mock_session_ctx,
+            ),
             patch("aiohttp.ClientTimeout", return_value=MagicMock()),
         ):
             # Use a model without databricks/ prefix
-            result = await LLMManager.get_embedding("test text", model="databricks-gte-large-en")
+            result = await LLMManager.get_embedding(
+                "test text", model="databricks-gte-large-en"
+            )
 
         # Should have called construct_embeddings_url with the prefixed model
         assert mock_emb_url.called
@@ -1020,8 +1431,13 @@ class TestGetEmbeddingOllama:
         embedder_config = {"provider": "ollama", "config": {"model": "nomic-embed"}}
         mock_session_ctx, _, _ = _make_aiohttp_session_mock(500, text_data="error")
 
-        with patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx):
-            result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+        with patch(
+            "src.utils.aiohttp_session.shared_client_session",
+            return_value=mock_session_ctx,
+        ):
+            result = await LLMManager.get_embedding(
+                "test text", embedder_config=embedder_config
+            )
         assert result is None
 
     @pytest.mark.asyncio
@@ -1030,8 +1446,13 @@ class TestGetEmbeddingOllama:
         embedder_config = {"provider": "ollama", "config": {"model": "nomic-embed"}}
         mock_session_ctx, _, _ = _make_aiohttp_session_mock(200, {"embeddings": []})
 
-        with patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx):
-            result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+        with patch(
+            "src.utils.aiohttp_session.shared_client_session",
+            return_value=mock_session_ctx,
+        ):
+            result = await LLMManager.get_embedding(
+                "test text", embedder_config=embedder_config
+            )
         assert result is None
 
     @pytest.mark.asyncio
@@ -1039,10 +1460,17 @@ class TestGetEmbeddingOllama:
         """Successful Ollama call resets the circuit breaker."""
         embedder_config = {"provider": "ollama", "config": {"model": "nomic-embed"}}
         _embeddings._embedding_failures["ollama"] = {"count": 2, "last_failure": 0}
-        mock_session_ctx, _, _ = _make_aiohttp_session_mock(200, {"embeddings": [[0.1, 0.2]]})
+        mock_session_ctx, _, _ = _make_aiohttp_session_mock(
+            200, {"embeddings": [[0.1, 0.2]]}
+        )
 
-        with patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx):
-            result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+        with patch(
+            "src.utils.aiohttp_session.shared_client_session",
+            return_value=mock_session_ctx,
+        ):
+            result = await LLMManager.get_embedding(
+                "test text", embedder_config=embedder_config
+            )
 
         assert result == [0.1, 0.2]
         assert _embeddings._embedding_failures.get("ollama", {}).get("count", 0) == 0
@@ -1060,68 +1488,129 @@ class TestGetEmbeddingGoogle:
     @pytest.mark.asyncio
     async def test_google_no_api_key_returns_none(self):
         """Returns None when Google API key is not available."""
-        embedder_config = {"provider": "google", "config": {"model": "text-embedding-004"}}
+        embedder_config = {
+            "provider": "google",
+            "config": {"model": "text-embedding-004"},
+        }
 
         mock_ctx = MagicMock()
         mock_ctx.primary_group_id = "group-1"
 
         with (
-            patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value=None),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_ctx,
+            ),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
-            result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+            result = await LLMManager.get_embedding(
+                "test text", embedder_config=embedder_config
+            )
         assert result is None
 
     @pytest.mark.asyncio
     async def test_google_non_200_returns_none(self):
         """Returns None when Google API returns non-200 status."""
-        embedder_config = {"provider": "google", "config": {"model": "text-embedding-004"}}
+        embedder_config = {
+            "provider": "google",
+            "config": {"model": "text-embedding-004"},
+        }
         mock_session_ctx, _, _ = _make_aiohttp_session_mock(403, text_data="forbidden")
 
         mock_ctx = MagicMock()
         mock_ctx.primary_group_id = "group-1"
 
         with (
-            patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="key"),
-            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_ctx,
+            ),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="key",
+            ),
+            patch(
+                "src.utils.aiohttp_session.shared_client_session",
+                return_value=mock_session_ctx,
+            ),
         ):
-            result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+            result = await LLMManager.get_embedding(
+                "test text", embedder_config=embedder_config
+            )
         assert result is None
 
     @pytest.mark.asyncio
     async def test_google_empty_embedding_returns_none(self):
         """Returns None when Google response has no embedding values."""
-        embedder_config = {"provider": "google", "config": {"model": "text-embedding-004"}}
-        mock_session_ctx, _, _ = _make_aiohttp_session_mock(200, {"embedding": {"values": []}})
+        embedder_config = {
+            "provider": "google",
+            "config": {"model": "text-embedding-004"},
+        }
+        mock_session_ctx, _, _ = _make_aiohttp_session_mock(
+            200, {"embedding": {"values": []}}
+        )
 
         mock_ctx = MagicMock()
         mock_ctx.primary_group_id = "group-1"
 
         with (
-            patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="key"),
-            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_ctx,
+            ),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="key",
+            ),
+            patch(
+                "src.utils.aiohttp_session.shared_client_session",
+                return_value=mock_session_ctx,
+            ),
         ):
-            result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+            result = await LLMManager.get_embedding(
+                "test text", embedder_config=embedder_config
+            )
         assert result is None
 
     @pytest.mark.asyncio
     async def test_google_resets_circuit_breaker_on_success(self):
         """Successful Google call resets circuit breaker."""
-        embedder_config = {"provider": "google", "config": {"model": "text-embedding-004"}}
+        embedder_config = {
+            "provider": "google",
+            "config": {"model": "text-embedding-004"},
+        }
         _embeddings._embedding_failures["google"] = {"count": 2, "last_failure": 0}
 
-        mock_session_ctx, _, _ = _make_aiohttp_session_mock(200, {"embedding": {"values": [0.1, 0.2]}})
+        mock_session_ctx, _, _ = _make_aiohttp_session_mock(
+            200, {"embedding": {"values": [0.1, 0.2]}}
+        )
         mock_ctx = MagicMock()
         mock_ctx.primary_group_id = "group-1"
 
         with (
-            patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="key"),
-            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_ctx,
+            ),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="key",
+            ),
+            patch(
+                "src.utils.aiohttp_session.shared_client_session",
+                return_value=mock_session_ctx,
+            ),
         ):
-            result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+            result = await LLMManager.get_embedding(
+                "test text", embedder_config=embedder_config
+            )
         assert result == [0.1, 0.2]
         assert _embeddings._embedding_failures.get("google", {}).get("count", 0) == 0
 
@@ -1138,56 +1627,103 @@ class TestGetEmbeddingOpenAI:
     @pytest.mark.asyncio
     async def test_openai_no_api_key_returns_none(self):
         """Returns None when OpenAI API key not available."""
-        embedder_config = {"provider": "openai", "config": {"model": "text-embedding-ada-002"}}
+        embedder_config = {
+            "provider": "openai",
+            "config": {"model": "text-embedding-ada-002"},
+        }
 
         mock_ctx = MagicMock()
         mock_ctx.primary_group_id = "group-1"
 
         with (
-            patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value=None),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_ctx,
+            ),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
-            result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+            result = await LLMManager.get_embedding(
+                "test text", embedder_config=embedder_config
+            )
         assert result is None
 
     @pytest.mark.asyncio
     async def test_openai_non_200_returns_none(self):
         """Returns None when OpenAI API returns non-200 status."""
-        embedder_config = {"provider": "openai", "config": {"model": "text-embedding-ada-002"}}
-        mock_session_ctx, _, _ = _make_aiohttp_session_mock(429, text_data="rate limited")
+        embedder_config = {
+            "provider": "openai",
+            "config": {"model": "text-embedding-ada-002"},
+        }
+        mock_session_ctx, _, _ = _make_aiohttp_session_mock(
+            429, text_data="rate limited"
+        )
 
         mock_ctx = MagicMock()
         mock_ctx.primary_group_id = "group-1"
 
         with (
-            patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="oai-key"),
-            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_ctx,
+            ),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="oai-key",
+            ),
+            patch(
+                "src.utils.aiohttp_session.shared_client_session",
+                return_value=mock_session_ctx,
+            ),
         ):
-            result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+            result = await LLMManager.get_embedding(
+                "test text", embedder_config=embedder_config
+            )
         assert result is None
 
     @pytest.mark.asyncio
     async def test_openai_empty_data_returns_none(self):
         """Returns None when OpenAI response has empty data."""
-        embedder_config = {"provider": "openai", "config": {"model": "text-embedding-ada-002"}}
+        embedder_config = {
+            "provider": "openai",
+            "config": {"model": "text-embedding-ada-002"},
+        }
         mock_session_ctx, _, _ = _make_aiohttp_session_mock(200, {"data": []})
 
         mock_ctx = MagicMock()
         mock_ctx.primary_group_id = "group-1"
 
         with (
-            patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, return_value="oai-key"),
-            patch("src.utils.aiohttp_session.shared_client_session", return_value=mock_session_ctx),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_ctx,
+            ),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                return_value="oai-key",
+            ),
+            patch(
+                "src.utils.aiohttp_session.shared_client_session",
+                return_value=mock_session_ctx,
+            ),
         ):
-            result = await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+            result = await LLMManager.get_embedding(
+                "test text", embedder_config=embedder_config
+            )
         assert result is None
 
     @pytest.mark.asyncio
     async def test_circuit_breaker_trips_after_failures(self):
         """Circuit breaker trips after _embedding_failure_threshold failures."""
-        embedder_config = {"provider": "openai", "config": {"model": "text-embedding-ada-002"}}
+        embedder_config = {
+            "provider": "openai",
+            "config": {"model": "text-embedding-ada-002"},
+        }
         _embeddings._embedding_failures.clear()
 
         mock_ctx = MagicMock()
@@ -1195,13 +1731,25 @@ class TestGetEmbeddingOpenAI:
 
         # Force 3 failures (threshold)
         with (
-            patch("src.utils.user_context.UserContext.get_group_context", return_value=mock_ctx),
-            patch("src.services.llm.manager.ApiKeysService.get_provider_api_key", new_callable=AsyncMock, side_effect=RuntimeError("API error")),
+            patch(
+                "src.utils.user_context.UserContext.get_group_context",
+                return_value=mock_ctx,
+            ),
+            patch(
+                "src.services.llm.manager.ApiKeysService.get_provider_api_key",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("API error"),
+            ),
         ):
             for _ in range(_embeddings._EMBEDDING_FAILURE_THRESHOLD):
-                await LLMManager.get_embedding("test text", embedder_config=embedder_config)
+                await LLMManager.get_embedding(
+                    "test text", embedder_config=embedder_config
+                )
 
-        assert _embeddings._embedding_failures["openai"]["count"] >= _embeddings._EMBEDDING_FAILURE_THRESHOLD
+        assert (
+            _embeddings._embedding_failures["openai"]["count"]
+            >= _embeddings._EMBEDDING_FAILURE_THRESHOLD
+        )
 
 
 class TestModuleRegistration:
@@ -1211,9 +1759,11 @@ class TestModuleRegistration:
         """The registration block logs a warning when MODEL_CONFIGS import fails."""
         import importlib
         import sys
+
         # The registration already ran at module import time
         # Just verify the module loaded successfully even if registration failed
         from src.services.llm.manager import LLMManager
+
         assert LLMManager is not None
 
 
@@ -1258,7 +1808,9 @@ class TestConfigureLiteLLMCaching:
 
     def test_local_cache_enabled_with_ttl(self):
         """Default 'local' backend enables an in-memory cache with the configured TTL."""
-        patches = self._settings_patches(LITELLM_CACHE_TYPE="local", LITELLM_CACHE_TTL=1234)
+        patches = self._settings_patches(
+            LITELLM_CACHE_TYPE="local", LITELLM_CACHE_TTL=1234
+        )
         with patch("src.services.llm.manager.litellm.enable_cache") as mock_enable:
             for p in patches:
                 p.start()
@@ -1271,7 +1823,9 @@ class TestConfigureLiteLLMCaching:
 
     def test_cache_type_is_case_insensitive(self):
         """An uppercase cache type is normalized to lowercase."""
-        patches = self._settings_patches(LITELLM_CACHE_TYPE="LOCAL", LITELLM_CACHE_TTL=60)
+        patches = self._settings_patches(
+            LITELLM_CACHE_TYPE="LOCAL", LITELLM_CACHE_TTL=60
+        )
         with patch("src.services.llm.manager.litellm.enable_cache") as mock_enable:
             for p in patches:
                 p.start()
@@ -1346,7 +1900,9 @@ class TestConfigureLiteLLMCaching:
     def test_disk_cache_defaults_dir_under_logs(self):
         """'disk' backend with no configured dir falls back to a controlled
         <logs>/llm_cache directory (not litellm's cwd default)."""
-        patches = self._settings_patches(LITELLM_CACHE_TYPE="disk", LITELLM_CACHE_DIR=None)
+        patches = self._settings_patches(
+            LITELLM_CACHE_TYPE="disk", LITELLM_CACHE_DIR=None
+        )
         with patch("src.services.llm.manager.litellm.enable_cache") as mock_enable:
             for p in patches:
                 p.start()
@@ -1428,9 +1984,20 @@ class TestCompletionMaxTokensPolicy:
 
     async def _run_completion(self, mock_llm, **kwargs):
         with (
-            patch.object(LLMManager, "_get_group_id_from_context", return_value="group-1"),
-            patch.object(LLMManager, "configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm),
-            patch("src.services.llm.manager._run_llm_blocking", new_callable=AsyncMock, return_value="ok"),
+            patch.object(
+                LLMManager, "_get_group_id_from_context", return_value="group-1"
+            ),
+            patch.object(
+                LLMManager,
+                "configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=mock_llm,
+            ),
+            patch(
+                "src.services.llm.manager._run_llm_blocking",
+                new_callable=AsyncMock,
+                return_value="ok",
+            ),
         ):
             await LLMManager.completion(
                 messages=[{"role": "user", "content": "hello"}],
@@ -1474,6 +2041,7 @@ class TestDedicatedLlmExecutor:
     async def test_runs_on_dedicated_pool_and_propagates_contextvars(self):
         import contextvars
         import threading
+
         from src.services.llm.manager import _run_llm_blocking
 
         var = contextvars.ContextVar("kasal_llm_exec_test", default=None)

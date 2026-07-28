@@ -3,15 +3,22 @@ SQL Generator for YAML2DAX SQL Translation
 Converts KPI definitions to SQL queries for various SQL dialects
 """
 
-from typing import List, Dict, Any, Optional, Tuple
-import re
 import logging
+import re
+from typing import Any, Dict, List, Optional, Tuple
+
 from ...base.models import KPI, KPIDefinition
-from .models import (
-    SQLDialect, SQLAggregationType, SQLQuery, SQLMeasure, SQLDefinition,
-    SQLTranslationOptions, SQLTranslationResult, SQLStructure
-)
 from .helpers.sql_structures import SQLStructureExpander
+from .models import (
+    SQLAggregationType,
+    SQLDefinition,
+    SQLDialect,
+    SQLMeasure,
+    SQLQuery,
+    SQLStructure,
+    SQLTranslationOptions,
+    SQLTranslationResult,
+)
 
 
 class SQLGenerator:
@@ -26,7 +33,7 @@ class SQLGenerator:
 
         # Initialize SQL structure processor for improved SQL generation
         self.structure_processor = SQLStructureExpander(dialect)
-    
+
     def _get_dialect_config(self) -> Dict[str, Any]:
         """
         Get dialect-specific configuration.
@@ -58,36 +65,40 @@ class SQLGenerator:
         }
 
         return configs.get(self.dialect, configs[SQLDialect.DATABRICKS])
-    
+
     def quote_identifier(self, identifier: str) -> str:
         """Quote an identifier according to dialect"""
         quote_start = self.dialect_config["quote_char"]
         quote_end = self.dialect_config.get("quote_char_end", quote_start)
         return f"{quote_start}{identifier}{quote_end}"
-    
-    def generate_sql_from_kbi_definition(self, 
-                                       definition: KPIDefinition, 
-                                       options: SQLTranslationOptions = None) -> SQLTranslationResult:
+
+    def generate_sql_from_kbi_definition(
+        self, definition: KPIDefinition, options: SQLTranslationOptions = None
+    ) -> SQLTranslationResult:
         """
         Generate SQL translation from KPI definition using improved structure processor
-        
+
         Args:
             definition: KPI definition to translate
             options: Translation options
-            
+
         Returns:
             SQLTranslationResult with translated SQL queries and measures
         """
         if options is None:
             options = SQLTranslationOptions(target_dialect=self.dialect)
-        
+
         try:
             # Use the improved structure processor for comprehensive SQL generation
-            sql_definition = self.structure_processor.process_definition(definition, options)
-            
+            sql_definition = self.structure_processor.process_definition(
+                definition, options
+            )
+
             # Generate SQL queries using the structure processor
-            sql_queries = self.structure_processor.generate_sql_queries_from_definition(sql_definition, options)
-            
+            sql_queries = self.structure_processor.generate_sql_queries_from_definition(
+                sql_definition, options
+            )
+
             # Create result with comprehensive data
             result = SQLTranslationResult(
                 sql_queries=sql_queries,
@@ -97,14 +108,14 @@ class SQLGenerator:
                 measures_count=len(sql_definition.sql_measures),
                 queries_count=len(sql_queries),
                 syntax_valid=True,
-                estimated_complexity=self._estimate_complexity(sql_definition)
+                estimated_complexity=self._estimate_complexity(sql_definition),
             )
-            
+
             # Add validation and optimization suggestions
             result = self._enhance_result_with_analysis(result)
-            
+
             return result
-            
+
         except Exception as e:
             self.logger.error(f"Error generating SQL from KPI definition: {str(e)}")
             # Return minimal error result
@@ -114,37 +125,39 @@ class SQLGenerator:
                 sql_definition=SQLDefinition(
                     description=definition.description,
                     technical_name=definition.technical_name,
-                    dialect=self.dialect
+                    dialect=self.dialect,
                 ),
                 translation_options=options,
                 measures_count=0,
                 queries_count=0,
                 syntax_valid=False,
-                validation_messages=[f"Generation failed: {str(e)}"]
+                validation_messages=[f"Generation failed: {str(e)}"],
             )
-        
+
     def _estimate_complexity(self, sql_definition: SQLDefinition) -> str:
         """Estimate the complexity of the SQL definition"""
         measure_count = len(sql_definition.sql_measures)
         has_structures = bool(sql_definition.sql_structures)
         has_filters = any(measure.filters for measure in sql_definition.sql_measures)
-        
+
         if measure_count > 10 or has_structures:
             return "HIGH"
         elif measure_count > 5 or has_filters:
             return "MEDIUM"
         else:
             return "LOW"
-    
-    def _enhance_result_with_analysis(self, result: SQLTranslationResult) -> SQLTranslationResult:
+
+    def _enhance_result_with_analysis(
+        self, result: SQLTranslationResult
+    ) -> SQLTranslationResult:
         """Add validation and optimization suggestions to the result"""
         validation_messages = []
         optimization_suggestions = []
-        
+
         # Validate SQL queries
         for query in result.sql_queries:
             sql_text = query.to_sql()
-            
+
             # Basic validation
             if not sql_text or not sql_text.strip():
                 validation_messages.append("Empty SQL query generated")
@@ -155,29 +168,34 @@ class SQLGenerator:
             elif "FROM" not in sql_text.upper():
                 validation_messages.append("SQL query missing FROM clause")
                 result.syntax_valid = False
-            
+
             # Check for unresolved variables
             if "$" in sql_text:
                 validation_messages.append("SQL contains unresolved variables")
-                optimization_suggestions.append("Ensure all variables are properly defined in default_variables")
-        
+                optimization_suggestions.append(
+                    "Ensure all variables are properly defined in default_variables"
+                )
+
         # Performance optimization suggestions
         if len(result.sql_measures) > 5:
-            optimization_suggestions.append("Consider using CTEs for better readability with many measures")
-        
+            optimization_suggestions.append(
+                "Consider using CTEs for better readability with many measures"
+            )
+
         if any(len(measure.filters) > 3 for measure in result.sql_measures):
-            optimization_suggestions.append("Consider creating filtered views for complex filter conditions")
-        
+            optimization_suggestions.append(
+                "Consider creating filtered views for complex filter conditions"
+            )
+
         # Update result with findings
         result.validation_messages.extend(validation_messages)
         result.optimization_suggestions.extend(optimization_suggestions)
-        
+
         return result
-    
-    def _translate_kbi_to_sql_measure(self,
-                                    kpi: KPI,
-                                    definition: KPIDefinition,
-                                    options: SQLTranslationOptions) -> SQLMeasure:
+
+    def _translate_kbi_to_sql_measure(
+        self, kpi: KPI, definition: KPIDefinition, options: SQLTranslationOptions
+    ) -> SQLMeasure:
         """
         Translate a single KPI to SQL measure
 
@@ -205,17 +223,21 @@ class SQLGenerator:
             sql_expression=sql_expression,
             aggregation_type=sql_agg_type,
             source_table=kpi.source_table or "fact_table",
-            source_column=kpi.formula if self._is_simple_column_reference(kpi.formula) else None,
+            source_column=(
+                kpi.formula if self._is_simple_column_reference(kpi.formula) else None
+            ),
             filters=sql_filters,
             display_sign=kpi.display_sign,
             technical_name=kpi.technical_name or "",
             original_kbi=kpi,
-            dialect=self.dialect
+            dialect=self.dialect,
         )
-        
+
         return sql_measure
-    
-    def _map_aggregation_type(self, dax_agg_type: str, formula: str) -> SQLAggregationType:
+
+    def _map_aggregation_type(
+        self, dax_agg_type: str, formula: str
+    ) -> SQLAggregationType:
         """Map DAX aggregation type to SQL aggregation type"""
         if not dax_agg_type:
             # Infer from formula
@@ -230,7 +252,7 @@ class SQLGenerator:
                 return SQLAggregationType.MAX
             else:
                 return SQLAggregationType.SUM
-        
+
         # Direct mapping
         mapping = {
             "SUM": SQLAggregationType.SUM,
@@ -242,170 +264,199 @@ class SQLGenerator:
             "COUNTROWS": SQLAggregationType.COUNT,
             "CALCULATED": SQLAggregationType.SUM,  # Default for calculated measures
         }
-        
+
         return mapping.get(dax_agg_type.upper(), SQLAggregationType.SUM)
-    
-    def _generate_sql_expression(self,
-                                kpi: KPI,
-                                sql_agg_type: SQLAggregationType,
-                                definition: KPIDefinition) -> str:
+
+    def _generate_sql_expression(
+        self, kpi: KPI, sql_agg_type: SQLAggregationType, definition: KPIDefinition
+    ) -> str:
         """Generate SQL expression for the measure"""
         formula = kpi.formula or ""
         source_table = kpi.source_table or "fact_table"
-        
+
         # Handle different aggregation types
         if sql_agg_type == SQLAggregationType.SUM:
             if self._is_simple_column_reference(formula):
                 return f"SUM({self.quote_identifier(source_table)}.{self.quote_identifier(formula)})"
             else:
                 return f"SUM({self._convert_formula_to_sql(formula, source_table, definition)})"
-        
+
         elif sql_agg_type == SQLAggregationType.COUNT:
             if formula and formula.upper() != "*":
                 return f"COUNT({self.quote_identifier(source_table)}.{self.quote_identifier(formula)})"
             else:
                 return f"COUNT(*)"
-        
+
         elif sql_agg_type == SQLAggregationType.COUNT_DISTINCT:
             column = formula if self._is_simple_column_reference(formula) else "*"
             if column != "*":
                 return f"COUNT(DISTINCT {self.quote_identifier(source_table)}.{self.quote_identifier(column)})"
             else:
                 return f"COUNT(DISTINCT {self.quote_identifier(source_table)}.id)"  # Fallback
-        
+
         elif sql_agg_type == SQLAggregationType.AVG:
             if self._is_simple_column_reference(formula):
                 return f"AVG({self.quote_identifier(source_table)}.{self.quote_identifier(formula)})"
             else:
                 return f"AVG({self._convert_formula_to_sql(formula, source_table, definition)})"
-        
+
         elif sql_agg_type == SQLAggregationType.MIN:
             return f"MIN({self.quote_identifier(source_table)}.{self.quote_identifier(formula)})"
-        
+
         elif sql_agg_type == SQLAggregationType.MAX:
             return f"MAX({self.quote_identifier(source_table)}.{self.quote_identifier(formula)})"
-        
+
         else:
             # Default to SUM
             return f"SUM({self.quote_identifier(source_table)}.{self.quote_identifier(formula)})"
-    
+
     def _is_simple_column_reference(self, formula: str) -> bool:
         """Check if formula is a simple column reference"""
         if not formula:
             return False
-        
+
         # Simple column names or bic_ prefixed columns
-        pattern = r'^[a-zA-Z_][a-zA-Z0-9_]*$'
+        pattern = r"^[a-zA-Z_][a-zA-Z0-9_]*$"
         return bool(re.match(pattern, formula.strip()))
-    
-    def _convert_formula_to_sql(self, 
-                               formula: str, 
-                               source_table: str,
-                               definition: KPIDefinition) -> str:
+
+    def _convert_formula_to_sql(
+        self, formula: str, source_table: str, definition: KPIDefinition
+    ) -> str:
         """Convert DAX-style formula to SQL expression"""
         if not formula:
             return "1"
-        
+
         # Handle CASE WHEN expressions
         if "CASE WHEN" in formula.upper():
             return self._convert_case_when_to_sql(formula, source_table)
-        
+
         # Handle IF expressions (DAX style)
         if formula.upper().startswith("IF("):
             return self._convert_if_to_case_when(formula, source_table)
-        
+
         # Handle arithmetic expressions with column references
         sql_formula = formula
-        
+
         # Replace column references with table.column format
-        column_pattern = r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
+        column_pattern = r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b"
+
         def replace_column(match):
             column_name = match.group(1)
             # Skip SQL keywords and functions
-            sql_keywords = {'SUM', 'COUNT', 'AVG', 'MIN', 'MAX', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'AND', 'OR', 'NOT', 'IN', 'BETWEEN'}
+            sql_keywords = {
+                "SUM",
+                "COUNT",
+                "AVG",
+                "MIN",
+                "MAX",
+                "CASE",
+                "WHEN",
+                "THEN",
+                "ELSE",
+                "END",
+                "AND",
+                "OR",
+                "NOT",
+                "IN",
+                "BETWEEN",
+            }
             if column_name.upper() not in sql_keywords and not column_name.isdigit():
                 return f"{self.quote_identifier(source_table)}.{self.quote_identifier(column_name)}"
             return column_name
-        
+
         sql_formula = re.sub(column_pattern, replace_column, sql_formula)
-        
+
         return sql_formula
-    
+
     def _convert_case_when_to_sql(self, formula: str, source_table: str) -> str:
         """Convert CASE WHEN expressions to SQL"""
         # CASE WHEN is already SQL, just need to update column references
         return self._convert_formula_to_sql(formula, source_table, None)
-    
+
     def _convert_if_to_case_when(self, formula: str, source_table: str) -> str:
         """Convert DAX IF() to SQL CASE WHEN"""
         # Simple IF(condition, true_value, false_value) to CASE WHEN conversion
         # This is a basic implementation - real conversion would be more complex
-        if_pattern = r'IF\s*\(\s*([^,]+),\s*([^,]+),\s*([^)]+)\)'
-        
+        if_pattern = r"IF\s*\(\s*([^,]+),\s*([^,]+),\s*([^)]+)\)"
+
         def convert_if(match):
             condition = match.group(1).strip()
             true_value = match.group(2).strip()
             false_value = match.group(3).strip()
-            
+
             # Convert condition to SQL
             sql_condition = self._convert_formula_to_sql(condition, source_table, None)
             sql_true = self._convert_formula_to_sql(true_value, source_table, None)
             sql_false = self._convert_formula_to_sql(false_value, source_table, None)
-            
+
             return f"CASE WHEN {sql_condition} THEN {sql_true} ELSE {sql_false} END"
-        
+
         return re.sub(if_pattern, convert_if, formula, flags=re.IGNORECASE)
-    
-    def _process_filters(self, 
-                        filters: List[str], 
-                        definition: KPIDefinition,
-                        options: SQLTranslationOptions) -> List[str]:
+
+    def _process_filters(
+        self,
+        filters: List[str],
+        definition: KPIDefinition,
+        options: SQLTranslationOptions,
+    ) -> List[str]:
         """Process and convert filters to SQL WHERE conditions"""
         sql_filters = []
-        
+
         for filter_condition in filters:
             try:
-                sql_condition = self._convert_filter_to_sql(filter_condition, definition)
+                sql_condition = self._convert_filter_to_sql(
+                    filter_condition, definition
+                )
                 if sql_condition:
                     sql_filters.append(sql_condition)
             except Exception as e:
-                self.logger.warning(f"Could not convert filter '{filter_condition}': {str(e)}")
-        
+                self.logger.warning(
+                    f"Could not convert filter '{filter_condition}': {str(e)}"
+                )
+
         return sql_filters
-    
-    def _convert_filter_to_sql(self, filter_condition: str, definition: KPIDefinition) -> str:
+
+    def _convert_filter_to_sql(
+        self, filter_condition: str, definition: KPIDefinition
+    ) -> str:
         """Convert a single filter condition to SQL"""
         if not filter_condition:
             return ""
-        
+
         condition = filter_condition.strip()
-        
+
         # Handle variable substitution
         condition = self._substitute_variables(condition, definition.default_variables)
-        
+
         # Convert DAX/SAP BW operators to SQL
         # NOT IN
-        condition = re.sub(r'NOT\s+IN\s*\(([^)]+)\)', r'NOT IN (\1)', condition, flags=re.IGNORECASE)
-        
+        condition = re.sub(
+            r"NOT\s+IN\s*\(([^)]+)\)", r"NOT IN (\1)", condition, flags=re.IGNORECASE
+        )
+
         # BETWEEN
-        condition = re.sub(r'BETWEEN\s+\'([^\']+)\'\s+AND\s+\'([^\']+)\'', 
-                          r"BETWEEN '\1' AND '\2'", condition, flags=re.IGNORECASE)
-        
+        condition = re.sub(
+            r"BETWEEN\s+\'([^\']+)\'\s+AND\s+\'([^\']+)\'",
+            r"BETWEEN '\1' AND '\2'",
+            condition,
+            flags=re.IGNORECASE,
+        )
+
         # Convert AND/OR operators
-        condition = condition.replace(' AND ', ' AND ').replace(' OR ', ' OR ')
-        
+        condition = condition.replace(" AND ", " AND ").replace(" OR ", " OR ")
+
         # Ensure proper quoting of string literals
         condition = self._ensure_proper_quoting(condition)
-        
+
         return condition
-    
+
     def _substitute_variables(self, condition: str, variables: Dict[str, Any]) -> str:
         """Substitute variables in filter conditions"""
         result = condition
-        
+
         for var_name, var_value in variables.items():
             var_pattern = f"\\$var_{var_name}|\\${var_name}"
-            
+
             if isinstance(var_value, list):
                 # Handle list variables
                 quoted_values = [f"'{str(v)}'" for v in var_value]
@@ -413,14 +464,13 @@ class SQLGenerator:
             else:
                 # Handle single variables
                 replacement = f"'{str(var_value)}'"
-            
+
             result = re.sub(var_pattern, replacement, result, flags=re.IGNORECASE)
-        
+
         return result
-    
+
     def _ensure_proper_quoting(self, condition: str) -> str:
         """Ensure proper quoting of string literals in conditions"""
         # This is a simplified implementation
         # In practice, you'd want more sophisticated parsing
         return condition
-    

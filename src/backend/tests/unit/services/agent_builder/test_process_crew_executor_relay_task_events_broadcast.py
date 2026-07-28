@@ -12,16 +12,21 @@ Targets:
   2600-2612  shutdown with child processes
   2677-2686  kill_orphan_crew_processes ImportError/Exception
 """
+
 import asyncio
 import queue
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 
 
 def _make_executor():
-    with patch("src.services.agent_builder.process_executor.mp.get_context") as mock_ctx:
+    with patch(
+        "src.services.agent_builder.process_executor.mp.get_context"
+    ) as mock_ctx:
         mock_ctx.return_value = MagicMock()
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
         executor = ProcessCrewExecutor()
     executor._ctx = MagicMock()
     return executor
@@ -30,6 +35,7 @@ def _make_executor():
 # ---------------------------------------------------------------------------
 # _relay_task_events — SSE broadcasting (lines 2179-2217)
 # ---------------------------------------------------------------------------
+
 
 class TestRelayTaskEventsBroadcast:
 
@@ -74,9 +80,13 @@ class TestRelayTaskEventsBroadcast:
         mock_sse_event_class = MagicMock()
         mock_sse_event_class.return_value = MagicMock()
 
-        with patch("src.core.sse_manager.sse_manager", mock_sse_manager), \
-             patch("src.core.sse_manager.SSEEvent", mock_sse_event_class):
-            task = asyncio.create_task(executor._relay_task_events(mock_queue, "exec-sse"))
+        with (
+            patch("src.core.sse_manager.sse_manager", mock_sse_manager),
+            patch("src.core.sse_manager.SSEEvent", mock_sse_event_class),
+        ):
+            task = asyncio.create_task(
+                executor._relay_task_events(mock_queue, "exec-sse")
+            )
             await asyncio.sleep(0.1)
             task.cancel()
             try:
@@ -118,9 +128,13 @@ class TestRelayTaskEventsBroadcast:
         mock_sse_manager = AsyncMock()
         mock_sse_manager.broadcast_to_job = AsyncMock(return_value=0)
 
-        with patch("src.core.sse_manager.sse_manager", mock_sse_manager), \
-             patch("src.core.sse_manager.SSEEvent", MagicMock()):
-            task = asyncio.create_task(executor._relay_task_events(mock_queue, "exec-sse2"))
+        with (
+            patch("src.core.sse_manager.sse_manager", mock_sse_manager),
+            patch("src.core.sse_manager.SSEEvent", MagicMock()),
+        ):
+            task = asyncio.create_task(
+                executor._relay_task_events(mock_queue, "exec-sse2")
+            )
             await asyncio.sleep(0.1)
             task.cancel()
             try:
@@ -154,11 +168,17 @@ class TestRelayTaskEventsBroadcast:
         mock_queue.get = MagicMock(side_effect=get_side_effect)
 
         mock_sse_manager = AsyncMock()
-        mock_sse_manager.broadcast_to_job = AsyncMock(side_effect=RuntimeError("SSE send failed"))
+        mock_sse_manager.broadcast_to_job = AsyncMock(
+            side_effect=RuntimeError("SSE send failed")
+        )
 
-        with patch("src.core.sse_manager.sse_manager", mock_sse_manager), \
-             patch("src.core.sse_manager.SSEEvent", MagicMock()):
-            task = asyncio.create_task(executor._relay_task_events(mock_queue, "exec-sseerr"))
+        with (
+            patch("src.core.sse_manager.sse_manager", mock_sse_manager),
+            patch("src.core.sse_manager.SSEEvent", MagicMock()),
+        ):
+            task = asyncio.create_task(
+                executor._relay_task_events(mock_queue, "exec-sseerr")
+            )
             await asyncio.sleep(0.1)
             task.cancel()
             try:
@@ -185,9 +205,13 @@ class TestRelayTaskEventsBroadcast:
         mock_queue = MagicMock()
         mock_queue.get = MagicMock(side_effect=get_side_effect)
 
-        with patch("src.core.sse_manager.sse_manager", AsyncMock()), \
-             patch("src.core.sse_manager.SSEEvent", MagicMock()):
-            task = asyncio.create_task(executor._relay_task_events(mock_queue, "exec-qerr"))
+        with (
+            patch("src.core.sse_manager.sse_manager", AsyncMock()),
+            patch("src.core.sse_manager.SSEEvent", MagicMock()),
+        ):
+            task = asyncio.create_task(
+                executor._relay_task_events(mock_queue, "exec-qerr")
+            )
             await asyncio.sleep(0.1)
             task.cancel()
             try:
@@ -199,6 +223,7 @@ class TestRelayTaskEventsBroadcast:
 # ---------------------------------------------------------------------------
 # _process_log_queue — logs written path (lines 2304-2348)
 # ---------------------------------------------------------------------------
+
 
 class TestProcessLogQueueFull:
 
@@ -219,12 +244,21 @@ class TestProcessLogQueueFull:
             yield mock_session
 
         from unittest.mock import mock_open
+
         m = mock_open(read_data=log_content)
 
-        with patch("os.path.exists", return_value=True), \
-             patch("builtins.open", m), \
-             patch("src.db.database_router.get_smart_db_session", return_value=mock_smart_session()), \
-             patch("src.repositories.execution_logs_repository.ExecutionLogsRepository", return_value=mock_repo):
+        with (
+            patch("os.path.exists", return_value=True),
+            patch("builtins.open", m),
+            patch(
+                "src.db.database_router.get_smart_db_session",
+                return_value=mock_smart_session(),
+            ),
+            patch(
+                "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                return_value=mock_repo,
+            ),
+        ):
             await executor._process_log_queue(mock_queue, execution_id, None)
 
         # create_log should be called at least once for the header
@@ -251,12 +285,21 @@ class TestProcessLogQueueFull:
             yield mock_session
 
         from unittest.mock import mock_open
+
         m = mock_open(read_data=log_content)
 
-        with patch("os.path.exists", return_value=True), \
-             patch("builtins.open", m), \
-             patch("src.db.database_router.get_smart_db_session", return_value=mock_smart_session()), \
-             patch("src.repositories.execution_logs_repository.ExecutionLogsRepository", return_value=mock_repo):
+        with (
+            patch("os.path.exists", return_value=True),
+            patch("builtins.open", m),
+            patch(
+                "src.db.database_router.get_smart_db_session",
+                return_value=mock_smart_session(),
+            ),
+            patch(
+                "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                return_value=mock_repo,
+            ),
+        ):
             await executor._process_log_queue(mock_queue, execution_id, group_ctx)
 
         # At least header + 1 matching log
@@ -276,11 +319,17 @@ class TestProcessLogQueueFull:
             yield  # make it a generator
 
         from unittest.mock import mock_open
+
         m = mock_open(read_data=log_content)
 
-        with patch("os.path.exists", return_value=True), \
-             patch("builtins.open", m), \
-             patch("src.db.database_router.get_smart_db_session", side_effect=RuntimeError("db error")):
+        with (
+            patch("os.path.exists", return_value=True),
+            patch("builtins.open", m),
+            patch(
+                "src.db.database_router.get_smart_db_session",
+                side_effect=RuntimeError("db error"),
+            ),
+        ):
             # Should not raise
             await executor._process_log_queue(mock_queue, execution_id, None)
 
@@ -288,6 +337,7 @@ class TestProcessLogQueueFull:
 # ---------------------------------------------------------------------------
 # _terminate_orphaned_process — short ID match (line 2458)
 # ---------------------------------------------------------------------------
+
 
 class TestTerminateOrphanedShortId:
 
@@ -306,14 +356,17 @@ class TestTerminateOrphanedShortId:
         # Process has a different but startswith-matching ID
         mock_proc = MagicMock()
         mock_proc.info = {"pid": 7654, "name": "python", "cmdline": []}
-        mock_proc.environ = MagicMock(return_value={
-            "KASAL_EXECUTION_ID": short_id + "-extended-version"
-        })
+        mock_proc.environ = MagicMock(
+            return_value={"KASAL_EXECUTION_ID": short_id + "-extended-version"}
+        )
 
         import psutil as _psutil
-        with patch("psutil.process_iter", return_value=[mock_proc]), \
-             patch("psutil.Process", return_value=mock_parent_proc), \
-             patch("psutil.wait_procs", return_value=([], [])):
+
+        with (
+            patch("psutil.process_iter", return_value=[mock_proc]),
+            patch("psutil.Process", return_value=mock_parent_proc),
+            patch("psutil.wait_procs", return_value=([], [])),
+        ):
             result = executor._terminate_orphaned_process(full_exec_id)
 
         # Should have found a match via startswith
@@ -323,6 +376,7 @@ class TestTerminateOrphanedShortId:
 # ---------------------------------------------------------------------------
 # shutdown — additional child process cleanup
 # ---------------------------------------------------------------------------
+
 
 class TestShutdownChildProcesses:
 
@@ -337,8 +391,10 @@ class TestShutdownChildProcesses:
         mock_current = MagicMock()
         mock_current.children = MagicMock(return_value=[mock_alive_child])
 
-        with patch("psutil.Process", return_value=mock_current), \
-             patch("psutil.wait_procs", return_value=([], [mock_alive_child])):
+        with (
+            patch("psutil.Process", return_value=mock_current),
+            patch("psutil.wait_procs", return_value=([], [mock_alive_child])),
+        ):
             executor.shutdown(wait=True)
 
         mock_alive_child.kill.assert_called_once()
@@ -355,14 +411,17 @@ class TestShutdownChildProcesses:
         mock_current = MagicMock()
         mock_current.children = MagicMock(return_value=[mock_alive_child])
 
-        with patch("psutil.Process", return_value=mock_current), \
-             patch("psutil.wait_procs", return_value=([], [mock_alive_child])):
+        with (
+            patch("psutil.Process", return_value=mock_current),
+            patch("psutil.wait_procs", return_value=([], [mock_alive_child])),
+        ):
             executor.shutdown()  # Should not raise
 
 
 # ---------------------------------------------------------------------------
 # kill_orphan_crew_processes — ImportError and Exception paths
 # ---------------------------------------------------------------------------
+
 
 class TestKillOrphanCrewProcessesEdgeCases:
 
@@ -390,7 +449,11 @@ class TestKillOrphanCrewProcessesEdgeCases:
 
         non_crew_proc = MagicMock()
         non_crew_proc.info = {
-            "pid": 1, "name": "chrome", "cmdline": ["chrome"], "ppid": 100, "create_time": 0
+            "pid": 1,
+            "name": "chrome",
+            "cmdline": ["chrome"],
+            "ppid": 100,
+            "create_time": 0,
         }
         non_crew_proc.create_time = MagicMock(return_value=0)
 

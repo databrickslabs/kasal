@@ -1,6 +1,9 @@
 """Tests for UCMetricViewGeneratorTool."""
+
 import json
+
 import pytest
+
 from src.services.tools.uc_metric_view_generator_tool import UCMetricViewGeneratorTool
 
 
@@ -13,41 +16,41 @@ class TestUCMetricViewGeneratorTool:
         tool = UCMetricViewGeneratorTool()
         measures = [
             {
-                'measure_name': 'total_sales',
-                'original_name': 'Total Sales',
-                'dax_expression': 'SUM(fact_sales[amount])',
-                'proposed_allocation': 'fact_sales',
+                "measure_name": "total_sales",
+                "original_name": "Total Sales",
+                "dax_expression": "SUM(fact_sales[amount])",
+                "proposed_allocation": "fact_sales",
             }
         ]
         mquery = [
             {
-                'table_name': 'fact_sales',
-                'transpiled_sql': 'SELECT region, SUM(amount) AS amount FROM cat.sch.sales GROUP BY region',
-                'validation_passed': 'Yes',
+                "table_name": "fact_sales",
+                "transpiled_sql": "SELECT region, SUM(amount) AS amount FROM cat.sch.sales GROUP BY region",
+                "validation_passed": "Yes",
             }
         ]
         result = tool._run(
             measures_json=json.dumps(measures),
             mquery_json=json.dumps(mquery),
-            catalog='test_cat',
-            schema_name='test_sch',
+            catalog="test_cat",
+            schema_name="test_sch",
         )
         data = json.loads(result)
-        assert 'yaml' in data
-        assert 'sql' in data
-        assert 'stats' in data
+        assert "yaml" in data
+        assert "sql" in data
+        assert "stats" in data
 
     def test_empty_input(self):
         tool = UCMetricViewGeneratorTool()
-        result = tool._run(measures_json='[]', mquery_json='[]')
+        result = tool._run(measures_json="[]", mquery_json="[]")
         data = json.loads(result)
-        assert data['stats'] == {} or isinstance(data['stats'], dict)
+        assert data["stats"] == {} or isinstance(data["stats"], dict)
 
     def test_invalid_json(self):
         tool = UCMetricViewGeneratorTool()
-        result = tool._run(measures_json='bad json')
+        result = tool._run(measures_json="bad json")
         data = json.loads(result)
-        assert 'error' in data
+        assert "error" in data
 
 
 # ===========================================================================
@@ -57,7 +60,7 @@ class TestUCMetricViewGeneratorTool:
 import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestBuildRawDaxExtract:
@@ -65,27 +68,29 @@ class TestBuildRawDaxExtract:
 
     def test_collects_untruncated_dax(self):
         long_dax = "CALCULATE(SUM(fact[amount]), " + ("X" * 2000) + ")"
-        measures = [{
-            'measure_name': 'total_sales',
-            'original_name': 'Total Sales',
-            'dax_expression': long_dax,
-            'proposed_allocation': 'fact_sales',
-        }]
+        measures = [
+            {
+                "measure_name": "total_sales",
+                "original_name": "Total Sales",
+                "dax_expression": long_dax,
+                "proposed_allocation": "fact_sales",
+            }
+        ]
         extract = UCMetricViewGeneratorTool._build_raw_dax_extract(measures)
         assert len(extract) == 1
-        assert extract[0]['dax_expression'] == long_dax
-        assert len(extract[0]['dax_expression']) > 500
-        assert extract[0]['measure_name'] == 'total_sales'
-        assert extract[0]['proposed_allocation'] == 'fact_sales'
+        assert extract[0]["dax_expression"] == long_dax
+        assert len(extract[0]["dax_expression"]) > 500
+        assert extract[0]["measure_name"] == "total_sales"
+        assert extract[0]["proposed_allocation"] == "fact_sales"
 
     def test_multiple_measures(self):
         measures = [
-            {'measure_name': 'm1', 'dax_expression': 'SUM(a)'},
-            {'measure_name': 'm2', 'dax_expression': 'AVG(b)'},
+            {"measure_name": "m1", "dax_expression": "SUM(a)"},
+            {"measure_name": "m2", "dax_expression": "AVG(b)"},
         ]
         extract = UCMetricViewGeneratorTool._build_raw_dax_extract(measures)
         assert len(extract) == 2
-        assert {e['measure_name'] for e in extract} == {'m1', 'm2'}
+        assert {e["measure_name"] for e in extract} == {"m1", "m2"}
 
     def test_non_list_returns_empty(self):
         assert UCMetricViewGeneratorTool._build_raw_dax_extract(None) == []
@@ -93,14 +98,16 @@ class TestBuildRawDaxExtract:
 
     def test_skips_non_dict_entries(self):
         extract = UCMetricViewGeneratorTool._build_raw_dax_extract(
-            [{'measure_name': 'ok', 'dax_expression': 'SUM(a)'}, "garbage", 42]
+            [{"measure_name": "ok", "dax_expression": "SUM(a)"}, "garbage", 42]
         )
         assert len(extract) == 1
-        assert extract[0]['measure_name'] == 'ok'
+        assert extract[0]["measure_name"] == "ok"
 
     def test_missing_dax_becomes_empty_string(self):
-        extract = UCMetricViewGeneratorTool._build_raw_dax_extract([{'measure_name': 'm'}])
-        assert extract[0]['dax_expression'] == ''
+        extract = UCMetricViewGeneratorTool._build_raw_dax_extract(
+            [{"measure_name": "m"}]
+        )
+        assert extract[0]["dax_expression"] == ""
 
 
 class TestSaveDaxToConversionHistory:
@@ -111,8 +118,14 @@ class TestSaveDaxToConversionHistory:
 
     def test_persists_record_with_raw_dax(self):
         tool = UCMetricViewGeneratorTool()
-        raw_dax = [{'measure_name': 'total_sales', 'original_name': 'Total Sales',
-                    'dax_expression': 'SUM(fact[amount])', 'proposed_allocation': 'fact'}]
+        raw_dax = [
+            {
+                "measure_name": "total_sales",
+                "original_name": "Total Sales",
+                "dax_expression": "SUM(fact[amount])",
+                "proposed_allocation": "fact",
+            }
+        ]
 
         captured = {}
         mock_repo = MagicMock()
@@ -121,6 +134,7 @@ class TestSaveDaxToConversionHistory:
         async def _create(data):
             captured["data"] = data
             return mock_record
+
         mock_repo.create = AsyncMock(side_effect=_create)
         mock_repo.session = MagicMock()
         mock_repo.session.commit = AsyncMock()
@@ -133,10 +147,17 @@ class TestSaveDaxToConversionHistory:
             "src.services.tools.tool_session_provider.ToolSessionProvider.conversion_repo",
             _repo_ctx,
         ):
-            self._run(tool._save_dax_to_conversion_history(
-                raw_dax=raw_dax, yaml_output={"v": "yaml"}, sql_output={"v": "sql"},
-                workspace_id="ws-1", dataset_id="ds-1", catalog="main", schema="default",
-            ))
+            self._run(
+                tool._save_dax_to_conversion_history(
+                    raw_dax=raw_dax,
+                    yaml_output={"v": "yaml"},
+                    sql_output={"v": "sql"},
+                    workspace_id="ws-1",
+                    dataset_id="ds-1",
+                    catalog="main",
+                    schema="default",
+                )
+            )
 
         data = captured["data"]
         assert data["source_format"] == "powerbi_dax"
@@ -155,7 +176,10 @@ class TestSaveDaxToConversionHistory:
         tool = UCMetricViewGeneratorTool()
         captured = {}
         mock_repo = MagicMock()
-        mock_repo.create = AsyncMock(side_effect=lambda d: captured.update({"data": d}) or SimpleNamespace(id=9, group_id=None))
+        mock_repo.create = AsyncMock(
+            side_effect=lambda d: captured.update({"data": d})
+            or SimpleNamespace(id=9, group_id=None)
+        )
         mock_repo.session = MagicMock()
         mock_repo.session.commit = AsyncMock()
 
@@ -168,10 +192,17 @@ class TestSaveDaxToConversionHistory:
             "src.services.tools.tool_session_provider.ToolSessionProvider.conversion_repo",
             _repo_ctx,
         ):
-            self._run(tool._save_dax_to_conversion_history(
-                raw_dax=[], yaml_output=yaml_out, sql_output=yaml_out,
-                workspace_id="ws", dataset_id="ds", catalog="main", schema="default",
-            ))
+            self._run(
+                tool._save_dax_to_conversion_history(
+                    raw_dax=[],
+                    yaml_output=yaml_out,
+                    sql_output=yaml_out,
+                    workspace_id="ws",
+                    dataset_id="ds",
+                    catalog="main",
+                    schema="default",
+                )
+            )
 
         data = captured["data"]
         assert data["measure_count"] == 3  # views, not 0
@@ -189,10 +220,17 @@ class TestSaveDaxToConversionHistory:
             "src.services.tools.tool_session_provider.ToolSessionProvider.conversion_repo",
             _boom_ctx,
         ):
-            result = self._run(tool._save_dax_to_conversion_history(
-                raw_dax=[], yaml_output={}, sql_output={},
-                workspace_id=None, dataset_id=None, catalog="main", schema="default",
-            ))
+            result = self._run(
+                tool._save_dax_to_conversion_history(
+                    raw_dax=[],
+                    yaml_output={},
+                    sql_output={},
+                    workspace_id=None,
+                    dataset_id=None,
+                    catalog="main",
+                    schema="default",
+                )
+            )
         assert result is None
 
 
@@ -200,15 +238,21 @@ class TestSaveDaxToConversionHistory:
 # Measure DAX fallback (TMDL → SP) for API-mode extraction under a Service Account
 # ---------------------------------------------------------------------------
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 
 class TestTmdlTablesToMeasures:
     def test_maps_shape_with_dax(self):
-        tables = {"Fact_Sales": {"columns": [], "mquery_expression": "", "measures": [
-            {"name": "Total Revenue", "expression": "SUM(x)"},
-            {"name": "Margin", "expression": "DIVIDE(a,b)"},
-        ]}}
+        tables = {
+            "Fact_Sales": {
+                "columns": [],
+                "mquery_expression": "",
+                "measures": [
+                    {"name": "Total Revenue", "expression": "SUM(x)"},
+                    {"name": "Margin", "expression": "DIVIDE(a,b)"},
+                ],
+            }
+        }
         out = UCMetricViewGeneratorTool._tmdl_tables_to_measures(tables)
         assert len(out) == 2
         assert out[0]["measure_name"] == "Total Revenue"
@@ -228,21 +272,33 @@ class TestExtractMeasuresFallback:
         gen = MagicMock()
         gen.get_fabric_token.return_value = "fab-token"
         gen.fetch_tmdl_parts.return_value = (
-            [{"path": "definition/tables/T.tmdl", "payload": "x"}] if tmdl_parts_ok else None
+            [{"path": "definition/tables/T.tmdl", "payload": "x"}]
+            if tmdl_parts_ok
+            else None
         )
         gen.parse_tmdl_to_admin_tables.return_value = {
-            "Fact": {"columns": [], "mquery_expression": "", "measures": [
-                {"name": "Rev", "expression": "SUM(a)"}]}
+            "Fact": {
+                "columns": [],
+                "mquery_expression": "",
+                "measures": [{"name": "Rev", "expression": "SUM(a)"}],
+            }
         }
         return gen
 
     def test_sa_tmdl_recovers_measures(self):
         tool = UCMetricViewGeneratorTool()
         gen = self._fake_gen()
-        with patch.object(UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen):
+        with patch.object(
+            UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen
+        ):
             out = tool._extract_measures_fallback(
-                workspace_id="ws", dataset_id="ds", tenant_id="t", client_id="c",
-                client_secret=None, username="sa@x.com", password="pw",
+                workspace_id="ws",
+                dataset_id="ds",
+                tenant_id="t",
+                client_id="c",
+                client_secret=None,
+                username="sa@x.com",
+                password="pw",
             )
         assert len(out) == 1
         assert out[0]["measure_name"] == "Rev"
@@ -254,10 +310,17 @@ class TestExtractMeasuresFallback:
     def test_falls_through_to_sp_when_no_sa(self):
         tool = UCMetricViewGeneratorTool()
         gen = self._fake_gen()
-        with patch.object(UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen):
+        with patch.object(
+            UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen
+        ):
             out = tool._extract_measures_fallback(
-                workspace_id="ws", dataset_id="ds", tenant_id="t", client_id="c",
-                client_secret="sp-secret", username=None, password=None,
+                workspace_id="ws",
+                dataset_id="ds",
+                tenant_id="t",
+                client_id="c",
+                client_secret="sp-secret",
+                username=None,
+                password=None,
             )
         assert len(out) == 1
         # SP branch passes the secret positionally (3rd arg)
@@ -267,10 +330,17 @@ class TestExtractMeasuresFallback:
     def test_returns_empty_when_tmdl_unavailable_and_no_creds(self):
         tool = UCMetricViewGeneratorTool()
         gen = self._fake_gen(tmdl_parts_ok=False)
-        with patch.object(UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen):
+        with patch.object(
+            UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen
+        ):
             out = tool._extract_measures_fallback(
-                workspace_id="ws", dataset_id="ds", tenant_id="t", client_id="c",
-                client_secret=None, username=None, password=None,
+                workspace_id="ws",
+                dataset_id="ds",
+                tenant_id="t",
+                client_id="c",
+                client_secret=None,
+                username=None,
+                password=None,
             )
         assert out == []
 
@@ -279,10 +349,15 @@ class TestExtractMeasuresFallback:
 # MQuery TMDL fallback (Admin Scanner blocked for Service Accounts)
 # ---------------------------------------------------------------------------
 
+
 class TestTmdlTablesToMquery:
     def test_maps_source_and_skips_empty(self):
         tables = {
-            "Fact_Sales": {"columns": [], "mquery_expression": "let S = X in S", "measures": []},
+            "Fact_Sales": {
+                "columns": [],
+                "mquery_expression": "let S = X in S",
+                "measures": [],
+            },
             "Empty": {"columns": [], "mquery_expression": "", "measures": []},
         }
         out = UCMetricViewGeneratorTool._tmdl_tables_to_mquery(tables)
@@ -310,10 +385,17 @@ class TestExtractMqueryFallback:
     def test_sa_recovers_mquery(self):
         tool = UCMetricViewGeneratorTool()
         gen = self._fake_gen()
-        with patch.object(UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen):
+        with patch.object(
+            UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen
+        ):
             out = tool._extract_mquery_fallback(
-                workspace_id="ws", dataset_id="ds", tenant_id="t", client_id="c",
-                client_secret=None, username="sa@x.com", password="pw",
+                workspace_id="ws",
+                dataset_id="ds",
+                tenant_id="t",
+                client_id="c",
+                client_secret=None,
+                username="sa@x.com",
+                password="pw",
             )
         assert len(out) == 1 and out[0]["table_name"] == "Fact"
         _, kw = gen.get_fabric_token.call_args
@@ -322,10 +404,17 @@ class TestExtractMqueryFallback:
     def test_sp_fallback_when_no_sa(self):
         tool = UCMetricViewGeneratorTool()
         gen = self._fake_gen()
-        with patch.object(UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen):
+        with patch.object(
+            UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen
+        ):
             out = tool._extract_mquery_fallback(
-                workspace_id="ws", dataset_id="ds", tenant_id="t", client_id="c",
-                client_secret="sp-secret", username=None, password=None,
+                workspace_id="ws",
+                dataset_id="ds",
+                tenant_id="t",
+                client_id="c",
+                client_secret="sp-secret",
+                username=None,
+                password=None,
             )
         assert len(out) == 1
         args, _ = gen.get_fabric_token.call_args
@@ -334,10 +423,17 @@ class TestExtractMqueryFallback:
     def test_empty_when_no_creds_and_no_tmdl(self):
         tool = UCMetricViewGeneratorTool()
         gen = self._fake_gen(tmdl_ok=False)
-        with patch.object(UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen):
+        with patch.object(
+            UCMetricViewGeneratorTool, "_import_generate_config", return_value=gen
+        ):
             out = tool._extract_mquery_fallback(
-                workspace_id="ws", dataset_id="ds", tenant_id="t", client_id="c",
-                client_secret=None, username=None, password=None,
+                workspace_id="ws",
+                dataset_id="ds",
+                tenant_id="t",
+                client_id="c",
+                client_secret=None,
+                username=None,
+                password=None,
             )
         assert out == []
 
@@ -351,8 +447,16 @@ class TestBuildFallbackExtract:
 
     def test_groups_mquery_and_measures_per_table(self):
         measures = [
-            {"measure_name": "Total", "dax_expression": "SUM(DCC[Amt])", "proposed_allocation": "DCC_Sales"},
-            {"measure_name": "Cnt", "expression": "COUNTROWS(DCC)", "table_name": "DCC_Sales"},
+            {
+                "measure_name": "Total",
+                "dax_expression": "SUM(DCC[Amt])",
+                "proposed_allocation": "DCC_Sales",
+            },
+            {
+                "measure_name": "Cnt",
+                "expression": "COUNTROWS(DCC)",
+                "table_name": "DCC_Sales",
+            },
         ]
         mquery = [{"table_name": "DCC_Sales", "transpiled_sql": "let S in S"}]
         rows = UCMetricViewGeneratorTool._build_fallback_extract(measures, mquery)
@@ -382,9 +486,17 @@ class TestBuildFallbackExtract:
 
     def test_sorted_measures_first(self):
         rows = UCMetricViewGeneratorTool._build_fallback_extract(
-            [{"measure_name": "M", "dax_expression": "d", "proposed_allocation": "HasMeasures"}],
-            [{"table_name": "NoMeasures", "transpiled_sql": "let S in S"},
-             {"table_name": "HasMeasures", "transpiled_sql": "let S in S"}],
+            [
+                {
+                    "measure_name": "M",
+                    "dax_expression": "d",
+                    "proposed_allocation": "HasMeasures",
+                }
+            ],
+            [
+                {"table_name": "NoMeasures", "transpiled_sql": "let S in S"},
+                {"table_name": "HasMeasures", "transpiled_sql": "let S in S"},
+            ],
         )
         # table with measures sorts before the one without
         assert rows[0]["table_name"] == "HasMeasures"
@@ -398,15 +510,28 @@ class TestAgentJunkKwargsGuard:
     """
 
     def test_junk_kwargs_do_not_override_injected_data(self):
-        measures = json.dumps([{"measure_name": "total", "original_name": "Total",
-                                "dax_expression": "SUM(F[amt])", "proposed_allocation": "F"}])
+        measures = json.dumps(
+            [
+                {
+                    "measure_name": "total",
+                    "original_name": "Total",
+                    "dax_expression": "SUM(F[amt])",
+                    "proposed_allocation": "F",
+                }
+            ]
+        )
         # Flow injected good data into _default_config:
-        tool = UCMetricViewGeneratorTool(measures_json=measures, mquery_json="[]", config_json="{}")
+        tool = UCMetricViewGeneratorTool(
+            measures_json=measures, mquery_json="[]", config_json="{}"
+        )
         # Agent passes junk placeholders at call time:
-        result = tool._run(config_json="<config_json>", measures_json="the measures json")
+        result = tool._run(
+            config_json="<config_json>", measures_json="the measures json"
+        )
         data = json.loads(result)
-        assert not data.get("error", "").startswith("Invalid JSON"), \
-            "junk agent kwargs must not defeat the injected JSON data"
+        assert not data.get("error", "").startswith(
+            "Invalid JSON"
+        ), "junk agent kwargs must not defeat the injected JSON data"
 
     def test_empty_string_json_does_not_error(self):
         tool = UCMetricViewGeneratorTool()

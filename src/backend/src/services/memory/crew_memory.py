@@ -17,11 +17,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
+from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
 from src.services.memory.backend_factory import (
     DatabricksIndexValidationError,
     MemoryBackendFactory,
 )
-from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
 from src.utils.memory_paths import local_memory_root, local_memory_store_dir
 
 logger = LoggerManager.get_instance().crew
@@ -624,14 +624,13 @@ class CrewMemoryService:
         override the hybrid-scoring defaults.
         """
         try:
-            from src.utils.storage_paths import db_storage_path
-
             from src.services.memory.engine_storage_adapter import (
                 build_litellm_embedder,
             )
             from src.services.memory.local_storage_backend import (
                 LocalMemoryStorage,
             )
+            from src.utils.storage_paths import db_storage_path
 
             embedder: Any = None
             if callable(custom_embedder) or hasattr(custom_embedder, "embed_documents"):

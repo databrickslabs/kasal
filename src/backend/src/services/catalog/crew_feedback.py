@@ -31,7 +31,9 @@ class CrewFeedbackService:
         if rating not in ("up", "down"):
             raise ValueError("rating must be 'up' or 'down'")
         if rating == "down" and not (comment or "").strip():
-            raise ValueError("a comment explaining what went wrong is required for thumbs-down")
+            raise ValueError(
+                "a comment explaining what went wrong is required for thumbs-down"
+            )
 
         data: Dict[str, Any] = {
             "id": str(uuid4()),

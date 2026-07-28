@@ -3,31 +3,32 @@ Comprehensive unit tests for services/otel_tracing/mlflow_exporter.py
 """
 
 import threading
+from unittest.mock import MagicMock, Mock, call, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, Mock, call
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExportResult
 
 from src.services.otel_tracing.mlflow_exporter import (
-    KasalMLflowSpanExporter,
-    _build_span_name,
-    _build_pairing_key,
-    _extract_agent_name,
-    _extract_task_name,
-    _extract_span_outputs,
-    _extract_span_attrs,
-    _PairedSpan,
-    _InstantSpan,
-    _EVENT_PAIRS,
     _END_TO_STARTS,
-    _span_type_for,
+    _EVENT_PAIRS,
+    KasalMLflowSpanExporter,
     _as_chat_outputs,
+    _build_pairing_key,
+    _build_span_name,
+    _extract_agent_name,
+    _extract_span_attrs,
+    _extract_span_outputs,
+    _extract_task_name,
+    _InstantSpan,
+    _PairedSpan,
+    _span_type_for,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper factories
 # ---------------------------------------------------------------------------
+
 
 def _make_span(
     name="test-span",
@@ -83,6 +84,7 @@ def _make_exporter(job_id="job-1"):
 # Utility function tests
 # ---------------------------------------------------------------------------
 
+
 class TestBuildSpanName:
     def test_crew_event_no_context(self):
         result = _build_span_name("crew_started", {})
@@ -137,7 +139,10 @@ class TestExtractAgentName:
         assert _extract_agent_name({"kasal.agent_name": "Alice"}) == "Alice"
 
     def test_from_extra_agent_role(self):
-        assert _extract_agent_name({"kasal.extra.agent_role": "Researcher"}) == "Researcher"
+        assert (
+            _extract_agent_name({"kasal.extra.agent_role": "Researcher"})
+            == "Researcher"
+        )
 
     def test_empty_string_when_missing(self):
         assert _extract_agent_name({}) == ""
@@ -145,10 +150,16 @@ class TestExtractAgentName:
 
 class TestExtractTaskName:
     def test_from_task_name_attr(self):
-        assert _extract_task_name({"kasal.task_name": "Research Topic"}) == "Research Topic"
+        assert (
+            _extract_task_name({"kasal.task_name": "Research Topic"})
+            == "Research Topic"
+        )
 
     def test_from_extra_task_name(self):
-        assert _extract_task_name({"kasal.extra.task_name": "Write Report"}) == "Write Report"
+        assert (
+            _extract_task_name({"kasal.extra.task_name": "Write Report"})
+            == "Write Report"
+        )
 
     def test_empty_string_when_missing(self):
         assert _extract_task_name({}) == ""
@@ -180,7 +191,9 @@ class TestExtractSpanOutputs:
 
 class TestExtractSpanAttrs:
     def test_only_kasal_attrs(self):
-        span = _make_span(extra_attrs={"kasal.custom": "value", "other.attr": "ignored"})
+        span = _make_span(
+            extra_attrs={"kasal.custom": "value", "other.attr": "ignored"}
+        )
         result = _extract_span_attrs(span)
         assert "kasal.custom" in result
         assert "other.attr" not in result
@@ -203,6 +216,7 @@ class TestExtractSpanAttrs:
 # Exporter tests
 # ---------------------------------------------------------------------------
 
+
 class TestKasalMLflowSpanExporterInit:
     def test_initialization(self):
         exporter = _make_exporter("test-job")
@@ -217,33 +231,39 @@ class TestKasalMLflowSpanExporterInit:
         exporter = _make_exporter()
         assert not hasattr(exporter, "_executor")
 
+
 class TestExport:
     def test_returns_success(self):
         exporter = _make_exporter()
         spans = [_make_span("s1", "crew_started")]
         result = exporter.export(spans)
         assert result == SpanExportResult.SUCCESS
+
     def test_skips_spans_without_event_type(self):
         exporter = _make_exporter()
         span = MagicMock(spec=ReadableSpan)
         span.attributes = {"other.attr": "value"}
         exporter.export([span])
         assert len(exporter._buffer) == 0
+
     def test_buffers_spans_with_event_type(self):
         exporter = _make_exporter()
         spans = [_make_span("s1", "crew_started"), _make_span("s2", "task_started")]
         exporter.export(spans)
         assert len(exporter._buffer) == 2
+
     def test_detects_flow_context_from_flow_started(self):
         exporter = _make_exporter()
         spans = [_make_span("s1", "flow_started")]
         exporter.export(spans)
         assert exporter._is_flow is True
+
     def test_detects_flow_context_from_flow_created(self):
         exporter = _make_exporter()
         spans = [_make_span("s1", "flow_created")]
         exporter.export(spans)
         assert exporter._is_flow is True
+
     def test_crew_completed_triggers_flush_for_crew(self):
         # Flush runs SYNCHRONOUSLY (inline) on crew_completed — the trace must be
         # built before export() returns so the subprocess can't tear down first.
@@ -251,24 +271,28 @@ class TestExport:
         with patch.object(exporter, "_flush") as mock_flush:
             exporter.export([_make_span("s1", "crew_completed")])
         mock_flush.assert_called_once()
+
     def test_flow_completed_triggers_flush_for_flow(self):
         exporter = _make_exporter()
         exporter._is_flow = True
         with patch.object(exporter, "_flush") as mock_flush:
             exporter.export([_make_span("s1", "flow_completed")])
         mock_flush.assert_called_once()
+
     def test_crew_completed_not_flush_when_in_flow_mode(self):
         exporter = _make_exporter()
         exporter._is_flow = True
         with patch.object(exporter, "_flush") as mock_flush:
             exporter.export([_make_span("s1", "crew_completed")])
         mock_flush.assert_not_called()
+
     def test_no_flush_after_already_flushed(self):
         exporter = _make_exporter()
         exporter._flushed = True
         with patch.object(exporter, "_flush") as mock_flush:
             exporter.export([_make_span("s1", "crew_completed")])
         mock_flush.assert_not_called()
+
 
 class TestPairEvents:
     def test_pairs_crew_started_crew_completed(self):
@@ -300,8 +324,16 @@ class TestPairEvents:
     def test_pairs_task_started_task_completed(self):
         exporter = _make_exporter()
         spans = [
-            _make_span("s1", "task_started", task_name="Research", start_time=100, end_time=101),
-            _make_span("s2", "task_completed", task_name="Research", start_time=500, end_time=501),
+            _make_span(
+                "s1", "task_started", task_name="Research", start_time=100, end_time=101
+            ),
+            _make_span(
+                "s2",
+                "task_completed",
+                task_name="Research",
+                start_time=500,
+                end_time=501,
+            ),
         ]
         paired, instants = exporter._pair_events(spans)
         assert len(paired) == 1
@@ -309,8 +341,20 @@ class TestPairEvents:
     def test_merges_attributes_from_start_and_end(self):
         exporter = _make_exporter()
         spans = [
-            _make_span("s1", "crew_started", extra_attrs={"kasal.start_info": "begin"}, start_time=100, end_time=101),
-            _make_span("s2", "crew_completed", extra_attrs={"kasal.end_info": "end"}, start_time=500, end_time=501),
+            _make_span(
+                "s1",
+                "crew_started",
+                extra_attrs={"kasal.start_info": "begin"},
+                start_time=100,
+                end_time=101,
+            ),
+            _make_span(
+                "s2",
+                "crew_completed",
+                extra_attrs={"kasal.end_info": "end"},
+                start_time=500,
+                end_time=501,
+            ),
         ]
         paired, _ = exporter._pair_events(spans)
         assert "kasal.start_info" in paired[0].attributes
@@ -320,7 +364,13 @@ class TestPairEvents:
         exporter = _make_exporter()
         spans = [
             _make_span("s1", "task_started", start_time=100, end_time=101),
-            _make_span("s2", "task_completed", start_time=500, end_time=501, status_code_name="ERROR"),
+            _make_span(
+                "s2",
+                "task_completed",
+                start_time=500,
+                end_time=501,
+                status_code_name="ERROR",
+            ),
         ]
         paired, _ = exporter._pair_events(spans)
         assert paired[0].status == "ERROR"
@@ -329,7 +379,12 @@ class TestPairEvents:
 class TestDetermineHierarchyLevel:
     def test_crew_events(self):
         exporter = _make_exporter()
-        for event_type in ["crew_started", "crew_completed", "flow_started", "flow_completed"]:
+        for event_type in [
+            "crew_started",
+            "crew_completed",
+            "flow_started",
+            "flow_completed",
+        ]:
             assert exporter._determine_hierarchy_level(event_type) == "crew"
 
     def test_agent_events(self):
@@ -436,18 +491,21 @@ class TestFlush:
         with patch.object(exporter, "_build_mlflow_trace") as mock_build:
             exporter._flush()
         mock_build.assert_not_called()
+
     def test_marks_flushed_after_flush(self):
         exporter = _make_exporter()
         exporter._buffer.append(_make_span("s1", "crew_started"))
         with patch.object(exporter, "_build_mlflow_trace"):
             exporter._flush()
         assert exporter._flushed is True
+
     def test_clears_buffer_after_flush(self):
         exporter = _make_exporter()
         exporter._buffer.append(_make_span("s1", "crew_started"))
         with patch.object(exporter, "_build_mlflow_trace"):
             exporter._flush()
         assert exporter._buffer == []
+
     def test_second_flush_is_noop(self):
         exporter = _make_exporter()
         exporter._buffer.append(_make_span("s1", "crew_started"))
@@ -455,11 +513,15 @@ class TestFlush:
             exporter._flush()
             exporter._flush()  # second call
         mock_build.assert_called_once()  # only once
+
     def test_handles_build_error_gracefully(self):
         exporter = _make_exporter()
         exporter._buffer.append(_make_span("s1", "crew_completed"))
-        with patch.object(exporter, "_build_mlflow_trace", side_effect=RuntimeError("build error")):
+        with patch.object(
+            exporter, "_build_mlflow_trace", side_effect=RuntimeError("build error")
+        ):
             exporter._flush()  # Should not raise
+
 
 class TestShutdown:
     def test_flushes_remaining_buffer(self):
@@ -553,7 +615,14 @@ class TestBuildMlflowTrace:
             mock_client.start_trace.return_value = mock_root
             mock_client.start_span.return_value = MagicMock(span_id="child-1")
 
-            paired = [_PairedSpan(name="crew_execution", start_time=1000, end_time=2001, event_type="crew_started")]
+            paired = [
+                _PairedSpan(
+                    name="crew_execution",
+                    start_time=1000,
+                    end_time=2001,
+                    event_type="crew_started",
+                )
+            ]
             exporter._build_mlflow_trace(paired, [], all_spans)
 
             mock_client.start_trace.assert_called_once()
@@ -624,7 +693,9 @@ class TestSpanTypes:
 
     def test_as_chat_outputs_shapes_assistant_message(self):
         out = _as_chat_outputs("hello world")
-        assert out == {"choices": [{"message": {"role": "assistant", "content": "hello world"}}]}
+        assert out == {
+            "choices": [{"message": {"role": "assistant", "content": "hello world"}}]
+        }
         assert _as_chat_outputs("") is None
         assert _as_chat_outputs(None) is None
 
@@ -686,11 +757,14 @@ class TestSpanTypes:
 
         # The llm_call leaf span must be typed CHAT_MODEL.
         llm_starts = [c for c in start_span_calls if c.get("span_type") == "CHAT_MODEL"]
-        assert llm_starts, f"expected a CHAT_MODEL span, got {[c.get('span_type') for c in start_span_calls]}"
+        assert (
+            llm_starts
+        ), f"expected a CHAT_MODEL span, got {[c.get('span_type') for c in start_span_calls]}"
 
         # Its output must be chat-shaped (assistant message), so the UI renders chat.
         chat_ends = [
-            c for c in end_span_calls
+            c
+            for c in end_span_calls
             if isinstance(c.get("outputs"), dict) and "choices" in c["outputs"]
         ]
         assert chat_ends, "expected chat-shaped outputs on the CHAT_MODEL span"
@@ -709,8 +783,15 @@ class TestDeriveRootIO:
                  else latest task output with content.
     """
 
-    def _crew_span(self, *, inputs=None, content=None, event_type="crew_started",
-                   start_time=100, end_time=200):
+    def _crew_span(
+        self,
+        *,
+        inputs=None,
+        content=None,
+        event_type="crew_started",
+        start_time=100,
+        end_time=200,
+    ):
         attrs = {}
         if inputs is not None:
             attrs["kasal.extra.inputs"] = inputs
@@ -727,8 +808,16 @@ class TestDeriveRootIO:
             attributes=attrs,
         )
 
-    def _task_span(self, *, task_prompt=None, task_name_attr=None, task_name="",
-                   content=None, start_time=100, end_time=200):
+    def _task_span(
+        self,
+        *,
+        task_prompt=None,
+        task_name_attr=None,
+        task_name="",
+        content=None,
+        start_time=100,
+        end_time=200,
+    ):
         attrs = {}
         if task_prompt is not None:
             attrs["kasal.extra.task_prompt"] = task_prompt

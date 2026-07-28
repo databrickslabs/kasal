@@ -242,6 +242,7 @@ def cleanup_after_test():
         # (Sync fixture → clear the dict directly; no event loop is running.)
         try:
             from src.core.cache import template_cache
+
             template_cache._cache.clear()
         except Exception:
             pass
@@ -619,13 +620,11 @@ def pytest_sessionfinish(session, exitstatus):
 
     from src.core.paths import BACKEND_ROOT
 
-    created = sorted(
-        _tree_snapshot(BACKEND_ROOT) - _pollution_snapshot
-    )
+    created = sorted(_tree_snapshot(BACKEND_ROOT) - _pollution_snapshot)
     if created:
         raise pytest.UsageError(
             "the test run created files outside tests/.artifacts/:\n  "
             + "\n  ".join(created)
             + "\n\nPoint whatever wrote them at tests/.artifacts (see the env vars "
-              "at the top of tests/conftest.py), or use tmp_path."
+            "at the top of tests/conftest.py), or use tmp_path."
         )

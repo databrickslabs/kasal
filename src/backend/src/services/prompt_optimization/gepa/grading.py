@@ -9,6 +9,7 @@ and not the whole optimisation run.
 import logging
 import re
 from typing import Any, Dict, List, Optional
+
 from src.utils.prompt_utils import robust_json_parser
 
 logger = logging.getLogger(__name__)

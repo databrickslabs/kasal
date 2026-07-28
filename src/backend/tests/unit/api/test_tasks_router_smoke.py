@@ -1,28 +1,38 @@
-import pytest
-from unittest.mock import AsyncMock
-from types import SimpleNamespace
 from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from src.api.tasks_router import (
-    list_tasks,
     create_task,
-    get_task,
-    update_task_full,
-    update_task,
-    delete_task,
     delete_all_tasks,
+    delete_task,
+    get_task,
+    list_tasks,
+    update_task,
+    update_task_full,
 )
 from src.schemas.task import TaskCreate, TaskUpdate
 from src.utils.user_context import GroupContext
 
 
 def gc(role="user"):
-    return GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role=role)
+    return GroupContext(
+        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role=role
+    )
 
 
 def make_task(i="t1"):
     now = datetime.utcnow()
-    return SimpleNamespace(id=i, title="T", description="d", created_at=now, updated_at=now, tool_configs={})
+    return SimpleNamespace(
+        id=i,
+        title="T",
+        description="d",
+        created_at=now,
+        updated_at=now,
+        tool_configs={},
+    )
 
 
 @pytest.mark.asyncio
@@ -35,11 +45,19 @@ async def test_list_and_create_permissions_and_success():
 
     # create forbidden for user
     with pytest.raises(Exception):
-        await create_task(TaskCreate(name="T", description="d", expected_output="o", agent_id=None), service=svc, group_context=gc("user"))
+        await create_task(
+            TaskCreate(name="T", description="d", expected_output="o", agent_id=None),
+            service=svc,
+            group_context=gc("user"),
+        )
 
     # create success for editor
     svc.create_with_group = AsyncMock(return_value=make_task("t2"))
-    out2 = await create_task(TaskCreate(name="T", description="d", expected_output="o", agent_id=None), service=svc, group_context=gc("editor"))
+    out2 = await create_task(
+        TaskCreate(name="T", description="d", expected_output="o", agent_id=None),
+        service=svc,
+        group_context=gc("editor"),
+    )
     assert out2.id == "t2"
 
 
@@ -56,21 +74,37 @@ async def test_get_update_delete_paths():
 
     # update full forbidden, 404, success
     with pytest.raises(Exception):
-        await update_task_full("t3", {"title": "X"}, service=svc, group_context=gc("user"))
+        await update_task_full(
+            "t3", {"title": "X"}, service=svc, group_context=gc("user")
+        )
     svc.update_full_with_group_check = AsyncMock(return_value=None)
     with pytest.raises(Exception):
-        await update_task_full("t3", {"title": "X"}, service=svc, group_context=gc("admin"))
+        await update_task_full(
+            "t3", {"title": "X"}, service=svc, group_context=gc("admin")
+        )
     svc.update_full_with_group_check = AsyncMock(return_value=make_task("t3"))
-    assert (await update_task_full("t3", {"title": "X"}, service=svc, group_context=gc("editor"))).id == "t3"
+    assert (
+        await update_task_full(
+            "t3", {"title": "X"}, service=svc, group_context=gc("editor")
+        )
+    ).id == "t3"
 
     # update partial forbidden, 404, success
     with pytest.raises(Exception):
-        await update_task("t3", TaskUpdate(title="Y"), service=svc, group_context=gc("user"))
+        await update_task(
+            "t3", TaskUpdate(title="Y"), service=svc, group_context=gc("user")
+        )
     svc.update_with_group_check = AsyncMock(return_value=None)
     with pytest.raises(Exception):
-        await update_task("t3", TaskUpdate(title="Y"), service=svc, group_context=gc("editor"))
+        await update_task(
+            "t3", TaskUpdate(title="Y"), service=svc, group_context=gc("editor")
+        )
     svc.update_with_group_check = AsyncMock(return_value=make_task("t3"))
-    assert (await update_task("t3", TaskUpdate(title="Y"), service=svc, group_context=gc("admin"))).id == "t3"
+    assert (
+        await update_task(
+            "t3", TaskUpdate(title="Y"), service=svc, group_context=gc("admin")
+        )
+    ).id == "t3"
 
     # delete forbidden, 404, success
     with pytest.raises(Exception):
@@ -93,4 +127,3 @@ async def test_delete_all_tasks_admin_and_error():
     # admin ok
     svc.delete_all_for_group = AsyncMock(return_value=None)
     assert await delete_all_tasks(service=svc, group_context=gc("admin")) is None
-

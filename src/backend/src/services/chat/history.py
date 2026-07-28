@@ -1,7 +1,8 @@
-from typing import List, Optional, Type
-from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
+from typing import List, Optional, Type
 from uuid import uuid4
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_service import BaseService
 from src.models.chat_history import ChatHistory

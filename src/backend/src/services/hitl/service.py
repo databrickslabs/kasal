@@ -7,28 +7,31 @@ handling timeouts, and triggering flow resume.
 """
 
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.models.execution_status import ExecutionStatus
 from src.models.hitl_approval import (
     HITLApproval,
     HITLApprovalStatus,
+    HITLRejectionAction,
     HITLTimeoutAction,
-    HITLRejectionAction
 )
-from src.models.execution_status import ExecutionStatus
-from src.repositories.hitl_repository import HITLApprovalRepository, HITLWebhookRepository
+from src.repositories.hitl_repository import (
+    HITLApprovalRepository,
+    HITLWebhookRepository,
+)
 from src.schemas.hitl import (
-    HITLApprovalCreate,
-    HITLApprovalResponse,
-    HITLApprovalListResponse,
-    HITLActionResponse,
     ExecutionHITLStatus,
+    HITLActionResponse,
+    HITLApprovalCreate,
+    HITLApprovalListResponse,
+    HITLApprovalResponse,
     HITLApprovalStatusEnum,
-    HITLRejectionActionEnum
+    HITLRejectionActionEnum,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,26 +39,31 @@ logger = logging.getLogger(__name__)
 
 class HITLServiceError(Exception):
     """Base exception for HITL service errors."""
+
     pass
 
 
 class HITLApprovalNotFoundError(HITLServiceError):
     """Raised when an HITL approval is not found."""
+
     pass
 
 
 class HITLApprovalAlreadyProcessedError(HITLServiceError):
     """Raised when trying to process an already processed approval."""
+
     pass
 
 
 class HITLApprovalExpiredError(HITLServiceError):
     """Raised when trying to process an expired approval."""
+
     pass
 
 
 class HITLPermissionDeniedError(HITLServiceError):
     """Raised when user is not allowed to approve/reject."""
+
     pass
 
 
@@ -66,7 +74,7 @@ class HITLService:
         self,
         session: AsyncSession,
         approval_repository: Optional[HITLApprovalRepository] = None,
-        webhook_repository: Optional[HITLWebhookRepository] = None
+        webhook_repository: Optional[HITLWebhookRepository] = None,
     ):
         """
         Initialize the service with session and repositories.
@@ -90,7 +98,7 @@ class HITLService:
         group_id: str,
         previous_crew_name: Optional[str] = None,
         previous_crew_output: Optional[str] = None,
-        flow_state_snapshot: Optional[Dict[str, Any]] = None
+        flow_state_snapshot: Optional[Dict[str, Any]] = None,
     ) -> HITLApproval:
         """
         Create a new HITL approval request when flow hits a gate.
@@ -130,7 +138,7 @@ class HITLService:
                 previous_crew_output=previous_crew_output,
                 flow_state_snapshot=flow_state_snapshot or {},
                 expires_at=expires_at,
-                group_id=group_id
+                group_id=group_id,
             )
 
             created_approval = await self.approval_repo.create(approval)
@@ -139,7 +147,7 @@ class HITLService:
             await self._update_execution_status(
                 execution_id=execution_id,
                 status=ExecutionStatus.WAITING_FOR_APPROVAL.value,
-                message=f"Waiting for approval at gate: {gate_node_id}"
+                message=f"Waiting for approval at gate: {gate_node_id}",
             )
 
             logger.info(
@@ -159,7 +167,7 @@ class HITLService:
         approved_by: str,
         group_id: str,
         comment: Optional[str] = None,
-        user_token: Optional[str] = None
+        user_token: Optional[str] = None,
     ) -> HITLActionResponse:
         """
         Approve an HITL gate and resume flow execution.
@@ -207,7 +215,7 @@ class HITLService:
                 approval_id=approval_id,
                 status=HITLApprovalStatus.APPROVED,
                 responded_by=approved_by,
-                approval_comment=comment
+                approval_comment=comment,
             )
 
             # Tool-call and task-review gates don't suspend the orchestration —
@@ -217,7 +225,9 @@ class HITLService:
                 execution_resumed = False
             else:
                 # Resume flow execution with user's token for OBO auth
-                execution_resumed = await self._resume_flow_execution(approval, user_token=user_token)
+                execution_resumed = await self._resume_flow_execution(
+                    approval, user_token=user_token
+                )
 
             logger.info(f"HITL approval {approval_id} approved by {approved_by}")
 
@@ -226,11 +236,15 @@ class HITLService:
                 approval_id=approval_id,
                 status=HITLApprovalStatusEnum.APPROVED,
                 message="Gate approved successfully",
-                execution_resumed=execution_resumed
+                execution_resumed=execution_resumed,
             )
 
-        except (HITLApprovalNotFoundError, HITLApprovalAlreadyProcessedError,
-                HITLApprovalExpiredError, HITLPermissionDeniedError):
+        except (
+            HITLApprovalNotFoundError,
+            HITLApprovalAlreadyProcessedError,
+            HITLApprovalExpiredError,
+            HITLPermissionDeniedError,
+        ):
             raise
         except SQLAlchemyError as e:
             logger.error(f"Database error approving HITL: {str(e)}")
@@ -242,7 +256,7 @@ class HITLService:
         rejected_by: str,
         group_id: str,
         reason: str,
-        action: HITLRejectionActionEnum = HITLRejectionActionEnum.REJECT
+        action: HITLRejectionActionEnum = HITLRejectionActionEnum.REJECT,
     ) -> HITLActionResponse:
         """
         Reject an HITL gate.
@@ -281,7 +295,8 @@ class HITLService:
 
             # Determine new status based on action
             new_status = (
-                HITLApprovalStatus.RETRY if action == HITLRejectionActionEnum.RETRY
+                HITLApprovalStatus.RETRY
+                if action == HITLRejectionActionEnum.RETRY
                 else HITLApprovalStatus.REJECTED
             )
 
@@ -291,7 +306,7 @@ class HITLService:
                 status=new_status,
                 responded_by=rejected_by,
                 rejection_reason=reason,
-                rejection_action=action.value
+                rejection_action=action.value,
             )
 
             # Handle rejection action
@@ -327,21 +342,22 @@ class HITLService:
                 approval_id=approval_id,
                 status=HITLApprovalStatusEnum(new_status),
                 message=message,
-                execution_resumed=execution_resumed
+                execution_resumed=execution_resumed,
             )
 
-        except (HITLApprovalNotFoundError, HITLApprovalAlreadyProcessedError,
-                HITLApprovalExpiredError, HITLPermissionDeniedError):
+        except (
+            HITLApprovalNotFoundError,
+            HITLApprovalAlreadyProcessedError,
+            HITLApprovalExpiredError,
+            HITLPermissionDeniedError,
+        ):
             raise
         except SQLAlchemyError as e:
             logger.error(f"Database error rejecting HITL: {str(e)}")
             raise HITLServiceError(f"Failed to reject: {str(e)}")
 
     async def get_pending_approvals(
-        self,
-        group_id: str,
-        limit: int = 50,
-        offset: int = 0
+        self, group_id: str, limit: int = 50, offset: int = 0
     ) -> HITLApprovalListResponse:
         """
         Get all pending HITL approvals for a group.
@@ -356,9 +372,7 @@ class HITLService:
         """
         try:
             approvals, total = await self.approval_repo.get_pending_for_group(
-                group_id=group_id,
-                limit=limit,
-                offset=offset
+                group_id=group_id, limit=limit, offset=offset
             )
 
             # Omit the heavy `previous_crew_output` from the LIST response too
@@ -387,21 +401,19 @@ class HITLService:
                     rejection_reason=a.rejection_reason,
                     rejection_action=(
                         HITLRejectionActionEnum(a.rejection_action)
-                        if a.rejection_action else None
+                        if a.rejection_action
+                        else None
                     ),
                     expires_at=a.expires_at,
                     is_expired=a.is_expired,
                     created_at=a.created_at,
-                    group_id=a.group_id
+                    group_id=a.group_id,
                 )
                 for a in approvals
             ]
 
             return HITLApprovalListResponse(
-                items=items,
-                total=total,
-                limit=limit,
-                offset=offset
+                items=items, total=total, limit=limit, offset=offset
             )
 
         except SQLAlchemyError as e:
@@ -409,9 +421,7 @@ class HITLService:
             raise HITLServiceError(f"Failed to get pending approvals: {str(e)}")
 
     async def get_execution_hitl_status(
-        self,
-        execution_id: str,
-        group_id: str
+        self, execution_id: str, group_id: str
     ) -> ExecutionHITLStatus:
         """
         Get HITL status for an execution.
@@ -426,14 +436,12 @@ class HITLService:
         try:
             # Get all approvals for execution
             approvals = await self.approval_repo.get_all_for_execution(
-                execution_id=execution_id,
-                group_id=group_id
+                execution_id=execution_id, group_id=group_id
             )
 
             # Find pending approval
             pending = next(
-                (a for a in approvals if a.status == HITLApprovalStatus.PENDING),
-                None
+                (a for a in approvals if a.status == HITLApprovalStatus.PENDING), None
             )
 
             # Convert to response objects.
@@ -466,25 +474,29 @@ class HITLService:
                     rejection_reason=a.rejection_reason,
                     rejection_action=(
                         HITLRejectionActionEnum(a.rejection_action)
-                        if a.rejection_action else None
+                        if a.rejection_action
+                        else None
                     ),
                     expires_at=a.expires_at,
                     is_expired=a.is_expired,
                     created_at=a.created_at,
-                    group_id=a.group_id
+                    group_id=a.group_id,
                 )
                 for a in approvals
             ]
 
             pending_response = next(
-                (r for r in approval_responses if r.status == HITLApprovalStatusEnum.PENDING),
-                None
+                (
+                    r
+                    for r in approval_responses
+                    if r.status == HITLApprovalStatusEnum.PENDING
+                ),
+                None,
             )
 
             # Count passed gates
             gates_passed = sum(
-                1 for a in approvals
-                if a.status == HITLApprovalStatus.APPROVED
+                1 for a in approvals if a.status == HITLApprovalStatus.APPROVED
             )
 
             return ExecutionHITLStatus(
@@ -492,7 +504,7 @@ class HITLService:
                 has_pending_approval=pending is not None,
                 pending_approval=pending_response,
                 approval_history=approval_responses,
-                total_gates_passed=gates_passed
+                total_gates_passed=gates_passed,
             )
 
         except SQLAlchemyError as e:
@@ -523,11 +535,10 @@ class HITLService:
                             approval_id=approval.id,
                             status=HITLApprovalStatus.TIMEOUT,
                             responded_by="system",
-                            rejection_reason="Approval timed out (auto-rejected)"
+                            rejection_reason="Approval timed out (auto-rejected)",
                         )
                         await self._fail_execution(
-                            approval,
-                            "HITL gate timed out and was auto-rejected"
+                            approval, "HITL gate timed out and was auto-rejected"
                         )
                     else:
                         # Fail action - fail the execution
@@ -535,12 +546,9 @@ class HITLService:
                             approval_id=approval.id,
                             status=HITLApprovalStatus.TIMEOUT,
                             responded_by="system",
-                            rejection_reason="Approval timed out"
+                            rejection_reason="Approval timed out",
                         )
-                        await self._fail_execution(
-                            approval,
-                            "HITL gate timed out"
-                        )
+                        await self._fail_execution(approval, "HITL gate timed out")
 
                     processed_ids.append(approval.id)
                     logger.info(
@@ -564,13 +572,12 @@ class HITLService:
     # =========================================================================
 
     async def _update_execution_status(
-        self,
-        execution_id: str,
-        status: str,
-        message: Optional[str] = None
+        self, execution_id: str, status: str, message: Optional[str] = None
     ) -> None:
         """Update execution status in the database."""
-        from src.repositories.execution_history_repository import ExecutionHistoryRepository
+        from src.repositories.execution_history_repository import (
+            ExecutionHistoryRepository,
+        )
 
         repo = ExecutionHistoryRepository(self.session)
         execution = await repo.get_execution_by_job_id(execution_id)
@@ -579,14 +586,15 @@ class HITLService:
             execution.status = status
             if message:
                 # Store message in error field for visibility
-                if status in [ExecutionStatus.FAILED.value, ExecutionStatus.REJECTED.value]:
+                if status in [
+                    ExecutionStatus.FAILED.value,
+                    ExecutionStatus.REJECTED.value,
+                ]:
                     execution.error = message
             await self.session.flush()
 
     async def _resume_flow_execution(
-        self,
-        approval: HITLApproval,
-        user_token: Optional[str] = None
+        self, approval: HITLApproval, user_token: Optional[str] = None
     ) -> bool:
         """
         Resume flow execution after approval.
@@ -600,11 +608,14 @@ class HITLService:
         """
         try:
             # Import here to avoid circular imports
-            from src.repositories.execution_history_repository import ExecutionHistoryRepository
+            import asyncio
+
+            from src.repositories.execution_history_repository import (
+                ExecutionHistoryRepository,
+            )
             from src.services.execution.kasal_service import KasalExecutionService
             from src.services.execution.status import ExecutionStatusService
             from src.utils.user_context import GroupContext
-            import asyncio
 
             # Get execution record
             exec_repo = ExecutionHistoryRepository(self.session)
@@ -616,13 +627,16 @@ class HITLService:
 
             # Update execution status to RUNNING
             await self._update_execution_status(
-                execution_id=approval.execution_id,
-                status=ExecutionStatus.RUNNING.value
+                execution_id=approval.execution_id, status=ExecutionStatus.RUNNING.value
             )
 
             # Extract the original flow configuration from the execution inputs
             original_inputs = execution.inputs or {}
-            flow_id = str(execution.flow_id) if execution.flow_id else original_inputs.get('flow_id')
+            flow_id = (
+                str(execution.flow_id)
+                if execution.flow_id
+                else original_inputs.get("flow_id")
+            )
             flow_uuid = execution.flow_uuid  # CrewAI's state.id for @persist
 
             # Build the resume configuration
@@ -631,9 +645,10 @@ class HITLService:
             # resume_from_crew_sequence should be the FIRST crew TO RUN (which is crew_sequence + 1)
             resume_config = {
                 **original_inputs,
-                'resume_from_flow_uuid': flow_uuid,
-                'resume_from_execution_id': approval.execution_id,
-                'resume_from_crew_sequence': approval.crew_sequence + 1,  # Skip completed crew, start from next
+                "resume_from_flow_uuid": flow_uuid,
+                "resume_from_execution_id": approval.execution_id,
+                "resume_from_crew_sequence": approval.crew_sequence
+                + 1,  # Skip completed crew, start from next
             }
 
             logger.info(
@@ -646,7 +661,7 @@ class HITLService:
             group_context = GroupContext(
                 group_ids=[approval.group_id],
                 group_email=approval.responded_by,
-                access_token=user_token  # Pass user's token for OBO authentication
+                access_token=user_token,  # Pass user's token for OBO authentication
             )
 
             # Trigger the flow execution asynchronously in a background task
@@ -656,20 +671,25 @@ class HITLService:
                     crewai_service = KasalExecutionService()
                     result = await crewai_service.run_flow_execution(
                         flow_id=flow_id,
-                        nodes=original_inputs.get('nodes'),
-                        edges=original_inputs.get('edges'),
+                        nodes=original_inputs.get("nodes"),
+                        edges=original_inputs.get("edges"),
                         job_id=approval.execution_id,  # Reuse the same job_id
                         config=resume_config,
-                        group_context=group_context
+                        group_context=group_context,
                     )
-                    logger.info(f"✅ Flow resume completed for {approval.execution_id}: {result.get('status', 'unknown')}")
+                    logger.info(
+                        f"✅ Flow resume completed for {approval.execution_id}: {result.get('status', 'unknown')}"
+                    )
                 except Exception as e:
-                    logger.error(f"❌ Flow resume failed for {approval.execution_id}: {str(e)}", exc_info=True)
+                    logger.error(
+                        f"❌ Flow resume failed for {approval.execution_id}: {str(e)}",
+                        exc_info=True,
+                    )
                     # Update status to FAILED
                     await ExecutionStatusService.update_status(
                         job_id=approval.execution_id,
                         status=ExecutionStatus.FAILED.value,
-                        message=f"Resume failed after HITL approval: {str(e)}"
+                        message=f"Resume failed after HITL approval: {str(e)}",
                     )
 
             # Create the background task
@@ -693,11 +713,14 @@ class HITLService:
         """
         try:
             # Import here to avoid circular imports
-            from src.repositories.execution_history_repository import ExecutionHistoryRepository
+            import asyncio
+
+            from src.repositories.execution_history_repository import (
+                ExecutionHistoryRepository,
+            )
             from src.services.execution.kasal_service import KasalExecutionService
             from src.services.execution.status import ExecutionStatusService
             from src.utils.user_context import GroupContext
-            import asyncio
 
             # Get execution record
             exec_repo = ExecutionHistoryRepository(self.session)
@@ -709,13 +732,16 @@ class HITLService:
 
             # Update execution status to RUNNING
             await self._update_execution_status(
-                execution_id=approval.execution_id,
-                status=ExecutionStatus.RUNNING.value
+                execution_id=approval.execution_id, status=ExecutionStatus.RUNNING.value
             )
 
             # Extract the original flow configuration from the execution inputs
             original_inputs = execution.inputs or {}
-            flow_id = str(execution.flow_id) if execution.flow_id else original_inputs.get('flow_id')
+            flow_id = (
+                str(execution.flow_id)
+                if execution.flow_id
+                else original_inputs.get("flow_id")
+            )
             flow_uuid = execution.flow_uuid  # CrewAI's state.id for @persist
 
             # Build the retry configuration
@@ -724,9 +750,9 @@ class HITLService:
             retry_from_sequence = max(0, approval.crew_sequence - 1)
             retry_config = {
                 **original_inputs,
-                'resume_from_flow_uuid': flow_uuid,
-                'resume_from_execution_id': approval.execution_id,
-                'resume_from_crew_sequence': retry_from_sequence,  # Re-run the same crew
+                "resume_from_flow_uuid": flow_uuid,
+                "resume_from_execution_id": approval.execution_id,
+                "resume_from_crew_sequence": retry_from_sequence,  # Re-run the same crew
             }
 
             logger.info(
@@ -736,8 +762,7 @@ class HITLService:
 
             # Create group context for the retry
             group_context = GroupContext(
-                group_ids=[approval.group_id],
-                group_email=approval.responded_by
+                group_ids=[approval.group_id], group_email=approval.responded_by
             )
 
             # Trigger the flow execution asynchronously in a background task
@@ -746,20 +771,25 @@ class HITLService:
                     crewai_service = KasalExecutionService()
                     result = await crewai_service.run_flow_execution(
                         flow_id=flow_id,
-                        nodes=original_inputs.get('nodes'),
-                        edges=original_inputs.get('edges'),
+                        nodes=original_inputs.get("nodes"),
+                        edges=original_inputs.get("edges"),
                         job_id=approval.execution_id,  # Reuse the same job_id
                         config=retry_config,
-                        group_context=group_context
+                        group_context=group_context,
                     )
-                    logger.info(f"✅ Flow retry completed for {approval.execution_id}: {result.get('status', 'unknown')}")
+                    logger.info(
+                        f"✅ Flow retry completed for {approval.execution_id}: {result.get('status', 'unknown')}"
+                    )
                 except Exception as e:
-                    logger.error(f"❌ Flow retry failed for {approval.execution_id}: {str(e)}", exc_info=True)
+                    logger.error(
+                        f"❌ Flow retry failed for {approval.execution_id}: {str(e)}",
+                        exc_info=True,
+                    )
                     # Update status to FAILED
                     await ExecutionStatusService.update_status(
                         job_id=approval.execution_id,
                         status=ExecutionStatus.FAILED.value,
-                        message=f"Retry failed after HITL rejection: {str(e)}"
+                        message=f"Retry failed after HITL rejection: {str(e)}",
                     )
 
             # Create the background task
@@ -771,11 +801,7 @@ class HITLService:
             logger.error(f"Error retrying previous crew: {str(e)}", exc_info=True)
             return False
 
-    async def _fail_execution(
-        self,
-        approval: HITLApproval,
-        reason: str
-    ) -> None:
+    async def _fail_execution(self, approval: HITLApproval, reason: str) -> None:
         """
         Fail the flow execution.
 
@@ -787,7 +813,7 @@ class HITLService:
             await self._update_execution_status(
                 execution_id=approval.execution_id,
                 status=ExecutionStatus.REJECTED.value,
-                message=f"HITL gate rejected: {reason}"
+                message=f"HITL gate rejected: {reason}",
             )
 
             logger.info(

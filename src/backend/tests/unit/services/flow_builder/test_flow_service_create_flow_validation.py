@@ -7,13 +7,21 @@ get_flows_by_crew (invalid uuid), update_flow (nodes/edges),
 force_delete_flow_with_executions, force_delete_flow_with_executions_with_group_check,
 create_flow (invalid listener/action), delete_flow, validate_flow_data error.
 """
-import uuid
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from types import SimpleNamespace
-from datetime import datetime
 
-from src.core.exceptions import NotFoundError, ForbiddenError, ConflictError, KasalError, BadRequestError
+import uuid
+from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from src.core.exceptions import (
+    BadRequestError,
+    ConflictError,
+    ForbiddenError,
+    KasalError,
+    NotFoundError,
+)
 
 
 def make_session():
@@ -24,7 +32,15 @@ def make_session():
     return session
 
 
-def make_flow(flow_id=None, name="test", group_id="g1", crew_id=None, nodes=None, edges=None, flow_config=None):
+def make_flow(
+    flow_id=None,
+    name="test",
+    group_id="g1",
+    crew_id=None,
+    nodes=None,
+    edges=None,
+    flow_config=None,
+):
     f = MagicMock()
     f.id = flow_id or uuid.uuid4()
     f.name = name
@@ -39,6 +55,7 @@ def make_flow(flow_id=None, name="test", group_id="g1", crew_id=None, nodes=None
 
 def make_flow_create(**kwargs):
     from src.schemas.flow import FlowCreate
+
     return FlowCreate(
         name=kwargs.get("name", "My Flow"),
         crew_id=kwargs.get("crew_id", None),
@@ -50,6 +67,7 @@ def make_flow_create(**kwargs):
 
 def make_flow_update(**kwargs):
     from src.schemas.flow import FlowUpdate
+
     return FlowUpdate(
         name=kwargs.get("name", "Updated"),
         nodes=kwargs.get("nodes", None),
@@ -59,21 +77,20 @@ def make_flow_update(**kwargs):
 
 
 def make_group_context(group_ids=None, email="user@example.com"):
-    ctx = SimpleNamespace(
-        group_ids=group_ids or ["g1"],
-        group_email=email
-    )
+    ctx = SimpleNamespace(group_ids=group_ids or ["g1"], group_email=email)
     return ctx
 
 
 def make_service(session=None):
     from src.services.flow_builder.flow_service import FlowService
+
     return FlowService(session=session or make_session())
 
 
 # ---------------------------------------------------------------------------
 # create_flow_with_group - validation paths
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_create_flow_with_group_invalid_listener():
@@ -127,6 +144,7 @@ async def test_create_flow_with_group_crew_not_found():
     group_ctx = make_group_context()
 
     import src.repositories.crew_repository as crew_repo_mod
+
     orig_crew_repo = crew_repo_mod.CrewRepository
 
     mock_crew_repo_instance = AsyncMock()
@@ -155,6 +173,7 @@ async def test_create_flow_with_group_crew_found():
     crew_id = str(uuid.uuid4())
 
     import src.repositories.crew_repository as crew_repo_mod
+
     orig_crew_repo = crew_repo_mod.CrewRepository
 
     mock_crew = MagicMock()
@@ -210,6 +229,7 @@ async def test_create_flow_with_group_generic_exception():
 # ---------------------------------------------------------------------------
 # get_flow_with_group_check
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_flow_with_group_check_not_found():
@@ -275,6 +295,7 @@ async def test_get_flow_with_group_check_no_group_id_in_flow():
 # get_all_flows_for_group
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_get_all_flows_for_group_no_context():
     svc = make_service()
@@ -311,6 +332,7 @@ async def test_get_all_flows_for_group_success():
 # update_flow_with_group_check
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_update_flow_with_group_check_not_found():
     svc = make_service()
@@ -322,7 +344,9 @@ async def test_update_flow_with_group_check_not_found():
 
         flow_id = uuid.uuid4()
         with pytest.raises(NotFoundError):
-            await svc.update_flow_with_group_check(flow_id, make_flow_update(), make_group_context())
+            await svc.update_flow_with_group_check(
+                flow_id, make_flow_update(), make_group_context()
+            )
 
 
 @pytest.mark.asyncio
@@ -337,7 +361,9 @@ async def test_update_flow_with_group_check_forbidden():
 
         group_ctx = make_group_context(group_ids=["my-group"])
         with pytest.raises(ForbiddenError):
-            await svc.update_flow_with_group_check(flow.id, make_flow_update(), group_ctx)
+            await svc.update_flow_with_group_check(
+                flow.id, make_flow_update(), group_ctx
+            )
 
 
 @pytest.mark.asyncio
@@ -382,6 +408,7 @@ async def test_update_flow_with_group_check_success():
 # delete_all_flows_for_group
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_delete_all_flows_for_group_no_context():
     svc = make_service()
@@ -408,7 +435,9 @@ async def test_delete_all_flows_for_group_success():
     mock_result.scalars.return_value = mock_scalars
     session.execute = AsyncMock(return_value=mock_result)
 
-    with patch.object(svc, "force_delete_flow_with_executions", new_callable=AsyncMock) as mock_delete:
+    with patch.object(
+        svc, "force_delete_flow_with_executions", new_callable=AsyncMock
+    ) as mock_delete:
         mock_delete.return_value = True
         ctx = make_group_context(group_ids=["g1"])
         await svc.delete_all_flows_for_group(ctx)
@@ -427,7 +456,9 @@ async def test_delete_all_flows_for_group_error_swallowed():
     mock_result.scalars.return_value = mock_scalars
     session.execute = AsyncMock(return_value=mock_result)
 
-    with patch.object(svc, "force_delete_flow_with_executions", new_callable=AsyncMock) as mock_delete:
+    with patch.object(
+        svc, "force_delete_flow_with_executions", new_callable=AsyncMock
+    ) as mock_delete:
         mock_delete.side_effect = RuntimeError("delete failed")
         ctx = make_group_context(group_ids=["g1"])
         # Should not raise
@@ -437,6 +468,7 @@ async def test_delete_all_flows_for_group_error_swallowed():
 # ---------------------------------------------------------------------------
 # get_flows_by_crew
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_flows_by_crew_invalid_uuid():
@@ -464,6 +496,7 @@ async def test_get_flows_by_crew_string_uuid():
 # update_flow - with nodes and edges
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_update_flow_with_nodes_and_edges():
     svc = make_service()
@@ -477,8 +510,16 @@ async def test_update_flow_with_nodes_and_edges():
         mock_repo.update = AsyncMock(return_value=updated_flow)
         MockRepo.return_value = mock_repo
 
-        from src.schemas.flow import FlowUpdate, Node, Edge, NodeData
-        nodes = [Node(id="n1", type="crewNode", position={"x": 0, "y": 0}, data={"label": "n1"})]
+        from src.schemas.flow import Edge, FlowUpdate, Node, NodeData
+
+        nodes = [
+            Node(
+                id="n1",
+                type="crewNode",
+                position={"x": 0, "y": 0},
+                data={"label": "n1"},
+            )
+        ]
         edges = [Edge(id="e1", source="n1", target="n2")]
         update = FlowUpdate(name="Updated", nodes=nodes, edges=edges)
 
@@ -523,6 +564,7 @@ async def test_update_flow_generic_error():
 # ---------------------------------------------------------------------------
 # force_delete_flow_with_executions
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_force_delete_flow_not_found():
@@ -581,9 +623,9 @@ async def test_force_delete_flow_no_executions():
 
     delete_result = MagicMock()
 
-    session.execute = AsyncMock(side_effect=[
-        check_result, find_result, exec_result, delete_result
-    ])
+    session.execute = AsyncMock(
+        side_effect=[check_result, find_result, exec_result, delete_result]
+    )
 
     result = await svc.force_delete_flow_with_executions(flow_id)
     assert result is True
@@ -605,6 +647,7 @@ async def test_force_delete_flow_generic_error():
 # force_delete_flow_with_executions_with_group_check
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_force_delete_with_group_check_not_found():
     session = make_session()
@@ -616,7 +659,9 @@ async def test_force_delete_with_group_check_not_found():
 
     flow_id = uuid.uuid4()
     with pytest.raises(NotFoundError):
-        await svc.force_delete_flow_with_executions_with_group_check(flow_id, make_group_context())
+        await svc.force_delete_flow_with_executions_with_group_check(
+            flow_id, make_group_context()
+        )
 
 
 @pytest.mark.asyncio
@@ -657,7 +702,9 @@ async def test_force_delete_with_group_check_success():
     session.execute = AsyncMock(side_effect=_execute)
 
     group_ctx = make_group_context(group_ids=["g1"])
-    result = await svc.force_delete_flow_with_executions_with_group_check(flow_id, group_ctx)
+    result = await svc.force_delete_flow_with_executions_with_group_check(
+        flow_id, group_ctx
+    )
     assert result is True
 
 
@@ -670,12 +717,15 @@ async def test_force_delete_with_group_check_generic_error():
     session.execute = AsyncMock(side_effect=RuntimeError("crash"))
 
     with pytest.raises(KasalError):
-        await svc.force_delete_flow_with_executions_with_group_check(flow_id, make_group_context())
+        await svc.force_delete_flow_with_executions_with_group_check(
+            flow_id, make_group_context()
+        )
 
 
 # ---------------------------------------------------------------------------
 # create_flow (backward compat) - validation paths
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_create_flow_invalid_listener():
@@ -716,6 +766,7 @@ async def test_create_flow_action_missing_required_fields():
 # ---------------------------------------------------------------------------
 # delete_flow
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_delete_flow_not_found():
@@ -775,6 +826,7 @@ async def test_delete_flow_success():
 # ---------------------------------------------------------------------------
 # validate_flow_data - error path
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_validate_flow_data_error():

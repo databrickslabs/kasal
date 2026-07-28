@@ -1,11 +1,13 @@
 """Unit tests for MetricViewValidatorTool."""
+
 import json
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from src.services.tools.metric_view_validator_tool import (
-    MetricViewValidatorTool,
     MetricViewValidatorSchema,
+    MetricViewValidatorTool,
 )
 
 
@@ -40,32 +42,38 @@ SAMPLE_YAML = {
         "name: fact_sales_uc_metric_view\n"
         "catalog: main\nschema: metrics\n"
         "source: main.raw.fact_sales\n"
-        "dimensions:\n  - name: Region\n    expr: \"`region`\"\n"
-        "measures:\n  - name: Total Revenue\n    expr: \"SUM(`amount`)\"\n"
+        'dimensions:\n  - name: Region\n    expr: "`region`"\n'
+        'measures:\n  - name: Total Revenue\n    expr: "SUM(`amount`)"\n'
     )
 }
 
-SAMPLE_MEASURES = json.dumps([
-    {
-        "measure_name": "Total Revenue",
-        "dax_expression": "SUM(Fact_Sales[Amount])",
-        "proposed_allocation": "fact_sales",
-        "table": "Fact_Sales",
-    },
-    {
-        "measure_name": "Profit Margin",
-        "dax_expression": "DIVIDE([Profit], [Revenue])",
-        "proposed_allocation": "fact_sales",
-        "table": "Fact_Sales",
-    },
-])
+SAMPLE_MEASURES = json.dumps(
+    [
+        {
+            "measure_name": "Total Revenue",
+            "dax_expression": "SUM(Fact_Sales[Amount])",
+            "proposed_allocation": "fact_sales",
+            "table": "Fact_Sales",
+        },
+        {
+            "measure_name": "Profit Margin",
+            "dax_expression": "DIVIDE([Profit], [Revenue])",
+            "proposed_allocation": "fact_sales",
+            "table": "Fact_Sales",
+        },
+    ]
+)
 
-SAMPLE_UCMV_OUTPUT = json.dumps({
-    "yaml": SAMPLE_YAML,
-    "sql": {"fact_sales": "CREATE METRIC VIEW main.metrics.fact_sales_uc_metric_view ..."},
-    "stats": {"fact_sales": {"total": 2, "translated": 2}},
-    "measures_with_dax": json.loads(SAMPLE_MEASURES),
-})
+SAMPLE_UCMV_OUTPUT = json.dumps(
+    {
+        "yaml": SAMPLE_YAML,
+        "sql": {
+            "fact_sales": "CREATE METRIC VIEW main.metrics.fact_sales_uc_metric_view ..."
+        },
+        "stats": {"fact_sales": {"total": 2, "translated": 2}},
+        "measures_with_dax": json.loads(SAMPLE_MEASURES),
+    }
+)
 
 MOCK_VALIDATION_RESULT = {
     "summary": {
@@ -84,8 +92,16 @@ MOCK_VALIDATION_RESULT = {
             "review": 0,
             "invalid": 0,
             "details": [
-                {"measure_name": "Total Revenue", "status": "VALID", "reason": "SUM match"},
-                {"measure_name": "Profit Margin", "status": "EQUIVALENT", "reason": "DIVIDE pattern"},
+                {
+                    "measure_name": "Total Revenue",
+                    "status": "VALID",
+                    "reason": "SUM match",
+                },
+                {
+                    "measure_name": "Profit Margin",
+                    "status": "EQUIVALENT",
+                    "reason": "DIVIDE pattern",
+                },
             ],
         }
     },
@@ -102,6 +118,7 @@ def _make_mock_pipeline(result=None):
 # ---------------------------------------------------------------------------
 # Schema tests
 # ---------------------------------------------------------------------------
+
 
 class TestMetricViewValidatorSchema:
     def test_all_optional(self):
@@ -127,6 +144,7 @@ class TestMetricViewValidatorSchema:
 # Initialization tests
 # ---------------------------------------------------------------------------
 
+
 class TestMetricViewValidatorToolInit:
     def test_tool_name(self):
         tool = MetricViewValidatorTool()
@@ -145,10 +163,9 @@ class TestMetricViewValidatorToolInit:
 # Happy path: ucmv_output provided
 # ---------------------------------------------------------------------------
 
+
 class TestUcmvOutputMode:
-    @patch(
-        "src.services.tools.metric_view_validator_tool.MetricViewValidatorTool._run"
-    )
+    @patch("src.services.tools.metric_view_validator_tool.MetricViewValidatorTool._run")
     def test_run_called(self, mock_run):
         mock_run.return_value = json.dumps(MOCK_VALIDATION_RESULT)
         tool = MetricViewValidatorTool()
@@ -156,10 +173,14 @@ class TestUcmvOutputMode:
         assert result is not None
 
     def test_ucmv_output_parsed(self):
-        with patch(
-            "src.services.tools.metric_view_validator_tool.MetricExpressionValidatorPipeline",
-            return_value=_make_mock_pipeline(),
-        ) if False else pytest.raises(Exception) if False else _noop_ctx():
+        with (
+            patch(
+                "src.services.tools.metric_view_validator_tool.MetricExpressionValidatorPipeline",
+                return_value=_make_mock_pipeline(),
+            )
+            if False
+            else pytest.raises(Exception) if False else _noop_ctx()
+        ):
             tool = MetricViewValidatorTool()
             # With real pipeline unavailable, tool should still return something
             result = tool._run(ucmv_output=SAMPLE_UCMV_OUTPUT)
@@ -169,6 +190,7 @@ class TestUcmvOutputMode:
 # ---------------------------------------------------------------------------
 # Happy path: yaml_content + measures_json
 # ---------------------------------------------------------------------------
+
 
 class TestYamlContentMode:
     def test_yaml_content_mode(self):
@@ -184,6 +206,7 @@ class TestYamlContentMode:
 # ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
+
 
 class TestErrorHandling:
     def test_invalid_json_ucmv_output(self):
@@ -210,6 +233,7 @@ class TestErrorHandling:
 # ---------------------------------------------------------------------------
 # Output structure
 # ---------------------------------------------------------------------------
+
 
 class TestOutputStructure:
     def test_output_is_valid_json_or_string(self):
@@ -239,6 +263,7 @@ class TestOutputStructure:
 
 from contextlib import contextmanager
 
+
 @contextmanager
 def _noop_ctx():
     yield
@@ -254,46 +279,80 @@ class TestResolvedMeasuresPairing:
 
     def test_uses_resolved_measures_by_table_from_ucmv_output(self):
         tool = MetricViewValidatorTool()
-        ucmv_output = json.dumps({
-            "yaml": {"fact_pe002": "version: '1.1'\nmeasures:\n  - name: paid_hours\n    expr: SUM(source.paid_hours)\n"},
-            "resolved_measures_by_table": {
-                "fact_pe002": [
-                    {"measure_name": "paid_hours", "original_name": "Paid Hours",
-                     "sql_expr": "SUM(source.paid_hours)", "dax_expression": "SUM(fact_pe002[paid_hours])",
-                     "proposed_allocation": "fact_pe002", "table_name": "fact_pe002"},
-                ]
-            },
-            "measures_with_dax": [],  # empty (holder-table junk would go here)
-        })
+        ucmv_output = json.dumps(
+            {
+                "yaml": {
+                    "fact_pe002": "version: '1.1'\nmeasures:\n  - name: paid_hours\n    expr: SUM(source.paid_hours)\n"
+                },
+                "resolved_measures_by_table": {
+                    "fact_pe002": [
+                        {
+                            "measure_name": "paid_hours",
+                            "original_name": "Paid Hours",
+                            "sql_expr": "SUM(source.paid_hours)",
+                            "dax_expression": "SUM(fact_pe002[paid_hours])",
+                            "proposed_allocation": "fact_pe002",
+                            "table_name": "fact_pe002",
+                        },
+                    ]
+                },
+                "measures_with_dax": [],  # empty (holder-table junk would go here)
+            }
+        )
 
         captured = {}
 
         class _FakePipeline:
-            def __init__(self, *a, **k): pass
-            def run(self, metrics_view_yaml_path=None, table_mapping_json_path=None, **k):
+            def __init__(self, *a, **k):
+                pass
+
+            def run(
+                self, metrics_view_yaml_path=None, table_mapping_json_path=None, **k
+            ):
                 # capture the measures that reached the pipeline
                 with open(table_mapping_json_path) as f:
-                    captured['measures'] = json.load(f)
-                return {"evaluated": [
-                    {"measure_name": "paid_hours", "measure_eval_result": {"status": "VALID"}}
-                ]}
+                    captured["measures"] = json.load(f)
+                return {
+                    "evaluated": [
+                        {
+                            "measure_name": "paid_hours",
+                            "measure_eval_result": {"status": "VALID"},
+                        }
+                    ]
+                }
 
         # Isolate from real DB / tmp side-channels that would override ucmv_output
         import os as _os
-        with patch(
-            "src.services.tools.metric_view_validation_utils.pipeline.MetricExpressionValidatorPipeline",
-            _FakePipeline,
-        ), patch.object(MetricViewValidatorTool, "_fetch_saved_ucmv_edits_from_db", return_value=None), \
-           patch.object(MetricViewValidatorTool, "_fetch_latest_ucmv_from_db", return_value=None), \
-           patch.object(MetricViewValidatorTool, "_fetch_measures_from_db", return_value=[]), \
-           patch.object(_os.path, "exists", return_value=False):
+
+        with (
+            patch(
+                "src.services.tools.metric_view_validation_utils.pipeline.MetricExpressionValidatorPipeline",
+                _FakePipeline,
+            ),
+            patch.object(
+                MetricViewValidatorTool,
+                "_fetch_saved_ucmv_edits_from_db",
+                return_value=None,
+            ),
+            patch.object(
+                MetricViewValidatorTool, "_fetch_latest_ucmv_from_db", return_value=None
+            ),
+            patch.object(
+                MetricViewValidatorTool, "_fetch_measures_from_db", return_value=[]
+            ),
+            patch.object(_os.path, "exists", return_value=False),
+        ):
             result = tool._run(ucmv_output=ucmv_output)
 
         data = json.loads(result)
         # The measure paired to fact_pe002 and got validated (not skipped)
-        assert captured.get('measures'), "resolved measures should have reached the pipeline"
-        assert captured['measures'][0]['dax_expression'] == "SUM(fact_pe002[paid_hours])"
-        assert data.get('summary', {}).get('total_valid', 0) >= 1
+        assert captured.get(
+            "measures"
+        ), "resolved measures should have reached the pipeline"
+        assert (
+            captured["measures"][0]["dax_expression"] == "SUM(fact_pe002[paid_hours])"
+        )
+        assert data.get("summary", {}).get("total_valid", 0) >= 1
 
 
 class TestCompactAgentReturn:
@@ -311,8 +370,12 @@ class TestCompactAgentReturn:
         tables = list(evaluated_by_table.keys())
 
         class _FakePipeline:
-            def __init__(self, *a, **k): pass
-            def run(self, metrics_view_yaml_path=None, table_mapping_json_path=None, **k):
+            def __init__(self, *a, **k):
+                pass
+
+            def run(
+                self, metrics_view_yaml_path=None, table_mapping_json_path=None, **k
+            ):
                 # Return evaluated rows for each table in turn.
                 idx = calls["i"]
                 calls["i"] += 1
@@ -320,13 +383,24 @@ class TestCompactAgentReturn:
                 return {"evaluated": evaluated_by_table[key]}
 
         tool = MetricViewValidatorTool()
-        with patch(
-            "src.services.tools.metric_view_validation_utils.pipeline.MetricExpressionValidatorPipeline",
-            _FakePipeline,
-        ), patch.object(MetricViewValidatorTool, "_fetch_saved_ucmv_edits_from_db", return_value=None), \
-           patch.object(MetricViewValidatorTool, "_fetch_latest_ucmv_from_db", return_value=None), \
-           patch.object(MetricViewValidatorTool, "_fetch_measures_from_db", return_value=[]), \
-           patch.object(_os.path, "exists", return_value=False):
+        with (
+            patch(
+                "src.services.tools.metric_view_validation_utils.pipeline.MetricExpressionValidatorPipeline",
+                _FakePipeline,
+            ),
+            patch.object(
+                MetricViewValidatorTool,
+                "_fetch_saved_ucmv_edits_from_db",
+                return_value=None,
+            ),
+            patch.object(
+                MetricViewValidatorTool, "_fetch_latest_ucmv_from_db", return_value=None
+            ),
+            patch.object(
+                MetricViewValidatorTool, "_fetch_measures_from_db", return_value=[]
+            ),
+            patch.object(_os.path, "exists", return_value=False),
+        ):
             return json.loads(tool._run(ucmv_output=ucmv_output))
 
     def _big_ucmv(self, n_tables=28, per_table=5):
@@ -337,20 +411,43 @@ class TestCompactAgentReturn:
             tk = f"fact_{t}"
             names = [f"m{t}_{i}" for i in range(per_table)]
             yaml[tk] = "version: '1.1'\nmeasures:\n" + "".join(
-                f"  - name: {nm}\n    expr: SUM(source.{nm})\n" for nm in names)
-            rmbt[tk] = [{"measure_name": nm, "original_name": nm,
-                         "sql_expr": f"SUM(source.{nm})", "dax_expression": f"SUM({tk}[{nm}])",
-                         "proposed_allocation": tk, "table_name": tk} for nm in names]
+                f"  - name: {nm}\n    expr: SUM(source.{nm})\n" for nm in names
+            )
+            rmbt[tk] = [
+                {
+                    "measure_name": nm,
+                    "original_name": nm,
+                    "sql_expr": f"SUM(source.{nm})",
+                    "dax_expression": f"SUM({tk}[{nm}])",
+                    "proposed_allocation": tk,
+                    "table_name": tk,
+                }
+                for nm in names
+            ]
             # Mostly VALID, but make one REVIEW and one INVALID per table.
             evaluated[tk] = []
             for i, nm in enumerate(names):
                 status = "VALID"
-                if i == 0: status = "REVIEW"
-                elif i == 1: status = "INVALID"
-                evaluated[tk].append({"measure_name": nm,
-                                      "measure_eval_result": {"status": status, "reason": "x" * 200}})
-        return json.dumps({"yaml": yaml, "resolved_measures_by_table": rmbt,
-                           "measures_with_dax": []}), evaluated
+                if i == 0:
+                    status = "REVIEW"
+                elif i == 1:
+                    status = "INVALID"
+                evaluated[tk].append(
+                    {
+                        "measure_name": nm,
+                        "measure_eval_result": {"status": status, "reason": "x" * 200},
+                    }
+                )
+        return (
+            json.dumps(
+                {
+                    "yaml": yaml,
+                    "resolved_measures_by_table": rmbt,
+                    "measures_with_dax": [],
+                }
+            ),
+            evaluated,
+        )
 
     def test_return_is_compact_but_keeps_yaml(self):
         ucmv, evaluated = self._big_ucmv(n_tables=28, per_table=5)
@@ -366,7 +463,14 @@ class TestCompactAgentReturn:
         assert "yaml" in data and len(data["yaml"]) == 28
         sample = next(iter(data["per_table_summary"].values()))
         # counts + a SLIM per-measure details list (name + status + short reason)
-        assert {"evaluated", "valid", "equivalent", "review", "invalid", "details"} <= set(sample)
+        assert {
+            "evaluated",
+            "valid",
+            "equivalent",
+            "review",
+            "invalid",
+            "details",
+        } <= set(sample)
         # every measure is listed (breakdown dropdown), each with a status but
         # WITHOUT the heavy differences/dax/sql comparison arrays.
         assert len(sample["details"]) == 5
@@ -405,23 +509,44 @@ class TestCompactAgentReturn:
         bucket, so the UI showed only a few 'validated' measures with no
         explanation for the rest."""
         import os as _os
-        ucmv = json.dumps({
-            "yaml": {"fact_x": "version: '1.1'\nmeasures:\n  - name: a\n    expr: MEASURE(b)/MEASURE(c)\n"},
-            "resolved_measures_by_table": {
-                "fact_x": [{"measure_name": "a", "original_name": "A",
-                            "sql_expr": "x", "dax_expression": "y",
-                            "proposed_allocation": "fact_x", "table_name": "fact_x"}]
-            },
-            "measures_with_dax": [],
-        })
+
+        ucmv = json.dumps(
+            {
+                "yaml": {
+                    "fact_x": "version: '1.1'\nmeasures:\n  - name: a\n    expr: MEASURE(b)/MEASURE(c)\n"
+                },
+                "resolved_measures_by_table": {
+                    "fact_x": [
+                        {
+                            "measure_name": "a",
+                            "original_name": "A",
+                            "sql_expr": "x",
+                            "dax_expression": "y",
+                            "proposed_allocation": "fact_x",
+                            "table_name": "fact_x",
+                        }
+                    ]
+                },
+                "measures_with_dax": [],
+            }
+        )
 
         class _MixedPipeline:
-            def __init__(self, *a, **k): pass
-            def run(self, metrics_view_yaml_path=None, table_mapping_json_path=None, **k):
+            def __init__(self, *a, **k):
+                pass
+
+            def run(
+                self, metrics_view_yaml_path=None, table_mapping_json_path=None, **k
+            ):
                 return {
                     "evaluated": [
-                        {"measure_name": "a", "measure_eval_result": {"status": "EQUIVALENT",
-                                                                      "similarities": ["match"]}},
+                        {
+                            "measure_name": "a",
+                            "measure_eval_result": {
+                                "status": "EQUIVALENT",
+                                "similarities": ["match"],
+                            },
+                        },
                     ],
                     "skipped": [
                         {"measure_eval": "simple", "measure_name": "total_sales"},
@@ -431,13 +556,24 @@ class TestCompactAgentReturn:
                 }
 
         tool = MetricViewValidatorTool()
-        with patch(
-            "src.services.tools.metric_view_validation_utils.pipeline.MetricExpressionValidatorPipeline",
-            _MixedPipeline,
-        ), patch.object(MetricViewValidatorTool, "_fetch_saved_ucmv_edits_from_db", return_value=None), \
-           patch.object(MetricViewValidatorTool, "_fetch_latest_ucmv_from_db", return_value=None), \
-           patch.object(MetricViewValidatorTool, "_fetch_measures_from_db", return_value=[]), \
-           patch.object(_os.path, "exists", return_value=False):
+        with (
+            patch(
+                "src.services.tools.metric_view_validation_utils.pipeline.MetricExpressionValidatorPipeline",
+                _MixedPipeline,
+            ),
+            patch.object(
+                MetricViewValidatorTool,
+                "_fetch_saved_ucmv_edits_from_db",
+                return_value=None,
+            ),
+            patch.object(
+                MetricViewValidatorTool, "_fetch_latest_ucmv_from_db", return_value=None
+            ),
+            patch.object(
+                MetricViewValidatorTool, "_fetch_measures_from_db", return_value=[]
+            ),
+            patch.object(_os.path, "exists", return_value=False),
+        ):
             data = json.loads(tool._run(ucmv_output=ucmv))
 
         tbl = data["per_table_summary"]["fact_x"]
@@ -448,10 +584,15 @@ class TestCompactAgentReturn:
         assert tbl["total_measures"] == 4
         # details list ALL four measures
         assert len(tbl["details"]) == 4
-        statuses = {d["measure_name"]: d["measure_eval_result"]["status"] for d in tbl["details"]}
+        statuses = {
+            d["measure_name"]: d["measure_eval_result"]["status"]
+            for d in tbl["details"]
+        }
         assert statuses["a"] == "EQUIVALENT"
         assert statuses["total_sales"] == "skipped"
         assert statuses["weird_ref"] == "skipped"
         # skipped rows carry a human reason
-        skipped_row = next(d for d in tbl["details"] if d["measure_name"] == "weird_ref")
+        skipped_row = next(
+            d for d in tbl["details"] if d["measure_name"] == "weird_ref"
+        )
         assert skipped_row["measure_eval_result"]["similarities"]  # non-empty reason

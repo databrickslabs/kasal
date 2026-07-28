@@ -4,22 +4,32 @@ Unit tests for PowerBIRouter.
 Tests the functionality of Power BI integration endpoints including
 configuration management, DAX query execution, and status checks.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime
 
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.schemas.powerbi_config import PowerBIConfigCreate, DAXQueryRequest, DAXQueryResponse
+from src.schemas.powerbi_config import (
+    DAXQueryRequest,
+    DAXQueryResponse,
+    PowerBIConfigCreate,
+)
 
 
 # Mock Power BI config response
 class MockPowerBIConfigResponse:
-    def __init__(self, tenant_id="test-tenant", client_id="test-client",
-                 workspace_id="test-workspace", semantic_model_id="test-model",
-                 enabled=True):
+    def __init__(
+        self,
+        tenant_id="test-tenant",
+        client_id="test-client",
+        workspace_id="test-workspace",
+        semantic_model_id="test-model",
+        enabled=True,
+    ):
         self.tenant_id = tenant_id
         self.client_id = client_id
         self.workspace_id = workspace_id
@@ -37,7 +47,7 @@ class MockPowerBIConfigResponse:
             "semantic_model_id": self.semantic_model_id,
             "enabled": self.enabled,
             "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat()
+            "updated_at": self.updated_at.isoformat(),
         }
 
 
@@ -67,7 +77,8 @@ def mock_group_context():
 def app(mock_powerbi_service, mock_db_session, mock_group_context):
     """Create a FastAPI app with mocked dependencies."""
     from fastapi import FastAPI
-    from src.api.powerbi_router import router, get_powerbi_service
+
+    from src.api.powerbi_router import get_powerbi_service, router
     from src.core.dependencies import get_db, get_group_context
     from tests.unit.api.conftest import register_exception_handlers
 
@@ -77,7 +88,9 @@ def app(mock_powerbi_service, mock_db_session, mock_group_context):
 
     # Override dependencies
     app.dependency_overrides[get_db] = lambda: mock_db_session
-    app.dependency_overrides[get_powerbi_service] = lambda session=None, group_context=None: mock_powerbi_service
+    app.dependency_overrides[get_powerbi_service] = (
+        lambda session=None, group_context=None: mock_powerbi_service
+    )
     app.dependency_overrides[get_group_context] = lambda: mock_group_context
 
     return app
@@ -92,16 +105,20 @@ def client(app):
 @pytest.fixture
 def mock_workspace_admin():
     """Mock workspace admin check."""
+
     def mock_is_admin(context):
         return True
+
     return mock_is_admin
 
 
 @pytest.fixture
 def mock_non_admin():
     """Mock non-admin check."""
+
     def mock_is_admin(context):
         return False
+
     return mock_is_admin
 
 
@@ -110,13 +127,13 @@ class TestPowerBIRouterConfigEndpoints:
 
     def test_set_powerbi_config_success(self, client, mock_powerbi_service):
         """Test successful Power BI configuration setting."""
-        with patch('src.api.powerbi_router.is_workspace_admin', return_value=True):
+        with patch("src.api.powerbi_router.is_workspace_admin", return_value=True):
             config_data = {
                 "tenant_id": "test-tenant",
                 "client_id": "test-client",
                 "workspace_id": "test-workspace",
                 "semantic_model_id": "test-model",
-                "enabled": True
+                "enabled": True,
             }
 
             # Mock repository response
@@ -139,11 +156,11 @@ class TestPowerBIRouterConfigEndpoints:
 
     def test_set_powerbi_config_not_admin(self, client, mock_powerbi_service):
         """Test Power BI configuration setting by non-admin."""
-        with patch('src.api.powerbi_router.is_workspace_admin', return_value=False):
+        with patch("src.api.powerbi_router.is_workspace_admin", return_value=False):
             config_data = {
                 "tenant_id": "test-tenant",
                 "client_id": "test-client",
-                "enabled": True
+                "enabled": True,
             }
 
             response = client.post("/powerbi/config", json=config_data)
@@ -153,14 +170,16 @@ class TestPowerBIRouterConfigEndpoints:
 
     def test_set_powerbi_config_error(self, client, mock_powerbi_service):
         """Test Power BI configuration setting with service error."""
-        with patch('src.api.powerbi_router.is_workspace_admin', return_value=True):
+        with patch("src.api.powerbi_router.is_workspace_admin", return_value=True):
             config_data = {
                 "tenant_id": "test-tenant",
                 "client_id": "test-client",
-                "enabled": True
+                "enabled": True,
             }
 
-            mock_powerbi_service.repository.create_config.side_effect = Exception("Database error")
+            mock_powerbi_service.repository.create_config.side_effect = Exception(
+                "Database error"
+            )
 
             response = client.post("/powerbi/config", json=config_data)
 
@@ -199,7 +218,9 @@ class TestPowerBIRouterConfigEndpoints:
 
     def test_get_powerbi_config_error(self, client, mock_powerbi_service):
         """Test Power BI configuration retrieval with service error."""
-        mock_powerbi_service.repository.get_active_config.side_effect = Exception("Database error")
+        mock_powerbi_service.repository.get_active_config.side_effect = Exception(
+            "Database error"
+        )
 
         response = client.get("/powerbi/config")
 
@@ -213,7 +234,7 @@ class TestPowerBIRouterQueryEndpoint:
         """Test successful DAX query execution."""
         query_request = {
             "dax_query": "EVALUATE 'Sales'",
-            "semantic_model_id": "test-model"
+            "semantic_model_id": "test-model",
         }
 
         mock_response = DAXQueryResponse(
@@ -221,7 +242,7 @@ class TestPowerBIRouterQueryEndpoint:
             data=[{"Region": "East", "Total": 1000}],
             row_count=1,
             columns=["Region", "Total"],
-            execution_time_ms=250
+            execution_time_ms=250,
         )
 
         mock_powerbi_service.execute_dax_query.return_value = mock_response
@@ -236,9 +257,7 @@ class TestPowerBIRouterQueryEndpoint:
 
     def test_execute_dax_query_missing_query(self, client):
         """Test DAX query execution with missing query."""
-        query_request = {
-            "semantic_model_id": "test-model"
-        }
+        query_request = {"semantic_model_id": "test-model"}
 
         response = client.post("/powerbi/query", json=query_request)
 
@@ -248,10 +267,12 @@ class TestPowerBIRouterQueryEndpoint:
         """Test DAX query execution with service error."""
         query_request = {
             "dax_query": "EVALUATE 'Sales'",
-            "semantic_model_id": "test-model"
+            "semantic_model_id": "test-model",
         }
 
-        mock_powerbi_service.execute_dax_query.side_effect = Exception("Query execution failed")
+        mock_powerbi_service.execute_dax_query.side_effect = Exception(
+            "Query execution failed"
+        )
 
         response = client.post("/powerbi/query", json=query_request)
 
@@ -262,12 +283,11 @@ class TestPowerBIRouterQueryEndpoint:
         """Test DAX query execution with HTTP exception."""
         query_request = {
             "dax_query": "EVALUATE 'Sales'",
-            "semantic_model_id": "test-model"
+            "semantic_model_id": "test-model",
         }
 
         mock_powerbi_service.execute_dax_query.side_effect = HTTPException(
-            status_code=400,
-            detail="Invalid DAX query"
+            status_code=400, detail="Invalid DAX query"
         )
 
         response = client.post("/powerbi/query", json=query_request)
@@ -326,7 +346,9 @@ class TestPowerBIRouterStatusEndpoint:
 
     def test_check_powerbi_status_error(self, client, mock_powerbi_service):
         """Test status check with service error."""
-        mock_powerbi_service.repository.get_active_config.side_effect = Exception("Database error")
+        mock_powerbi_service.repository.get_active_config.side_effect = Exception(
+            "Database error"
+        )
 
         response = client.get("/powerbi/status")
 
@@ -336,13 +358,15 @@ class TestPowerBIRouterStatusEndpoint:
 class TestPowerBIRouterMultiTenancy:
     """Test cases for multi-tenant functionality."""
 
-    def test_config_uses_group_context(self, client, mock_powerbi_service, mock_group_context):
+    def test_config_uses_group_context(
+        self, client, mock_powerbi_service, mock_group_context
+    ):
         """Test that configuration uses group context."""
-        with patch('src.api.powerbi_router.is_workspace_admin', return_value=True):
+        with patch("src.api.powerbi_router.is_workspace_admin", return_value=True):
             config_data = {
                 "tenant_id": "test-tenant",
                 "client_id": "test-client",
-                "enabled": True
+                "enabled": True,
             }
 
             mock_config = MagicMock()
@@ -361,15 +385,11 @@ class TestPowerBIRouterMultiTenancy:
         """Test that queries use group context."""
         query_request = {
             "dax_query": "EVALUATE 'Sales'",
-            "semantic_model_id": "test-model"
+            "semantic_model_id": "test-model",
         }
 
         mock_response = DAXQueryResponse(
-            status="success",
-            data=[],
-            row_count=0,
-            columns=[],
-            execution_time_ms=100
+            status="success", data=[], row_count=0, columns=[], execution_time_ms=100
         )
 
         mock_powerbi_service.execute_dax_query.return_value = mock_response

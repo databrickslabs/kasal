@@ -1,6 +1,8 @@
 """Tests for metric_view_validation_utils.pipeline (MetricExpressionValidatorPipeline)."""
+
 import json
 import textwrap
+
 import pytest
 
 from src.services.tools.metric_view_validation_utils.pipeline import (
@@ -38,6 +40,7 @@ def _write_files(tmp_path):
 # Initialisation
 # ---------------------------------------------------------------------------
 
+
 class TestInit:
     def test_defaults(self):
         p = MetricExpressionValidatorPipeline()
@@ -56,6 +59,7 @@ class TestInit:
 # ---------------------------------------------------------------------------
 # run() – missing parameters
 # ---------------------------------------------------------------------------
+
 
 class TestRunMissingParams:
     def test_no_params_returns_error(self):
@@ -82,6 +86,7 @@ class TestRunMissingParams:
 # ---------------------------------------------------------------------------
 # run() – direct validation mode
 # ---------------------------------------------------------------------------
+
 
 class TestRunDirect:
     def test_valid_pair_returns_is_valid(self):
@@ -142,7 +147,7 @@ class TestRunDirect:
         result = p.run(
             databricks_expr="SUM(source_a.amount)",
             dax_expr="SUM(fact_a[amount])",
-            table_mappings={"fact_b": "source_b"},   # adds, not replaces
+            table_mappings={"fact_b": "source_b"},  # adds, not replaces
         )
         assert result["is_valid"] is True
 
@@ -150,6 +155,7 @@ class TestRunDirect:
 # ---------------------------------------------------------------------------
 # run() – file-based validation mode
 # ---------------------------------------------------------------------------
+
 
 class TestRunFileBased:
     def test_returns_skipped_and_evaluated(self, tmp_path):
@@ -207,6 +213,7 @@ class TestRunFileBased:
 # run_as_json()
 # ---------------------------------------------------------------------------
 
+
 class TestRunAsJson:
     def test_returns_string(self):
         p = MetricExpressionValidatorPipeline()
@@ -227,7 +234,7 @@ class TestRunAsJson:
 
     def test_error_case_serialised(self):
         p = MetricExpressionValidatorPipeline()
-        result = p.run_as_json()   # no params → error
+        result = p.run_as_json()  # no params → error
         parsed = json.loads(result)
         assert "error" in parsed
 
@@ -245,6 +252,7 @@ class TestRunAsJson:
 # ---------------------------------------------------------------------------
 # Mapping merge behaviour
 # ---------------------------------------------------------------------------
+
 
 class TestMappingMerge:
     def test_empty_instance_with_call_overrides(self):

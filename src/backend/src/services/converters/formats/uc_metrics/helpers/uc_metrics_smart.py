@@ -3,7 +3,8 @@ Smart UC Metrics Generator
 Auto-routes between basic and tree parsing generators based on complexity
 """
 
-from typing import Dict, Any, List
+from typing import Any, Dict, List
+
 from ....base.models import KPIDefinition
 from ..yaml_to_uc_metrics import UCMetricsGenerator
 from .uc_metrics_tree_parsing import UCMetricsTreeParsingGenerator
@@ -58,9 +59,7 @@ class SmartUCMetricsGenerator:
         return "basic"
 
     def generate_consolidated_uc_metrics(
-        self,
-        definition: KPIDefinition,
-        metadata: Dict[str, Any]
+        self, definition: KPIDefinition, metadata: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Generate consolidated UC Metrics with automatic strategy selection.
@@ -80,10 +79,14 @@ class SmartUCMetricsGenerator:
             self.tree_generator.dependency_resolver.register_measures(definition)
 
             # Check for circular dependencies
-            cycles = self.tree_generator.dependency_resolver.detect_circular_dependencies()
+            cycles = (
+                self.tree_generator.dependency_resolver.detect_circular_dependencies()
+            )
             if cycles:
-                cycle_descriptions = [' -> '.join(cycle) for cycle in cycles]
-                raise ValueError(f"Circular dependencies detected:\n" + '\n'.join(cycle_descriptions))
+                cycle_descriptions = [" -> ".join(cycle) for cycle in cycles]
+                raise ValueError(
+                    f"Circular dependencies detected:\n" + "\n".join(cycle_descriptions)
+                )
 
             # Generate all measures with dependencies resolved
             measures = self.tree_generator.generate_all_measures(definition)
@@ -93,15 +96,14 @@ class SmartUCMetricsGenerator:
         else:
             # Use basic generator for simple cases
             return self.basic_generator.generate_consolidated_uc_metrics(
-                definition.kpis,
-                metadata
+                definition.kpis, metadata
             )
 
     def _build_consolidated_format(
         self,
         measures: List[Dict[str, Any]],
         definition: KPIDefinition,
-        metadata: Dict[str, Any]
+        metadata: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
         Build consolidated UC Metrics format from generated measures.
@@ -128,7 +130,7 @@ class SmartUCMetricsGenerator:
         catalog = metadata.get("catalog", "main")
         schema = metadata.get("schema", "default")
 
-        if '.' in source_table:
+        if "." in source_table:
             source = source_table
         else:
             source = f"{catalog}.{schema}.{source_table}"
@@ -138,7 +140,7 @@ class SmartUCMetricsGenerator:
             "version": "0.1",
             "description": f"UC metrics store definition for \"{metadata.get('name', 'measures')}\"",
             "source": source,
-            "measures": measures
+            "measures": measures,
         }
 
         # Add common filters if present
@@ -164,18 +166,23 @@ class SmartUCMetricsGenerator:
             "has_dependencies": has_deps,
             "recommended_strategy": strategy,
             "calculated_measures": sum(
-                1 for kpi in definition.kpis
+                1
+                for kpi in definition.kpis
                 if kpi.aggregation_type and kpi.aggregation_type.upper() == "CALCULATED"
             ),
             "simple_measures": sum(
-                1 for kpi in definition.kpis
-                if not kpi.aggregation_type or kpi.aggregation_type.upper() != "CALCULATED"
+                1
+                for kpi in definition.kpis
+                if not kpi.aggregation_type
+                or kpi.aggregation_type.upper() != "CALCULATED"
             ),
         }
 
         # Add dependency analysis if using tree parsing
         if strategy == "tree_parsing":
             self.tree_generator.dependency_resolver.register_measures(definition)
-            report["dependency_analysis"] = self.tree_generator.get_dependency_analysis(definition)
+            report["dependency_analysis"] = self.tree_generator.get_dependency_analysis(
+                definition
+            )
 
         return report

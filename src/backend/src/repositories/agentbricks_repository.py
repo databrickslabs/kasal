@@ -11,24 +11,24 @@ Uses unified authentication from get_auth_context() which implements:
 import asyncio
 import logging
 import time
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
 import httpx
 
-from src.utils.telemetry import get_user_agent_header, KasalProduct
-
 from src.schemas.agentbricks import (
+    AgentBricksAuthConfig,
     AgentBricksEndpoint,
     AgentBricksEndpointsRequest,
     AgentBricksEndpointsResponse,
+    AgentBricksExecutionRequest,
+    AgentBricksExecutionResponse,
+    AgentBricksMessage,
     AgentBricksQueryRequest,
     AgentBricksQueryResponse,
     AgentBricksQueryStatus,
-    AgentBricksExecutionRequest,
-    AgentBricksExecutionResponse,
-    AgentBricksAuthConfig,
-    AgentBricksMessage
 )
 from src.utils.databricks_auth import get_auth_context
+from src.utils.telemetry import KasalProduct, get_user_agent_header
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +78,13 @@ class AgentBricksRepository:
         if not databricks_host:
             try:
                 from databricks.sdk.config import Config
+
                 sdk_config = Config()
                 if sdk_config.host:
                     databricks_host = sdk_config.host
-                    logger.info(f"Auto-detected host from SDK Config: {databricks_host}")
+                    logger.info(
+                        f"Auto-detected host from SDK Config: {databricks_host}"
+                    )
             except Exception as e:
                 logger.debug(f"Could not auto-detect host from SDK: {e}")
 
@@ -89,6 +92,7 @@ class AgentBricksRepository:
         if not databricks_host:
             try:
                 from src.utils.databricks_auth import _databricks_auth
+
                 await _databricks_auth._load_config()
                 databricks_host = _databricks_auth.get_workspace_host()
                 logger.info(f"Got host from databricks_auth: {databricks_host}")
@@ -100,9 +104,9 @@ class AgentBricksRepository:
             logger.warning(f"Using default host: {databricks_host}")
 
         # Normalize host format
-        if databricks_host.startswith('https://'):
+        if databricks_host.startswith("https://"):
             databricks_host = databricks_host[8:]
-        if databricks_host.endswith('/'):
+        if databricks_host.endswith("/"):
             databricks_host = databricks_host[:-1]
 
         self._host = databricks_host
@@ -119,7 +123,11 @@ class AgentBricksRepository:
         try:
             # Extract user token if available (for OBO)
             user_token = None
-            if self.auth_config and self.auth_config.use_obo and self.auth_config.user_token:
+            if (
+                self.auth_config
+                and self.auth_config.use_obo
+                and self.auth_config.user_token
+            ):
                 user_token = self.auth_config.user_token
 
             # Get unified auth context (handles OBO → PAT with group_id → SPN)
@@ -192,7 +200,9 @@ class AgentBricksRepository:
 
         return False
 
-    async def _get_tile_name_map(self, headers: Optional[Dict[str, str]]) -> Dict[str, str]:
+    async def _get_tile_name_map(
+        self, headers: Optional[Dict[str, str]]
+    ) -> Dict[str, str]:
         """Map serving_endpoint_name -> friendly Agent Bricks tile name.
 
         Serving endpoints are named like ``mas-<id>-endpoint``; the human-facing
@@ -218,8 +228,7 @@ class AgentBricksRepository:
             return {}
 
     async def get_endpoints(
-        self,
-        request: AgentBricksEndpointsRequest
+        self, request: AgentBricksEndpointsRequest
     ) -> AgentBricksEndpointsResponse:
         """
         Fetch available AgentBricks endpoints with optional filtering.
@@ -267,7 +276,9 @@ class AgentBricksRepository:
 
                 # Parse state
                 state_data = endpoint_data.get("state", {})
-                state_str = state_data.get("ready") if isinstance(state_data, dict) else None
+                state_str = (
+                    state_data.get("ready") if isinstance(state_data, dict) else None
+                )
                 if state_str == "READY":
                     state_str = "READY"
                 elif state_str == "NOT_READY":
@@ -286,7 +297,7 @@ class AgentBricksRepository:
                     config=endpoint_data.get("config"),
                     tags=endpoint_data.get("tags", []),
                     task=endpoint_data.get("task"),
-                    endpoint_type=endpoint_data.get("endpoint_type")
+                    endpoint_type=endpoint_data.get("endpoint_type"),
                 )
                 all_endpoints.append(endpoint)
 
@@ -297,16 +308,14 @@ class AgentBricksRepository:
             # Filter by ready status
             if request.ready_only:
                 filtered_endpoints = [
-                    ep for ep in filtered_endpoints
-                    if ep.state == "READY"
+                    ep for ep in filtered_endpoints if ep.state == "READY"
                 ]
                 filtered = True
 
             # Filter by specific endpoint IDs
             if request.endpoint_ids:
                 filtered_endpoints = [
-                    ep for ep in filtered_endpoints
-                    if ep.id in request.endpoint_ids
+                    ep for ep in filtered_endpoints if ep.id in request.endpoint_ids
                 ]
                 filtered = True
 
@@ -314,27 +323,32 @@ class AgentBricksRepository:
             if request.search_query:
                 search_lower = request.search_query.lower()
                 filtered_endpoints = [
-                    ep for ep in filtered_endpoints
-                    if search_lower in ep.name.lower() or
-                       (ep.display_name and search_lower in ep.display_name.lower()) or
-                       (ep.creator and search_lower in ep.creator.lower())
+                    ep
+                    for ep in filtered_endpoints
+                    if search_lower in ep.name.lower()
+                    or (ep.display_name and search_lower in ep.display_name.lower())
+                    or (ep.creator and search_lower in ep.creator.lower())
                 ]
                 filtered = True
 
             # Filter by creator
             if request.creator_filter:
                 filtered_endpoints = [
-                    ep for ep in filtered_endpoints
-                    if ep.creator and request.creator_filter.lower() in ep.creator.lower()
+                    ep
+                    for ep in filtered_endpoints
+                    if ep.creator
+                    and request.creator_filter.lower() in ep.creator.lower()
                 ]
                 filtered = True
 
-            logger.info(f"Found {len(filtered_endpoints)} AgentBricks endpoints{' (filtered)' if filtered else ''}")
+            logger.info(
+                f"Found {len(filtered_endpoints)} AgentBricks endpoints{' (filtered)' if filtered else ''}"
+            )
 
             return AgentBricksEndpointsResponse(
                 endpoints=filtered_endpoints,
                 total_count=len(filtered_endpoints),
-                filtered=filtered
+                filtered=filtered,
             )
 
         except Exception as e:
@@ -342,8 +356,7 @@ class AgentBricksRepository:
             return AgentBricksEndpointsResponse(endpoints=[])
 
     async def query_endpoint(
-        self,
-        request: AgentBricksQueryRequest
+        self, request: AgentBricksQueryRequest
     ) -> AgentBricksQueryResponse:
         """
         Query an AgentBricks endpoint with messages.
@@ -365,23 +378,22 @@ class AgentBricksRepository:
                 return AgentBricksQueryResponse(
                     response="",
                     status=AgentBricksQueryStatus.FAILED,
-                    error=f"Authentication failed: {error}"
+                    error=f"Authentication failed: {error}",
                 )
 
             # Build endpoint URL
-            url = await self._make_url(f"/serving-endpoints/{request.endpoint_name}/invocations")
+            url = await self._make_url(
+                f"/serving-endpoints/{request.endpoint_name}/invocations"
+            )
             logger.info(f"Querying AgentBricks endpoint: {url}")
 
             # Convert messages to AgentBricks input format
             input_messages = [
-                {"role": msg.role, "content": msg.content}
-                for msg in request.messages
+                {"role": msg.role, "content": msg.content} for msg in request.messages
             ]
 
             # Build request payload
-            payload = {
-                "input": input_messages
-            }
+            payload = {"input": input_messages}
 
             # Add custom inputs if provided
             if request.custom_inputs:
@@ -393,15 +405,15 @@ class AgentBricksRepository:
 
             # Send request
             logger.debug(f"AgentBricks request payload: {payload}")
-            response = await self._client.post(url, headers=headers, json=payload, timeout=120)
+            response = await self._client.post(
+                url, headers=headers, json=payload, timeout=120
+            )
 
             if response.status_code != 200:
                 error_msg = f"HTTP {response.status_code}: {response.text}"
                 logger.error(f"AgentBricks query failed: {error_msg}")
                 return AgentBricksQueryResponse(
-                    response="",
-                    status=AgentBricksQueryStatus.FAILED,
-                    error=error_msg
+                    response="", status=AgentBricksQueryStatus.FAILED, error=error_msg
                 )
 
             response.raise_for_status()
@@ -450,20 +462,17 @@ class AgentBricksRepository:
                 response=response_text or str(result),
                 status=AgentBricksQueryStatus.SUCCESS,
                 trace=trace_info,
-                usage=usage_info
+                usage=usage_info,
             )
 
         except Exception as e:
             logger.error(f"Error querying AgentBricks endpoint: {e}")
             return AgentBricksQueryResponse(
-                response="",
-                status=AgentBricksQueryStatus.FAILED,
-                error=str(e)
+                response="", status=AgentBricksQueryStatus.FAILED, error=str(e)
             )
 
     async def execute_query(
-        self,
-        request: AgentBricksExecutionRequest
+        self, request: AgentBricksExecutionRequest
     ) -> AgentBricksExecutionResponse:
         """
         Execute a simplified query to an AgentBricks endpoint.
@@ -476,16 +485,14 @@ class AgentBricksRepository:
         """
         try:
             # Convert question to message format
-            messages = [
-                AgentBricksMessage(role="user", content=request.question)
-            ]
+            messages = [AgentBricksMessage(role="user", content=request.question)]
 
             # Create query request
             query_request = AgentBricksQueryRequest(
                 endpoint_name=request.endpoint_name,
                 messages=messages,
                 custom_inputs=request.custom_inputs,
-                return_trace=request.return_trace
+                return_trace=request.return_trace,
             )
 
             # Execute query
@@ -495,9 +502,13 @@ class AgentBricksRepository:
             return AgentBricksExecutionResponse(
                 endpoint_name=request.endpoint_name,
                 status=query_response.status,
-                result=query_response.response if query_response.status == AgentBricksQueryStatus.SUCCESS else None,
+                result=(
+                    query_response.response
+                    if query_response.status == AgentBricksQueryStatus.SUCCESS
+                    else None
+                ),
                 error=query_response.error,
-                trace=query_response.trace
+                trace=query_response.trace,
             )
 
         except Exception as e:
@@ -505,7 +516,7 @@ class AgentBricksRepository:
             return AgentBricksExecutionResponse(
                 endpoint_name=request.endpoint_name,
                 status=AgentBricksQueryStatus.FAILED,
-                error=str(e)
+                error=str(e),
             )
 
     async def aclose(self):

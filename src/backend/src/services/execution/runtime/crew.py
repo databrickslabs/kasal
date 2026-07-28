@@ -28,6 +28,7 @@ from pydantic import UUID4, BaseModel, ConfigDict, Field, PrivateAttr
 
 from src.core.events.bus import event_bus
 from src.core.events.types import CrewKickoffCompletedEvent, CrewKickoffStartedEvent
+
 from .agent import Agent, BaseAgent
 from .executor import delegation_tools, interpolate_text
 from .task import Task

@@ -4,25 +4,26 @@ Crew preparation module for CrewAI engine.
 This module handles the preparation and configuration of CrewAI agents and tasks.
 """
 
-from typing import Dict, Any, List, Optional
 import asyncio
 import logging
-import re
 import os
+import re
 from datetime import datetime
-from src.services.execution.runtime import Agent, Crew, Task, Process
+from typing import Any, Dict, List, Optional
+
 from src.core.logger import LoggerManager
-from src.services.agent_builder.task_adapter import create_task, is_data_missing
-from src.services.agent_builder.agent_adapter import create_agent
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
+from src.services.agent_builder.agent_adapter import create_agent
+from src.services.agent_builder.task_adapter import create_task, is_data_missing
+from src.services.execution.config.crew_config_builder import CrewConfigBuilder
+from src.services.execution.config.embedder_config_builder import EmbedderConfigBuilder
+from src.services.execution.config.manager_config_builder import ManagerConfigBuilder
+from src.services.execution.runtime import Agent, Crew, Process, Task
 from src.services.memory.backend_factory import MemoryBackendFactory
-from src.utils.databricks_url_utils import DatabricksURLUtils
 
 # Import new service classes
 from src.services.memory.crew_memory import CrewMemoryService
-from src.services.execution.config.embedder_config_builder import EmbedderConfigBuilder
-from src.services.execution.config.manager_config_builder import ManagerConfigBuilder
-from src.services.execution.config.crew_config_builder import CrewConfigBuilder
+from src.utils.databricks_url_utils import DatabricksURLUtils
 
 logger = LoggerManager.get_instance().crew
 
@@ -662,7 +663,9 @@ class CrewPreparation:
                 # is ignored rather than honoured, so what the crew says is what
                 # runs; it is logged so an old crew's behaviour change is
                 # traceable.
-                has_context = "_context_refs" in task_config or task_config.get("context")
+                has_context = "_context_refs" in task_config or task_config.get(
+                    "context"
+                )
                 crew_process = str(
                     (self.config.get("crew") or {}).get("process", "") or ""
                 ).lower()
@@ -1279,9 +1282,9 @@ class CrewPreparation:
             # agent in the crew (previously each agent re-fetched the whole
             # group table, including tool_config decryption per row).
             if self._group_agents_cache is None:
+                from src.db.session import request_scoped_session
                 from src.services.catalog.agents import AgentService
                 from src.utils.user_context import GroupContext
-                from src.db.session import request_scoped_session
 
                 group_id = self.config.get("group_id", "default")
                 async with request_scoped_session() as session:

@@ -11,9 +11,10 @@ while the catalogue listed models the providers had retired. SUPPORTED_MODELS is
 now derived from DEFAULT_MODELS, and what is worth testing is that the
 derivation holds — not which models happen to be current today.
 """
+
 import pytest
 
-from src.schemas.model_provider import ModelProvider, SUPPORTED_MODELS
+from src.schemas.model_provider import SUPPORTED_MODELS, ModelProvider
 from src.seeds.model_configs import DEFAULT_MODELS, REMOVED_MODEL_KEYS
 
 
@@ -87,21 +88,25 @@ class TestSupportedModels:
     def test_all_providers_have_models(self):
         """Test that all providers have at least one model."""
         for provider in ModelProvider:
-            assert len(SUPPORTED_MODELS[provider]) > 0, f"Provider {provider} has no models"
+            assert (
+                len(SUPPORTED_MODELS[provider]) > 0
+            ), f"Provider {provider} has no models"
 
     def test_model_uniqueness_within_provider(self):
         """Test that models are unique within each provider."""
         for provider, models in SUPPORTED_MODELS.items():
-            assert len(set(models)) == len(models), f"Duplicate models found for {provider}"
+            assert len(set(models)) == len(
+                models
+            ), f"Duplicate models found for {provider}"
 
     def test_model_keys_are_globally_unique(self):
         """A model key belongs to exactly one provider."""
         seen = {}
         for provider, models in SUPPORTED_MODELS.items():
             for model in models:
-                assert model not in seen, (
-                    f"{model} listed under both {seen.get(model)} and {provider}"
-                )
+                assert (
+                    model not in seen
+                ), f"{model} listed under both {seen.get(model)} and {provider}"
                 seen[model] = provider
 
     def test_model_naming_conventions(self):
@@ -123,9 +128,9 @@ class TestSupportedModels:
                 # (whatever the serving endpoint was started with), so they
                 # carry no pattern constraint.
                 if provider in patterns:
-                    assert any(p in model.lower() for p in patterns[provider]), (
-                        f"{model} does not look like a {provider.value} model"
-                    )
+                    assert any(
+                        p in model.lower() for p in patterns[provider]
+                    ), f"{model} does not look like a {provider.value} model"
 
 
 class TestModelProviderIntegration:
@@ -133,6 +138,7 @@ class TestModelProviderIntegration:
 
     def test_model_validation_scenario(self):
         """Test a realistic model validation scenario."""
+
         def is_model_supported(provider_name: str, model_name: str) -> bool:
             try:
                 provider = ModelProvider(provider_name)
@@ -176,6 +182,7 @@ class TestModelProviderIntegration:
 
     def test_model_search_functionality(self):
         """Test searching for models across providers."""
+
         def find_providers_for_model_pattern(pattern: str):
             matching_providers = []
             for provider, models in SUPPORTED_MODELS.items():

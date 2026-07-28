@@ -5,16 +5,17 @@ Tests role-based access control helpers, workspace admin logic,
 effective role resolution, and the require_roles decorator family.
 """
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 from fastapi import HTTPException
 
 from src.utils.user_context import GroupContext
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_current_user(is_system_admin=False, is_personal_workspace_manager=False):
     """Return a MagicMock that looks like a User model."""
@@ -55,32 +56,39 @@ def _make_ctx(
 # is_admin
 # ---------------------------------------------------------------------------
 
+
 class TestIsAdmin:
     """Tests for is_admin()."""
 
     def test_returns_true_for_admin(self):
         from src.core.permissions import is_admin
+
         assert is_admin("admin") is True
 
     def test_returns_true_for_ADMIN_uppercase(self):
         from src.core.permissions import is_admin
+
         assert is_admin("ADMIN") is True
 
     def test_returns_false_for_editor(self):
         from src.core.permissions import is_admin
+
         assert not is_admin("editor")
 
     def test_returns_false_for_operator(self):
         from src.core.permissions import is_admin
+
         assert not is_admin("operator")
 
     def test_returns_falsy_for_none(self):
         from src.core.permissions import is_admin
+
         # The implementation returns `role and …` so None yields None (falsy)
         assert not is_admin(None)
 
     def test_returns_falsy_for_empty_string(self):
         from src.core.permissions import is_admin
+
         assert not is_admin("")
 
 
@@ -88,27 +96,33 @@ class TestIsAdmin:
 # is_editor_or_above
 # ---------------------------------------------------------------------------
 
+
 class TestIsEditorOrAbove:
     """Tests for is_editor_or_above()."""
 
     def test_true_for_admin(self):
         from src.core.permissions import is_editor_or_above
+
         assert is_editor_or_above("admin") is True
 
     def test_true_for_editor(self):
         from src.core.permissions import is_editor_or_above
+
         assert is_editor_or_above("editor") is True
 
     def test_false_for_operator(self):
         from src.core.permissions import is_editor_or_above
+
         assert not is_editor_or_above("operator")
 
     def test_false_for_none(self):
         from src.core.permissions import is_editor_or_above
+
         assert not is_editor_or_above(None)
 
     def test_case_insensitive_EDITOR(self):
         from src.core.permissions import is_editor_or_above
+
         assert is_editor_or_above("EDITOR") is True
 
 
@@ -116,31 +130,38 @@ class TestIsEditorOrAbove:
 # is_operator_or_above
 # ---------------------------------------------------------------------------
 
+
 class TestIsOperatorOrAbove:
     """Tests for is_operator_or_above()."""
 
     def test_true_for_admin(self):
         from src.core.permissions import is_operator_or_above
+
         assert is_operator_or_above("admin") is True
 
     def test_true_for_editor(self):
         from src.core.permissions import is_operator_or_above
+
         assert is_operator_or_above("editor") is True
 
     def test_true_for_operator(self):
         from src.core.permissions import is_operator_or_above
+
         assert is_operator_or_above("operator") is True
 
     def test_false_for_none(self):
         from src.core.permissions import is_operator_or_above
+
         assert not is_operator_or_above(None)
 
     def test_false_for_unknown_role(self):
         from src.core.permissions import is_operator_or_above
+
         assert not is_operator_or_above("viewer")
 
     def test_case_insensitive_OPERATOR(self):
         from src.core.permissions import is_operator_or_above
+
         assert is_operator_or_above("OPERATOR") is True
 
 
@@ -148,31 +169,37 @@ class TestIsOperatorOrAbove:
 # check_role_in_context
 # ---------------------------------------------------------------------------
 
+
 class TestCheckRoleInContext:
     """Tests for check_role_in_context()."""
 
     def test_returns_true_when_role_in_allowed(self):
         from src.core.permissions import check_role_in_context
+
         ctx = _make_ctx(user_role="editor", group_ids=["team_1"])
         assert check_role_in_context(ctx, ["admin", "editor"]) is True
 
     def test_returns_false_when_role_not_allowed(self):
         from src.core.permissions import check_role_in_context
+
         ctx = _make_ctx(user_role="operator", group_ids=["team_1"])
         assert check_role_in_context(ctx, ["admin", "editor"]) is False
 
     def test_system_admin_always_passes(self):
         from src.core.permissions import check_role_in_context
+
         ctx = _make_ctx(is_system_admin=True)
         assert check_role_in_context(ctx, ["admin"]) is True
 
     def test_returns_false_when_no_role(self):
         from src.core.permissions import check_role_in_context
+
         ctx = _make_ctx(user_role=None, include_current_user=False)
         assert check_role_in_context(ctx, ["admin", "editor", "operator"]) is False
 
     def test_case_insensitive_comparison(self):
         from src.core.permissions import check_role_in_context
+
         ctx = _make_ctx(user_role="ADMIN", group_ids=["team_1"])
         assert check_role_in_context(ctx, ["admin"]) is True
 
@@ -181,26 +208,31 @@ class TestCheckRoleInContext:
 # is_system_admin
 # ---------------------------------------------------------------------------
 
+
 class TestIsSystemAdmin:
     """Tests for is_system_admin()."""
 
     def test_returns_true_when_is_system_admin_flag_set(self):
         from src.core.permissions import is_system_admin
+
         ctx = _make_ctx(is_system_admin=True)
         assert is_system_admin(ctx) is True
 
     def test_returns_false_when_flag_not_set(self):
         from src.core.permissions import is_system_admin
+
         ctx = _make_ctx(is_system_admin=False)
         assert is_system_admin(ctx) is False
 
     def test_returns_false_when_no_current_user(self):
         from src.core.permissions import is_system_admin
+
         ctx = _make_ctx(include_current_user=False)
         assert is_system_admin(ctx) is False
 
     def test_returns_false_for_none_context(self):
         from src.core.permissions import is_system_admin
+
         assert is_system_admin(None) is False  # type: ignore[arg-type]
 
 
@@ -208,16 +240,19 @@ class TestIsSystemAdmin:
 # is_workspace_admin
 # ---------------------------------------------------------------------------
 
+
 class TestIsWorkspaceAdmin:
     """Tests for is_workspace_admin()."""
 
     def test_system_admin_is_workspace_admin(self):
         from src.core.permissions import is_workspace_admin
+
         ctx = _make_ctx(is_system_admin=True)
         assert is_workspace_admin(ctx) is True
 
     def test_personal_workspace_manager_is_admin(self):
         from src.core.permissions import is_workspace_admin
+
         ctx = _make_ctx(
             group_ids=["user_123"],
             is_personal_workspace_manager=True,
@@ -226,6 +261,7 @@ class TestIsWorkspaceAdmin:
 
     def test_personal_workspace_non_manager_is_not_admin(self):
         from src.core.permissions import is_workspace_admin
+
         ctx = _make_ctx(
             group_ids=["user_123"],
             is_personal_workspace_manager=False,
@@ -234,6 +270,7 @@ class TestIsWorkspaceAdmin:
 
     def test_team_workspace_admin_role_is_admin(self):
         from src.core.permissions import is_workspace_admin
+
         ctx = _make_ctx(
             group_ids=["team_456"],
             user_role="admin",
@@ -243,6 +280,7 @@ class TestIsWorkspaceAdmin:
 
     def test_team_workspace_editor_role_is_not_admin(self):
         from src.core.permissions import is_workspace_admin
+
         ctx = _make_ctx(
             group_ids=["team_456"],
             user_role="editor",
@@ -252,10 +290,12 @@ class TestIsWorkspaceAdmin:
 
     def test_returns_false_for_none_context(self):
         from src.core.permissions import is_workspace_admin
+
         assert is_workspace_admin(None) is False  # type: ignore[arg-type]
 
     def test_no_current_user_falls_through_to_user_role(self):
         from src.core.permissions import is_workspace_admin
+
         ctx = _make_ctx(user_role="admin", include_current_user=False)
         assert is_workspace_admin(ctx) is True
 
@@ -264,16 +304,19 @@ class TestIsWorkspaceAdmin:
 # get_effective_role
 # ---------------------------------------------------------------------------
 
+
 class TestGetEffectiveRole:
     """Tests for get_effective_role()."""
 
     def test_system_admin_returns_admin(self):
         from src.core.permissions import get_effective_role
+
         ctx = _make_ctx(is_system_admin=True)
         assert get_effective_role(ctx) == "admin"
 
     def test_personal_workspace_manager_returns_admin(self):
         from src.core.permissions import get_effective_role
+
         ctx = _make_ctx(
             group_ids=["user_999"],
             is_personal_workspace_manager=True,
@@ -282,6 +325,7 @@ class TestGetEffectiveRole:
 
     def test_personal_workspace_non_manager_returns_editor(self):
         from src.core.permissions import get_effective_role
+
         ctx = _make_ctx(
             group_ids=["user_999"],
             is_personal_workspace_manager=False,
@@ -290,20 +334,24 @@ class TestGetEffectiveRole:
 
     def test_team_workspace_uses_assigned_role(self):
         from src.core.permissions import get_effective_role
+
         ctx = _make_ctx(user_role="operator", group_ids=["team_1"])
         assert get_effective_role(ctx) == "operator"
 
     def test_returns_none_for_none_context(self):
         from src.core.permissions import get_effective_role
+
         assert get_effective_role(None) is None  # type: ignore[arg-type]
 
     def test_returns_user_role_when_no_current_user(self):
         from src.core.permissions import get_effective_role
+
         ctx = _make_ctx(user_role="editor", include_current_user=False)
         assert get_effective_role(ctx) == "editor"
 
     def test_returns_none_when_no_user_role_and_no_current_user(self):
         from src.core.permissions import get_effective_role
+
         ctx = _make_ctx(user_role=None, include_current_user=False)
         assert get_effective_role(ctx) is None
 
@@ -311,6 +359,7 @@ class TestGetEffectiveRole:
 # ---------------------------------------------------------------------------
 # require_roles decorator
 # ---------------------------------------------------------------------------
+
 
 class TestRequireRoles:
     """Tests for the require_roles() async decorator.
@@ -418,6 +467,7 @@ class TestRequireRoles:
 # ---------------------------------------------------------------------------
 # require_admin / require_editor_or_admin / require_operator_or_above
 # ---------------------------------------------------------------------------
+
 
 class TestConvenienceDecorators:
     """Tests for require_admin(), require_editor_or_admin(), require_operator_or_above()."""

@@ -8,6 +8,7 @@ and managing API keys stored in the local database.
 import logging
 import os
 from typing import List, Optional
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 class ApiKeysService(BaseService):
     """Service for managing API keys."""
-    
+
     def __init__(self, session: AsyncSession, group_id: Optional[str] = None):
         """
         Initialize the service with session.
@@ -43,6 +44,7 @@ class ApiKeysService(BaseService):
         (PERF-005) — get_auth_context caches DATABRICKS_TOKEN/API_KEY lookups."""
         try:
             from src.utils.databricks_auth import invalidate_pat_cache
+
             invalidate_pat_cache(self.group_id)
         except Exception:
             # Cache invalidation must never break a key mutation; the entry
@@ -78,7 +80,7 @@ class ApiKeysService(BaseService):
             )
 
         return await self.repository.find_by_name(name, group_id=self.group_id)
-    
+
     def find_by_name_sync(self, name: str) -> Optional[ApiKey]:
         """
         Find an API key by name synchronously within the current group context.
@@ -108,30 +110,32 @@ class ApiKeysService(BaseService):
             )
 
         return self.repository.find_by_name_sync(name, group_id=self.group_id)
-    
-    async def create_api_key(self, api_key_data: ApiKeyCreate, created_by_email: Optional[str] = None) -> ApiKey:
+
+    async def create_api_key(
+        self, api_key_data: ApiKeyCreate, created_by_email: Optional[str] = None
+    ) -> ApiKey:
         """
         Create a new API key with encrypted value.
-        
+
         Args:
             api_key_data: API key data for creation
             created_by_email: Email of the user creating the key
-            
+
         Returns:
             Created API key
         """
         # Encrypt the API key value
         encrypted_value = EncryptionUtils.encrypt_value(api_key_data.value)
-        
+
         # Create API key data dictionary
         api_key_dict = {
             "name": api_key_data.name,
             "encrypted_value": encrypted_value,
             "description": api_key_data.description or "",
             "group_id": self.group_id,
-            "created_by_email": created_by_email
+            "created_by_email": created_by_email,
         }
-        
+
         # Save to database
         created_key = await self.repository.create(api_key_dict)
 
@@ -142,15 +146,17 @@ class ApiKeysService(BaseService):
         created_key.value = api_key_data.value
 
         return created_key
-    
-    async def update_api_key(self, name: str, api_key_data: ApiKeyUpdate) -> Optional[ApiKey]:
+
+    async def update_api_key(
+        self, name: str, api_key_data: ApiKeyUpdate
+    ) -> Optional[ApiKey]:
         """
         Update an existing API key.
-        
+
         Args:
             name: Name of the API key to update
             api_key_data: API key data for update
-            
+
         Returns:
             Updated API key if successful, else None
         """
@@ -158,15 +164,15 @@ class ApiKeysService(BaseService):
         api_key = await self.find_by_name(name)
         if not api_key:
             return None
-        
+
         # Create update dictionary
         update_dict = {
             "encrypted_value": EncryptionUtils.encrypt_value(api_key_data.value)
         }
-        
+
         if api_key_data.description is not None:
             update_dict["description"] = api_key_data.description
-        
+
         # Update in database
         updated_key = await self.repository.update(api_key.id, update_dict)
 
@@ -177,14 +183,14 @@ class ApiKeysService(BaseService):
         updated_key.value = api_key_data.value
 
         return updated_key
-    
+
     async def delete_api_key(self, name: str) -> bool:
         """
         Delete an API key.
-        
+
         Args:
             name: Name of the API key to delete
-            
+
         Returns:
             True if deleted, False otherwise
         """
@@ -198,16 +204,16 @@ class ApiKeysService(BaseService):
         if deleted:
             self._invalidate_pat_cache()
         return deleted
-    
+
     async def get_all_api_keys(self) -> List[ApiKey]:
         """
         Get all API keys with decrypted values for the current group.
-        
+
         Returns:
             List of all API keys with decrypted values
         """
         api_keys = await self.repository.find_all(group_id=self.group_id)
-        
+
         # Decrypt values for the response
         for key in api_keys:
             try:
@@ -217,31 +223,35 @@ class ApiKeysService(BaseService):
                 logger.error(f"Error decrypting API key '{key.name}': {str(e)}")
                 # If decryption fails, set empty value
                 key.value = ""
-        
+
         return api_keys
-    
+
     async def get_api_keys_metadata(self) -> List[ApiKey]:
         """
         Get all API keys metadata without values for frontend display.
-        
+
         Returns only metadata (names, descriptions, IDs) with status indicator.
         Safe for HTTP API exposure.
-        
+
         Returns:
             List of API keys with metadata and set/not set status
         """
         api_keys = await self.repository.find_all(group_id=self.group_id)
-        
+
         # Set status indicator instead of actual values for security
         for key in api_keys:
             # Check if key has an encrypted value
             has_value = bool(key.encrypted_value and key.encrypted_value.strip())
-            key.value = "Set" if has_value else "Not set"  # Status indicator instead of actual value
-        
+            key.value = (
+                "Set" if has_value else "Not set"
+            )  # Status indicator instead of actual value
+
         return api_keys
-    
+
     @classmethod
-    async def get_api_key_value(cls, db: AsyncSession = None, key_name: str = None, group_id: str = None):
+    async def get_api_key_value(
+        cls, db: AsyncSession = None, key_name: str = None, group_id: str = None
+    ):
         """
         Get the value of an API key by name (decrypted).
 
@@ -272,6 +282,7 @@ class ApiKeysService(BaseService):
 
         # Create a service instance using session factory
         from src.db.session import request_scoped_session
+
         async with request_scoped_session() as session:
             service = cls(session, group_id=group_id)
 
@@ -286,19 +297,19 @@ class ApiKeysService(BaseService):
             except Exception as e:
                 logger.error(f"Error decrypting API key '{key_name}': {str(e)}")
                 return None
-    
+
     @classmethod
     async def setup_provider_api_key(cls, db: AsyncSession, key_name: str) -> bool:
         """
         Set up an API key for any provider from the database.
-        
+
         This is a generic function that can be used to set up any API key.
         It retrieves the key from the database and sets it as an environment variable.
-        
+
         Args:
             db: Database session
             key_name: Name of the API key
-            
+
         Returns:
             True if successful, False otherwise
         """
@@ -310,31 +321,31 @@ class ApiKeysService(BaseService):
         else:
             logger.warning(f"API key '{key_name}' not found in database")
             return False
-    
+
     @staticmethod
     def setup_provider_api_key_sync(db: Session, key_name: str) -> bool:
         """
         Set up an API key for any provider from the database (sync version).
-        
+
         Args:
             db: Database session (synchronous)
             key_name: Name of the API key
-            
+
         Returns:
             True if successful, False otherwise
         """
         # Create a service instance with a synchronous session
         service = ApiKeysService(db)
-        
+
         # Get the API key from the database
         try:
             # Find the API key by name
             api_key = service.find_by_name_sync(key_name)
-            
+
             if api_key and api_key.encrypted_value:
                 # Decrypt the value
                 value = EncryptionUtils.decrypt_value(api_key.encrypted_value)
-                
+
                 # Set as environment variable
                 os.environ[key_name] = value
                 logger.info(f"API key '{key_name}' set up successfully (sync)")
@@ -345,9 +356,11 @@ class ApiKeysService(BaseService):
         except Exception as e:
             logger.error(f"Error setting up API key '{key_name}': {str(e)}")
             return False
-            
+
     @classmethod
-    async def setup_openai_api_key(cls, db: AsyncSession = None, group_id: str = None) -> bool:
+    async def setup_openai_api_key(
+        cls, db: AsyncSession = None, group_id: str = None
+    ) -> bool:
         """
         Set up the OpenAI API key from the database.
 
@@ -381,9 +394,11 @@ class ApiKeysService(BaseService):
         except Exception as e:
             logger.error(f"Error setting up OpenAI API key: {str(e)}")
             return False
-        
+
     @classmethod
-    async def setup_anthropic_api_key(cls, db: AsyncSession = None, group_id: str = None) -> bool:
+    async def setup_anthropic_api_key(
+        cls, db: AsyncSession = None, group_id: str = None
+    ) -> bool:
         """
         Set up the Anthropic API key from the database.
 
@@ -417,9 +432,11 @@ class ApiKeysService(BaseService):
         except Exception as e:
             logger.error(f"Error setting up Anthropic API key: {str(e)}")
             return False
-        
+
     @classmethod
-    async def setup_deepseek_api_key(cls, db: AsyncSession = None, group_id: str = None) -> bool:
+    async def setup_deepseek_api_key(
+        cls, db: AsyncSession = None, group_id: str = None
+    ) -> bool:
         """
         Set up the DeepSeek API key from the database.
 
@@ -453,9 +470,11 @@ class ApiKeysService(BaseService):
         except Exception as e:
             logger.error(f"Error setting up DeepSeek API key: {str(e)}")
             return False
-            
+
     @classmethod
-    async def setup_gemini_api_key(cls, db: AsyncSession = None, group_id: str = None) -> bool:
+    async def setup_gemini_api_key(
+        cls, db: AsyncSession = None, group_id: str = None
+    ) -> bool:
         """
         Set up the Gemini API key from the database.
 
@@ -489,9 +508,9 @@ class ApiKeysService(BaseService):
         except Exception as e:
             logger.error(f"Error setting up Gemini API key: {str(e)}")
             return False
-        
+
     @classmethod
-    async def setup_all_api_keys(cls, db = None, group_id: str = None) -> None:
+    async def setup_all_api_keys(cls, db=None, group_id: str = None) -> None:
         """
         Set up all supported API keys from the database.
 
@@ -514,7 +533,9 @@ class ApiKeysService(BaseService):
         if db is not None and isinstance(db, Session):
             # NOTE: Sync methods are deprecated and don't support group_id properly
             # This path should not be used in production
-            logger.warning("Using deprecated sync API key setup - security may be compromised")
+            logger.warning(
+                "Using deprecated sync API key setup - security may be compromised"
+            )
             ApiKeysService.setup_provider_api_key_sync(db, "OPENAI_API_KEY")
             ApiKeysService.setup_provider_api_key_sync(db, "ANTHROPIC_API_KEY")
             ApiKeysService.setup_provider_api_key_sync(db, "DEEPSEEK_API_KEY")
@@ -525,7 +546,7 @@ class ApiKeysService(BaseService):
             await cls.setup_anthropic_api_key(group_id=group_id)
             await cls.setup_deepseek_api_key(group_id=group_id)
             await cls.setup_gemini_api_key(group_id=group_id)
-    
+
     @classmethod
     async def get_provider_api_key(cls, provider: str, group_id: str) -> Optional[str]:
         """
@@ -554,6 +575,7 @@ class ApiKeysService(BaseService):
         try:
             # Create a service instance using session factory
             from src.db.session import request_scoped_session
+
             async with request_scoped_session() as session:
                 service = cls(session, group_id=group_id)
 
@@ -561,17 +583,23 @@ class ApiKeysService(BaseService):
                 key_name = f"{provider.upper()}_API_KEY"
                 api_key = await service.find_by_name(key_name)
                 if not api_key:
-                    logger.warning(f"No API key found for provider: {provider} with group_id: {group_id}")
+                    logger.warning(
+                        f"No API key found for provider: {provider} with group_id: {group_id}"
+                    )
                     return None
 
                 # Decrypt the API key value
                 try:
-                    decrypted_value = EncryptionUtils.decrypt_value(api_key.encrypted_value)
+                    decrypted_value = EncryptionUtils.decrypt_value(
+                        api_key.encrypted_value
+                    )
                     return decrypted_value
                 except Exception as e:
-                    logger.error(f"Error decrypting API key for provider {provider}: {str(e)}")
+                    logger.error(
+                        f"Error decrypting API key for provider {provider}: {str(e)}"
+                    )
                     return None
 
         except Exception as e:
             logger.error(f"Error getting provider API key: {str(e)}")
-            return None 
+            return None

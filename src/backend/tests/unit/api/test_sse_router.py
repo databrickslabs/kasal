@@ -5,14 +5,15 @@ Tests the functionality of SSE streaming endpoints including
 execution streams, global streams, generation streams, statistics, and health check.
 Also tests _parse_last_event_id and Last-Event-ID header handling.
 """
-import pytest
-from pathlib import Path
-from unittest.mock import patch, AsyncMock, MagicMock
-from fastapi import FastAPI, APIRouter, Query, Request
-from fastapi.testclient import TestClient
-from fastapi.responses import StreamingResponse
-from starlette.datastructures import Headers
 
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from fastapi import APIRouter, FastAPI, Query, Request
+from fastapi.responses import StreamingResponse
+from fastapi.testclient import TestClient
+from starlette.datastructures import Headers
 
 # Create a mock router for testing without importing the actual module
 # This avoids triggering the full import chain
@@ -69,7 +70,12 @@ app.include_router(router)
 class MockGroupContext:
     """Mock group context for testing."""
 
-    def __init__(self, primary_group_id="group-123", group_ids=None, group_email="test@example.com"):
+    def __init__(
+        self,
+        primary_group_id="group-123",
+        group_ids=None,
+        group_email="test@example.com",
+    ):
         self.primary_group_id = primary_group_id
         self.group_ids = group_ids or ["group-123", "group-456"]
         self.group_email = group_email
@@ -152,7 +158,7 @@ class TestRouterConfiguration:
             "/sse/executions/{job_id}/stream",
             "/sse/executions/stream-all",
             "/sse/stats",
-            "/sse/health"
+            "/sse/health",
         ]
 
         routes = [route.path for route in app.routes]
@@ -163,9 +169,9 @@ class TestRouterConfiguration:
     def test_streaming_endpoints_have_correct_method(self, client):
         """Test that streaming endpoints use GET method."""
         for route in app.routes:
-            if hasattr(route, 'path'):
-                if 'stream' in route.path:
-                    assert 'GET' in route.methods
+            if hasattr(route, "path"):
+                if "stream" in route.path:
+                    assert "GET" in route.methods
 
 
 class TestStreamingResponseHeaders:
@@ -174,7 +180,9 @@ class TestStreamingResponseHeaders:
     def test_stream_response_headers_config(self):
         """Test that streaming responses are configured with correct headers."""
         # Verify headers configuration by reading the source file
-        router_file = Path(__file__).parent.parent.parent.parent / "src" / "api" / "sse_router.py"
+        router_file = (
+            Path(__file__).parent.parent.parent.parent / "src" / "api" / "sse_router.py"
+        )
         source = router_file.read_text()
 
         assert "cache-control" in source or "Cache-Control" in source
@@ -184,7 +192,9 @@ class TestStreamingResponseHeaders:
 
     def test_stream_response_media_type(self):
         """Test that streaming responses use text/event-stream media type."""
-        router_file = Path(__file__).parent.parent.parent.parent / "src" / "api" / "sse_router.py"
+        router_file = (
+            Path(__file__).parent.parent.parent.parent / "src" / "api" / "sse_router.py"
+        )
         source = router_file.read_text()
 
         assert "text/event-stream" in source
@@ -263,11 +273,13 @@ class TestStreamGenerationUpdates:
 
     def test_stream_generation_updates_calls_event_stream_generator(self):
         """Verify the real router passes correct params to event_stream_generator."""
-        router_file = Path(__file__).parent.parent.parent.parent / "src" / "api" / "sse_router.py"
+        router_file = (
+            Path(__file__).parent.parent.parent.parent / "src" / "api" / "sse_router.py"
+        )
         source = router_file.read_text()
 
         # Verify the endpoint definition exists with correct path
-        assert 'generations/{generation_id}/stream' in source
+        assert "generations/{generation_id}/stream" in source
 
         # Verify event_stream_generator is used with generation_id
         assert "event_stream_generator" in source
@@ -283,8 +295,11 @@ class TestStreamGenerationUpdates:
     def test_stream_generation_updates_uses_get_method(self, client):
         """Test that the generation stream endpoint uses GET method."""
         for route in app.routes:
-            if hasattr(route, 'path') and route.path == "/sse/generations/{generation_id}/stream":
-                assert 'GET' in route.methods
+            if (
+                hasattr(route, "path")
+                and route.path == "/sse/generations/{generation_id}/stream"
+            ):
+                assert "GET" in route.methods
 
 
 class TestParseLastEventId:
@@ -294,8 +309,13 @@ class TestParseLastEventId:
         """Valid integer Last-Event-ID returns int."""
         from src.api.sse_router import _parse_last_event_id
 
-        scope = {"type": "http", "method": "GET", "path": "/", "query_string": b"",
-                 "headers": [(b"last-event-id", b"42")]}
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "query_string": b"",
+            "headers": [(b"last-event-id", b"42")],
+        }
         request = Request(scope)
         assert _parse_last_event_id(request) == 42
 
@@ -303,8 +323,13 @@ class TestParseLastEventId:
         """Missing Last-Event-ID header returns None."""
         from src.api.sse_router import _parse_last_event_id
 
-        scope = {"type": "http", "method": "GET", "path": "/", "query_string": b"",
-                 "headers": []}
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "query_string": b"",
+            "headers": [],
+        }
         request = Request(scope)
         assert _parse_last_event_id(request) is None
 
@@ -312,8 +337,13 @@ class TestParseLastEventId:
         """Non-integer Last-Event-ID returns None."""
         from src.api.sse_router import _parse_last_event_id
 
-        scope = {"type": "http", "method": "GET", "path": "/", "query_string": b"",
-                 "headers": [(b"last-event-id", b"not-a-number")]}
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "query_string": b"",
+            "headers": [(b"last-event-id", b"not-a-number")],
+        }
         request = Request(scope)
         assert _parse_last_event_id(request) is None
 
@@ -321,8 +351,13 @@ class TestParseLastEventId:
         """Empty Last-Event-ID string returns None."""
         from src.api.sse_router import _parse_last_event_id
 
-        scope = {"type": "http", "method": "GET", "path": "/", "query_string": b"",
-                 "headers": [(b"last-event-id", b"")]}
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "query_string": b"",
+            "headers": [(b"last-event-id", b"")],
+        }
         request = Request(scope)
         assert _parse_last_event_id(request) is None
 
@@ -363,11 +398,12 @@ class TestSSEHeadersConfig:
 # branches that the TestClient-based tests above don't reach.
 # ============================================================================
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from types import SimpleNamespace
-
 import importlib
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 _m = importlib.import_module("src.api.sse_router")
 
 stream_execution_updates = _m.stream_execution_updates
@@ -405,10 +441,13 @@ def make_request(last_event_id=None, headers_dict=None):
 
 # ── _parse_last_event_id ──────────────────────────────────────────────────────
 
+
 def test_parse_last_event_id_valid():
     """Returns int when Last-Event-ID header is valid integer."""
     req = MagicMock()
-    req.headers.get = lambda key, default=None: "42" if key == "last-event-id" else default
+    req.headers.get = lambda key, default=None: (
+        "42" if key == "last-event-id" else default
+    )
 
     result = _parse_last_event_id(req)
     assert result == 42
@@ -417,7 +456,9 @@ def test_parse_last_event_id_valid():
 def test_parse_last_event_id_invalid_returns_none():
     """Returns None when Last-Event-ID header is not a valid integer."""
     req = MagicMock()
-    req.headers.get = lambda key, default=None: "not-an-int" if key == "last-event-id" else default
+    req.headers.get = lambda key, default=None: (
+        "not-an-int" if key == "last-event-id" else default
+    )
     result = _parse_last_event_id(req)
     assert result is None
 
@@ -432,6 +473,7 @@ def test_parse_last_event_id_no_header_returns_none():
 
 # ── stream_execution_updates ──────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_stream_execution_updates_returns_streaming_response():
     """stream_execution_updates returns a StreamingResponse."""
@@ -443,8 +485,10 @@ async def test_stream_execution_updates_returns_streaming_response():
 
     mock_generator = AsyncMock(return_value=iter([]))
 
-    with patch("src.api.sse_router.event_stream_generator", return_value=mock_generator), \
-         patch("src.api.sse_router.ExecutionHistoryRepository") as MockRepo:
+    with (
+        patch("src.api.sse_router.event_stream_generator", return_value=mock_generator),
+        patch("src.api.sse_router.ExecutionHistoryRepository") as MockRepo,
+    ):
         # No persisted execution for this job_id → stream is allowed.
         MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=None)
         out = await stream_execution_updates(
@@ -478,12 +522,18 @@ async def test_stream_execution_updates_with_last_event_id():
     from fastapi.responses import StreamingResponse
 
     req = MagicMock()
-    req.headers.get = lambda key, default=None: "5" if key == "last-event-id" else default
+    req.headers.get = lambda key, default=None: (
+        "5" if key == "last-event-id" else default
+    )
     ctx = Ctx()
 
     mock_gen = AsyncMock(return_value=iter([]))
-    with patch("src.api.sse_router.event_stream_generator", return_value=mock_gen) as mock_esg, \
-         patch("src.api.sse_router.ExecutionHistoryRepository") as MockRepo:
+    with (
+        patch(
+            "src.api.sse_router.event_stream_generator", return_value=mock_gen
+        ) as mock_esg,
+        patch("src.api.sse_router.ExecutionHistoryRepository") as MockRepo,
+    ):
         MockRepo.return_value.get_execution_by_job_id = AsyncMock(return_value=None)
         out = await stream_execution_updates(
             request=req, job_id="job-2", group_context=ctx, session=MagicMock()
@@ -491,10 +541,13 @@ async def test_stream_execution_updates_with_last_event_id():
     assert isinstance(out, StreamingResponse)
     # last_event_id should be 5 (parsed from header)
     call_kwargs = mock_esg.call_args
-    assert call_kwargs[1].get("last_event_id") == 5 or call_kwargs[0][1] == "job-2" or True
+    assert (
+        call_kwargs[1].get("last_event_id") == 5 or call_kwargs[0][1] == "job-2" or True
+    )
 
 
 # ── stream_all_executions ──────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_stream_all_executions_returns_streaming_response():
@@ -511,13 +564,12 @@ async def test_stream_all_executions_returns_streaming_response():
 
     mock_gen = AsyncMock(return_value=iter([]))
     with patch("src.api.sse_router.event_stream_generator", return_value=mock_gen):
-        out = await stream_all_executions(
-            request=req, group_context=ctx
-        )
+        out = await stream_all_executions(request=req, group_context=ctx)
     assert isinstance(out, StreamingResponse)
 
 
 # ── stream_generation_updates ──────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_stream_generation_updates_returns_streaming_response():
@@ -537,6 +589,7 @@ async def test_stream_generation_updates_returns_streaming_response():
 
 
 # ── get_generation_result (non-streaming recovery fallback) ──────────────────────
+
 
 @pytest.mark.asyncio
 async def test_get_generation_result_pending_when_no_terminal_event():
@@ -596,6 +649,7 @@ async def test_get_generation_result_preserves_existing_status():
 
 # ── get_sse_stats ──────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_get_sse_stats_returns_statistics():
     """get_sse_stats calls sse_manager.get_statistics and returns result."""
@@ -606,6 +660,7 @@ async def test_get_sse_stats_returns_statistics():
 
 
 # ── sse_health ──────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_sse_health_returns_healthy():

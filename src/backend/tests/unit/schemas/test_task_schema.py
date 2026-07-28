@@ -4,20 +4,29 @@ Unit tests for task schemas.
 Tests the functionality of Pydantic schemas for task operations
 including validation, serialization, and field constraints.
 """
-import pytest
+
 from datetime import datetime
+from typing import Any, Dict, List, Union
+
+import pytest
 from pydantic import ValidationError
-from typing import List, Dict, Any, Union
 
 from src.schemas.task import (
-    ConditionConfig, LLMGuardrailConfig, TaskConfig, TaskBase, TaskCreate, TaskUpdate,
-    TaskInDBBase, Task, TaskResponse
+    ConditionConfig,
+    LLMGuardrailConfig,
+    Task,
+    TaskBase,
+    TaskConfig,
+    TaskCreate,
+    TaskInDBBase,
+    TaskResponse,
+    TaskUpdate,
 )
 
 
 class TestConditionConfig:
     """Test cases for ConditionConfig schema."""
-    
+
     def test_valid_condition_config_minimal(self):
         """Test ConditionConfig with minimal required fields."""
         condition_data = {"type": "wait"}
@@ -25,40 +34,49 @@ class TestConditionConfig:
         assert condition.type == "wait"
         assert condition.parameters == {}
         assert condition.dependent_task is None
-    
+
     def test_valid_condition_config_full(self):
         """Test ConditionConfig with all fields."""
         condition_data = {
             "type": "timeout",
             "parameters": {"duration": 300, "unit": "seconds"},
-            "dependent_task": "task-123"
+            "dependent_task": "task-123",
         }
         condition = ConditionConfig(**condition_data)
         assert condition.type == "timeout"
         assert condition.parameters == {"duration": 300, "unit": "seconds"}
         assert condition.dependent_task == "task-123"
-    
+
     def test_condition_config_missing_type(self):
         """Test ConditionConfig validation with missing type."""
         with pytest.raises(ValidationError) as exc_info:
             ConditionConfig()
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "type" in missing_fields
-    
+
     def test_condition_config_various_types(self):
         """Test ConditionConfig with various condition types."""
         condition_types = [
-            "wait", "timeout", "dependency", "manual", "schedule",
-            "webhook", "api_call", "file_exists", "custom"
+            "wait",
+            "timeout",
+            "dependency",
+            "manual",
+            "schedule",
+            "webhook",
+            "api_call",
+            "file_exists",
+            "custom",
         ]
-        
+
         for cond_type in condition_types:
             condition_data = {"type": cond_type}
             condition = ConditionConfig(**condition_data)
             assert condition.type == cond_type
-    
+
     def test_condition_config_complex_parameters(self):
         """Test ConditionConfig with complex parameters."""
         complex_params = {
@@ -66,19 +84,16 @@ class TestConditionConfig:
             "retries": 3,
             "nested": {"key": "value", "list": [1, 2, 3]},
             "boolean": True,
-            "null_value": None
+            "null_value": None,
         }
-        condition_data = {
-            "type": "complex",
-            "parameters": complex_params
-        }
+        condition_data = {"type": "complex", "parameters": complex_params}
         condition = ConditionConfig(**condition_data)
         assert condition.parameters == complex_params
 
 
 class TestTaskConfig:
     """Test cases for TaskConfig schema."""
-    
+
     def test_valid_task_config_empty(self):
         """Test TaskConfig with all default values."""
         config = TaskConfig()
@@ -98,7 +113,7 @@ class TestTaskConfig:
         assert config.condition is None
         assert config.guardrail is None
         assert config.markdown is None
-    
+
     def test_valid_task_config_full(self):
         """Test TaskConfig with all fields specified."""
         condition = ConditionConfig(type="timeout", parameters={"duration": 60})
@@ -118,7 +133,7 @@ class TestTaskConfig:
             "human_input": True,
             "condition": condition,
             "guardrail": "safety_check",
-            "markdown": True
+            "markdown": True,
         }
         config = TaskConfig(**config_data)
         assert config.cache_response is True
@@ -138,13 +153,13 @@ class TestTaskConfig:
         assert config.condition.type == "timeout"
         assert config.guardrail == "safety_check"
         assert config.markdown is True
-    
+
     def test_task_config_partial_fields(self):
         """Test TaskConfig with partial fields."""
         config_data = {
             "cache_response": False,
             "guardrail_max_retries": 3,
-            "human_input": True
+            "human_input": True,
         }
         config = TaskConfig(**config_data)
         assert config.cache_response is False
@@ -153,14 +168,14 @@ class TestTaskConfig:
         assert config.cache_ttl is None
         assert config.timeout is None
         assert config.priority is None
-    
+
     def test_task_config_with_condition_dict(self):
         """Test TaskConfig with condition provided as dictionary."""
         config_data = {
             "condition": {
                 "type": "dependency",
                 "parameters": {"wait_for": "previous_task"},
-                "dependent_task": "task-456"
+                "dependent_task": "task-456",
             }
         }
         config = TaskConfig(**config_data)
@@ -172,13 +187,13 @@ class TestTaskConfig:
 
 class TestTaskBase:
     """Test cases for TaskBase schema."""
-    
+
     def test_valid_task_base_minimal(self):
         """Test TaskBase with minimal required fields."""
         task_data = {
             "name": "Test Task",
             "description": "A test task",
-            "expected_output": "Test results"
+            "expected_output": "Test results",
         }
         task = TaskBase(**task_data)
         assert task.name == "Test Task"
@@ -198,7 +213,7 @@ class TestTaskBase:
         assert task.human_input is False
         assert task.converter_cls is None
         assert task.guardrail is None
-    
+
     def test_valid_task_base_full(self):
         """Test TaskBase with all fields specified."""
         config = TaskConfig(priority=1, human_input=True)
@@ -219,7 +234,7 @@ class TestTaskBase:
             "callback": "analysis_complete",
             "human_input": True,
             "converter_cls": "AnalysisConverter",
-            "guardrail": "data_privacy_check"
+            "guardrail": "data_privacy_check",
         }
         task = TaskBase(**task_data)
         assert task.name == "Complex Task"
@@ -241,43 +256,43 @@ class TestTaskBase:
         assert task.human_input is True
         assert task.converter_cls == "AnalysisConverter"
         assert task.guardrail == "data_privacy_check"
-    
+
     def test_task_base_missing_required_fields(self):
         """Test TaskBase validation with missing required fields."""
         with pytest.raises(ValidationError) as exc_info:
             TaskBase(name="Test Task")
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "description" in missing_fields
         assert "expected_output" in missing_fields
-        
+
         with pytest.raises(ValidationError) as exc_info:
             TaskBase(description="Test description")
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "name" in missing_fields
         assert "expected_output" in missing_fields
-    
+
     def test_task_base_empty_strings(self):
         """Test TaskBase with empty strings for required fields."""
-        task_data = {
-            "name": "",
-            "description": "",
-            "expected_output": ""
-        }
+        task_data = {"name": "", "description": "", "expected_output": ""}
         task = TaskBase(**task_data)
         assert task.name == ""
         assert task.description == ""
         assert task.expected_output == ""
-    
+
     def test_task_base_config_auto_creation(self):
         """Test that TaskBase automatically creates TaskConfig."""
         task_data = {
             "name": "Auto Config Task",
             "description": "Task with auto-created config",
-            "expected_output": "Results"
+            "expected_output": "Results",
         }
         task = TaskBase(**task_data)
         assert isinstance(task.config, TaskConfig)
@@ -287,26 +302,26 @@ class TestTaskBase:
 
 class TestTaskCreate:
     """Test cases for TaskCreate schema."""
-    
+
     def test_task_create_inheritance(self):
         """Test that TaskCreate inherits from TaskBase."""
         task_data = {
             "name": "Create Task",
             "description": "Task creation test",
-            "expected_output": "Creation results"
+            "expected_output": "Creation results",
         }
         task = TaskCreate(**task_data)
-        
+
         # Should have all base class attributes
-        assert hasattr(task, 'name')
-        assert hasattr(task, 'description')
-        assert hasattr(task, 'expected_output')
-        assert hasattr(task, 'agent_id')
-        assert hasattr(task, 'tools')
-        assert hasattr(task, 'async_execution')
-        assert hasattr(task, 'context')
-        assert hasattr(task, 'config')
-        
+        assert hasattr(task, "name")
+        assert hasattr(task, "description")
+        assert hasattr(task, "expected_output")
+        assert hasattr(task, "agent_id")
+        assert hasattr(task, "tools")
+        assert hasattr(task, "async_execution")
+        assert hasattr(task, "context")
+        assert hasattr(task, "config")
+
         # Should behave like base class
         assert task.name == "Create Task"
         assert task.description == "Task creation test"
@@ -314,14 +329,10 @@ class TestTaskCreate:
         assert task.agent_id is None
         assert task.tools == []
         assert isinstance(task.config, TaskConfig)
-    
+
     def test_task_create_with_custom_config(self):
         """Test TaskCreate with custom configuration."""
-        custom_config = TaskConfig(
-            priority=2,
-            timeout=300,
-            human_input=True
-        )
+        custom_config = TaskConfig(priority=2, timeout=300, human_input=True)
         task_data = {
             "name": "Custom Config Task",
             "description": "Task with custom configuration",
@@ -329,7 +340,7 @@ class TestTaskCreate:
             "config": custom_config,
             "agent_id": "agent-456",
             "tools": ["custom_tool"],
-            "async_execution": True
+            "async_execution": True,
         }
         task = TaskCreate(**task_data)
         assert task.config.priority == 2
@@ -342,7 +353,7 @@ class TestTaskCreate:
 
 class TestTaskUpdate:
     """Test cases for TaskUpdate schema."""
-    
+
     def test_task_update_all_optional(self):
         """Test that all TaskUpdate fields are optional."""
         update = TaskUpdate()
@@ -363,13 +374,13 @@ class TestTaskUpdate:
         assert update.human_input is None
         assert update.converter_cls is None
         assert update.guardrail is None
-    
+
     def test_task_update_partial(self):
         """Test TaskUpdate with partial fields."""
         update_data = {
             "name": "Updated Task",
             "agent_id": "new-agent-789",
-            "async_execution": True
+            "async_execution": True,
         }
         update = TaskUpdate(**update_data)
         assert update.name == "Updated Task"
@@ -378,7 +389,7 @@ class TestTaskUpdate:
         assert update.description is None
         assert update.expected_output is None
         assert update.tools is None
-    
+
     def test_task_update_full(self):
         """Test TaskUpdate with all fields."""
         config = TaskConfig(guardrail_max_retries=10, priority=3)
@@ -399,7 +410,7 @@ class TestTaskUpdate:
             "callback": "updated_callback",
             "human_input": False,
             "converter_cls": "UpdatedConverter",
-            "guardrail": "updated_guardrail"
+            "guardrail": "updated_guardrail",
         }
         update = TaskUpdate(**update_data)
         assert update.name == "Fully Updated Task"
@@ -425,7 +436,7 @@ class TestTaskUpdate:
 
 class TestTaskInDBBase:
     """Test cases for TaskInDBBase schema."""
-    
+
     def test_valid_task_in_db_base(self):
         """Test TaskInDBBase with all required fields."""
         now = datetime.now()
@@ -435,7 +446,7 @@ class TestTaskInDBBase:
             "description": "Task in database",
             "expected_output": "DB results",
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         task = TaskInDBBase(**task_data)
         assert task.id == "task-123"
@@ -444,33 +455,35 @@ class TestTaskInDBBase:
         assert task.expected_output == "DB results"
         assert task.created_at == now
         assert task.updated_at == now
-        
+
         # Should inherit all base class defaults
         assert task.agent_id is None
         assert task.tools == []
         assert task.async_execution is False
         assert isinstance(task.config, TaskConfig)
-    
+
     def test_task_in_db_base_config(self):
         """Test TaskInDBBase model configuration."""
-        assert hasattr(TaskInDBBase, 'model_config')
-        assert TaskInDBBase.model_config['from_attributes'] is True
-    
+        assert hasattr(TaskInDBBase, "model_config")
+        assert TaskInDBBase.model_config["from_attributes"] is True
+
     def test_task_in_db_base_missing_fields(self):
         """Test TaskInDBBase validation with missing fields."""
         with pytest.raises(ValidationError) as exc_info:
             TaskInDBBase(
                 name="Test Task",
                 description="Test description",
-                expected_output="Test output"
+                expected_output="Test output",
             )
-        
+
         errors = exc_info.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "id" in missing_fields
         assert "created_at" in missing_fields
         assert "updated_at" in missing_fields
-    
+
     def test_task_in_db_base_datetime_conversion(self):
         """Test TaskInDBBase with datetime string conversion."""
         task_data = {
@@ -479,7 +492,7 @@ class TestTaskInDBBase:
             "description": "Task with datetime strings",
             "expected_output": "DateTime results",
             "created_at": "2023-01-01T12:00:00",
-            "updated_at": "2023-01-01T12:30:00"
+            "updated_at": "2023-01-01T12:30:00",
         }
         task = TaskInDBBase(**task_data)
         assert task.id == "task-456"
@@ -489,7 +502,7 @@ class TestTaskInDBBase:
 
 class TestTask:
     """Test cases for Task schema."""
-    
+
     def test_task_inheritance(self):
         """Test that Task inherits from TaskInDBBase."""
         now = datetime.now()
@@ -499,23 +512,23 @@ class TestTask:
             "description": "Complete task object",
             "expected_output": "Full results",
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         task = Task(**task_data)
-        
+
         # Should have all TaskInDBBase attributes
-        assert hasattr(task, 'id')
-        assert hasattr(task, 'created_at')
-        assert hasattr(task, 'updated_at')
-        
+        assert hasattr(task, "id")
+        assert hasattr(task, "created_at")
+        assert hasattr(task, "updated_at")
+
         # Should have all TaskBase attributes
-        assert hasattr(task, 'name')
-        assert hasattr(task, 'description')
-        assert hasattr(task, 'expected_output')
-        assert hasattr(task, 'agent_id')
-        assert hasattr(task, 'tools')
-        assert hasattr(task, 'config')
-        
+        assert hasattr(task, "name")
+        assert hasattr(task, "description")
+        assert hasattr(task, "expected_output")
+        assert hasattr(task, "agent_id")
+        assert hasattr(task, "tools")
+        assert hasattr(task, "config")
+
         # Verify values
         assert task.id == "task-789"
         assert task.name == "Full Task"
@@ -527,7 +540,7 @@ class TestTask:
 
 class TestTaskResponse:
     """Test cases for TaskResponse (backward compatibility alias)."""
-    
+
     def test_task_response_alias(self):
         """Test that TaskResponse is an alias for Task."""
         now = datetime.now()
@@ -537,25 +550,25 @@ class TestTaskResponse:
             "description": "Task response test",
             "expected_output": "Response results",
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
-        
+
         # Both should create the same type of object
         task = Task(**task_data)
         task_response = TaskResponse(**task_data)
-        
+
         assert type(task) == type(task_response)
         assert task.id == task_response.id
         assert task.name == task_response.name
         assert task.description == task_response.description
-        
+
         # Verify they are actually the same class
         assert TaskResponse is Task
 
 
 class TestSchemaIntegration:
     """Integration tests for task schema interactions."""
-    
+
     def test_task_lifecycle_workflow(self):
         """Test complete task lifecycle workflow."""
         # Create task
@@ -565,19 +578,19 @@ class TestSchemaIntegration:
             "expected_output": "Lifecycle results",
             "agent_id": "agent-lifecycle",
             "tools": ["tool1", "tool2"],
-            "config": TaskConfig(priority=1, timeout=600)
+            "config": TaskConfig(priority=1, timeout=600),
         }
         create_schema = TaskCreate(**create_data)
-        
+
         # Update task
         update_data = {
             "name": "Updated Lifecycle Task",
             "agent_id": "agent-updated",
             "async_execution": True,
-            "config": TaskConfig(priority=2, max_retries=5)
+            "config": TaskConfig(priority=2, max_retries=5),
         }
         update_schema = TaskUpdate(**update_data)
-        
+
         # Database entity (simulating what would come from database)
         now = datetime.now()
         db_data = {
@@ -590,10 +603,10 @@ class TestSchemaIntegration:
             "async_execution": update_data["async_execution"],  # Updated execution
             "config": update_data["config"],  # Updated config
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
         }
         task_response = Task(**db_data)
-        
+
         # Verify the complete workflow
         assert create_schema.name == "Lifecycle Task"
         assert create_schema.config.priority == 1
@@ -601,29 +614,31 @@ class TestSchemaIntegration:
         assert update_schema.config.priority == 2
         assert task_response.id == "lifecycle-task-1"
         assert task_response.name == "Updated Lifecycle Task"  # From update
-        assert task_response.description == "Testing complete lifecycle"  # From creation
+        assert (
+            task_response.description == "Testing complete lifecycle"
+        )  # From creation
         assert task_response.agent_id == "agent-updated"  # From update
         assert task_response.async_execution is True  # From update
         assert task_response.config.priority == 2  # From update
-    
+
     def test_task_configuration_scenarios(self):
         """Test different task configuration scenarios."""
         # Simple task
         simple_task = TaskCreate(
             name="Simple Task",
             description="A simple task",
-            expected_output="Simple results"
+            expected_output="Simple results",
         )
         assert simple_task.async_execution is False
         assert simple_task.human_input is False
         assert isinstance(simple_task.config, TaskConfig)
         assert simple_task.config.priority is None
-        
+
         # Complex task with conditions
         condition = ConditionConfig(
             type="dependency",
             parameters={"wait_for": ["task-1", "task-2"]},
-            dependent_task="task-3"
+            dependent_task="task-3",
         )
         complex_config = TaskConfig(
             priority=1,
@@ -631,7 +646,7 @@ class TestSchemaIntegration:
             retry_on_fail=True,
             max_retries=3,
             condition=condition,
-            human_input=True
+            human_input=True,
         )
         complex_task = TaskCreate(
             name="Complex Task",
@@ -643,14 +658,14 @@ class TestSchemaIntegration:
             context=["context-data-1", "context-data-2"],
             config=complex_config,
             human_input=True,
-            guardrail="safety_check"
+            guardrail="safety_check",
         )
         assert complex_task.config.priority == 1
         assert complex_task.config.condition.type == "dependency"
         assert complex_task.async_execution is True
         assert complex_task.human_input is True
         assert complex_task.guardrail == "safety_check"
-        
+
         # Output-focused task
         output_task = TaskCreate(
             name="Output Task",
@@ -661,7 +676,7 @@ class TestSchemaIntegration:
             output_file="report.pdf",
             output={"format": "pdf", "template": "standard"},
             markdown=True,
-            callback="report_ready_callback"
+            callback="report_ready_callback",
         )
         assert output_task.output_json == "report.json"
         assert output_task.output_pydantic == "ReportModel"

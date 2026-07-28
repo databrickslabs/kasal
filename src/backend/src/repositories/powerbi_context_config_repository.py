@@ -1,11 +1,14 @@
-from typing import List, Optional, Dict
 import logging
+from typing import Dict, List, Optional
 
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
-from src.models.powerbi_context_config import PowerBIBusinessMapping, PowerBIFieldSynonym
+from src.models.powerbi_context_config import (
+    PowerBIBusinessMapping,
+    PowerBIFieldSynonym,
+)
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -24,9 +27,7 @@ class PowerBIBusinessMappingRepository(BaseRepository[PowerBIBusinessMapping]):
         super().__init__(PowerBIBusinessMapping, session)
 
     async def get_by_model(
-        self,
-        group_id: str,
-        semantic_model_id: str
+        self, group_id: str, semantic_model_id: str
     ) -> List[PowerBIBusinessMapping]:
         """
         Get all business mappings for a specific semantic model and group.
@@ -40,16 +41,13 @@ class PowerBIBusinessMappingRepository(BaseRepository[PowerBIBusinessMapping]):
         """
         query = select(self.model).where(
             self.model.group_id == group_id,
-            self.model.semantic_model_id == semantic_model_id
+            self.model.semantic_model_id == semantic_model_id,
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
     async def get_by_term(
-        self,
-        group_id: str,
-        semantic_model_id: str,
-        natural_term: str
+        self, group_id: str, semantic_model_id: str, natural_term: str
     ) -> Optional[PowerBIBusinessMapping]:
         """
         Get a specific business mapping by natural term.
@@ -65,16 +63,12 @@ class PowerBIBusinessMappingRepository(BaseRepository[PowerBIBusinessMapping]):
         query = select(self.model).where(
             self.model.group_id == group_id,
             self.model.semantic_model_id == semantic_model_id,
-            self.model.natural_term == natural_term
+            self.model.natural_term == natural_term,
         )
         result = await self.session.execute(query)
         return result.scalars().first()
 
-    async def delete_by_model(
-        self,
-        group_id: str,
-        semantic_model_id: str
-    ) -> int:
+    async def delete_by_model(self, group_id: str, semantic_model_id: str) -> int:
         """
         Delete all business mappings for a specific semantic model.
 
@@ -87,16 +81,14 @@ class PowerBIBusinessMappingRepository(BaseRepository[PowerBIBusinessMapping]):
         """
         stmt = delete(self.model).where(
             self.model.group_id == group_id,
-            self.model.semantic_model_id == semantic_model_id
+            self.model.semantic_model_id == semantic_model_id,
         )
         result = await self.session.execute(stmt)
         await self.session.flush()
         return result.rowcount
 
     async def get_as_dict(
-        self,
-        group_id: str,
-        semantic_model_id: str
+        self, group_id: str, semantic_model_id: str
     ) -> Dict[str, str]:
         """
         Get business mappings as a dictionary (natural_term -> dax_expression).
@@ -126,9 +118,7 @@ class PowerBIFieldSynonymRepository(BaseRepository[PowerBIFieldSynonym]):
         super().__init__(PowerBIFieldSynonym, session)
 
     async def get_by_model(
-        self,
-        group_id: str,
-        semantic_model_id: str
+        self, group_id: str, semantic_model_id: str
     ) -> List[PowerBIFieldSynonym]:
         """
         Get all field synonyms for a specific semantic model and group.
@@ -142,16 +132,13 @@ class PowerBIFieldSynonymRepository(BaseRepository[PowerBIFieldSynonym]):
         """
         query = select(self.model).where(
             self.model.group_id == group_id,
-            self.model.semantic_model_id == semantic_model_id
+            self.model.semantic_model_id == semantic_model_id,
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
     async def get_by_field(
-        self,
-        group_id: str,
-        semantic_model_id: str,
-        field_name: str
+        self, group_id: str, semantic_model_id: str, field_name: str
     ) -> Optional[PowerBIFieldSynonym]:
         """
         Get field synonyms for a specific field.
@@ -167,16 +154,12 @@ class PowerBIFieldSynonymRepository(BaseRepository[PowerBIFieldSynonym]):
         query = select(self.model).where(
             self.model.group_id == group_id,
             self.model.semantic_model_id == semantic_model_id,
-            self.model.field_name == field_name
+            self.model.field_name == field_name,
         )
         result = await self.session.execute(query)
         return result.scalars().first()
 
-    async def delete_by_model(
-        self,
-        group_id: str,
-        semantic_model_id: str
-    ) -> int:
+    async def delete_by_model(self, group_id: str, semantic_model_id: str) -> int:
         """
         Delete all field synonyms for a specific semantic model.
 
@@ -189,16 +172,14 @@ class PowerBIFieldSynonymRepository(BaseRepository[PowerBIFieldSynonym]):
         """
         stmt = delete(self.model).where(
             self.model.group_id == group_id,
-            self.model.semantic_model_id == semantic_model_id
+            self.model.semantic_model_id == semantic_model_id,
         )
         result = await self.session.execute(stmt)
         await self.session.flush()
         return result.rowcount
 
     async def get_as_dict(
-        self,
-        group_id: str,
-        semantic_model_id: str
+        self, group_id: str, semantic_model_id: str
     ) -> Dict[str, List[str]]:
         """
         Get field synonyms as a dictionary (field_name -> list of synonyms).

@@ -1,12 +1,14 @@
 """
 Tests for LakebaseMemoryService (unified single-table model).
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.services.memory.lakebase_service import (
-    LakebaseMemoryService,
     PGVECTOR_ADMIN_INSTRUCTIONS,
+    LakebaseMemoryService,
 )
 
 
@@ -79,8 +81,14 @@ class TestTestConnection:
             assert result["details"]["pgvector_available"] is False
             assert result["details"]["pg_version"] == "unknown"
             assert "CREATE EXTENSION IF NOT EXISTS vector" in result["message"]
-            assert result["details"]["pgvector_setup_instructions"] == PGVECTOR_ADMIN_INSTRUCTIONS
-            assert result["details"]["pgvector_setup_sql"] == "CREATE EXTENSION IF NOT EXISTS vector;"
+            assert (
+                result["details"]["pgvector_setup_instructions"]
+                == PGVECTOR_ADMIN_INSTRUCTIONS
+            )
+            assert (
+                result["details"]["pgvector_setup_sql"]
+                == "CREATE EXTENSION IF NOT EXISTS vector;"
+            )
 
     @pytest.mark.asyncio
     async def test_connection_failure(self, service):
@@ -129,7 +137,9 @@ class TestInitializeTables:
             assert result["tables"]["memory"]["success"] is True
 
     @pytest.mark.asyncio
-    async def test_initialize_tables_create_extension_fallback(self, service, mock_session):
+    async def test_initialize_tables_create_extension_fallback(
+        self, service, mock_session
+    ):
         """Test the CREATE EXTENSION fallback loop succeeds for 'vector'."""
         # First execute: extension probe returns None (not existing)
         ext_probe = MagicMock()
@@ -155,7 +165,9 @@ class TestInitializeTables:
             assert result["tables"]["memory"]["success"] is True
 
     @pytest.mark.asyncio
-    async def test_initialize_tables_create_extension_total_failure(self, service, mock_session):
+    async def test_initialize_tables_create_extension_total_failure(
+        self, service, mock_session
+    ):
         """Test PGVECTOR_ADMIN_INSTRUCTIONS path when CREATE EXTENSION always fails."""
         ext_probe = MagicMock()
         ext_probe.scalar.return_value = None
@@ -373,8 +385,30 @@ class TestGetTableData:
 
         rows_result = MagicMock()
         rows_result.fetchall.return_value = [
-            ("id1", "crew1", "grp1", "sess1", "researcher", "Hello world", '{"key": "val"}', 0.9, ts, ts),
-            ("id2", "crew1", "grp1", "sess1", "analyst", "Second row", {}, None, ts, None),
+            (
+                "id1",
+                "crew1",
+                "grp1",
+                "sess1",
+                "researcher",
+                "Hello world",
+                '{"key": "val"}',
+                0.9,
+                ts,
+                ts,
+            ),
+            (
+                "id2",
+                "crew1",
+                "grp1",
+                "sess1",
+                "analyst",
+                "Second row",
+                {},
+                None,
+                ts,
+                None,
+            ),
         ]
         mock_session.execute = AsyncMock(side_effect=[count_result, rows_result])
 
@@ -410,7 +444,18 @@ class TestGetTableData:
 
         rows_result = MagicMock()
         rows_result.fetchall.return_value = [
-            ("id1", "crew1", "grp1", "sess1", "agent1", "content", '{"parsed": true}', None, None, None),
+            (
+                "id1",
+                "crew1",
+                "grp1",
+                "sess1",
+                "agent1",
+                "content",
+                '{"parsed": true}',
+                None,
+                None,
+                None,
+            ),
         ]
         mock_session.execute = AsyncMock(side_effect=[count_result, rows_result])
 
@@ -430,7 +475,18 @@ class TestGetTableData:
 
         rows_result = MagicMock()
         rows_result.fetchall.return_value = [
-            ("id1", "crew1", "grp1", "sess1", "agent1", "content", "not-json{", None, None, None),
+            (
+                "id1",
+                "crew1",
+                "grp1",
+                "sess1",
+                "agent1",
+                "content",
+                "not-json{",
+                None,
+                None,
+                None,
+            ),
         ]
         mock_session.execute = AsyncMock(side_effect=[count_result, rows_result])
 
@@ -463,10 +519,22 @@ class TestGetEntityData:
         """Test fetching entity data for graph visualization."""
         rows_result = MagicMock()
         rows_result.fetchall.return_value = [
-            ("id1", "crew1", "researcher", "Alice is a data scientist",
-             '{"entity_name": "Alice", "entity_type": "person", "related_to": ["Bob"]}', 0.9),
-            ("id2", "crew1", "analyst", "Bob is an engineer",
-             '{"entity_name": "Bob", "entity_type": "person"}', 0.8),
+            (
+                "id1",
+                "crew1",
+                "researcher",
+                "Alice is a data scientist",
+                '{"entity_name": "Alice", "entity_type": "person", "related_to": ["Bob"]}',
+                0.9,
+            ),
+            (
+                "id2",
+                "crew1",
+                "analyst",
+                "Bob is an engineer",
+                '{"entity_name": "Bob", "entity_type": "person"}',
+                0.8,
+            ),
         ]
         mock_session.execute = AsyncMock(return_value=rows_result)
 
@@ -509,7 +577,14 @@ class TestGetEntityData:
         """Test that invalid JSON metadata falls back to {} (lines 496-497)."""
         rows_result = MagicMock()
         rows_result.fetchall.return_value = [
-            ("id1", "crew1", "researcher", "Some entity description", "not-json{", None),
+            (
+                "id1",
+                "crew1",
+                "researcher",
+                "Some entity description",
+                "not-json{",
+                None,
+            ),
         ]
         mock_session.execute = AsyncMock(return_value=rows_result)
 
@@ -546,10 +621,22 @@ class TestGetEntityData:
         """Test that duplicate entity IDs are deduplicated."""
         rows_result = MagicMock()
         rows_result.fetchall.return_value = [
-            ("id1", "crew1", "agent1", "content1",
-             '{"entity_name": "Alice", "entity_type": "person"}', 0.9),
-            ("id2", "crew1", "agent2", "content2",
-             '{"entity_name": "Alice", "entity_type": "person"}', 0.8),
+            (
+                "id1",
+                "crew1",
+                "agent1",
+                "content1",
+                '{"entity_name": "Alice", "entity_type": "person"}',
+                0.9,
+            ),
+            (
+                "id2",
+                "crew1",
+                "agent2",
+                "content2",
+                '{"entity_name": "Alice", "entity_type": "person"}',
+                0.8,
+            ),
         ]
         mock_session.execute = AsyncMock(return_value=rows_result)
 
@@ -573,12 +660,20 @@ class TestGetEntityData:
             assert result["relationships"] == []
 
     @pytest.mark.asyncio
-    async def test_get_entity_data_comma_separated_relationships(self, service, mock_session):
+    async def test_get_entity_data_comma_separated_relationships(
+        self, service, mock_session
+    ):
         """Test entity data with comma-separated related_to string."""
         rows_result = MagicMock()
         rows_result.fetchall.return_value = [
-            ("id1", "crew1", "agent1", "Entity content",
-             '{"entity_name": "Alice", "related_to": "Bob, Charlie"}', None),
+            (
+                "id1",
+                "crew1",
+                "agent1",
+                "Entity content",
+                '{"entity_name": "Alice", "related_to": "Bob, Charlie"}',
+                None,
+            ),
         ]
         mock_session.execute = AsyncMock(return_value=rows_result)
 
@@ -593,12 +688,20 @@ class TestGetEntityData:
             assert "Charlie" in targets
 
     @pytest.mark.asyncio
-    async def test_get_entity_data_non_string_relationship_target(self, service, mock_session):
+    async def test_get_entity_data_non_string_relationship_target(
+        self, service, mock_session
+    ):
         """Test entity data where related_to contains non-string targets."""
         rows_result = MagicMock()
         rows_result.fetchall.return_value = [
-            ("id1", "crew1", "agent1", "Entity content",
-             {"entity_name": "Alice", "relationships": [123]}, None),
+            (
+                "id1",
+                "crew1",
+                "agent1",
+                "Entity content",
+                {"entity_name": "Alice", "relationships": [123]},
+                None,
+            ),
         ]
         mock_session.execute = AsyncMock(return_value=rows_result)
 

@@ -19,9 +19,10 @@ Covers missing lines:
 
 import os
 import sys
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import numpy as np
+import pytest
 
 os.environ.setdefault("DATABASE_TYPE", "sqlite")
 os.environ.setdefault("SQLITE_DB_PATH", ":memory:")

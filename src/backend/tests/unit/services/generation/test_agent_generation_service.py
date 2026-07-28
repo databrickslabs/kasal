@@ -3,16 +3,20 @@ Coverage tests for services/agent_generation_service.py
 Covers: _log_llm_interaction (exception),
 generate_agent, _prepare_prompt_template, _generate_agent_config, _process_agent_config
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.generation.agents import AgentGenerationService
 
 
 def make_service():
     session = AsyncMock()
-    with patch('src.services.generation.agents.LLMLogRepository'), \
-         patch('src.services.generation.agents.LLMLogService') as MockLLS:
+    with (
+        patch("src.services.generation.agents.LLMLogRepository"),
+        patch("src.services.generation.agents.LLMLogService") as MockLLS,
+    ):
         MockLLS.return_value = AsyncMock()
         svc = AgentGenerationService(session)
     return svc
@@ -20,24 +24,24 @@ def make_service():
 
 # ---- _log_llm_interaction ----
 
+
 @pytest.mark.asyncio
 async def test_log_llm_interaction_exception():
     """Test _log_llm_interaction handles exception gracefully."""
     svc = make_service()
     svc.log_service.create_log = AsyncMock(side_effect=Exception("db error"))
     # Should not raise
-    await svc._log_llm_interaction(
-        endpoint="test", prompt="p", response="r", model="m"
-    )
+    await svc._log_llm_interaction(endpoint="test", prompt="p", response="r", model="m")
 
 
 # ---- _prepare_prompt_template ----
+
 
 @pytest.mark.asyncio
 async def test_prepare_prompt_template_not_found():
     """Test _prepare_prompt_template raises ValueError when template not found."""
     svc = make_service()
-    with patch('src.services.generation.agents.TemplateService') as MockTS:
+    with patch("src.services.generation.agents.TemplateService") as MockTS:
         MockTS.get_effective_template_content = AsyncMock(return_value=None)
         with pytest.raises(ValueError, match="not found"):
             await svc._prepare_prompt_template([], None)
@@ -47,26 +51,31 @@ async def test_prepare_prompt_template_not_found():
 async def test_prepare_prompt_template_success():
     """Test _prepare_prompt_template returns system message."""
     svc = make_service()
-    with patch('src.services.generation.agents.TemplateService') as MockTS:
-        MockTS.get_effective_template_content = AsyncMock(return_value="You are an agent generator.")
+    with patch("src.services.generation.agents.TemplateService") as MockTS:
+        MockTS.get_effective_template_content = AsyncMock(
+            return_value="You are an agent generator."
+        )
         result = await svc._prepare_prompt_template([], None)
     assert result == "You are an agent generator."
 
 
 # ---- _generate_agent_config ----
 
+
 @pytest.mark.asyncio
 async def test_generate_agent_config_success():
     """Test _generate_agent_config with valid LLM response."""
     svc = make_service()
-    with patch('src.services.generation.agents.LLMManager') as MockLLM:
-        MockLLM.completion = AsyncMock(return_value='{"name": "Researcher", "role": "Research Analyst", "goal": "Find info", "backstory": "Expert"}')
-        with patch('src.services.generation.agents.robust_json_parser') as MockParser:
+    with patch("src.services.generation.agents.LLMManager") as MockLLM:
+        MockLLM.completion = AsyncMock(
+            return_value='{"name": "Researcher", "role": "Research Analyst", "goal": "Find info", "backstory": "Expert"}'
+        )
+        with patch("src.services.generation.agents.robust_json_parser") as MockParser:
             MockParser.return_value = {
                 "name": "Researcher",
                 "role": "Research Analyst",
                 "goal": "Find information",
-                "backstory": "Expert researcher"
+                "backstory": "Expert researcher",
             }
             result = await svc._generate_agent_config(
                 "Research agent", "System message", "model-x", fast_planning=True
@@ -78,15 +87,14 @@ async def test_generate_agent_config_success():
 async def test_generate_agent_config_llm_exception():
     """Test _generate_agent_config raises ValueError on LLM exception."""
     svc = make_service()
-    with patch('src.services.generation.agents.LLMManager') as MockLLM:
+    with patch("src.services.generation.agents.LLMManager") as MockLLM:
         MockLLM.completion = AsyncMock(side_effect=Exception("LLM error"))
         with pytest.raises(ValueError, match="Failed to generate"):
-            await svc._generate_agent_config(
-                "Research agent", "System msg", "model-x"
-            )
+            await svc._generate_agent_config("Research agent", "System msg", "model-x")
 
 
 # ---- _process_agent_config ----
+
 
 def test_process_agent_config_missing_field():
     """Test _process_agent_config raises ValueError on missing field."""
@@ -102,7 +110,7 @@ def test_process_agent_config_new_advanced_config():
         "name": "Agent",
         "role": "Researcher",
         "goal": "Find info",
-        "backstory": "Expert"
+        "backstory": "Expert",
     }
     result = svc._process_agent_config(setup, "model-x")
     assert "advanced_config" in result
@@ -118,10 +126,7 @@ def test_process_agent_config_existing_advanced_config():
         "role": "Researcher",
         "goal": "Find info",
         "backstory": "Expert",
-        "advanced_config": {
-            "llm": "old-model",
-            "max_iter": 30
-        }
+        "advanced_config": {"llm": "old-model", "max_iter": 30},
     }
     result = svc._process_agent_config(setup, "new-model")
     assert result["advanced_config"]["llm"] == "new-model"
@@ -136,7 +141,7 @@ def test_process_agent_config_slow_planning():
         "name": "Agent",
         "role": "Researcher",
         "goal": "Find info",
-        "backstory": "Expert"
+        "backstory": "Expert",
     }
     result = svc._process_agent_config(setup, "model-y", tools=["tool1", "tool2"])
     # tools should be cleared
@@ -145,20 +150,25 @@ def test_process_agent_config_slow_planning():
 
 # ---- generate_agent (integration) ----
 
+
 @pytest.mark.asyncio
 async def test_generate_agent_success():
     """Test full generate_agent pipeline."""
     svc = make_service()
-    with patch('src.services.generation.agents.TemplateService') as MockTS:
-        MockTS.get_effective_template_content = AsyncMock(return_value="You are an agent.")
-        with patch('src.services.generation.agents.LLMManager') as MockLLM:
-            MockLLM.completion = AsyncMock(return_value='{}')
-            with patch('src.services.generation.agents.robust_json_parser') as MockParse:
+    with patch("src.services.generation.agents.TemplateService") as MockTS:
+        MockTS.get_effective_template_content = AsyncMock(
+            return_value="You are an agent."
+        )
+        with patch("src.services.generation.agents.LLMManager") as MockLLM:
+            MockLLM.completion = AsyncMock(return_value="{}")
+            with patch(
+                "src.services.generation.agents.robust_json_parser"
+            ) as MockParse:
                 MockParse.return_value = {
                     "name": "Test Agent",
                     "role": "Tester",
                     "goal": "Test things",
-                    "backstory": "Experienced tester"
+                    "backstory": "Experienced tester",
                 }
                 svc.log_service.create_log = AsyncMock()
                 result = await svc.generate_agent("Create a test agent")
@@ -170,18 +180,22 @@ async def test_generate_agent_success():
 async def test_generate_agent_log_failure_non_fatal():
     """Test generate_agent doesn't fail if logging fails."""
     svc = make_service()
-    with patch('src.services.generation.agents.TemplateService') as MockTS:
+    with patch("src.services.generation.agents.TemplateService") as MockTS:
         MockTS.get_effective_template_content = AsyncMock(return_value="System message")
-        with patch('src.services.generation.agents.LLMManager') as MockLLM:
-            MockLLM.completion = AsyncMock(return_value='{}')
-            with patch('src.services.generation.agents.robust_json_parser') as MockParse:
+        with patch("src.services.generation.agents.LLMManager") as MockLLM:
+            MockLLM.completion = AsyncMock(return_value="{}")
+            with patch(
+                "src.services.generation.agents.robust_json_parser"
+            ) as MockParse:
                 MockParse.return_value = {
                     "name": "Agent",
                     "role": "R",
                     "goal": "G",
-                    "backstory": "B"
+                    "backstory": "B",
                 }
-                svc.log_service.create_log = AsyncMock(side_effect=Exception("log error"))
+                svc.log_service.create_log = AsyncMock(
+                    side_effect=Exception("log error")
+                )
                 result = await svc.generate_agent("Create an agent")
 
     assert result is not None
@@ -191,10 +205,11 @@ async def test_generate_agent_log_failure_non_fatal():
 async def test_generate_agent_propagates_exception():
     """Test generate_agent propagates template not found exception."""
     svc = make_service()
-    with patch('src.services.generation.agents.TemplateService') as MockTS:
+    with patch("src.services.generation.agents.TemplateService") as MockTS:
         MockTS.get_effective_template_content = AsyncMock(return_value=None)
         with pytest.raises(Exception):
             await svc.generate_agent("Create an agent")
+
 
 # ==========================================================================
 # Additional isolated unit tests using fakes: process_agent_config advanced-
@@ -202,6 +217,7 @@ async def test_generate_agent_propagates_exception():
 # ==========================================================================
 import sys
 from types import SimpleNamespace
+
 from src.services.generation.agents import AgentGenerationService as Svc
 
 
@@ -209,6 +225,7 @@ class FakeLogService:
     def __init__(self, repo):
         self.repo = repo
         self.logged = []
+
     async def create_log(self, **kwargs):
         self.logged.append(kwargs)
 
@@ -232,12 +249,14 @@ def monkeypatch_imports(monkeypatch):
     # Mock LLMManager
     fake_llm_mod = SimpleNamespace()
     fake_llm_mod.LLMManager = FakeLLMManager
-    monkeypatch.setitem(sys.modules, 'src.services.llm.manager', fake_llm_mod)
+    monkeypatch.setitem(sys.modules, "src.services.llm.manager", fake_llm_mod)
 
     # Mock TemplateService
     fake_template_mod = SimpleNamespace()
     fake_template_mod.TemplateService = FakeTemplateService
-    monkeypatch.setitem(sys.modules, 'src.services.catalog.templates', fake_template_mod)
+    monkeypatch.setitem(
+        sys.modules, "src.services.catalog.templates", fake_template_mod
+    )
 
     return monkeypatch
 
@@ -266,15 +285,20 @@ async def test_process_agent_config_missing_required_field():
 async def test_process_agent_config_adds_advanced_config():
     svc = Svc(SimpleNamespace())
 
-    setup = {"name": "TestAgent", "role": "Analyst", "goal": "Analyze", "backstory": "Expert"}
+    setup = {
+        "name": "TestAgent",
+        "role": "Analyst",
+        "goal": "Analyze",
+        "backstory": "Expert",
+    }
 
     out = svc._process_agent_config(setup, "test-model")
 
-    assert 'advanced_config' in out
-    assert out['advanced_config']['llm'] == "test-model"
-    assert out['advanced_config']['max_iter'] == 25
-    assert out['advanced_config']['verbose'] is False
-    assert out['tools'] == []
+    assert "advanced_config" in out
+    assert out["advanced_config"]["llm"] == "test-model"
+    assert out["advanced_config"]["max_iter"] == 25
+    assert out["advanced_config"]["verbose"] is False
+    assert out["tools"] == []
 
 
 @pytest.mark.asyncio
@@ -286,14 +310,14 @@ async def test_process_agent_config_updates_existing_advanced_config():
         "role": "Analyst",
         "goal": "Analyze",
         "backstory": "Expert",
-        "advanced_config": {"llm": "old-model", "verbose": True}
+        "advanced_config": {"llm": "old-model", "verbose": True},
     }
 
     out = svc._process_agent_config(setup, "new-model")
 
-    assert out['advanced_config']['llm'] == "new-model"  # Updated
-    assert out['advanced_config']['verbose'] is True  # Preserved
-    assert out['advanced_config']['max_iter'] == 25  # Added default
+    assert out["advanced_config"]["llm"] == "new-model"  # Updated
+    assert out["advanced_config"]["verbose"] is True  # Preserved
+    assert out["advanced_config"]["max_iter"] == 25  # Added default
 
 
 # ---------------------------------------------------------------------------
@@ -309,14 +333,17 @@ def _mock_llm_and_template():
         '{"name": "TestAgent", "role": "Analyst", '
         '"goal": "Analyze data", "backstory": "Expert analyst"}'
     )
-    with patch(
-        "src.services.generation.agents.LLMManager.completion",
-        new_callable=AsyncMock,
-        return_value=fake_llm_response,
-    ), patch(
-        "src.services.generation.agents.TemplateService.get_effective_template_content",
-        new_callable=AsyncMock,
-        return_value="You are an agent generator.",
+    with (
+        patch(
+            "src.services.generation.agents.LLMManager.completion",
+            new_callable=AsyncMock,
+            return_value=fake_llm_response,
+        ),
+        patch(
+            "src.services.generation.agents.TemplateService.get_effective_template_content",
+            new_callable=AsyncMock,
+            return_value="You are an agent generator.",
+        ),
     ):
         yield
 

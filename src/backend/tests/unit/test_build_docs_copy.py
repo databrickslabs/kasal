@@ -17,13 +17,13 @@ docs-copy loops.
 src/build.py lives at the repository root's ``src/`` directory (NOT inside the
 backend package), so it is loaded here via importlib from its absolute path.
 """
+
 import importlib.util
 import sys
 from pathlib import Path
 from unittest import mock
 
 import pytest
-
 
 # --- Locate and import src/build.py by absolute path -----------------------
 # tests/unit/test_build_docs_copy.py -> backend -> src -> repo_src (build.py)
@@ -114,11 +114,7 @@ def _run_build_frontend(build_module, tmp_path, docs_dir):
 
 def _collect_rel_files(base: Path):
     """Return the set of POSIX-style relative paths of files under base."""
-    return {
-        p.relative_to(base).as_posix()
-        for p in base.rglob("*")
-        if p.is_file()
-    }
+    return {p.relative_to(base).as_posix() for p in base.rglob("*") if p.is_file()}
 
 
 EXPECTED_DOCS = {

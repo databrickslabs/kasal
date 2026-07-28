@@ -31,54 +31,48 @@ from .dax_parser import (
 # DAX Transpilation - DAX → SQL
 from .dax_to_sql import DaxToSqlTranspiler
 
-# DAX Generation - YAML → DAX
-from .yaml_to_dax import DAXGenerator
-
 # Helper modules (for advanced usage)
 from .helpers.dax_aggregations import (
-    AggregationType,
     AggregationDetector,
+    AggregationType,
     DAXAggregationBuilder,
     ExceptionAggregationHandler,
     detect_and_build_aggregation,
 )
 from .helpers.dax_context import DAXBaseKBIContext, DAXKBIContextCache
-from .helpers.dax_syntax_converter import DaxSyntaxConverter
 
 # Advanced generators (imported directly to avoid circular dependencies)
 from .helpers.dax_smart import SmartDAXGenerator
+from .helpers.dax_syntax_converter import DaxSyntaxConverter
 from .helpers.dax_tree_parsing import TreeParsingDAXGenerator
+
+# DAX Generation - YAML → DAX
+from .yaml_to_dax import DAXGenerator
 
 __all__ = [
     # ===== AUTHENTICATION =====
-    'AadService',
-
+    "AadService",
     # ===== CONNECTION & EXTRACTION =====
-    'PowerBIConnector',
-
+    "PowerBIConnector",
     # ===== DAX PARSER (Consolidated) =====
     # Parsing & Transpilation
-    'DAXExpressionParser',
-    'DaxToken',
-    'DaxToSqlTranspiler',  # DAX → SQL transpilation
-
+    "DAXExpressionParser",
+    "DaxToken",
+    "DaxToSqlTranspiler",  # DAX → SQL transpilation
     # YAML to DAX Generation
-    'DAXGenerator',
-
+    "DAXGenerator",
     # ===== HELPERS (Advanced) =====
     # Aggregations
-    'AggregationType',
-    'AggregationDetector',
-    'DAXAggregationBuilder',
-    'ExceptionAggregationHandler',
-    'detect_and_build_aggregation',
-
+    "AggregationType",
+    "AggregationDetector",
+    "DAXAggregationBuilder",
+    "ExceptionAggregationHandler",
+    "detect_and_build_aggregation",
     # Context
-    'DAXBaseKBIContext',
-    'DAXKBIContextCache',
-
+    "DAXBaseKBIContext",
+    "DAXKBIContextCache",
     # Syntax & Parsing
-    'DaxSyntaxConverter',
-    'SmartDAXGenerator',
-    'TreeParsingDAXGenerator',
+    "DaxSyntaxConverter",
+    "SmartDAXGenerator",
+    "TreeParsingDAXGenerator",
 ]

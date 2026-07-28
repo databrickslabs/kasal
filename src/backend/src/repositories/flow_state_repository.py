@@ -17,7 +17,9 @@ class FlowStateRepository(BaseRepository[FlowState]):
     def __init__(self, session: AsyncSession):
         super().__init__(FlowState, session)
 
-    async def add_state(self, flow_uuid: str, method_name: str, state_json: str) -> FlowState:
+    async def add_state(
+        self, flow_uuid: str, method_name: str, state_json: str
+    ) -> FlowState:
         """Append a new flow-state snapshot (history is kept; latest wins on load)."""
         db_obj = FlowState(
             flow_uuid=flow_uuid,

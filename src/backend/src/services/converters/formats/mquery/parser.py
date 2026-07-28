@@ -10,15 +10,11 @@ Author: Kasal Team
 Date: 2025
 """
 
-import re
 import logging
-from typing import Dict, Optional, Any
+import re
+from typing import Any, Dict, Optional
 
-from .models import (
-    MQueryExpression,
-    ExpressionType,
-    PowerBITable
-)
+from .models import ExpressionType, MQueryExpression, PowerBITable
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +53,9 @@ class MQueryParser:
                 return expr_type
         return ExpressionType.OTHER
 
-    def extract_databricks_catalog_info(self, expression: str) -> Dict[str, Optional[str]]:
+    def extract_databricks_catalog_info(
+        self, expression: str
+    ) -> Dict[str, Optional[str]]:
         """
         Extract connection info from DatabricksMultiCloud.Catalogs.
         Used for display/logging purposes only.
@@ -72,13 +70,12 @@ class MQueryParser:
             "workspace_url": None,
             "warehouse_path": None,
             "catalog": None,
-            "database": None
+            "database": None,
         }
 
         # Extract workspace URL
         url_match = re.search(
-            r'Databricks(?:MultiCloud)?\.Catalogs\s*\(\s*"([^"]+)"',
-            expression
+            r'Databricks(?:MultiCloud)?\.Catalogs\s*\(\s*"([^"]+)"', expression
         )
         if url_match:
             result["workspace_url"] = url_match.group(1)
@@ -116,15 +113,9 @@ class MQueryParser:
         Returns:
             Dict with server, database
         """
-        result: Dict[str, Optional[str]] = {
-            "server": None,
-            "database": None
-        }
+        result: Dict[str, Optional[str]] = {"server": None, "database": None}
 
-        match = re.search(
-            r'Sql\.Database\s*\(\s*"([^"]+)"\s*,\s*"([^"]+)"',
-            expression
-        )
+        match = re.search(r'Sql\.Database\s*\(\s*"([^"]+)"\s*,\s*"([^"]+)"', expression)
         if match:
             result["server"] = match.group(1)
             result["database"] = match.group(2)
@@ -148,26 +139,32 @@ class MQueryParser:
         logger.info(f"[PARSER] Detected expression type: {expr_type.value}")
 
         result = MQueryExpression(
-            raw_expression=raw_expression,
-            expression_type=expr_type
+            raw_expression=raw_expression, expression_type=expr_type
         )
 
         # Extract connection metadata based on expression type
-        if expr_type in (ExpressionType.NATIVE_QUERY, ExpressionType.DATABRICKS_CATALOG):
+        if expr_type in (
+            ExpressionType.NATIVE_QUERY,
+            ExpressionType.DATABRICKS_CATALOG,
+        ):
             dbx_info = self.extract_databricks_catalog_info(raw_expression)
             if dbx_info["workspace_url"]:
                 result.server = dbx_info["workspace_url"]
                 result.warehouse_path = dbx_info["warehouse_path"]
                 result.catalog = dbx_info["catalog"]
                 result.database = dbx_info["database"]
-                logger.info(f"[PARSER] Databricks source: workspace={dbx_info['workspace_url']}")
+                logger.info(
+                    f"[PARSER] Databricks source: workspace={dbx_info['workspace_url']}"
+                )
             elif expr_type == ExpressionType.NATIVE_QUERY:
                 # Check for SQL Server source
                 sql_info = self.extract_sql_database_info(raw_expression)
                 if sql_info["server"]:
                     result.server = sql_info["server"]
                     result.database = sql_info["database"]
-                    logger.info(f"[PARSER] SQL Server source: server={sql_info['server']}")
+                    logger.info(
+                        f"[PARSER] SQL Server source: server={sql_info['server']}"
+                    )
 
         elif expr_type == ExpressionType.SQL_DATABASE:
             sql_info = self.extract_sql_database_info(raw_expression)
@@ -214,7 +211,7 @@ class MQueryParser:
             "database": expression.database,
             "catalog": expression.catalog,
             "warehouse_path": expression.warehouse_path,
-            "enable_folding": expression.enable_folding
+            "enable_folding": expression.enable_folding,
         }
 
 
@@ -274,7 +271,7 @@ class TableFromRowsConverter:
         rows_match = re.search(
             r"Table\.FromRows\s*\(\s*\{\s*((?:\{[^}]*\}\s*,?\s*)+)\s*\}",
             expression,
-            re.IGNORECASE | re.DOTALL
+            re.IGNORECASE | re.DOTALL,
         )
 
         if not rows_match:
@@ -320,7 +317,7 @@ class TableFromRowsConverter:
         type_table_match = re.search(
             r"type\s+table\s*\[\s*((?:[^\]]+))\s*\]",
             expression,
-            re.IGNORECASE | re.DOTALL
+            re.IGNORECASE | re.DOTALL,
         )
 
         if not type_table_match:
@@ -330,7 +327,9 @@ class TableFromRowsConverter:
         type_content = type_table_match.group(1)
 
         # Parse column definitions: ColumnName = type
-        column_pattern = re.compile(r"(\w+)\s*=\s*(text|number|Int64\.Type|type\s+\w+|\w+)")
+        column_pattern = re.compile(
+            r"(\w+)\s*=\s*(text|number|Int64\.Type|type\s+\w+|\w+)"
+        )
         for col_match in column_pattern.finditer(type_content):
             col_name = col_match.group(1)
             col_type = col_match.group(2).strip()
@@ -369,7 +368,7 @@ class TableFromRowsConverter:
         self,
         expression: str,
         table_name: str,
-        columns_from_schema: Optional[list] = None
+        columns_from_schema: Optional[list] = None,
     ) -> Optional[str]:
         """
         Convert Table.FromRows M-Query to CREATE VIEW with VALUES statement.
@@ -402,14 +401,20 @@ class TableFromRowsConverter:
                 (col.get("name", f"col{i}"), col.get("dataType", "String"))
                 for i, col in enumerate(columns_from_schema)
             ]
-            logger.info(f"[TableFromRows] Using schema columns as fallback: {len(columns)} columns")
+            logger.info(
+                f"[TableFromRows] Using schema columns as fallback: {len(columns)} columns"
+            )
 
         if not columns:
-            logger.warning(f"[TableFromRows] No column definitions found for {table_name}")
+            logger.warning(
+                f"[TableFromRows] No column definitions found for {table_name}"
+            )
             # Try to infer column count from first row
             if rows:
                 columns = [(f"col{i}", "text") for i in range(len(rows[0]))]
-                logger.info(f"[TableFromRows] Inferred {len(columns)} columns from row data")
+                logger.info(
+                    f"[TableFromRows] Inferred {len(columns)} columns from row data"
+                )
 
         # Build column names list
         column_names = [col[0] for col in columns]
@@ -432,19 +437,18 @@ class TableFromRowsConverter:
             values_rows.append(f"  ({', '.join(formatted_values)})")
 
         # Build the SQL - join rows with comma and newline
-        values_str = ',\n'.join(values_rows)
+        values_str = ",\n".join(values_rows)
         sql = f"""CREATE OR REPLACE VIEW {self.target_catalog}.{self.target_schema}.{safe_table_name} AS
 SELECT * FROM VALUES
 {values_str}
 AS t({', '.join(column_names)});"""
 
-        logger.info(f"[TableFromRows] Generated SQL for {table_name}: {len(rows)} rows, {len(columns)} columns")
+        logger.info(
+            f"[TableFromRows] Generated SQL for {table_name}: {len(rows)} rows, {len(columns)} columns"
+        )
         return sql
 
-    def convert_table(
-        self,
-        table_data: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+    def convert_table(self, table_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Convert a Power BI table with Table.FromRows source to SQL.
 
@@ -492,5 +496,5 @@ AS t({', '.join(column_names)});"""
             "sql": sql,
             "row_count": len(rows),
             "column_count": len(columns),
-            "expression_type": "table_from_rows"
+            "expression_type": "table_from_rows",
         }

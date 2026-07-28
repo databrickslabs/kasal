@@ -27,7 +27,9 @@ router = APIRouter(
 
 @router.post("/improve", response_model=PromptImprovementResponse)
 async def improve_prompt(
-    request: PromptImprovementRequest, group_context: GroupContextDep, session: SessionDep
+    request: PromptImprovementRequest,
+    group_context: GroupContextDep,
+    session: SessionDep,
 ):
     """
     Improve prompt fields of an agent, task, or template as one coherent set.
@@ -41,6 +43,7 @@ async def improve_prompt(
     # (e.g. gpt-5-3-codex via the Responses API) fail with "OPENAI_API_KEY is
     # required". Mirrors task_generation_router's suggest_guardrail.
     from src.utils.user_context import UserContext
+
     if group_context:
         UserContext.set_group_context(group_context)
         if group_context.access_token:

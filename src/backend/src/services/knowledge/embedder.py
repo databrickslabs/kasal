@@ -27,9 +27,10 @@ consistent. Both the embed and search paths call
 :func:`resolve_knowledge_embedder_config` and pass the result straight to
 ``LLMManager.get_embedding(s)`` as ``embedder_config``.
 """
+
+import logging
 import os
 from typing import Any, Dict, Optional
-import logging
 
 logger = logging.getLogger(__name__)
 

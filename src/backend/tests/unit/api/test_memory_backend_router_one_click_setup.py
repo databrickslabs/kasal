@@ -4,18 +4,20 @@ Focuses on: get_memory_backend_service factory (line 44),
 set_default_memory_config not-found, one_click_databricks_setup
 workspace_url paths, and various endpoints with missing branches.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.api.memory_backend import lakebase_router as _lakebase
 from src.api.memory_backend.configs_router import set_default_memory_config
+from src.api.memory_backend.dependencies import get_memory_backend_service
+from src.api.memory_backend.records_router import get_memory_stats
 from src.api.memory_backend.vectorsearch_router import (
     get_workspace_url,
     one_click_databricks_setup,
 )
-from src.api.memory_backend.dependencies import get_memory_backend_service
-from src.api.memory_backend.records_router import get_memory_stats
 from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
 
 
@@ -35,6 +37,7 @@ class AdminCtx:
 
 # ── get_memory_backend_service factory (line 44) ──────────────────────────────
 
+
 def test_get_memory_backend_service_creates_instance():
     """get_memory_backend_service creates MemoryBackendService with session."""
     from src.services.memory.backend_service import MemoryBackendService
@@ -48,6 +51,7 @@ def test_get_memory_backend_service_creates_instance():
 
 # ── get_workspace_url ─────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_get_workspace_url_returns_result():
     """get_workspace_url calls service and returns result."""
@@ -60,6 +64,7 @@ async def test_get_workspace_url_returns_result():
 
 
 # ── test_lakebase_connection ───────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_lakebase_conn_success():
@@ -107,6 +112,7 @@ async def test_lakebase_conn_exception_returns_error():
 
 # ── set_default_memory_config ─────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_set_default_memory_config_not_found():
     """set_default_memory_config raises NotFoundError when backend not found."""
@@ -127,10 +133,13 @@ async def test_set_default_memory_config_success():
 
     out = await set_default_memory_config("backend-1", group_context=ctx, service=svc)
     assert out["success"] is True
-    svc.set_default_backend.assert_called_once_with("user_alice_example_com", "backend-1")
+    svc.set_default_backend.assert_called_once_with(
+        "user_alice_example_com", "backend-1"
+    )
 
 
 # ── get_memory_stats ──────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_get_memory_stats_returns_stats():
@@ -148,6 +157,7 @@ async def test_get_memory_stats_returns_stats():
 
 # ── one_click_databricks_setup ────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_one_click_setup_permission_denied():
     """one_click_databricks_setup raises ForbiddenError for non-admin."""
@@ -157,8 +167,10 @@ async def test_one_click_setup_permission_denied():
 
     with pytest.raises(ForbiddenError):
         await one_click_databricks_setup(
-            request={"workspace_url": "https://w"}, req=req,
-            group_context=ctx, service=svc
+            request={"workspace_url": "https://w"},
+            req=req,
+            group_context=ctx,
+            service=svc,
         )
 
 
@@ -170,10 +182,19 @@ async def test_one_click_setup_with_workspace_url_in_request():
     ctx = AdminCtx(is_admin=True)
     req = MagicMock()
 
-    with patch("src.utils.databricks_auth.extract_user_token_from_request", return_value="tok"), \
-         patch("src.utils.user_context.UserContext.set_group_context"):
+    with (
+        patch(
+            "src.utils.databricks_auth.extract_user_token_from_request",
+            return_value="tok",
+        ),
+        patch("src.utils.user_context.UserContext.set_group_context"),
+    ):
         out = await one_click_databricks_setup(
-            request={"workspace_url": "https://myws.databricks.com", "catalog": "ml", "schema": "agents"},
+            request={
+                "workspace_url": "https://myws.databricks.com",
+                "catalog": "ml",
+                "schema": "agents",
+            },
             req=req,
             group_context=ctx,
             service=svc,
@@ -188,9 +209,16 @@ async def test_one_click_setup_no_workspace_url_raises():
     ctx = AdminCtx(is_admin=True)
     req = MagicMock()
 
-    with patch("src.utils.databricks_auth.extract_user_token_from_request", return_value="tok"), \
-         patch("src.utils.user_context.UserContext.set_group_context"), \
-         patch("src.utils.databricks_auth.get_auth_context", AsyncMock(return_value=None)):
+    with (
+        patch(
+            "src.utils.databricks_auth.extract_user_token_from_request",
+            return_value="tok",
+        ),
+        patch("src.utils.user_context.UserContext.set_group_context"),
+        patch(
+            "src.utils.databricks_auth.get_auth_context", AsyncMock(return_value=None)
+        ),
+    ):
         with pytest.raises(BadRequestError):
             await one_click_databricks_setup(
                 request={},  # No workspace_url
@@ -208,10 +236,20 @@ async def test_one_click_setup_workspace_url_from_auth():
     ctx = AdminCtx(is_admin=True)
     req = MagicMock()
 
-    fake_auth = SimpleNamespace(workspace_url="https://auto.databricks.com", auth_method="oauth")
-    with patch("src.utils.databricks_auth.extract_user_token_from_request", return_value="tok"), \
-         patch("src.utils.user_context.UserContext.set_group_context"), \
-         patch("src.utils.databricks_auth.get_auth_context", AsyncMock(return_value=fake_auth)):
+    fake_auth = SimpleNamespace(
+        workspace_url="https://auto.databricks.com", auth_method="oauth"
+    )
+    with (
+        patch(
+            "src.utils.databricks_auth.extract_user_token_from_request",
+            return_value="tok",
+        ),
+        patch("src.utils.user_context.UserContext.set_group_context"),
+        patch(
+            "src.utils.databricks_auth.get_auth_context",
+            AsyncMock(return_value=fake_auth),
+        ),
+    ):
         out = await one_click_databricks_setup(
             request={"catalog": "ml", "schema": "agents"},
             req=req,
@@ -229,9 +267,17 @@ async def test_one_click_setup_auth_raises_but_no_url_in_request():
     ctx = AdminCtx(is_admin=True)
     req = MagicMock()
 
-    with patch("src.utils.databricks_auth.extract_user_token_from_request", return_value="tok"), \
-         patch("src.utils.user_context.UserContext.set_group_context"), \
-         patch("src.utils.databricks_auth.get_auth_context", AsyncMock(side_effect=Exception("auth error"))):
+    with (
+        patch(
+            "src.utils.databricks_auth.extract_user_token_from_request",
+            return_value="tok",
+        ),
+        patch("src.utils.user_context.UserContext.set_group_context"),
+        patch(
+            "src.utils.databricks_auth.get_auth_context",
+            AsyncMock(side_effect=Exception("auth error")),
+        ),
+    ):
         with pytest.raises(BadRequestError):
             await one_click_databricks_setup(
                 request={},

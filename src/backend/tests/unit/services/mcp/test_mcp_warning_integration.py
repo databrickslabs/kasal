@@ -65,6 +65,7 @@ for _mod_name in [
         _STUBS[_mod_name] = _mock
 
 import pytest
+
 from src.services.tools.mcp_integration import MCPIntegration
 
 

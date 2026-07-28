@@ -3,10 +3,10 @@ Conversion Repositories
 Repository pattern implementations for converter models
 """
 
-from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select, update, func, and_, or_, desc
+from sqlalchemy import and_, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.base_repository import BaseRepository
@@ -42,17 +42,16 @@ class ConversionHistoryRepository(BaseRepository[ConversionHistory]):
         Returns:
             List of conversion history entries
         """
-        query = select(self.model).where(
-            self.model.execution_id == execution_id
-        ).order_by(desc(self.model.created_at))
+        query = (
+            select(self.model)
+            .where(self.model.execution_id == execution_id)
+            .order_by(desc(self.model.created_at))
+        )
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
     async def find_by_group(
-        self,
-        group_id: str,
-        limit: int = 100,
-        offset: int = 0
+        self, group_id: str, limit: int = 100, offset: int = 0
     ) -> List[ConversionHistory]:
         """
         Find conversion history for a specific group.
@@ -80,7 +79,7 @@ class ConversionHistoryRepository(BaseRepository[ConversionHistory]):
         source_format: str,
         target_format: str,
         group_id: Optional[str] = None,
-        limit: int = 50
+        limit: int = 50,
     ) -> List[ConversionHistory]:
         """
         Find conversion history by source and target formats.
@@ -111,9 +110,7 @@ class ConversionHistoryRepository(BaseRepository[ConversionHistory]):
         return list(result.scalars().all())
 
     async def find_successful(
-        self,
-        group_id: Optional[str] = None,
-        limit: int = 100
+        self, group_id: Optional[str] = None, limit: int = 100
     ) -> List[ConversionHistory]:
         """
         Find successful conversions.
@@ -139,9 +136,7 @@ class ConversionHistoryRepository(BaseRepository[ConversionHistory]):
         return list(result.scalars().all())
 
     async def find_failed(
-        self,
-        group_id: Optional[str] = None,
-        limit: int = 100
+        self, group_id: Optional[str] = None, limit: int = 100
     ) -> List[ConversionHistory]:
         """
         Find failed conversions for debugging.
@@ -167,9 +162,7 @@ class ConversionHistoryRepository(BaseRepository[ConversionHistory]):
         return list(result.scalars().all())
 
     async def get_statistics(
-        self,
-        group_id: Optional[str] = None,
-        days: int = 30
+        self, group_id: Optional[str] = None, days: int = 30
     ) -> Dict[str, Any]:
         """
         Get conversion statistics for analytics.
@@ -193,7 +186,9 @@ class ConversionHistoryRepository(BaseRepository[ConversionHistory]):
 
         # Success count
         success_conditions = conditions + [self.model.status == "success"]
-        success_query = select(func.count(self.model.id)).where(and_(*success_conditions))
+        success_query = select(func.count(self.model.id)).where(
+            and_(*success_conditions)
+        )
         success_result = await self.session.execute(success_query)
         success_count = success_result.scalar()
 
@@ -215,31 +210,31 @@ class ConversionHistoryRepository(BaseRepository[ConversionHistory]):
             select(
                 self.model.source_format,
                 self.model.target_format,
-                func.count(self.model.id).label('count')
+                func.count(self.model.id).label("count"),
             )
             .where(and_(*conditions))
             .group_by(self.model.source_format, self.model.target_format)
-            .order_by(desc('count'))
+            .order_by(desc("count"))
             .limit(10)
         )
         popular_result = await self.session.execute(popular_query)
         popular_conversions = [
             {
-                'source': row.source_format,
-                'target': row.target_format,
-                'count': row.count
+                "source": row.source_format,
+                "target": row.target_format,
+                "count": row.count,
             }
             for row in popular_result
         ]
 
         return {
-            'total_conversions': total,
-            'successful': success_count,
-            'failed': failed_count,
-            'success_rate': (success_count / total * 100) if total > 0 else 0,
-            'average_execution_time_ms': round(avg_execution_time, 2),
-            'popular_conversions': popular_conversions,
-            'period_days': days,
+            "total_conversions": total,
+            "successful": success_count,
+            "failed": failed_count,
+            "success_rate": (success_count / total * 100) if total > 0 else 0,
+            "average_execution_time_ms": round(avg_execution_time, 2),
+            "popular_conversions": popular_conversions,
+            "period_days": days,
         }
 
 
@@ -259,10 +254,7 @@ class ConversionJobRepository(BaseRepository[ConversionJob]):
         super().__init__(ConversionJob, session)
 
     async def find_by_status(
-        self,
-        status: str,
-        group_id: Optional[str] = None,
-        limit: int = 50
+        self, status: str, group_id: Optional[str] = None, limit: int = 50
     ) -> List[ConversionJob]:
         """
         Find jobs by status.
@@ -289,8 +281,7 @@ class ConversionJobRepository(BaseRepository[ConversionJob]):
         return list(result.scalars().all())
 
     async def find_active_jobs(
-        self,
-        group_id: Optional[str] = None
+        self, group_id: Optional[str] = None
     ) -> List[ConversionJob]:
         """
         Find all active (pending or running) jobs.
@@ -301,9 +292,7 @@ class ConversionJobRepository(BaseRepository[ConversionJob]):
         Returns:
             List of active conversion jobs
         """
-        conditions = [
-            self.model.status.in_(['pending', 'running'])
-        ]
+        conditions = [self.model.status.in_(["pending", "running"])]
         if group_id:
             conditions.append(self.model.group_id == group_id)
 
@@ -316,7 +305,7 @@ class ConversionJobRepository(BaseRepository[ConversionJob]):
         job_id: str,
         status: str,
         progress: Optional[float] = None,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
     ) -> Optional[ConversionJob]:
         """
         Update job status and progress.
@@ -331,38 +320,32 @@ class ConversionJobRepository(BaseRepository[ConversionJob]):
             Updated job if found, else None
         """
         update_data: Dict[str, Any] = {
-            'status': status,
-            'updated_at': datetime.utcnow(),
+            "status": status,
+            "updated_at": datetime.utcnow(),
         }
 
         if progress is not None:
-            update_data['progress'] = progress
+            update_data["progress"] = progress
 
         if error_message is not None:
-            update_data['error_message'] = error_message
+            update_data["error_message"] = error_message
 
-        if status == 'running' and not await self.session.scalar(
+        if status == "running" and not await self.session.scalar(
             select(self.model.started_at).where(self.model.id == job_id)
         ):
-            update_data['started_at'] = datetime.utcnow()
+            update_data["started_at"] = datetime.utcnow()
 
-        if status in ['completed', 'failed', 'cancelled']:
-            update_data['completed_at'] = datetime.utcnow()
+        if status in ["completed", "failed", "cancelled"]:
+            update_data["completed_at"] = datetime.utcnow()
 
-        query = (
-            update(self.model)
-            .where(self.model.id == job_id)
-            .values(**update_data)
-        )
+        query = update(self.model).where(self.model.id == job_id).values(**update_data)
         await self.session.execute(query)
 
         # Fetch and return the updated job
         return await self.get(job_id)
 
     async def update_result(
-        self,
-        job_id: str,
-        result: Dict[str, Any]
+        self, job_id: str, result: Dict[str, Any]
     ) -> Optional[ConversionJob]:
         """
         Update job result.
@@ -397,13 +380,13 @@ class ConversionJobRepository(BaseRepository[ConversionJob]):
             .where(
                 and_(
                     self.model.id == job_id,
-                    self.model.status.in_(['pending', 'running'])
+                    self.model.status.in_(["pending", "running"]),
                 )
             )
             .values(
-                status='cancelled',
+                status="cancelled",
                 updated_at=datetime.utcnow(),
-                completed_at=datetime.utcnow()
+                completed_at=datetime.utcnow(),
             )
         )
         result = await self.session.execute(query)
@@ -412,7 +395,9 @@ class ConversionJobRepository(BaseRepository[ConversionJob]):
         return None
 
 
-class SavedConverterConfigurationRepository(BaseRepository[SavedConverterConfiguration]):
+class SavedConverterConfigurationRepository(
+    BaseRepository[SavedConverterConfiguration]
+):
     """
     Repository for SavedConverterConfiguration model.
     Manages user-saved converter configurations.
@@ -428,9 +413,7 @@ class SavedConverterConfigurationRepository(BaseRepository[SavedConverterConfigu
         super().__init__(SavedConverterConfiguration, session)
 
     async def find_by_user(
-        self,
-        created_by_email: str,
-        group_id: Optional[str] = None
+        self, created_by_email: str, group_id: Optional[str] = None
     ) -> List[SavedConverterConfiguration]:
         """
         Find configurations created by a specific user.
@@ -455,8 +438,7 @@ class SavedConverterConfigurationRepository(BaseRepository[SavedConverterConfigu
         return list(result.scalars().all())
 
     async def find_public(
-        self,
-        group_id: Optional[str] = None
+        self, group_id: Optional[str] = None
     ) -> List[SavedConverterConfiguration]:
         """
         Find public/shared configurations.
@@ -499,7 +481,7 @@ class SavedConverterConfigurationRepository(BaseRepository[SavedConverterConfigu
         source_format: str,
         target_format: str,
         group_id: Optional[str] = None,
-        user_email: Optional[str] = None
+        user_email: Optional[str] = None,
     ) -> List[SavedConverterConfiguration]:
         """
         Find configurations by conversion formats.
@@ -523,7 +505,7 @@ class SavedConverterConfigurationRepository(BaseRepository[SavedConverterConfigu
             conditions.append(
                 or_(
                     self.model.created_by_email == user_email,
-                    self.model.is_public == True
+                    self.model.is_public == True,
                 )
             )
 
@@ -536,8 +518,7 @@ class SavedConverterConfigurationRepository(BaseRepository[SavedConverterConfigu
         return list(result.scalars().all())
 
     async def increment_use_count(
-        self,
-        config_id: int
+        self, config_id: int
     ) -> Optional[SavedConverterConfiguration]:
         """
         Increment use count and update last_used_at.
@@ -554,7 +535,7 @@ class SavedConverterConfigurationRepository(BaseRepository[SavedConverterConfigu
             .values(
                 use_count=self.model.use_count + 1,
                 last_used_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+                updated_at=datetime.utcnow(),
             )
         )
         await self.session.execute(query)
@@ -564,7 +545,7 @@ class SavedConverterConfigurationRepository(BaseRepository[SavedConverterConfigu
         self,
         search_term: str,
         group_id: Optional[str] = None,
-        user_email: Optional[str] = None
+        user_email: Optional[str] = None,
     ) -> List[SavedConverterConfiguration]:
         """
         Search configurations by name.
@@ -577,16 +558,14 @@ class SavedConverterConfigurationRepository(BaseRepository[SavedConverterConfigu
         Returns:
             List of matching configurations
         """
-        conditions = [
-            self.model.name.ilike(f'%{search_term}%')
-        ]
+        conditions = [self.model.name.ilike(f"%{search_term}%")]
         if group_id:
             conditions.append(self.model.group_id == group_id)
         if user_email:
             conditions.append(
                 or_(
                     self.model.created_by_email == user_email,
-                    self.model.is_public == True
+                    self.model.is_public == True,
                 )
             )
 

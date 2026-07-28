@@ -14,32 +14,35 @@ Covers:
 
 import asyncio
 import json
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
+import pytest
+
+from src.api.database_management_router import (
+    debug_headers,
+    debug_permissions,
+    export_database,
+    get_database_info,
+    import_database,
+    list_backups,
+    migrate_to_lakebase,
+    migrate_to_lakebase_stream,
+)
+from src.api.database_management_router import (
+    test_lakebase_connection as _router_test_lakebase_connection,
+)
 from src.core.exceptions import BadRequestError, ForbiddenError, KasalError
 from src.schemas.database_management import (
     ExportRequest,
     ImportRequest,
     ListBackupsRequest,
 )
-from src.api.database_management_router import (
-    export_database,
-    import_database,
-    list_backups,
-    get_database_info,
-    debug_permissions,
-    debug_headers,
-    migrate_to_lakebase,
-    migrate_to_lakebase_stream,
-    test_lakebase_connection as _router_test_lakebase_connection,
-)
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class SysAdminCtx:
     primary_group_id = "g1"
@@ -59,17 +62,21 @@ class RegularCtx:
 # debug_permissions / debug_headers: DEBUG_MODE=False returns 404
 # ---------------------------------------------------------------------------
 
+
 class TestDebugEndpointsWhenNotDebug:
     @pytest.mark.asyncio
     async def test_debug_permissions_returns_404_when_not_debug(self):
         from fastapi import HTTPException
+
         from src.config.settings import settings as app_settings
 
         original = app_settings.DEBUG_MODE
         app_settings.DEBUG_MODE = False
         try:
             with pytest.raises(HTTPException) as exc_info:
-                await debug_permissions(session=AsyncMock(), group_context=SysAdminCtx())
+                await debug_permissions(
+                    session=AsyncMock(), group_context=SysAdminCtx()
+                )
             assert exc_info.value.status_code == 404
         finally:
             app_settings.DEBUG_MODE = original
@@ -77,6 +84,7 @@ class TestDebugEndpointsWhenNotDebug:
     @pytest.mark.asyncio
     async def test_debug_headers_returns_404_when_not_debug(self):
         from fastapi import HTTPException
+
         from src.config.settings import settings as app_settings
 
         original = app_settings.DEBUG_MODE
@@ -93,6 +101,7 @@ class TestDebugEndpointsWhenNotDebug:
 # ---------------------------------------------------------------------------
 # export / import / list_backups — service failure paths
 # ---------------------------------------------------------------------------
+
 
 class TestServiceFailurePaths:
     @pytest.mark.asyncio
@@ -116,7 +125,9 @@ class TestServiceFailurePaths:
         with patch("src.utils.user_context.UserContext"):
             with pytest.raises(KasalError):
                 await import_database(
-                    ImportRequest(catalog="c", schema="s", volume_name="v", backup_filename="b.db"),
+                    ImportRequest(
+                        catalog="c", schema="s", volume_name="v", backup_filename="b.db"
+                    ),
                     service=svc,
                     group_context=SysAdminCtx(),
                 )
@@ -166,6 +177,7 @@ class TestServiceFailurePaths:
 # test_lakebase_connection POST: missing instance_name
 # ---------------------------------------------------------------------------
 
+
 class TestLakebaseConnectionPost:
     @pytest.mark.asyncio
     async def test_missing_instance_name_raises_bad_request(self):
@@ -177,6 +189,7 @@ class TestLakebaseConnectionPost:
 # ---------------------------------------------------------------------------
 # migrate_to_lakebase_stream — event_generator branches
 # ---------------------------------------------------------------------------
+
 
 class TestMigrateToLakbaseStream:
     """
@@ -194,7 +207,7 @@ class TestMigrateToLakbaseStream:
             if isinstance(chunk, bytes):
                 chunk = chunk.decode()
             if chunk.startswith("data: "):
-                payload = chunk[len("data: "):].strip()
+                payload = chunk[len("data: ") :].strip()
                 try:
                     events.append(json.loads(payload))
                 except json.JSONDecodeError:
@@ -227,13 +240,18 @@ class TestMigrateToLakbaseStream:
         mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
         mock_sess.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.utils.databricks_auth.extract_user_token_from_request",
-                   return_value="tok"), \
-             patch("src.api.database_management_router.LakebaseService",
-                   return_value=mock_service), \
-             patch("src.db.session._local_session_factory",
-                   return_value=mock_sess), \
-             patch("src.db.session.dispose_engines", AsyncMock()):
+        with (
+            patch(
+                "src.utils.databricks_auth.extract_user_token_from_request",
+                return_value="tok",
+            ),
+            patch(
+                "src.api.database_management_router.LakebaseService",
+                return_value=mock_service,
+            ),
+            patch("src.db.session._local_session_factory", return_value=mock_sess),
+            patch("src.db.session.dispose_engines", AsyncMock()),
+        ):
 
             response = await migrate_to_lakebase_stream(
                 request={"instance_name": "kb", "endpoint": "pg.example.com"},
@@ -267,13 +285,18 @@ class TestMigrateToLakbaseStream:
         mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
         mock_sess.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.utils.databricks_auth.extract_user_token_from_request",
-                   return_value="tok"), \
-             patch("src.api.database_management_router.LakebaseService",
-                   return_value=mock_service), \
-             patch("src.db.session._local_session_factory",
-                   return_value=mock_sess), \
-             patch("src.db.session.dispose_engines", AsyncMock()):
+        with (
+            patch(
+                "src.utils.databricks_auth.extract_user_token_from_request",
+                return_value="tok",
+            ),
+            patch(
+                "src.api.database_management_router.LakebaseService",
+                return_value=mock_service,
+            ),
+            patch("src.db.session._local_session_factory", return_value=mock_sess),
+            patch("src.db.session.dispose_engines", AsyncMock()),
+        ):
 
             response = await migrate_to_lakebase_stream(
                 request={"instance_name": "kb"},
@@ -300,12 +323,17 @@ class TestMigrateToLakbaseStream:
         mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
         mock_sess.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.utils.databricks_auth.extract_user_token_from_request",
-                   return_value=None), \
-             patch("src.api.database_management_router.LakebaseService",
-                   return_value=mock_service), \
-             patch("src.db.session._local_session_factory",
-                   return_value=mock_sess):
+        with (
+            patch(
+                "src.utils.databricks_auth.extract_user_token_from_request",
+                return_value=None,
+            ),
+            patch(
+                "src.api.database_management_router.LakebaseService",
+                return_value=mock_service,
+            ),
+            patch("src.db.session._local_session_factory", return_value=mock_sess),
+        ):
 
             response = await migrate_to_lakebase_stream(
                 request={"instance_name": "kb"},
@@ -331,12 +359,17 @@ class TestMigrateToLakbaseStream:
         mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
         mock_sess.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.utils.databricks_auth.extract_user_token_from_request",
-                   return_value=None), \
-             patch("src.api.database_management_router.LakebaseService",
-                   return_value=mock_service), \
-             patch("src.db.session._local_session_factory",
-                   return_value=mock_sess):
+        with (
+            patch(
+                "src.utils.databricks_auth.extract_user_token_from_request",
+                return_value=None,
+            ),
+            patch(
+                "src.api.database_management_router.LakebaseService",
+                return_value=mock_service,
+            ),
+            patch("src.db.session._local_session_factory", return_value=mock_sess),
+        ):
 
             response = await migrate_to_lakebase_stream(
                 request={"instance_name": "kb"},
@@ -376,11 +409,17 @@ class TestMigrateToLakbaseStream:
         mock_sess.__aexit__ = AsyncMock(return_value=False)
         mock_factory = MagicMock(return_value=mock_sess)
 
-        with patch("src.utils.databricks_auth.extract_user_token_from_request",
-                   return_value="tok"), \
-             patch("src.api.database_management_router.LakebaseService",
-                   return_value=mock_service), \
-             patch("src.db.session._local_session_factory", mock_factory):
+        with (
+            patch(
+                "src.utils.databricks_auth.extract_user_token_from_request",
+                return_value="tok",
+            ),
+            patch(
+                "src.api.database_management_router.LakebaseService",
+                return_value=mock_service,
+            ),
+            patch("src.db.session._local_session_factory", mock_factory),
+        ):
 
             response = await migrate_to_lakebase_stream(
                 request={"instance_name": "kb", "endpoint": "pg.example.com"},
@@ -391,8 +430,9 @@ class TestMigrateToLakbaseStream:
             await self._collect_events(response)
 
         # Config should have been saved with enabled=False
-        assert any(not c.get("enabled", True) for c in saved_configs), \
-            f"Expected enabled=False in saved configs, got: {saved_configs}"
+        assert any(
+            not c.get("enabled", True) for c in saved_configs
+        ), f"Expected enabled=False in saved configs, got: {saved_configs}"
 
     @pytest.mark.asyncio
     async def test_outer_exception_emits_error_event(self):
@@ -400,8 +440,10 @@ class TestMigrateToLakbaseStream:
         ctx = SysAdminCtx()
         raw_request = self._make_request_obj()
 
-        with patch("src.utils.databricks_auth.extract_user_token_from_request",
-                   side_effect=Exception("token error")):
+        with patch(
+            "src.utils.databricks_auth.extract_user_token_from_request",
+            side_effect=Exception("token error"),
+        ):
 
             response = await migrate_to_lakebase_stream(
                 request={"instance_name": "kb", "endpoint": "pg.example.com"},
@@ -432,13 +474,18 @@ class TestMigrateToLakbaseStream:
         mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
         mock_sess.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.utils.databricks_auth.extract_user_token_from_request",
-                   return_value="tok"), \
-             patch("src.api.database_management_router.LakebaseService",
-                   return_value=mock_service), \
-             patch("src.db.session._local_session_factory",
-                   return_value=mock_sess), \
-             patch("src.db.session.dispose_engines", AsyncMock()):
+        with (
+            patch(
+                "src.utils.databricks_auth.extract_user_token_from_request",
+                return_value="tok",
+            ),
+            patch(
+                "src.api.database_management_router.LakebaseService",
+                return_value=mock_service,
+            ),
+            patch("src.db.session._local_session_factory", return_value=mock_sess),
+            patch("src.db.session.dispose_engines", AsyncMock()),
+        ):
 
             response = await migrate_to_lakebase_stream(
                 request={
@@ -480,13 +527,18 @@ class TestMigrateToLakbaseStream:
         mock_sess.__aenter__ = AsyncMock(return_value=mock_sess)
         mock_sess.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("src.utils.databricks_auth.extract_user_token_from_request",
-                   return_value="tok"), \
-             patch("src.api.database_management_router.LakebaseService",
-                   return_value=mock_service), \
-             patch("src.db.session._local_session_factory",
-                   return_value=mock_sess), \
-             patch("src.db.session.dispose_engines", AsyncMock()):
+        with (
+            patch(
+                "src.utils.databricks_auth.extract_user_token_from_request",
+                return_value="tok",
+            ),
+            patch(
+                "src.api.database_management_router.LakebaseService",
+                return_value=mock_service,
+            ),
+            patch("src.db.session._local_session_factory", return_value=mock_sess),
+            patch("src.db.session.dispose_engines", AsyncMock()),
+        ):
 
             response = await migrate_to_lakebase_stream(
                 request={"instance_name": "kb", "endpoint": "pg.example.com"},

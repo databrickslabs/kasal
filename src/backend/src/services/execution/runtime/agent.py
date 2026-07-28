@@ -26,7 +26,13 @@ from src.core.events.types import (
     LiteAgentExecutionStartedEvent,
 )
 from src.services.tools.base import BaseTool
-from .executor import build_messages, run_agent, structured_from_raw, json_schema_instruction
+
+from .executor import (
+    build_messages,
+    json_schema_instruction,
+    run_agent,
+    structured_from_raw,
+)
 from .types import LiteAgentOutput, PlanningConfig
 
 logger = logging.getLogger(__name__)
@@ -157,7 +163,11 @@ class Agent(BaseAgent):
                 user_content += json_schema_instruction(response_format)
             built = build_messages(self, user_content)
             if chat:
-                built = [built[0], *chat[:-1], {"role": "user", "content": user_content}]
+                built = [
+                    built[0],
+                    *chat[:-1],
+                    {"role": "user", "content": user_content},
+                ]
             raw = run_agent(self, user_content, self.tools, messages=built)
             structured = (
                 structured_from_raw(response_format, raw)

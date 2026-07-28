@@ -7,14 +7,15 @@ Tests cover:
 - ExecutionHistoryService.get_execution_groups_with_counts()
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # ExecutionService.get_execution_status_detail
 # ---------------------------------------------------------------------------
+
 
 class TestGetExecutionStatusDetail:
     """Tests for ExecutionService.get_execution_status_detail()."""
@@ -26,6 +27,7 @@ class TestGetExecutionStatusDetail:
     @pytest.fixture
     def service(self, mock_session):
         from src.services.execution.service import ExecutionService
+
         svc = ExecutionService.__new__(ExecutionService)
         svc.session = mock_session
         return svc
@@ -33,6 +35,7 @@ class TestGetExecutionStatusDetail:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_session(self):
         from src.services.execution.service import ExecutionService
+
         svc = ExecutionService.__new__(ExecutionService)
         svc.session = None
         result = await svc.get_execution_status_detail("exec-1")
@@ -47,7 +50,9 @@ class TestGetExecutionStatusDetail:
             "src.repositories.execution_history_repository.ExecutionHistoryRepository",
             return_value=mock_repo,
         ):
-            result = await service.get_execution_status_detail("exec-missing", group_ids=["g1"])
+            result = await service.get_execution_status_detail(
+                "exec-missing", group_ids=["g1"]
+            )
         assert result is None
 
     @pytest.mark.asyncio
@@ -65,7 +70,9 @@ class TestGetExecutionStatusDetail:
             "src.repositories.execution_history_repository.ExecutionHistoryRepository",
             return_value=mock_repo,
         ):
-            result = await service.get_execution_status_detail("exec-1", group_ids=["g1"])
+            result = await service.get_execution_status_detail(
+                "exec-1", group_ids=["g1"]
+            )
 
         assert result is not None
         assert result["execution_id"] == "exec-1"
@@ -94,7 +101,9 @@ class TestGetExecutionStatusDetail:
             "src.repositories.execution_history_repository.ExecutionHistoryRepository",
             return_value=mock_repo,
         ):
-            result = await service.get_execution_status_detail("exec-1", group_ids=["g1"])
+            result = await service.get_execution_status_detail(
+                "exec-1", group_ids=["g1"]
+            )
 
         assert result is not None
         assert result["status"] == "RUNNING"
@@ -144,7 +153,9 @@ class TestGetExecutionStatusDetail:
             "src.repositories.execution_history_repository.ExecutionHistoryRepository",
             return_value=mock_repo,
         ):
-            result = await service.get_execution_status_detail("exec-1", group_ids=["g1"])
+            result = await service.get_execution_status_detail(
+                "exec-1", group_ids=["g1"]
+            )
 
         assert result["is_stopping"] is True
         assert result["stopped_at"] == "2026-01-01T00:00:00"
@@ -168,6 +179,7 @@ class TestGetExecutionStatusDetail:
 # ExecutionHistoryService.get_execution_groups_with_counts
 # ---------------------------------------------------------------------------
 
+
 class TestGetExecutionGroupsWithCounts:
     """Tests for ExecutionHistoryService.get_execution_groups_with_counts()."""
 
@@ -178,6 +190,7 @@ class TestGetExecutionGroupsWithCounts:
     @pytest.fixture
     def service(self, mock_session):
         from src.services.execution.history import ExecutionHistoryService
+
         svc = ExecutionHistoryService.__new__(ExecutionHistoryService)
         svc.session = mock_session
         svc.history_repo = AsyncMock()
@@ -186,11 +199,13 @@ class TestGetExecutionGroupsWithCounts:
 
     @pytest.mark.asyncio
     async def test_returns_group_counts(self, service, mock_session):
-        service.history_repo.count_by_group = AsyncMock(return_value=[
-            ("group-a", 5),
-            ("group-b", 12),
-            ("group-c", 1),
-        ])
+        service.history_repo.count_by_group = AsyncMock(
+            return_value=[
+                ("group-a", 5),
+                ("group-b", 12),
+                ("group-c", 1),
+            ]
+        )
 
         result = await service.get_execution_groups_with_counts()
 
@@ -209,7 +224,9 @@ class TestGetExecutionGroupsWithCounts:
 
     @pytest.mark.asyncio
     async def test_raises_on_db_error(self, service, mock_session):
-        service.history_repo.count_by_group = AsyncMock(side_effect=Exception("connection lost"))
+        service.history_repo.count_by_group = AsyncMock(
+            side_effect=Exception("connection lost")
+        )
 
         with pytest.raises(Exception, match="connection lost"):
             await service.get_execution_groups_with_counts()

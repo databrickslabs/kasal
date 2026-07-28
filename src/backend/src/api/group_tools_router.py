@@ -7,13 +7,13 @@ Provides endpoints for workspace admins to:
 - Add/remove a tool to/from the group
 - Enable/disable and configure a tool within the group
 """
+
 from typing import Annotated, Any, Dict
 
 from fastapi import APIRouter, Depends, status
 
-from src.core.exceptions import BadRequestError, NotFoundError
-
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import BadRequestError, NotFoundError
 from src.core.permissions import require_admin
 from src.schemas.group_tool import GroupToolListResponse, GroupToolResponse
 from src.schemas.tool import ToolListResponse

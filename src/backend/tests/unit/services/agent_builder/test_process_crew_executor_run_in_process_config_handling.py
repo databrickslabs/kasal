@@ -13,17 +13,19 @@ Key targets:
   1490-1491  _process_log_queue writing logs
   1501-1521  _process_log_queue error path
 """
+
 import asyncio
 import logging
 import os
 import sys
-import pytest
-from unittest.mock import AsyncMock, MagicMock, Mock, patch, call
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Directly invoke run_crew_in_process with all critical deps mocked
 # ---------------------------------------------------------------------------
+
 
 class TestRunCrewInProcessDirect:
     """
@@ -34,16 +36,25 @@ class TestRunCrewInProcessDirect:
     def _make_base_patches(self):
         """Create a context manager that patches all subprocess imports."""
         return [
-            patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                  return_value=MagicMock()),
-            patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                  return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))),
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
         ]
 
     def test_database_type_existing_in_env(self):
         """When DATABASE_TYPE is already set, it is not overwritten."""
         import os
+
         from src.services.agent_builder.process_executor import run_crew_in_process
 
         old_val = os.environ.get("DATABASE_TYPE")
@@ -63,6 +74,7 @@ class TestRunCrewInProcessDirect:
     def test_json_string_config_parsed_successfully(self):
         """Valid JSON string config is parsed and processing continues."""
         import json
+
         from src.services.agent_builder.process_executor import run_crew_in_process
 
         config = {"agents": [], "tasks": [], "group_id": "grp-1"}
@@ -91,14 +103,26 @@ class TestRunCrewInProcessDirect:
         mock_alive_child.kill = MagicMock()
 
         # Patch the subprocess to avoid actually spawning crew infrastructure
-        with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   return_value=MagicMock(info=MagicMock(), error=MagicMock(), warning=MagicMock())), \
-             patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                   return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-             patch("psutil.Process") as mock_psutil, \
-             patch("psutil.wait_procs", return_value=([], [mock_alive_child])):
+        with (
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=MagicMock(
+                    info=MagicMock(), error=MagicMock(), warning=MagicMock()
+                ),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
+            patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+            patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
+            patch("psutil.Process") as mock_psutil,
+            patch("psutil.wait_procs", return_value=([], [mock_alive_child])),
+        ):
             mock_psutil.return_value.children.return_value = [mock_child]
             mock_psutil.return_value.is_running.return_value = False
 
@@ -114,14 +138,26 @@ class TestRunCrewInProcessDirect:
         """cleanup_async_db_connections exception in finally is handled."""
         from src.services.agent_builder.process_executor import run_crew_in_process
 
-        with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   return_value=MagicMock(info=MagicMock(), error=MagicMock())), \
-             patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                   return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow.tracing.cleanup_async_db_connections",
-                   side_effect=RuntimeError("cleanup failed")), \
-             patch("psutil.Process") as mock_psutil:
+        with (
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=MagicMock(info=MagicMock(), error=MagicMock()),
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
+            patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+            patch(
+                "src.services.mlflow.tracing.cleanup_async_db_connections",
+                side_effect=RuntimeError("cleanup failed"),
+            ),
+            patch("psutil.Process") as mock_psutil,
+        ):
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-cleanup-err", {})
 
@@ -145,17 +181,31 @@ class TestRunCrewInProcessDirect:
         mock_subprocess_logger.warning = MagicMock()
         mock_subprocess_logger.handlers = []
 
-        with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
-                   return_value=mock_subprocess_logger), \
-             patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
-                   return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
-             patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
-             patch("psutil.Process") as mock_psutil, \
-             patch("src.utils.user_context.UserContext.set_group_context") as mock_set_ctx, \
-             patch("src.utils.user_context.UserContext.set_user_token") as mock_set_tok, \
-             patch("src.utils.user_context.UserContext.get_group_context") as mock_get_ctx, \
-             patch("src.utils.user_context.GroupContext") as mock_group_ctx_class:
+        with (
+            patch(
+                "src.services.execution.subprocess_bootstrap.configure_subprocess_logging",
+                return_value=mock_subprocess_logger,
+            ),
+            patch(
+                "src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
+                return_value=(
+                    sys.stdout,
+                    sys.stderr,
+                    MagicMock(getvalue=MagicMock(return_value="")),
+                ),
+            ),
+            patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"),
+            patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
+            patch("psutil.Process") as mock_psutil,
+            patch(
+                "src.utils.user_context.UserContext.set_group_context"
+            ) as mock_set_ctx,
+            patch("src.utils.user_context.UserContext.set_user_token") as mock_set_tok,
+            patch(
+                "src.utils.user_context.UserContext.get_group_context"
+            ) as mock_get_ctx,
+            patch("src.utils.user_context.GroupContext") as mock_group_ctx_class,
+        ):
             mock_psutil.return_value.children.return_value = []
             mock_group_ctx = MagicMock()
             mock_group_ctx.primary_group_id = "tenant-123"
@@ -175,12 +225,14 @@ class TestRunCrewInProcessDirect:
 # ProcessCrewExecutor — cover lines in _process_log_queue
 # ---------------------------------------------------------------------------
 
+
 class TestProcessLogQueueCoverage:
 
     @pytest.mark.asyncio
     async def test_log_queue_with_matching_lines_writes_multiple_logs(self):
         """When crew.log has matching lines, all are written to DB."""
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
         with patch("src.services.agent_builder.process_executor.mp.get_context"):
             executor = ProcessCrewExecutor()
         executor._ctx = MagicMock()
@@ -189,12 +241,14 @@ class TestProcessLogQueueCoverage:
         mock_queue = MagicMock()
 
         # Create log lines that match our execution id
-        log_lines = "\n".join([
-            f"2025-01-01 {execution_id[:8]} Task 1 started",
-            f"2025-01-01 {execution_id[:8]} Task 1 completed",
-            f"2025-01-01 other-exec-id Something else",
-            f"2025-01-01 {execution_id[:8]} Task 2 started",
-        ])
+        log_lines = "\n".join(
+            [
+                f"2025-01-01 {execution_id[:8]} Task 1 started",
+                f"2025-01-01 {execution_id[:8]} Task 1 completed",
+                f"2025-01-01 other-exec-id Something else",
+                f"2025-01-01 {execution_id[:8]} Task 2 started",
+            ]
+        )
 
         mock_repo = AsyncMock()
         mock_session = AsyncMock()
@@ -204,13 +258,21 @@ class TestProcessLogQueueCoverage:
             yield mock_session
 
         from unittest.mock import mock_open
+
         m = mock_open(read_data=log_lines)
 
-        with patch("os.path.exists", return_value=True), \
-             patch("builtins.open", m), \
-             patch("src.db.database_router.get_smart_db_session", return_value=mock_smart_session()), \
-             patch("src.repositories.execution_logs_repository.ExecutionLogsRepository",
-                   return_value=mock_repo):
+        with (
+            patch("os.path.exists", return_value=True),
+            patch("builtins.open", m),
+            patch(
+                "src.db.database_router.get_smart_db_session",
+                return_value=mock_smart_session(),
+            ),
+            patch(
+                "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                return_value=mock_repo,
+            ),
+        ):
             await executor._process_log_queue(mock_queue, execution_id, None)
 
         # Header + 3 matching lines = 4 calls minimum
@@ -220,6 +282,7 @@ class TestProcessLogQueueCoverage:
     async def test_log_queue_session_error_logged_not_raised(self):
         """DB session error is caught and logged, execution continues."""
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
         with patch("src.services.agent_builder.process_executor.mp.get_context"):
             executor = ProcessCrewExecutor()
         executor._ctx = MagicMock()
@@ -229,12 +292,17 @@ class TestProcessLogQueueCoverage:
         log_content = f"2025-01-01 {execution_id[:8]} Some log line\n"
 
         from unittest.mock import mock_open
+
         m = mock_open(read_data=log_content)
 
-        with patch("os.path.exists", return_value=True), \
-             patch("builtins.open", m), \
-             patch("src.db.database_router.get_smart_db_session",
-                   side_effect=RuntimeError("db connection lost")):
+        with (
+            patch("os.path.exists", return_value=True),
+            patch("builtins.open", m),
+            patch(
+                "src.db.database_router.get_smart_db_session",
+                side_effect=RuntimeError("db connection lost"),
+            ),
+        ):
             # Should NOT raise
             await executor._process_log_queue(mock_queue, execution_id, None)
 
@@ -242,6 +310,7 @@ class TestProcessLogQueueCoverage:
     async def test_log_queue_no_log_dir_env_uses_default(self):
         """When LOG_DIR env is not set, uses default path."""
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
         with patch("src.services.agent_builder.process_executor.mp.get_context"):
             executor = ProcessCrewExecutor()
         executor._ctx = MagicMock()
@@ -261,6 +330,7 @@ class TestProcessLogQueueCoverage:
     async def test_log_queue_with_log_dir_env(self):
         """When LOG_DIR env is set, uses that path."""
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
         with patch("src.services.agent_builder.process_executor.mp.get_context"):
             executor = ProcessCrewExecutor()
         executor._ctx = MagicMock()

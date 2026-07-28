@@ -12,23 +12,25 @@ Targets uncovered lines (63% → 85%+):
  - Lines 657-717: LLM guardrail creation
  - Lines 788-800: task creation debug output
 """
+
 import json
-import pytest
 from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
+import pytest
 from pydantic import BaseModel
 
 from src.services.agent_builder.task_adapter import (
-    is_data_missing,
-    get_pydantic_class_from_name,
     create_callback_from_string,
     create_task,
+    get_pydantic_class_from_name,
+    is_data_missing,
 )
-
 
 # ---------------------------------------------------------------------------
 # is_data_missing
 # ---------------------------------------------------------------------------
+
 
 class TestIsDataMissing:
     def test_no_pydantic_attr_returns_true(self):
@@ -57,6 +59,7 @@ class TestIsDataMissing:
 # ---------------------------------------------------------------------------
 # get_pydantic_class_from_name – field type coverage
 # ---------------------------------------------------------------------------
+
 
 class TestGetPydanticClassFromNameFieldTypes:
     """Tests for field type branches in get_pydantic_class_from_name."""
@@ -155,8 +158,7 @@ class TestGetPydanticClassFromNameFieldTypes:
     @patch("src.services.agent_builder.task_adapter.UnitOfWork")
     async def test_array_of_strings_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
-            {"tags": {"type": "array", "items": {"type": "string"}}},
-            required=["tags"]
+            {"tags": {"type": "array", "items": {"type": "string"}}}, required=["tags"]
         )
         mock_schema = MagicMock()
         mock_schema.schema_definition = schema_def
@@ -178,7 +180,7 @@ class TestGetPydanticClassFromNameFieldTypes:
     async def test_array_of_integers_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"scores": {"type": "array", "items": {"type": "integer"}}},
-            required=["scores"]
+            required=["scores"],
         )
         mock_schema = MagicMock()
         mock_schema.schema_definition = schema_def
@@ -198,7 +200,7 @@ class TestGetPydanticClassFromNameFieldTypes:
     async def test_array_of_numbers_field(self, mock_uow_cls):
         schema_def = self._make_schema_def(
             {"values": {"type": "array", "items": {"type": "number"}}},
-            required=["values"]
+            required=["values"],
         )
         mock_schema = MagicMock()
         mock_schema.schema_definition = schema_def
@@ -350,6 +352,7 @@ class TestGetPydanticClassFromNameFieldTypes:
 # create_callback_from_string
 # ---------------------------------------------------------------------------
 
+
 class TestCreateCallbackFromString:
     def test_databricks_volume_callback(self):
         with patch(
@@ -426,6 +429,7 @@ class TestCreateCallbackFromString:
 # create_task – helper
 # ---------------------------------------------------------------------------
 
+
 def _base_task_config(**overrides):
     cfg = {
         "description": "Analyse the data",
@@ -446,12 +450,18 @@ def _make_agent(role="Analyst"):
 
 async def _create_task_patched(task_key, task_config, agent, **kwargs):
     """Helper to call create_task with all heavy deps mocked."""
-    with patch("src.services.mcp.service.MCPService"), \
-         patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-         patch("src.db.session.request_scoped_session") as mock_sess, \
-         patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-         patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-         patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc:
+    with (
+        patch("src.services.mcp.service.MCPService"),
+        patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+        patch("src.db.session.request_scoped_session") as mock_sess,
+        patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+        patch(
+            "src.services.databricks.workspace.service.DatabricksService"
+        ) as mock_db_svc,
+        patch(
+            "src.services.memory.backend_service.MemoryBackendService"
+        ) as mock_mem_svc,
+    ):
 
         mock_mcp_instance = MagicMock()
         mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
@@ -467,15 +477,17 @@ async def _create_task_patched(task_key, task_config, agent, **kwargs):
 
         mock_db_config = MagicMock()
         mock_db_config.volume_enabled = False
-        mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=mock_db_config)
+        mock_db_svc.return_value.get_databricks_config = AsyncMock(
+            return_value=mock_db_config
+        )
         mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
 
-        return await create_task(
-            task_key=task_key,
-            task_config=task_config,
-            agent=agent,
-            **kwargs
-        ), mock_task_cls
+        return (
+            await create_task(
+                task_key=task_key, task_config=task_config, agent=agent, **kwargs
+            ),
+            mock_task_cls,
+        )
 
 
 class TestCreateTaskBasic:
@@ -549,12 +561,18 @@ class TestCreateTaskBasic:
     @pytest.mark.asyncio
     async def test_task_creation_exception_reraises(self):
         agent = _make_agent()
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -562,7 +580,9 @@ class TestCreateTaskBasic:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.side_effect = Exception("task creation failed")
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
 
             with pytest.raises(Exception, match="task creation failed"):
@@ -584,14 +604,22 @@ class TestCreateTaskToolResolution:
         mock_tool_instance = MagicMock(name="SearchTool")
         mock_tool_factory.create_tool = MagicMock(return_value=mock_tool_instance)
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock) as mock_resolve:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch(
+                "src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
+                new_callable=AsyncMock,
+            ) as mock_resolve,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -599,7 +627,9 @@ class TestCreateTaskToolResolution:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_resolve.return_value = ["SearchTool"]
 
@@ -625,14 +655,22 @@ class TestCreateTaskToolResolution:
         mcp_t2 = MagicMock()
         mock_tool_factory.create_tool = MagicMock(return_value=(True, [mcp_t1, mcp_t2]))
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock) as mock_resolve:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch(
+                "src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
+                new_callable=AsyncMock,
+            ) as mock_resolve,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -640,7 +678,9 @@ class TestCreateTaskToolResolution:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_resolve.return_value = ["MCPTool"]
 
@@ -663,16 +703,26 @@ class TestCreateTaskToolResolution:
         mock_tool_svc = MagicMock()
         mock_tool_svc.get_tool_config_by_name = AsyncMock(return_value={})
         mock_tool_factory = MagicMock()
-        mock_tool_factory.create_tool = MagicMock(return_value=(True, "mcp_service_adapter"))
+        mock_tool_factory.create_tool = MagicMock(
+            return_value=(True, "mcp_service_adapter")
+        )
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock) as mock_resolve:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch(
+                "src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
+                new_callable=AsyncMock,
+            ) as mock_resolve,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -680,7 +730,9 @@ class TestCreateTaskToolResolution:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_resolve.return_value = ["MCPAdapter"]
 
@@ -707,12 +759,18 @@ class TestCreateTaskToolResolution:
         mock_genie = MagicMock(name="GenieTool")
         mock_tool_factory.create_tool = MagicMock(return_value=mock_genie)
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -720,7 +778,9 @@ class TestCreateTaskToolResolution:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
 
             task = await create_task(
@@ -751,14 +811,22 @@ class TestCreateTaskToolResolution:
         mock_serper = MagicMock(name="SerperDevTool")
         mock_tool_factory.create_tool = MagicMock(return_value=mock_serper)
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
-                   new_callable=AsyncMock) as mock_resolve:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch(
+                "src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
+                new_callable=AsyncMock,
+            ) as mock_resolve,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -766,7 +834,9 @@ class TestCreateTaskToolResolution:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_resolve.return_value = ["SerperDevTool"]
 
@@ -788,14 +858,24 @@ class TestCreateTaskGuardrail:
         guardrail_cfg = json.dumps({"type": "prompt_injection_check"})
         task_config = _base_task_config(guardrail=guardrail_cfg)
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
-             patch("src.services.agent_builder.task_adapter.GuardrailWrapper") as mock_gw:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch(
+                "src.services.guardrails.guardrail_factory.GuardrailFactory"
+            ) as mock_gf,
+            patch(
+                "src.services.agent_builder.task_adapter.GuardrailWrapper"
+            ) as mock_gw,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -803,7 +883,9 @@ class TestCreateTaskGuardrail:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
 
             mock_guardrail = MagicMock()
@@ -831,14 +913,24 @@ class TestCreateTaskGuardrail:
             callback_config={"volume_path": "/Volumes/test"},
         )
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
-             patch("src.services.databricks.volumes.volume_callback.DatabricksVolumeCallback") as mock_dvcb:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch(
+                "src.services.guardrails.guardrail_factory.GuardrailFactory"
+            ) as mock_gf,
+            patch(
+                "src.services.databricks.volumes.volume_callback.DatabricksVolumeCallback"
+            ) as mock_dvcb,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -846,9 +938,13 @@ class TestCreateTaskGuardrail:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
-            mock_gf.create_guardrail = MagicMock(return_value=None)  # Factory returns None
+            mock_gf.create_guardrail = MagicMock(
+                return_value=None
+            )  # Factory returns None
             mock_dvcb.return_value = AsyncMock()
 
             task = await create_task(
@@ -866,14 +962,24 @@ class TestCreateTaskGuardrail:
         guardrail_cfg = json.dumps({"description": "prompt_injection_check"})
         task_config = _base_task_config(guardrail=guardrail_cfg)
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
-             patch("src.services.agent_builder.task_adapter.GuardrailWrapper") as mock_gw:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch(
+                "src.services.guardrails.guardrail_factory.GuardrailFactory"
+            ) as mock_gf,
+            patch(
+                "src.services.agent_builder.task_adapter.GuardrailWrapper"
+            ) as mock_gw,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -881,7 +987,9 @@ class TestCreateTaskGuardrail:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_guardrail = MagicMock()
             mock_gf.create_guardrail = MagicMock(return_value=mock_guardrail)
@@ -915,18 +1023,32 @@ class TestCreateTaskGuardrail:
         captured = {}
 
         def _capture_create_guardrail(factory_config):
-            cfg = json.loads(factory_config) if isinstance(factory_config, str) else factory_config
+            cfg = (
+                json.loads(factory_config)
+                if isinstance(factory_config, str)
+                else factory_config
+            )
             captured["config"] = cfg
             return MagicMock()
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
-             patch("src.services.agent_builder.task_adapter.GuardrailWrapper") as mock_gw:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch(
+                "src.services.guardrails.guardrail_factory.GuardrailFactory"
+            ) as mock_gf,
+            patch(
+                "src.services.agent_builder.task_adapter.GuardrailWrapper"
+            ) as mock_gw,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -934,7 +1056,9 @@ class TestCreateTaskGuardrail:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_gf.create_guardrail = MagicMock(side_effect=_capture_create_guardrail)
             mock_gw.return_value = MagicMock()
@@ -961,27 +1085,43 @@ class TestCreateTaskGuardrail:
         # Agent runs with a DIFFERENT model than the guardrail's explicit pick.
         agent.llm = MagicMock()
         agent.llm.model = "databricks/run-model"
-        guardrail_cfg = json.dumps({
-            "type": "prompt_injection_check",
-            "llm_model": "databricks-claude-opus-4",
-        })
+        guardrail_cfg = json.dumps(
+            {
+                "type": "prompt_injection_check",
+                "llm_model": "databricks-claude-opus-4",
+            }
+        )
         task_config = _base_task_config(guardrail=guardrail_cfg)
 
         captured = {}
 
         def _capture_create_guardrail(factory_config):
-            cfg = json.loads(factory_config) if isinstance(factory_config, str) else factory_config
+            cfg = (
+                json.loads(factory_config)
+                if isinstance(factory_config, str)
+                else factory_config
+            )
             captured["config"] = cfg
             return MagicMock()
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
-             patch("src.services.agent_builder.task_adapter.GuardrailWrapper") as mock_gw:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch(
+                "src.services.guardrails.guardrail_factory.GuardrailFactory"
+            ) as mock_gf,
+            patch(
+                "src.services.agent_builder.task_adapter.GuardrailWrapper"
+            ) as mock_gw,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -989,7 +1129,9 @@ class TestCreateTaskGuardrail:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_gf.create_guardrail = MagicMock(side_effect=_capture_create_guardrail)
             mock_gw.return_value = MagicMock()
@@ -1017,14 +1159,20 @@ class TestCreateTaskGuardrail:
         }
         task_config = _base_task_config(llm_guardrail=llm_guardrail)
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g, \
-             patch("src.core.llm.transport.LLM") as mock_llm_cls:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g,
+            patch("src.core.llm.transport.LLM") as mock_llm_cls,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -1032,7 +1180,9 @@ class TestCreateTaskGuardrail:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_llm_cls.return_value = MagicMock()
             mock_llm_g.return_value = MagicMock()
@@ -1054,14 +1204,20 @@ class TestCreateTaskGuardrail:
         }
         task_config = _base_task_config(llm_guardrail=llm_guardrail)
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g, \
-             patch("src.core.llm.transport.LLM") as mock_llm_cls:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g,
+            patch("src.core.llm.transport.LLM") as mock_llm_cls,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -1069,7 +1225,9 @@ class TestCreateTaskGuardrail:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_llm_cls.return_value = MagicMock()
             mock_llm_g.return_value = MagicMock()
@@ -1082,9 +1240,15 @@ class TestCreateTaskGuardrail:
             )
 
         # LLM should be created with databricks/ prefix
-        call_args = mock_llm_cls.call_args[1] if mock_llm_cls.call_args else mock_llm_cls.call_args
+        call_args = (
+            mock_llm_cls.call_args[1]
+            if mock_llm_cls.call_args
+            else mock_llm_cls.call_args
+        )
         if call_args:
-            model_arg = call_args.get("model", "") if isinstance(call_args, dict) else ""
+            model_arg = (
+                call_args.get("model", "") if isinstance(call_args, dict) else ""
+            )
             # Prefix should be added
             assert model_arg.startswith("databricks/") if model_arg else True
 
@@ -1102,15 +1266,23 @@ class TestCreateTaskGuardrail:
         }
         task_config = _base_task_config(llm_guardrail=llm_guardrail)
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g, \
-             patch("src.services.llm.manager.LLMManager.configure_kasal_llm",
-                   new_callable=AsyncMock) as mock_configure:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g,
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+            ) as mock_configure,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -1118,7 +1290,9 @@ class TestCreateTaskGuardrail:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_configure.return_value = MagicMock()
             mock_llm_g.return_value = MagicMock()
@@ -1151,15 +1325,23 @@ class TestCreateTaskGuardrail:
         }
         task_config = _base_task_config(llm_guardrail=llm_guardrail)
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g, \
-             patch("src.services.llm.manager.LLMManager.configure_kasal_llm",
-                   new_callable=AsyncMock) as mock_configure:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g,
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+            ) as mock_configure,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -1167,7 +1349,9 @@ class TestCreateTaskGuardrail:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_configure.return_value = MagicMock()
             mock_llm_g.return_value = MagicMock()
@@ -1192,6 +1376,7 @@ class TestCreateTaskGuardrail:
         the explicit llm_model are read via getattr. Covers the non-dict branch
         in task_helpers.py:686-687."""
         from types import SimpleNamespace
+
         agent = _make_agent()
         agent.llm = MagicMock()
         agent.llm.model = "databricks/run-model"
@@ -1202,15 +1387,23 @@ class TestCreateTaskGuardrail:
         )
         task_config = _base_task_config(llm_guardrail=llm_guardrail)
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g, \
-             patch("src.services.llm.manager.LLMManager.configure_kasal_llm",
-                   new_callable=AsyncMock) as mock_configure:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g,
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+            ) as mock_configure,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -1218,7 +1411,9 @@ class TestCreateTaskGuardrail:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_configure.return_value = MagicMock()
             mock_llm_g.return_value = MagicMock()
@@ -1244,14 +1439,20 @@ class TestCreateTaskGuardrail:
         }
         task_config = _base_task_config(llm_guardrail=llm_guardrail)
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g, \
-             patch("src.core.llm.transport.LLM") as mock_llm_cls:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch("src.services.execution.runtime.LLMGuardrail") as mock_llm_g,
+            patch("src.core.llm.transport.LLM") as mock_llm_cls,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -1259,7 +1460,9 @@ class TestCreateTaskGuardrail:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_llm_cls.return_value = MagicMock()
             mock_llm_g.return_value = MagicMock()
@@ -1284,13 +1487,21 @@ class TestCreateTaskGuardrail:
             callback_config={"volume_path": "/Volumes/data"},
         )
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.databricks.volumes.volume_callback.DatabricksVolumeCallback") as mock_dvcb:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch(
+                "src.services.databricks.volumes.volume_callback.DatabricksVolumeCallback"
+            ) as mock_dvcb,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -1298,7 +1509,9 @@ class TestCreateTaskGuardrail:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
             mock_dvcb.return_value = AsyncMock()
 
@@ -1315,12 +1528,18 @@ class TestCreateTaskGuardrail:
         my_callback = MagicMock()
         task_config = _base_task_config(callback=my_callback)
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -1328,7 +1547,9 @@ class TestCreateTaskGuardrail:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_sess.return_value = mock_session
             mock_task_cls.return_value = MagicMock(tools=[], agent=agent)
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=MagicMock(volume_enabled=False))
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=MagicMock(volume_enabled=False)
+            )
             mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=None)
 
             task = await create_task(
@@ -1345,17 +1566,27 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
     """Test auto-adding DatabricksVolumeCallback when backend is Databricks."""
 
     @pytest.mark.asyncio
-    async def test_auto_adds_databricks_callback_when_active_backend_is_databricks(self):
+    async def test_auto_adds_databricks_callback_when_active_backend_is_databricks(
+        self,
+    ):
         agent = _make_agent()
         task_config = _base_task_config()
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
-             patch("src.services.databricks.volumes.volume_callback.DatabricksVolumeCallback") as mock_dvcb:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+            patch(
+                "src.services.databricks.volumes.volume_callback.DatabricksVolumeCallback"
+            ) as mock_dvcb,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -1370,7 +1601,9 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
             mock_db_config.volume_path = "/Volumes/test/outputs"
             mock_db_config.volume_file_format = "json"
             mock_db_config.volume_create_date_dirs = True
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=mock_db_config)
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=mock_db_config
+            )
 
             # Active config is Databricks
             mock_active_config = MagicMock()
@@ -1379,7 +1612,9 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
             mock_active_config.enable_entity = True
             mock_active_config.backend_type = MagicMock()
             mock_active_config.backend_type.value = "databricks"
-            mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=mock_active_config)
+            mock_mem_svc.return_value.get_active_config = AsyncMock(
+                return_value=mock_active_config
+            )
             mock_dvcb.return_value = AsyncMock()
 
             task = await create_task(
@@ -1395,12 +1630,18 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
         agent = _make_agent()
         task_config = _base_task_config()
 
-        with patch("src.services.mcp.service.MCPService"), \
-             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
-             patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks.workspace.service.DatabricksService") as mock_db_svc, \
-             patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc:
+        with (
+            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
+            patch("src.db.session.request_scoped_session") as mock_sess,
+            patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls,
+            patch(
+                "src.services.databricks.workspace.service.DatabricksService"
+            ) as mock_db_svc,
+            patch(
+                "src.services.memory.backend_service.MemoryBackendService"
+            ) as mock_mem_svc,
+        ):
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
             mock_session = AsyncMock()
@@ -1412,13 +1653,17 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
             mock_db_config = MagicMock()
             mock_db_config.volume_enabled = True
             mock_db_config.volume_path = "/Volumes/test"
-            mock_db_svc.return_value.get_databricks_config = AsyncMock(return_value=mock_db_config)
+            mock_db_svc.return_value.get_databricks_config = AsyncMock(
+                return_value=mock_db_config
+            )
 
             mock_active_config = MagicMock()
             mock_active_config.enable_short_term = True
             mock_active_config.backend_type = MagicMock()
             mock_active_config.backend_type.value = "chromadb"  # Not Databricks
-            mock_mem_svc.return_value.get_active_config = AsyncMock(return_value=mock_active_config)
+            mock_mem_svc.return_value.get_active_config = AsyncMock(
+                return_value=mock_active_config
+            )
 
             task = await create_task(
                 task_key="no-auto-cb",

@@ -21,8 +21,8 @@ Usage:
         logger.warning("[SECURITY] Secret leak: %s", result.secret_types)
 """
 
-import re
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import List
 
@@ -32,36 +32,54 @@ logger = logging.getLogger(__name__)
 # Order matters: more specific patterns first.
 _PATTERNS: List[tuple] = [
     ("databricks_pat", re.compile(r"dapi[0-9a-f]{32}", re.IGNORECASE)),
-    ("databricks_env_token", re.compile(
-        r"DATABRICKS_TOKEN\s*[=:]\s*\S{10,}",
-    )),
+    (
+        "databricks_env_token",
+        re.compile(
+            r"DATABRICKS_TOKEN\s*[=:]\s*\S{10,}",
+        ),
+    ),
     ("aws_access_key", re.compile(r"AKIA[0-9A-Z]{16}")),
-    ("slack_token",    re.compile(r"xox[baprs]-[0-9A-Za-z\-]+")),
-    ("private_key",    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----")),
+    ("slack_token", re.compile(r"xox[baprs]-[0-9A-Za-z\-]+")),
+    (
+        "private_key",
+        re.compile(
+            r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----"
+        ),
+    ),
     # GitHub tokens: personal access (ghp_), OAuth (gho_), app install (ghs_), fine-grained (github_pat_)
-    ("github_token",   re.compile(r"(?:ghp|gho|ghs|github_pat)_[A-Za-z0-9_]{20,}")),
+    ("github_token", re.compile(r"(?:ghp|gho|ghs|github_pat)_[A-Za-z0-9_]{20,}")),
     # GCP service account JSON key identifier
-    ("gcp_service_account", re.compile(
-        r'"type"\s*:\s*"service_account"',
-    )),
+    (
+        "gcp_service_account",
+        re.compile(
+            r'"type"\s*:\s*"service_account"',
+        ),
+    ),
     # Azure storage account key in connection string
-    ("azure_connection_string", re.compile(
-        r"AccountKey\s*=\s*[A-Za-z0-9+/=]{40,}",
-    )),
+    (
+        "azure_connection_string",
+        re.compile(
+            r"AccountKey\s*=\s*[A-Za-z0-9+/=]{40,}",
+        ),
+    ),
     # Generic: api_key / secret followed by = : or whitespace and a long value
     # Tightened: require at least 24 chars (excludes UUIDs at 32 hex+hyphens)
     # and the value must start with a plausible key prefix (alphanumeric, not all digits)
-    ("generic_api_key", re.compile(
-        r'(?:api[_-]?key|api[_-]?secret|secret[_-]?key|auth[_-]?token)'
-        r'["\s:=]+(?=[A-Za-z])[A-Za-z0-9/+_\-]{24,}',
-        re.IGNORECASE,
-    )),
+    (
+        "generic_api_key",
+        re.compile(
+            r"(?:api[_-]?key|api[_-]?secret|secret[_-]?key|auth[_-]?token)"
+            r'["\s:=]+(?=[A-Za-z])[A-Za-z0-9/+_\-]{24,}',
+            re.IGNORECASE,
+        ),
+    ),
 ]
 
 
 @dataclass
 class SecretLeakResult:
     """Result of a secret-leak scan."""
+
     detected: bool
     secret_types: List[str] = field(default_factory=list)
 

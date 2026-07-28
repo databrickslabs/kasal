@@ -1,11 +1,12 @@
 """Unit tests for LLMLogRepository."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 
-from src.repositories.log_repository import LLMLogRepository
+import pytest
+
 from src.models.log import LLMLog
+from src.repositories.log_repository import LLMLogRepository
 
 
 @pytest.fixture

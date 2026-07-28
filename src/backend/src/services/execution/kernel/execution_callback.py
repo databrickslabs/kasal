@@ -14,8 +14,8 @@ previously lived here.
 """
 
 import logging
-from typing import Any, Dict
 from datetime import datetime, timezone
+from typing import Any, Dict
 
 from src.services.execution.logs.queue import enqueue_log
 from src.utils.user_context import GroupContext
@@ -67,13 +67,18 @@ def create_execution_callbacks(
             # the LLM injection guardrail is the blocking layer when enabled by the user.
             try:
                 from src.services.security.scanner_pipeline import security_scanner
-                _scan = security_scanner.scan(content, context=f"step_callback:{job_id}")
+
+                _scan = security_scanner.scan(
+                    content, context=f"step_callback:{job_id}"
+                )
                 # SECURITY: if the output leaked credentials, mask them before the
                 # content is enqueued to logs / streamed to the UI / persisted.
                 if _scan.secrets.detected:
                     content = security_scanner.redact_secrets(content)
             except Exception as _sec_err:
-                logger.debug("%s [SECURITY] Tool output scan skipped: %s", log_prefix, _sec_err)
+                logger.debug(
+                    "%s [SECURITY] Tool output scan skipped: %s", log_prefix, _sec_err
+                )
 
             content_preview = content[:500] + "..." if len(content) > 500 else content
             log_message = f"[STEP] {content_preview}"
@@ -115,13 +120,18 @@ def create_execution_callbacks(
             # the LLM injection guardrail is the blocking layer when enabled by the user.
             try:
                 from src.services.security.scanner_pipeline import security_scanner
-                _scan = security_scanner.scan(content, context=f"task_callback:{job_id}")
+
+                _scan = security_scanner.scan(
+                    content, context=f"task_callback:{job_id}"
+                )
                 # SECURITY: mask any leaked credentials before the task output is
                 # enqueued to logs / streamed to the UI / persisted to traces.
                 if _scan.secrets.detected:
                     content = security_scanner.redact_secrets(content)
             except Exception as _sec_err:
-                logger.debug("%s [SECURITY] Task output scan skipped: %s", log_prefix, _sec_err)
+                logger.debug(
+                    "%s [SECURITY] Task output scan skipped: %s", log_prefix, _sec_err
+                )
 
             task_preview = (
                 task_description[:100] + "..."
@@ -200,9 +210,7 @@ def create_crew_callbacks(
                 f"{log_prefix} Crew execution completed (trace created by event bus)"
             )
         except Exception as e:
-            logger.error(
-                f"{log_prefix} Error in on_crew_complete: {e}", exc_info=True
-            )
+            logger.error(f"{log_prefix} Error in on_crew_complete: {e}", exc_info=True)
 
     def on_crew_error(error):
         """Called when crew execution fails."""

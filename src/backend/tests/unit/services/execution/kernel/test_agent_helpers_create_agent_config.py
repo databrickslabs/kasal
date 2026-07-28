@@ -8,41 +8,48 @@ Tests cover:
 - create_agent: validation, LLM config, security preamble injection, tool resolution,
   MCP tools, fallback paths, additional params, prompt template handling.
 """
+
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
 import pytest
 
 from src.utils.model_config import DEFAULT_ENGINE_MODEL
-from unittest.mock import AsyncMock, MagicMock, patch, call
-
 
 # ============================================================================
 # _build_security_preamble
 # ============================================================================
 
+
 class TestBuildSecurityPreamble:
 
     def test_returns_non_empty_string(self):
         from src.services.agent_builder.agent_adapter import _build_security_preamble
+
         result = _build_security_preamble()
         assert isinstance(result, str)
         assert len(result) > 0
 
     def test_contains_security_instruction(self):
         from src.services.agent_builder.agent_adapter import _build_security_preamble
+
         result = _build_security_preamble()
         assert "SECURITY" in result.upper() or "security" in result.lower()
 
     def test_mentions_injection(self):
         from src.services.agent_builder.agent_adapter import _build_security_preamble
+
         result = _build_security_preamble()
         assert "injection" in result.lower() or "inject" in result.lower()
 
     def test_mentions_untrusted_data(self):
         from src.services.agent_builder.agent_adapter import _build_security_preamble
+
         result = _build_security_preamble()
         assert "untrusted" in result.lower() or "external" in result.lower()
 
     def test_idempotent_returns_same_value_each_call(self):
         from src.services.agent_builder.agent_adapter import _build_security_preamble
+
         assert _build_security_preamble() == _build_security_preamble()
 
 
@@ -65,16 +72,36 @@ def _patch_all_deps():
     """Patch every external dependency of create_agent."""
     return (
         patch("src.services.execution.kernel.agent_builder.Agent"),
-        patch("src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names", new_callable=AsyncMock, return_value=[]),
+        patch(
+            "src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
         patch("src.db.session.request_scoped_session"),
         patch("src.services.mcp.service.MCPService"),
-        patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-        patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+        patch(
+            "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+        patch(
+            "src.services.llm.manager.LLMManager.configure_kasal_llm",
+            new_callable=AsyncMock,
+            return_value=MagicMock(),
+        ),
     )
 
 
-async def _run(agent_config, config=None, tools=None, tool_service=None, tool_factory=None, agent_id=None):
+async def _run(
+    agent_config,
+    config=None,
+    tools=None,
+    tool_service=None,
+    tool_factory=None,
+    agent_id=None,
+):
     from src.services.agent_builder.agent_adapter import create_agent
+
     return await create_agent(
         agent_key="test_agent",
         agent_config=agent_config,
@@ -90,11 +117,13 @@ async def _run(agent_config, config=None, tools=None, tool_service=None, tool_fa
 # Validation tests
 # ============================================================================
 
+
 class TestCreateAgentValidation:
 
     @pytest.mark.asyncio
     async def test_missing_role_raises_value_error(self):
         from src.services.agent_builder.agent_adapter import create_agent
+
         bad_config = {"goal": "g", "backstory": "b"}
         with pytest.raises(ValueError, match="role"):
             await create_agent("k", bad_config, config=GLOBAL_CONFIG)
@@ -102,6 +131,7 @@ class TestCreateAgentValidation:
     @pytest.mark.asyncio
     async def test_missing_goal_raises_value_error(self):
         from src.services.agent_builder.agent_adapter import create_agent
+
         bad_config = {"role": "r", "backstory": "b"}
         with pytest.raises(ValueError, match="goal"):
             await create_agent("k", bad_config, config=GLOBAL_CONFIG)
@@ -109,6 +139,7 @@ class TestCreateAgentValidation:
     @pytest.mark.asyncio
     async def test_missing_backstory_raises_value_error(self):
         from src.services.agent_builder.agent_adapter import create_agent
+
         bad_config = {"role": "r", "goal": "g"}
         with pytest.raises(ValueError, match="backstory"):
             await create_agent("k", bad_config, config=GLOBAL_CONFIG)
@@ -116,6 +147,7 @@ class TestCreateAgentValidation:
     @pytest.mark.asyncio
     async def test_empty_role_raises_value_error(self):
         from src.services.agent_builder.agent_adapter import create_agent
+
         bad_config = {"role": "", "goal": "g", "backstory": "b"}
         with pytest.raises(ValueError, match="role"):
             await create_agent("k", bad_config, config=GLOBAL_CONFIG)
@@ -125,11 +157,15 @@ class TestCreateAgentValidation:
 # Security preamble injection
 # ============================================================================
 
+
 class TestSecurityPreambleInjection:
 
     @pytest.mark.asyncio
     async def test_system_prompt_starts_with_preamble_no_template(self):
-        from src.services.agent_builder.agent_adapter import _build_security_preamble, create_agent
+        from src.services.agent_builder.agent_adapter import (
+            _build_security_preamble,
+            create_agent,
+        )
 
         captured = {}
 
@@ -138,10 +174,21 @@ class TestSecurityPreambleInjection:
             return MagicMock()
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
@@ -158,7 +205,10 @@ class TestSecurityPreambleInjection:
 
     @pytest.mark.asyncio
     async def test_system_prompt_prepends_preamble_to_custom_template(self):
-        from src.services.agent_builder.agent_adapter import _build_security_preamble, create_agent
+        from src.services.agent_builder.agent_adapter import (
+            _build_security_preamble,
+            create_agent,
+        )
 
         custom_template = "You are a helpful assistant."
         captured = {}
@@ -171,10 +221,21 @@ class TestSecurityPreambleInjection:
         agent_config["system_template"] = custom_template
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
@@ -194,15 +255,27 @@ class TestSecurityPreambleInjection:
             return MagicMock()
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             # Even if agent config says True, it must be forced to False
             agent_config = dict(BASE_CONFIG)
             agent_config["allow_code_execution"] = True
@@ -214,6 +287,7 @@ class TestSecurityPreambleInjection:
 # ============================================================================
 # LLM configuration
 # ============================================================================
+
 
 class TestCreateAgentLlmConfig:
 
@@ -230,15 +304,27 @@ class TestCreateAgentLlmConfig:
         agent_config["llm"] = "gpt-4"
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm) as mock_configure,
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=mock_llm,
+            ) as mock_configure,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             await create_agent("k", agent_config, config=GLOBAL_CONFIG)
 
         mock_configure.assert_called_once_with("gpt-4", GLOBAL_CONFIG["group_id"], None)
@@ -249,15 +335,27 @@ class TestCreateAgentLlmConfig:
         captured_args = {}
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", return_value=MagicMock()),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()) as mock_configure,
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                return_value=MagicMock(),
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ) as mock_configure,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             agent_config = dict(BASE_CONFIG)
             agent_config["llm"] = "gpt-4"
             agent_config["temperature"] = 70  # 70/100 = 0.7
@@ -278,15 +376,27 @@ class TestCreateAgentLlmConfig:
         mock_llm = MagicMock()
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm) as mock_configure,
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=mock_llm,
+            ) as mock_configure,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             # BASE_CONFIG has no 'llm' key
             await create_agent("k", dict(BASE_CONFIG), config=GLOBAL_CONFIG)
 
@@ -298,6 +408,7 @@ class TestCreateAgentLlmConfig:
 # ============================================================================
 # Knowledge sources removal
 # ============================================================================
+
 
 class TestKnowledgeSourcesRemoval:
 
@@ -314,15 +425,27 @@ class TestKnowledgeSourcesRemoval:
         agent_config["knowledge_sources"] = ["some_source"]
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             await create_agent("k", agent_config, config=GLOBAL_CONFIG)
 
         assert "knowledge_sources" not in captured
@@ -331,6 +454,7 @@ class TestKnowledgeSourcesRemoval:
 # ============================================================================
 # Tool resolution
 # ============================================================================
+
 
 class TestToolResolution:
 
@@ -346,16 +470,30 @@ class TestToolResolution:
         mock_tool.name = "MockTool"
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
-            await create_agent("k", dict(BASE_CONFIG), tools=[mock_tool], config=GLOBAL_CONFIG)
+
+            await create_agent(
+                "k", dict(BASE_CONFIG), tools=[mock_tool], config=GLOBAL_CONFIG
+            )
 
         assert mock_tool in captured["tools"]
 
@@ -371,8 +509,15 @@ class TestToolResolution:
         mcp_tool.name = "MCPTool"
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
@@ -384,6 +529,7 @@ class TestToolResolution:
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             # MCP servers must be declared in tool_configs — without them the
             # helper skips the DB session + MCP integration entirely (PERF-027).
             agent_config = {**BASE_CONFIG, "tool_configs": {"MCP_SERVERS": ["server1"]}}
@@ -409,8 +555,15 @@ class TestToolResolution:
         mock_tool_svc.get_tool_config_by_name = AsyncMock(return_value={})
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
@@ -418,11 +571,16 @@ class TestToolResolution:
                 return_value=[],
             ),
             patch("src.services.mcp.service.MCPService"),
-            patch("src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names", new_callable=AsyncMock, return_value=["ResolvedTool"]),
+            patch(
+                "src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names",
+                new_callable=AsyncMock,
+                return_value=["ResolvedTool"],
+            ),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             agent_config = dict(BASE_CONFIG)
             agent_config["tools"] = [99]  # Some tool ID
             await create_agent(
@@ -450,8 +608,15 @@ class TestToolResolution:
         mock_tool_svc.get_tool_config_by_name = AsyncMock(return_value={})
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch(
                 "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
@@ -459,11 +624,16 @@ class TestToolResolution:
                 return_value=[],
             ),
             patch("src.services.mcp.service.MCPService"),
-            patch("src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names", new_callable=AsyncMock, return_value=["SomeTool"]),
+            patch(
+                "src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names",
+                new_callable=AsyncMock,
+                return_value=["SomeTool"],
+            ),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             agent_config = dict(BASE_CONFIG)
             agent_config["tools"] = [1]
             await create_agent(
@@ -475,13 +645,18 @@ class TestToolResolution:
             )
 
         # No tools from factory since it returned None
-        factory_tools = [t for t in captured["tools"] if not isinstance(t, MagicMock) or t.name == "SomeTool"]
+        factory_tools = [
+            t
+            for t in captured["tools"]
+            if not isinstance(t, MagicMock) or t.name == "SomeTool"
+        ]
         assert len(captured["tools"]) == 0
 
 
 # ============================================================================
 # Additional agent parameters
 # ============================================================================
+
 
 class TestAdditionalAgentParams:
 
@@ -497,15 +672,27 @@ class TestAdditionalAgentParams:
         agent_config["max_iter"] = 5
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             await create_agent("k", agent_config, config=GLOBAL_CONFIG)
 
         assert captured.get("max_iter") == 5
@@ -522,18 +709,32 @@ class TestAdditionalAgentParams:
         agent_config["memory"] = True
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             await create_agent("k", agent_config, config=GLOBAL_CONFIG)
 
-        assert "memory" not in captured  # memory deliberately not propagated to the Agent
+        assert (
+            "memory" not in captured
+        )  # memory deliberately not propagated to the Agent
 
     @pytest.mark.asyncio
     async def test_none_additional_params_not_passed(self):
@@ -547,15 +748,27 @@ class TestAdditionalAgentParams:
         agent_config["max_iter"] = None  # None should NOT be passed
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             await create_agent("k", agent_config, config=GLOBAL_CONFIG)
 
         assert "max_iter" not in captured
@@ -564,6 +777,7 @@ class TestAdditionalAgentParams:
 # ============================================================================
 # Prompt template handling
 # ============================================================================
+
 
 class TestPromptTemplates:
 
@@ -582,15 +796,27 @@ class TestPromptTemplates:
         agent_config["system_template"] = "Custom system template."
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             await create_agent("k", agent_config, config=GLOBAL_CONFIG)
 
         assert "Custom system template." in captured["system_template"]
@@ -610,15 +836,27 @@ class TestPromptTemplates:
         agent_config["prompt_template"] = "Task prompt here."
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             await create_agent("k", agent_config, config=GLOBAL_CONFIG)
 
         assert captured.get("prompt_template") == "Task prompt here."
@@ -635,15 +873,27 @@ class TestPromptTemplates:
         agent_config["response_template"] = "Response format."
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             await create_agent("k", agent_config, config=GLOBAL_CONFIG)
 
         assert captured.get("response_template") == "Response format."
@@ -652,6 +902,7 @@ class TestPromptTemplates:
 # ============================================================================
 # Default agent settings
 # ============================================================================
+
 
 class TestDefaultAgentSettings:
 
@@ -664,15 +915,27 @@ class TestDefaultAgentSettings:
             return MagicMock()
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             await create_agent("k", dict(BASE_CONFIG), config=GLOBAL_CONFIG)
 
         assert captured.get("use_system_prompt") is True
@@ -687,15 +950,27 @@ class TestDefaultAgentSettings:
             return MagicMock()
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             await create_agent("k", dict(BASE_CONFIG), config=GLOBAL_CONFIG)
 
         assert captured.get("max_retry_limit") == 3
@@ -705,16 +980,30 @@ class TestDefaultAgentSettings:
         mock_agent = MagicMock()
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", return_value=mock_agent),
-            patch("src.services.llm.manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                return_value=mock_agent,
+            ),
+            patch(
+                "src.services.llm.manager.LLMManager.configure_kasal_llm",
+                new_callable=AsyncMock,
+                return_value=MagicMock(),
+            ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
-            result = await create_agent("my_special_key", dict(BASE_CONFIG), config=GLOBAL_CONFIG)
+
+            result = await create_agent(
+                "my_special_key", dict(BASE_CONFIG), config=GLOBAL_CONFIG
+            )
 
         assert result is mock_agent
 
@@ -722,6 +1011,7 @@ class TestDefaultAgentSettings:
 # ============================================================================
 # LLM fallback on exception
 # ============================================================================
+
 
 class TestLlmFallback:
 
@@ -737,19 +1027,27 @@ class TestLlmFallback:
         agent_config["llm"] = "my-fallback-model"
 
         with (
-            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch(
+                "src.services.execution.kernel.agent_builder.Agent",
+                side_effect=capture_agent,
+            ),
             patch(
                 "src.services.llm.manager.LLMManager.configure_kasal_llm",
                 new_callable=AsyncMock,
                 side_effect=Exception("LLM config failed"),
             ),
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
             patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
             from src.services.agent_builder.agent_adapter import create_agent
+
             await create_agent("k", agent_config, config=GLOBAL_CONFIG)
 
         # Fallback: llm should be the string "my-fallback-model"

@@ -3,15 +3,27 @@ Additional comprehensive unit tests for group Pydantic schemas to achieve 100% c
 
 Tests edge cases and validators in group.py schemas.
 """
-import pytest
+
 from datetime import datetime
+
+import pytest
 from pydantic import ValidationError
-from src.schemas.group import (
-    GroupBase, GroupCreateRequest, GroupUpdateRequest, GroupCreate, GroupUpdate,
-    GroupResponse, GroupWithRoleResponse, GroupUserBase, GroupUserCreateRequest,
-    GroupUserUpdateRequest, GroupUserResponse, GroupStatsResponse
-)
+
 from src.models.enums import GroupStatus, GroupUserRole, GroupUserStatus
+from src.schemas.group import (
+    GroupBase,
+    GroupCreate,
+    GroupCreateRequest,
+    GroupResponse,
+    GroupStatsResponse,
+    GroupUpdate,
+    GroupUpdateRequest,
+    GroupUserBase,
+    GroupUserCreateRequest,
+    GroupUserResponse,
+    GroupUserUpdateRequest,
+    GroupWithRoleResponse,
+)
 
 
 class TestGroupUserResponseValidator:
@@ -29,9 +41,9 @@ class TestGroupUserResponseValidator:
             joined_at=datetime.now(),
             auto_created=False,
             created_at=datetime.now(),
-            updated_at=datetime.now()
+            updated_at=datetime.now(),
         )
-        
+
         assert user_response.role == GroupUserRole.EDITOR
 
     def test_migrate_legacy_roles_user_to_operator(self):
@@ -46,9 +58,9 @@ class TestGroupUserResponseValidator:
             joined_at=datetime.now(),
             auto_created=False,
             created_at=datetime.now(),
-            updated_at=datetime.now()
+            updated_at=datetime.now(),
         )
-        
+
         assert user_response.role == GroupUserRole.OPERATOR
 
     def test_migrate_legacy_roles_viewer_to_operator(self):
@@ -63,9 +75,9 @@ class TestGroupUserResponseValidator:
             joined_at=datetime.now(),
             auto_created=False,
             created_at=datetime.now(),
-            updated_at=datetime.now()
+            updated_at=datetime.now(),
         )
-        
+
         assert user_response.role == GroupUserRole.OPERATOR
 
     def test_migrate_legacy_roles_unknown_string_unchanged(self):
@@ -80,7 +92,7 @@ class TestGroupUserResponseValidator:
             joined_at=datetime.now(),
             auto_created=False,
             created_at=datetime.now(),
-            updated_at=datetime.now()
+            updated_at=datetime.now(),
         )
 
         # Should remain unchanged since it's not in the mapping but is valid enum
@@ -98,20 +110,20 @@ class TestGroupUserResponseValidator:
             joined_at=datetime.now(),
             auto_created=False,
             created_at=datetime.now(),
-            updated_at=datetime.now()
+            updated_at=datetime.now(),
         )
-        
+
         # Should remain unchanged since it's not a string
         assert user_response.role == GroupUserRole.ADMIN
 
     def test_migrate_legacy_roles_with_all_mappings(self):
         """Test all legacy role mappings comprehensively."""
         legacy_mappings = {
-            'manager': GroupUserRole.EDITOR,
-            'user': GroupUserRole.OPERATOR,
-            'viewer': GroupUserRole.OPERATOR,
+            "manager": GroupUserRole.EDITOR,
+            "user": GroupUserRole.OPERATOR,
+            "viewer": GroupUserRole.OPERATOR,
         }
-        
+
         for legacy_role, expected_role in legacy_mappings.items():
             user_response = GroupUserResponse(
                 id="test-id",
@@ -123,9 +135,9 @@ class TestGroupUserResponseValidator:
                 joined_at=datetime.now(),
                 auto_created=False,
                 created_at=datetime.now(),
-                updated_at=datetime.now()
+                updated_at=datetime.now(),
             )
-            
+
             assert user_response.role == expected_role
 
 
@@ -253,17 +265,17 @@ class TestGroupSchemaConfigDict:
     def test_group_response_config_dict(self):
         """Test GroupResponse ConfigDict settings."""
         config = GroupResponse.model_config
-        assert config['from_attributes'] is True
+        assert config["from_attributes"] is True
 
     def test_group_user_response_config_dict(self):
         """Test GroupUserResponse ConfigDict settings."""
         config = GroupUserResponse.model_config
-        assert config['from_attributes'] is True
+        assert config["from_attributes"] is True
 
     def test_group_stats_response_config_dict(self):
         """Test GroupStatsResponse ConfigDict settings."""
         config = GroupStatsResponse.model_config
-        assert config['from_attributes'] is True
+        assert config["from_attributes"] is True
 
 
 class TestGroupSchemaFieldDescriptions:
@@ -272,46 +284,55 @@ class TestGroupSchemaFieldDescriptions:
     def test_group_base_field_descriptions(self):
         """Test GroupBase field descriptions."""
         fields = GroupBase.model_fields
-        assert fields['name'].description == "Human-readable group name"
-        assert fields['description'].description == "Optional group description"
+        assert fields["name"].description == "Human-readable group name"
+        assert fields["description"].description == "Optional group description"
 
     def test_group_response_field_descriptions(self):
         """Test GroupResponse field descriptions."""
         fields = GroupResponse.model_fields
-        assert fields['id'].description == "Unique group identifier"
-        assert fields['status'].description == "Group status"
-        assert fields['auto_created'].description == "Whether group was auto-created"
-        assert fields['created_by_email'].description == "Email of user who created the group"
-        assert fields['created_at'].description == "Group creation timestamp"
-        assert fields['updated_at'].description == "Group last update timestamp"
-        assert fields['user_count'].description == "Number of users in the group"
+        assert fields["id"].description == "Unique group identifier"
+        assert fields["status"].description == "Group status"
+        assert fields["auto_created"].description == "Whether group was auto-created"
+        assert (
+            fields["created_by_email"].description
+            == "Email of user who created the group"
+        )
+        assert fields["created_at"].description == "Group creation timestamp"
+        assert fields["updated_at"].description == "Group last update timestamp"
+        assert fields["user_count"].description == "Number of users in the group"
 
     def test_group_with_role_response_field_descriptions(self):
         """Test GroupWithRoleResponse field descriptions."""
         fields = GroupWithRoleResponse.model_fields
-        assert fields['user_role'].description == "Current user's role in this group"
+        assert fields["user_role"].description == "Current user's role in this group"
 
     def test_group_user_response_field_descriptions(self):
         """Test GroupUserResponse field descriptions."""
         fields = GroupUserResponse.model_fields
-        assert fields['id'].description == "Unique group user identifier"
-        assert fields['group_id'].description == "Group identifier"
-        assert fields['user_id'].description == "User identifier"
-        assert fields['email'].description == "User email address"
-        assert fields['joined_at'].description == "When user joined the group"
-        assert fields['auto_created'].description == "Whether association was auto-created"
-        assert fields['created_at'].description == "Association creation timestamp"
-        assert fields['updated_at'].description == "Association last update timestamp"
+        assert fields["id"].description == "Unique group user identifier"
+        assert fields["group_id"].description == "Group identifier"
+        assert fields["user_id"].description == "User identifier"
+        assert fields["email"].description == "User email address"
+        assert fields["joined_at"].description == "When user joined the group"
+        assert (
+            fields["auto_created"].description == "Whether association was auto-created"
+        )
+        assert fields["created_at"].description == "Association creation timestamp"
+        assert fields["updated_at"].description == "Association last update timestamp"
 
     def test_group_stats_response_field_descriptions(self):
         """Test GroupStatsResponse field descriptions."""
         fields = GroupStatsResponse.model_fields
-        assert fields['total_groups'].description == "Total number of groups"
-        assert fields['active_groups'].description == "Number of active groups"
-        assert fields['auto_created_groups'].description == "Number of auto-created groups"
-        assert fields['manual_groups'].description == "Number of manually created groups"
-        assert fields['total_users'].description == "Total number of group users"
-        assert fields['active_users'].description == "Number of active group users"
+        assert fields["total_groups"].description == "Total number of groups"
+        assert fields["active_groups"].description == "Number of active groups"
+        assert (
+            fields["auto_created_groups"].description == "Number of auto-created groups"
+        )
+        assert (
+            fields["manual_groups"].description == "Number of manually created groups"
+        )
+        assert fields["total_users"].description == "Total number of group users"
+        assert fields["active_users"].description == "Number of active group users"
 
 
 class TestGroupSchemaInheritance:

@@ -5,11 +5,13 @@ Tests Power BI connector for extracting measures from Power BI datasets via REST
 including authentication, connection management, and measure extraction.
 """
 
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock, PropertyMock
-from src.services.converters.formats.powerbi.connector import PowerBIConnector
+
 from src.services.converters.base.connectors import ConnectorType
 from src.services.converters.base.models import KPI
+from src.services.converters.formats.powerbi.connector import PowerBIConnector
 
 
 class TestPowerBIConnector:
@@ -23,7 +25,7 @@ class TestPowerBIConnector:
             semantic_model_id="model123",
             group_id="workspace456",
             access_token="test_token",
-            use_system_schema=False
+            use_system_schema=False,
         )
 
     @pytest.fixture
@@ -34,7 +36,7 @@ class TestPowerBIConnector:
             group_id="workspace456",
             tenant_id="tenant789",
             client_id="client_abc",
-            client_secret="secret_xyz"
+            client_secret="secret_xyz",
         )
 
     # ========== Initialization Tests ==========
@@ -58,7 +60,7 @@ class TestPowerBIConnector:
             semantic_model_id="model",
             group_id="workspace",
             access_token="token",
-            info_table_name="Custom Info Table"
+            info_table_name="Custom Info Table",
         )
         assert connector.info_table_name == "Custom Info Table"
 
@@ -77,7 +79,7 @@ class TestPowerBIConnector:
             access_token="token",
             project_id="proj123",
             use_database=True,
-            info_table_name="Info Table"
+            info_table_name="Info Table",
         )
 
         assert connector.semantic_model_id == "model"
@@ -90,7 +92,7 @@ class TestPowerBIConnector:
 
     # ========== Connection Tests ==========
 
-    @patch.object(PowerBIConnector, '_get_access_token')
+    @patch.object(PowerBIConnector, "_get_access_token")
     def test_connect_success(self, mock_get_token, connector_with_token):
         """Test successful connection"""
         mock_get_token.return_value = "new_token"
@@ -101,7 +103,7 @@ class TestPowerBIConnector:
         assert connector_with_token._access_token == "new_token"
         mock_get_token.assert_called_once()
 
-    @patch.object(PowerBIConnector, '_get_access_token')
+    @patch.object(PowerBIConnector, "_get_access_token")
     def test_connect_already_connected(self, mock_get_token, connector_with_token):
         """Test connecting when already connected"""
         connector_with_token._connected = True
@@ -111,7 +113,7 @@ class TestPowerBIConnector:
         # Should not call get_access_token again
         mock_get_token.assert_not_called()
 
-    @patch.object(PowerBIConnector, '_get_access_token')
+    @patch.object(PowerBIConnector, "_get_access_token")
     def test_connect_failure(self, mock_get_token, connector_with_token):
         """Test connection failure"""
         mock_get_token.side_effect = Exception("Auth failed")
@@ -131,9 +133,15 @@ class TestPowerBIConnector:
 
     # ========== Get Access Token Tests ==========
 
-    def test_get_access_token_delegates_to_aad_service(self, connector_with_credentials):
+    def test_get_access_token_delegates_to_aad_service(
+        self, connector_with_credentials
+    ):
         """Test _get_access_token delegates to AadService"""
-        with patch.object(connector_with_credentials.aad_service, 'get_access_token', return_value="service_token"):
+        with patch.object(
+            connector_with_credentials.aad_service,
+            "get_access_token",
+            return_value="service_token",
+        ):
             token = connector_with_credentials._get_access_token()
 
             assert token == "service_token"
@@ -141,7 +149,7 @@ class TestPowerBIConnector:
 
     # ========== Execute DAX Query Tests ==========
 
-    @patch('src.services.converters.formats.powerbi.connector.requests.post')
+    @patch("src.services.converters.formats.powerbi.connector.requests.post")
     def test_execute_dax_query_success(self, mock_post, connector_with_token):
         """Test successful DAX query execution"""
         connector_with_token._connected = True
@@ -151,13 +159,20 @@ class TestPowerBIConnector:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "results": [{
-                "tables": [{
-                    "rows": [
-                        {"[Name]": "Measure1", "[Expression]": "SUM(Table[Column])"}
+            "results": [
+                {
+                    "tables": [
+                        {
+                            "rows": [
+                                {
+                                    "[Name]": "Measure1",
+                                    "[Expression]": "SUM(Table[Column])",
+                                }
+                            ]
+                        }
                     ]
-                }]
-            }]
+                }
+            ]
         }
         mock_post.return_value = mock_response
 
@@ -167,7 +182,7 @@ class TestPowerBIConnector:
         assert result[0]["[Name]"] == "Measure1"
         mock_post.assert_called_once()
 
-    @patch('src.services.converters.formats.powerbi.connector.requests.post')
+    @patch("src.services.converters.formats.powerbi.connector.requests.post")
     def test_execute_dax_query_not_connected(self, mock_post, connector_with_token):
         """Test DAX query execution when not connected"""
         connector_with_token._connected = False
@@ -177,7 +192,7 @@ class TestPowerBIConnector:
 
         mock_post.assert_not_called()
 
-    @patch('src.services.converters.formats.powerbi.connector.requests.post')
+    @patch("src.services.converters.formats.powerbi.connector.requests.post")
     def test_execute_dax_query_api_error(self, mock_post, connector_with_token):
         """Test DAX query execution with API error"""
         connector_with_token._connected = True
@@ -192,7 +207,7 @@ class TestPowerBIConnector:
         with pytest.raises(RuntimeError, match="Query failed"):
             connector_with_token._execute_dax_query("INVALID QUERY")
 
-    @patch('src.services.converters.formats.powerbi.connector.requests.post')
+    @patch("src.services.converters.formats.powerbi.connector.requests.post")
     def test_execute_dax_query_no_tables(self, mock_post, connector_with_token):
         """Test DAX query with no tables in response"""
         connector_with_token._connected = True
@@ -207,8 +222,10 @@ class TestPowerBIConnector:
 
         assert result == []
 
-    @patch('src.services.converters.formats.powerbi.connector.requests.post')
-    def test_execute_dax_query_authorization_header(self, mock_post, connector_with_token):
+    @patch("src.services.converters.formats.powerbi.connector.requests.post")
+    def test_execute_dax_query_authorization_header(
+        self, mock_post, connector_with_token
+    ):
         """Test DAX query sends correct authorization header"""
         connector_with_token._connected = True
         connector_with_token._access_token = "my_token_123"
@@ -222,11 +239,11 @@ class TestPowerBIConnector:
 
         # Verify authorization header
         call_kwargs = mock_post.call_args[1]
-        assert call_kwargs['headers']['Authorization'] == "Bearer my_token_123"
+        assert call_kwargs["headers"]["Authorization"] == "Bearer my_token_123"
 
     # ========== Extract Measures Tests ==========
 
-    @patch.object(PowerBIConnector, '_execute_dax_query')
+    @patch.object(PowerBIConnector, "_execute_dax_query")
     def test_extract_measures_success(self, mock_execute, connector_with_token):
         """Test extracting measures successfully"""
         connector_with_token._connected = True
@@ -240,7 +257,7 @@ class TestPowerBIConnector:
                 "[Expression]": "SUM(Sales[Amount])",
                 "[IsHidden]": False,
                 "[State]": "Ready",
-                "[DisplayFolder]": "Metrics"
+                "[DisplayFolder]": "Metrics",
             }
         ]
 
@@ -251,7 +268,7 @@ class TestPowerBIConnector:
         assert kpis[0].technical_name == "total_sales"
         assert kpis[0].aggregation_type == "SUM"
 
-    @patch.object(PowerBIConnector, '_execute_dax_query')
+    @patch.object(PowerBIConnector, "_execute_dax_query")
     def test_extract_measures_not_connected(self, mock_execute, connector_with_token):
         """Test extracting measures when not connected"""
         connector_with_token._connected = False
@@ -259,7 +276,7 @@ class TestPowerBIConnector:
         with pytest.raises(RuntimeError, match="Not connected"):
             connector_with_token.extract_measures()
 
-    @patch.object(PowerBIConnector, '_execute_dax_query')
+    @patch.object(PowerBIConnector, "_execute_dax_query")
     def test_extract_measures_exclude_hidden(self, mock_execute, connector_with_token):
         """Test extracting measures excludes hidden by default"""
         connector_with_token._connected = True
@@ -268,13 +285,13 @@ class TestPowerBIConnector:
             {
                 "[Name]": "Visible",
                 "[Expression]": "SUM(Table[Col])",
-                "[IsHidden]": False
+                "[IsHidden]": False,
             },
             {
                 "[Name]": "Hidden",
                 "[Expression]": "SUM(Table[Col2])",
-                "[IsHidden]": True
-            }
+                "[IsHidden]": True,
+            },
         ]
 
         kpis = connector_with_token.extract_measures(include_hidden=False)
@@ -282,7 +299,7 @@ class TestPowerBIConnector:
         assert len(kpis) == 1
         assert kpis[0].technical_name == "visible"
 
-    @patch.object(PowerBIConnector, '_execute_dax_query')
+    @patch.object(PowerBIConnector, "_execute_dax_query")
     def test_extract_measures_include_hidden(self, mock_execute, connector_with_token):
         """Test extracting measures includes hidden when requested"""
         connector_with_token._connected = True
@@ -291,21 +308,23 @@ class TestPowerBIConnector:
             {
                 "[Name]": "Visible",
                 "[Expression]": "SUM(Table[Col])",
-                "[IsHidden]": False
+                "[IsHidden]": False,
             },
             {
                 "[Name]": "Hidden",
                 "[Expression]": "SUM(Table[Col2])",
-                "[IsHidden]": True
-            }
+                "[IsHidden]": True,
+            },
         ]
 
         kpis = connector_with_token.extract_measures(include_hidden=True)
 
         assert len(kpis) == 2
 
-    @patch.object(PowerBIConnector, '_execute_dax_query')
-    def test_extract_measures_with_filter_pattern(self, mock_execute, connector_with_token):
+    @patch.object(PowerBIConnector, "_execute_dax_query")
+    def test_extract_measures_with_filter_pattern(
+        self, mock_execute, connector_with_token
+    ):
         """Test extracting measures with filter pattern"""
         connector_with_token._connected = True
 
@@ -313,13 +332,13 @@ class TestPowerBIConnector:
             {
                 "[Name]": "Sales_Total",
                 "[Expression]": "SUM(Sales[Amount])",
-                "[IsHidden]": False
+                "[IsHidden]": False,
             },
             {
                 "[Name]": "Revenue_Total",
                 "[Expression]": "SUM(Revenue[Amount])",
-                "[IsHidden]": False
-            }
+                "[IsHidden]": False,
+            },
         ]
 
         kpis = connector_with_token.extract_measures(filter_pattern=r"Sales.*")
@@ -327,8 +346,10 @@ class TestPowerBIConnector:
         assert len(kpis) == 1
         assert kpis[0].technical_name == "sales_total"
 
-    @patch.object(PowerBIConnector, '_execute_dax_query')
-    def test_extract_measures_technical_name_generation(self, mock_execute, connector_with_token):
+    @patch.object(PowerBIConnector, "_execute_dax_query")
+    def test_extract_measures_technical_name_generation(
+        self, mock_execute, connector_with_token
+    ):
         """Test technical name generation from measure name"""
         connector_with_token._connected = True
 
@@ -336,7 +357,7 @@ class TestPowerBIConnector:
             {
                 "[Name]": "Total Sales-Amount",
                 "[Expression]": "SUM(Sales[Amount])",
-                "[IsHidden]": False
+                "[IsHidden]": False,
             }
         ]
 
@@ -345,8 +366,10 @@ class TestPowerBIConnector:
         # Spaces and hyphens converted to underscores, lowercased
         assert kpis[0].technical_name == "total_sales_amount"
 
-    @patch.object(PowerBIConnector, '_execute_dax_query')
-    def test_extract_measures_stores_advanced_parsing(self, mock_execute, connector_with_token):
+    @patch.object(PowerBIConnector, "_execute_dax_query")
+    def test_extract_measures_stores_advanced_parsing(
+        self, mock_execute, connector_with_token
+    ):
         """Test extract_measures stores advanced parsing metadata"""
         connector_with_token._connected = True
 
@@ -354,16 +377,16 @@ class TestPowerBIConnector:
             {
                 "[Name]": "Measure",
                 "[Expression]": "SUM(Table[Col])",
-                "[IsHidden]": False
+                "[IsHidden]": False,
             }
         ]
 
         kpis = connector_with_token.extract_measures()
 
         # Check advanced parsing metadata is attached
-        assert hasattr(kpis[0], '_advanced_parsing')
-        assert 'transpiled_sql' in kpis[0]._advanced_parsing
-        assert 'is_transpilable' in kpis[0]._advanced_parsing
+        assert hasattr(kpis[0], "_advanced_parsing")
+        assert "transpiled_sql" in kpis[0]._advanced_parsing
+        assert "is_transpilable" in kpis[0]._advanced_parsing
 
     # ========== Get Metadata Tests ==========
 
@@ -378,7 +401,7 @@ class TestPowerBIConnector:
         assert metadata.connected is False
         assert metadata.measure_count is None
 
-    @patch.object(PowerBIConnector, 'extract_measures')
+    @patch.object(PowerBIConnector, "extract_measures")
     def test_get_metadata_connected(self, mock_extract, connector_with_token):
         """Test getting metadata when connected"""
         connector_with_token._connected = True
@@ -394,7 +417,7 @@ class TestPowerBIConnector:
         assert metadata.additional_info["info_table_name"] == "Info Measures"
         assert metadata.additional_info["group_id"] == "workspace456"
 
-    @patch.object(PowerBIConnector, 'extract_measures')
+    @patch.object(PowerBIConnector, "extract_measures")
     def test_get_metadata_extraction_fails(self, mock_extract, connector_with_token):
         """Test getting metadata when extraction fails"""
         connector_with_token._connected = True
@@ -407,9 +430,11 @@ class TestPowerBIConnector:
 
     # ========== Context Manager Tests ==========
 
-    @patch.object(PowerBIConnector, 'connect')
-    @patch.object(PowerBIConnector, 'disconnect')
-    def test_context_manager_success(self, mock_disconnect, mock_connect, connector_with_token):
+    @patch.object(PowerBIConnector, "connect")
+    @patch.object(PowerBIConnector, "disconnect")
+    def test_context_manager_success(
+        self, mock_disconnect, mock_connect, connector_with_token
+    ):
         """Test using connector as context manager"""
         with connector_with_token as conn:
             assert conn == connector_with_token
@@ -417,9 +442,11 @@ class TestPowerBIConnector:
 
         mock_disconnect.assert_called_once()
 
-    @patch.object(PowerBIConnector, 'connect')
-    @patch.object(PowerBIConnector, 'disconnect')
-    def test_context_manager_with_exception(self, mock_disconnect, mock_connect, connector_with_token):
+    @patch.object(PowerBIConnector, "connect")
+    @patch.object(PowerBIConnector, "disconnect")
+    def test_context_manager_with_exception(
+        self, mock_disconnect, mock_connect, connector_with_token
+    ):
         """Test context manager disconnects even on exception"""
         try:
             with connector_with_token:
@@ -432,9 +459,11 @@ class TestPowerBIConnector:
 
     # ========== Integration Tests ==========
 
-    @patch('src.services.converters.formats.powerbi.connector.requests.post')
-    @patch.object(PowerBIConnector, '_get_access_token')
-    def test_full_extraction_workflow(self, mock_get_token, mock_post, connector_with_token):
+    @patch("src.services.converters.formats.powerbi.connector.requests.post")
+    @patch.object(PowerBIConnector, "_get_access_token")
+    def test_full_extraction_workflow(
+        self, mock_get_token, mock_post, connector_with_token
+    ):
         """Test complete workflow from connect to extract"""
         # Setup mocks
         mock_get_token.return_value = "workflow_token"
@@ -442,18 +471,22 @@ class TestPowerBIConnector:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "results": [{
-                "tables": [{
-                    "rows": [
+            "results": [
+                {
+                    "tables": [
                         {
-                            "[Name]": "Revenue",
-                            "[Expression]": "SUM(Sales[Amount])",
-                            "[IsHidden]": False,
-                            "[Table]": "Sales"
+                            "rows": [
+                                {
+                                    "[Name]": "Revenue",
+                                    "[Expression]": "SUM(Sales[Amount])",
+                                    "[IsHidden]": False,
+                                    "[Table]": "Sales",
+                                }
+                            ]
                         }
                     ]
-                }]
-            }]
+                }
+            ]
         }
         mock_post.return_value = mock_response
 
@@ -469,7 +502,7 @@ class TestPowerBIConnector:
 
     # ========== Edge Cases ==========
 
-    @patch.object(PowerBIConnector, '_execute_dax_query')
+    @patch.object(PowerBIConnector, "_execute_dax_query")
     def test_extract_measures_empty_result(self, mock_execute, connector_with_token):
         """Test extracting measures with empty result"""
         connector_with_token._connected = True
@@ -479,7 +512,7 @@ class TestPowerBIConnector:
 
         assert kpis == []
 
-    @patch.object(PowerBIConnector, '_execute_dax_query')
+    @patch.object(PowerBIConnector, "_execute_dax_query")
     def test_extract_measures_missing_fields(self, mock_execute, connector_with_token):
         """Test extracting measures with missing optional fields"""
         connector_with_token._connected = True
@@ -487,7 +520,7 @@ class TestPowerBIConnector:
         mock_execute.return_value = [
             {
                 "[Name]": "BasicMeasure",
-                "[Expression]": "SUM(Table[Col])"
+                "[Expression]": "SUM(Table[Col])",
                 # Missing IsHidden, Description, Table, etc.
             }
         ]
@@ -506,8 +539,10 @@ class TestPowerBIConnector:
         assert params["group_id"] == "workspace456"
         assert params["access_token"] == "test_token"
 
-    @patch('src.services.converters.formats.powerbi.connector.requests.post')
-    def test_execute_dax_query_builds_correct_url(self, mock_post, connector_with_token):
+    @patch("src.services.converters.formats.powerbi.connector.requests.post")
+    def test_execute_dax_query_builds_correct_url(
+        self, mock_post, connector_with_token
+    ):
         """Test _execute_dax_query builds correct API URL"""
         connector_with_token._connected = True
         connector_with_token._access_token = "token"

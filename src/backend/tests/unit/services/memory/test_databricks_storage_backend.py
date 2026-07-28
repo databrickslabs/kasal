@@ -8,14 +8,15 @@ silently returned zero records while still paying the full embed + auth +
 search round trip.
 """
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
-from src.services.memory.databricks_storage_backend import (
-    DatabricksStorageBackend,
-    _SCHEMA_COLUMNS,
-)
+import pytest
+
 from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
+from src.services.memory.databricks_storage_backend import (
+    _SCHEMA_COLUMNS,
+    DatabricksStorageBackend,
+)
 
 
 def _make_backend():
@@ -122,6 +123,7 @@ class TestBridgeLoop:
 
     def test_lakebase_backend_shares_the_bridge_loop(self):
         import asyncio
+
         from src.services.memory.lakebase_storage_backend import (
             LakebaseStorageBackend,
         )

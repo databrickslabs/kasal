@@ -7,8 +7,9 @@ and the error/logging paths.
 """
 
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.generation.prompt_improvement import PromptImprovementService
 from src.utils.user_context import GroupContext
@@ -35,8 +36,14 @@ class TestInit:
 
     def test_log_service_created(self):
         session = MagicMock()
-        with patch("src.services.generation.prompt_improvement.LLMLogRepository") as MockRepo, \
-             patch("src.services.generation.prompt_improvement.LLMLogService") as MockLogSvc:
+        with (
+            patch(
+                "src.services.generation.prompt_improvement.LLMLogRepository"
+            ) as MockRepo,
+            patch(
+                "src.services.generation.prompt_improvement.LLMLogService"
+            ) as MockLogSvc,
+        ):
             svc = PromptImprovementService(session)
             MockRepo.assert_called_once_with(session)
             MockLogSvc.assert_called_once_with(MockRepo.return_value)
@@ -53,9 +60,15 @@ class TestImprovePrompt:
             "goal": "Analyze datasets to surface trends",
             "backstory": "Seasoned analyst with reporting expertise.",
         }
-        with patch("src.services.generation.prompt_improvement.TemplateService") as MockTpl, \
-             patch("src.services.generation.prompt_improvement.LLMManager") as MockLLM:
-            MockTpl.get_effective_template_content = AsyncMock(return_value="SYSTEM TPL")
+        with (
+            patch(
+                "src.services.generation.prompt_improvement.TemplateService"
+            ) as MockTpl,
+            patch("src.services.generation.prompt_improvement.LLMManager") as MockLLM,
+        ):
+            MockTpl.get_effective_template_content = AsyncMock(
+                return_value="SYSTEM TPL"
+            )
             MockLLM.completion = AsyncMock(return_value=json.dumps(improved))
             result = await svc.improve_prompt(
                 target="agent",
@@ -65,7 +78,10 @@ class TestImprovePrompt:
             )
         assert result == improved
         # Uses the model passed (the form's selection), not a hardcoded one.
-        assert MockLLM.completion.call_args.kwargs["model"] == "databricks-claude-sonnet-4-5"
+        assert (
+            MockLLM.completion.call_args.kwargs["model"]
+            == "databricks-claude-sonnet-4-5"
+        )
         # The system prompt is the group-overridable template.
         messages = MockLLM.completion.call_args.kwargs["messages"]
         assert messages[0] == {"role": "system", "content": "SYSTEM TPL"}
@@ -79,8 +95,12 @@ class TestImprovePrompt:
     async def test_falls_back_to_a_default_model_when_none_passed(self):
         svc = PromptImprovementService(MagicMock())
         svc._log_llm_interaction = AsyncMock()
-        with patch("src.services.generation.prompt_improvement.TemplateService") as MockTpl, \
-             patch("src.services.generation.prompt_improvement.LLMManager") as MockLLM:
+        with (
+            patch(
+                "src.services.generation.prompt_improvement.TemplateService"
+            ) as MockTpl,
+            patch("src.services.generation.prompt_improvement.LLMManager") as MockLLM,
+        ):
             MockTpl.get_effective_template_content = AsyncMock(return_value="tpl")
             MockLLM.completion = AsyncMock(return_value=json.dumps(AGENT_FIELDS))
             await svc.improve_prompt(target="agent", fields=AGENT_FIELDS, model=None)
@@ -92,8 +112,12 @@ class TestImprovePrompt:
         svc._log_llm_interaction = AsyncMock()
         # LLM drops "backstory", blanks "goal", and adds an unknown key.
         partial = {"role": "Improved Role", "goal": "   ", "extra": "ignored"}
-        with patch("src.services.generation.prompt_improvement.TemplateService") as MockTpl, \
-             patch("src.services.generation.prompt_improvement.LLMManager") as MockLLM:
+        with (
+            patch(
+                "src.services.generation.prompt_improvement.TemplateService"
+            ) as MockTpl,
+            patch("src.services.generation.prompt_improvement.LLMManager") as MockLLM,
+        ):
             MockTpl.get_effective_template_content = AsyncMock(return_value="tpl")
             MockLLM.completion = AsyncMock(return_value=json.dumps(partial))
             result = await svc.improve_prompt(target="agent", fields=AGENT_FIELDS)
@@ -107,9 +131,16 @@ class TestImprovePrompt:
     async def test_non_dict_response_raises_and_logs_error(self):
         svc = PromptImprovementService(MagicMock())
         svc._log_llm_interaction = AsyncMock()
-        with patch("src.services.generation.prompt_improvement.TemplateService") as MockTpl, \
-             patch("src.services.generation.prompt_improvement.LLMManager") as MockLLM, \
-             patch("src.services.generation.prompt_improvement.robust_json_parser", return_value=["not", "a", "dict"]):
+        with (
+            patch(
+                "src.services.generation.prompt_improvement.TemplateService"
+            ) as MockTpl,
+            patch("src.services.generation.prompt_improvement.LLMManager") as MockLLM,
+            patch(
+                "src.services.generation.prompt_improvement.robust_json_parser",
+                return_value=["not", "a", "dict"],
+            ),
+        ):
             MockTpl.get_effective_template_content = AsyncMock(return_value="tpl")
             MockLLM.completion = AsyncMock(return_value="[]")
             with pytest.raises(ValueError):
@@ -120,8 +151,12 @@ class TestImprovePrompt:
     async def test_llm_error_propagates_and_logs_error(self):
         svc = PromptImprovementService(MagicMock())
         svc._log_llm_interaction = AsyncMock()
-        with patch("src.services.generation.prompt_improvement.TemplateService") as MockTpl, \
-             patch("src.services.generation.prompt_improvement.LLMManager") as MockLLM:
+        with (
+            patch(
+                "src.services.generation.prompt_improvement.TemplateService"
+            ) as MockTpl,
+            patch("src.services.generation.prompt_improvement.LLMManager") as MockLLM,
+        ):
             MockTpl.get_effective_template_content = AsyncMock(return_value="tpl")
             MockLLM.completion = AsyncMock(side_effect=RuntimeError("boom"))
             with pytest.raises(RuntimeError):

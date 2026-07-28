@@ -1,13 +1,11 @@
-import pytest
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.services.tools.tool_service import ToolService
 from src.utils.user_context import GroupContext
-
-
-from datetime import datetime
-
 
 
 @pytest.fixture(autouse=True)
@@ -15,13 +13,27 @@ def _clear_tool_list_cache():
     """The enabled-tools cache is module-global (PERF: burst polling);
     clear it around every test so suites stay independent."""
     from src.core.cache import tool_list_cache
+
     tool_list_cache._cache.clear()
     yield
     tool_list_cache._cache.clear()
 
-def mk_tool(id=1, title="T", enabled=True, group_id=None, config=None, icon="i", description="d"):
+
+def mk_tool(
+    id=1, title="T", enabled=True, group_id=None, config=None, icon="i", description="d"
+):
     now = datetime.utcnow()
-    return SimpleNamespace(id=id, title=title, enabled=enabled, group_id=group_id, config=config or {}, icon=icon, description=description, created_at=now, updated_at=now)
+    return SimpleNamespace(
+        id=id,
+        title=title,
+        enabled=enabled,
+        group_id=group_id,
+        config=config or {},
+        icon=icon,
+        description=description,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 @pytest.mark.asyncio
@@ -34,7 +46,9 @@ async def test_get_all_tools_for_group_override_logic():
     svc.repository = AsyncMock()
     svc.repository.list = AsyncMock(return_value=[t_base, t_group, t_other])
 
-    gc = GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin")
+    gc = GroupContext(
+        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+    )
     resp = await svc.get_all_tools_for_group(gc)
     titles = sorted([t.title for t in resp.tools])
     # group version of A should override base; B should remain
@@ -60,15 +74,20 @@ async def test_get_enabled_tools_for_group_merges_config_and_filters():
 
     # Patch GroupToolRepository used inside method by monkeypatching attribute on service module class instance
     from src.services.tools import tool_service as module
+
     class FakeGRepo:
         def __init__(self, session):
             self.session = session
+
         async def list_enabled_for_group(self, gid):
             assert gid == "g1"
             return [groupA]
+
     module.GroupToolRepository = FakeGRepo
 
-    gc = GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin")
+    gc = GroupContext(
+        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+    )
     # primary_group_id is a property in dataclass via group_ids[0]
     out = await svc.get_enabled_tools_for_group(gc)
     # Only A is mapped; B should be excluded; config should merge and prefer group
@@ -77,7 +96,7 @@ async def test_get_enabled_tools_for_group_merges_config_and_filters():
     assert t.title == "A" and t.config.get("x") == 9 and t.config.get("z") == 3
 
 
-from src.core.exceptions import KasalError, NotFoundError, ForbiddenError
+from src.core.exceptions import ForbiddenError, KasalError, NotFoundError
 from src.schemas.tool import ToolListResponse, ToolResponse, ToolUpdate
 
 
@@ -102,7 +121,15 @@ async def test_get_tool_by_id_and_with_group_check_paths():
     tool_g2 = mk_tool(2, title="G", group_id="g2")
     svc.repository.get = AsyncMock(return_value=tool_g2)
     with pytest.raises(NotFoundError) as ei2:
-        await svc.get_tool_with_group_check(2, group_context=GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="editor"))
+        await svc.get_tool_with_group_check(
+            2,
+            group_context=GroupContext(
+                group_ids=["g1"],
+                group_email="u@x",
+                email_domain="x.com",
+                user_role="editor",
+            ),
+        )
     assert ei2.value.status_code == 404
 
 
@@ -128,14 +155,34 @@ async def test_update_and_delete_tool_paths():
     t_g2 = mk_tool(7, title="TG", group_id="g2")
     svc.repository.get = AsyncMock(return_value=t_g2)
     with pytest.raises(NotFoundError) as ei:
-        await svc.update_tool_with_group_check(7, ToolUpdate(description="x"), GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="editor"))
+        await svc.update_tool_with_group_check(
+            7,
+            ToolUpdate(description="x"),
+            GroupContext(
+                group_ids=["g1"],
+                group_email="u@x",
+                email_domain="x.com",
+                user_role="editor",
+            ),
+        )
     assert ei.value.status_code == 404
 
     # update with group check: success
     t_g1 = mk_tool(8, title="TG1", group_id="g1")
     svc.repository.get = AsyncMock(return_value=t_g1)
-    svc.repository.update = AsyncMock(return_value=mk_tool(8, title="TG1", group_id="g1", description="ok"))
-    out2 = await svc.update_tool_with_group_check(8, ToolUpdate(description="ok"), GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="editor"))
+    svc.repository.update = AsyncMock(
+        return_value=mk_tool(8, title="TG1", group_id="g1", description="ok")
+    )
+    out2 = await svc.update_tool_with_group_check(
+        8,
+        ToolUpdate(description="ok"),
+        GroupContext(
+            group_ids=["g1"],
+            group_email="u@x",
+            email_domain="x.com",
+            user_role="editor",
+        ),
+    )
     assert out2.description == "ok"
 
     # delete: not found
@@ -151,13 +198,32 @@ async def test_update_and_delete_tool_paths():
     # delete with group check: forbidden
     svc.repository.get = AsyncMock(return_value=mk_tool(11, group_id="g2"))
     with pytest.raises(NotFoundError) as ei3:
-        await svc.delete_tool_with_group_check(11, GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="editor"))
+        await svc.delete_tool_with_group_check(
+            11,
+            GroupContext(
+                group_ids=["g1"],
+                group_email="u@x",
+                email_domain="x.com",
+                user_role="editor",
+            ),
+        )
     assert ei3.value.status_code == 404
 
     # delete with group check: success
     svc.repository.get = AsyncMock(return_value=mk_tool(12, group_id="g1"))
     svc.repository.delete = AsyncMock(return_value=True)
-    assert await svc.delete_tool_with_group_check(12, GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="editor")) is True
+    assert (
+        await svc.delete_tool_with_group_check(
+            12,
+            GroupContext(
+                group_ids=["g1"],
+                group_email="u@x",
+                email_domain="x.com",
+                user_role="editor",
+            ),
+        )
+        is True
+    )
 
 
 @pytest.mark.asyncio
@@ -181,23 +247,48 @@ async def test_toggle_paths_base_and_group():
     base = mk_tool(20, title="B", group_id=None, enabled=True)
     svc.repository.get = AsyncMock(return_value=base)
     from src.services.tools import tool_service as module
+
     svc.repository.find_by_title_and_group = AsyncMock(return_value=None)
-    svc.repository.create = AsyncMock(return_value=mk_tool(21, title="B", group_id="g1", enabled=False))
-    out = await svc.toggle_tool_enabled_with_group_check(20, GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"))
+    svc.repository.create = AsyncMock(
+        return_value=mk_tool(21, title="B", group_id="g1", enabled=False)
+    )
+    out = await svc.toggle_tool_enabled_with_group_check(
+        20,
+        GroupContext(
+            group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+        ),
+    )
     assert out.enabled is False
 
     # toggle with group check: base tool -> toggle existing group tool
     svc.repository.get = AsyncMock(return_value=base)
     existing_group_tool = mk_tool(22, title="B", group_id="g1", enabled=True)
     svc.repository.find_by_title_and_group = AsyncMock(return_value=existing_group_tool)
-    svc.repository.toggle_enabled = AsyncMock(return_value=mk_tool(22, title="B", group_id="g1", enabled=False))
-    out2 = await svc.toggle_tool_enabled_with_group_check(20, GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"))
+    svc.repository.toggle_enabled = AsyncMock(
+        return_value=mk_tool(22, title="B", group_id="g1", enabled=False)
+    )
+    out2 = await svc.toggle_tool_enabled_with_group_check(
+        20,
+        GroupContext(
+            group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+        ),
+    )
     assert out2.enabled is False
 
     # toggle with group check: group tool forbidden for other groups
-    svc.repository.get = AsyncMock(return_value=mk_tool(30, title="G", group_id="g2", enabled=True))
+    svc.repository.get = AsyncMock(
+        return_value=mk_tool(30, title="G", group_id="g2", enabled=True)
+    )
     with pytest.raises(NotFoundError) as ei2:
-        await svc.toggle_tool_enabled_with_group_check(30, GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="editor"))
+        await svc.toggle_tool_enabled_with_group_check(
+            30,
+            GroupContext(
+                group_ids=["g1"],
+                group_email="u@x",
+                email_domain="x.com",
+                user_role="editor",
+            ),
+        )
     assert ei2.value.status_code == 404
 
 
@@ -209,7 +300,9 @@ async def test_config_endpoints():
     # get_tool_config_by_name
     svc.repository.find_by_title = AsyncMock(return_value=None)
     assert await svc.get_tool_config_by_name("X") is None
-    svc.repository.find_by_title = AsyncMock(return_value=mk_tool(1, title="X", config={"a": 1}))
+    svc.repository.find_by_title = AsyncMock(
+        return_value=mk_tool(1, title="X", config={"a": 1})
+    )
     assert (await svc.get_tool_config_by_name("X")) == {"a": 1}
 
     # update_tool_configuration_by_title not found
@@ -219,24 +312,56 @@ async def test_config_endpoints():
     assert ei.value.status_code == 404
 
     # update_tool_configuration_by_title success
-    svc.repository.update_configuration_by_title = AsyncMock(return_value=mk_tool(2, title="Y", config={"b": 2}))
+    svc.repository.update_configuration_by_title = AsyncMock(
+        return_value=mk_tool(2, title="Y", config={"b": 2})
+    )
     out = await svc.update_tool_configuration_by_title("Y", {"b": 2})
     assert out.config.get("b") == 2
 
     # get_all_tool_configurations_for_group
     tool1 = ToolResponse.model_validate(mk_tool(3, title="A", config={"x": 1}))
     tool2 = ToolResponse.model_validate(mk_tool(4, title="B", config={"y": 2}))
-    svc.get_all_tools_for_group = AsyncMock(return_value=ToolListResponse(tools=[tool1, tool2], count=2))
-    cfgs = await svc.get_all_tool_configurations_for_group(GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"))
+    svc.get_all_tools_for_group = AsyncMock(
+        return_value=ToolListResponse(tools=[tool1, tool2], count=2)
+    )
+    cfgs = await svc.get_all_tool_configurations_for_group(
+        GroupContext(
+            group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+        )
+    )
     assert cfgs == {"A": {"x": 1}, "B": {"y": 2}}
 
     # get_tool_configuration_with_group_check prefers group
-    svc.repository.find_by_title_and_group = AsyncMock(return_value=mk_tool(5, title="A", group_id="g1", config={"g": 9}))
-    assert (await svc.get_tool_configuration_with_group_check("A", GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"))) == {"g": 9}
+    svc.repository.find_by_title_and_group = AsyncMock(
+        return_value=mk_tool(5, title="A", group_id="g1", config={"g": 9})
+    )
+    assert (
+        await svc.get_tool_configuration_with_group_check(
+            "A",
+            GroupContext(
+                group_ids=["g1"],
+                group_email="u@x",
+                email_domain="x.com",
+                user_role="admin",
+            ),
+        )
+    ) == {"g": 9}
     # falls back to base
     svc.repository.find_by_title_and_group = AsyncMock(return_value=None)
-    svc.repository.find_base_by_title = AsyncMock(return_value=mk_tool(6, title="A", group_id=None, config={"b": 1}))
-    assert (await svc.get_tool_configuration_with_group_check("A", GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"))) == {"b": 1}
+    svc.repository.find_base_by_title = AsyncMock(
+        return_value=mk_tool(6, title="A", group_id=None, config={"b": 1})
+    )
+    assert (
+        await svc.get_tool_configuration_with_group_check(
+            "A",
+            GroupContext(
+                group_ids=["g1"],
+                group_email="u@x",
+                email_domain="x.com",
+                user_role="admin",
+            ),
+        )
+    ) == {"b": 1}
 
     # update_tool_configuration_group_scoped requires group context
     with pytest.raises(ForbiddenError) as ei2:
@@ -244,23 +369,55 @@ async def test_config_endpoints():
     assert ei2.value.status_code == 403
 
     # update existing group-specific tool
-    svc.repository.find_by_title_and_group = AsyncMock(return_value=mk_tool(7, title="A", group_id="g1", config={"old": 0}))
-    svc.repository.update_configuration_for_title_and_group = AsyncMock(return_value=mk_tool(7, title="A", group_id="g1", config={"q": 1}))
-    out2 = await svc.update_tool_configuration_group_scoped("A", {"q": 1}, GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"))
+    svc.repository.find_by_title_and_group = AsyncMock(
+        return_value=mk_tool(7, title="A", group_id="g1", config={"old": 0})
+    )
+    svc.repository.update_configuration_for_title_and_group = AsyncMock(
+        return_value=mk_tool(7, title="A", group_id="g1", config={"q": 1})
+    )
+    out2 = await svc.update_tool_configuration_group_scoped(
+        "A",
+        {"q": 1},
+        GroupContext(
+            group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+        ),
+    )
     assert out2.config == {"q": 1}
 
     # create new group-specific from base when none exists
     svc.repository.find_by_title_and_group = AsyncMock(return_value=None)
-    svc.repository.find_base_by_title = AsyncMock(return_value=mk_tool(8, title="A", group_id=None, config={"base": True}, enabled=True))
-    svc.repository.create = AsyncMock(return_value=mk_tool(9, title="A", group_id="g1", config={"q": 2}))
-    out3 = await svc.update_tool_configuration_group_scoped("A", {"q": 2}, GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"))
+    svc.repository.find_base_by_title = AsyncMock(
+        return_value=mk_tool(
+            8, title="A", group_id=None, config={"base": True}, enabled=True
+        )
+    )
+    svc.repository.create = AsyncMock(
+        return_value=mk_tool(9, title="A", group_id="g1", config={"q": 2})
+    )
+    out3 = await svc.update_tool_configuration_group_scoped(
+        "A",
+        {"q": 2},
+        GroupContext(
+            group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+        ),
+    )
     assert out3.config == {"q": 2}
 
     # create brand new tool when neither group nor base exists
     svc.repository.find_by_title_and_group = AsyncMock(return_value=None)
     svc.repository.find_base_by_title = AsyncMock(return_value=None)
-    svc.repository.create = AsyncMock(return_value=mk_tool(10, title="A", group_id="g1", config={"n": 1}, enabled=True))
-    out4 = await svc.update_tool_configuration_group_scoped("A", {"n": 1}, GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"))
+    svc.repository.create = AsyncMock(
+        return_value=mk_tool(
+            10, title="A", group_id="g1", config={"n": 1}, enabled=True
+        )
+    )
+    out4 = await svc.update_tool_configuration_group_scoped(
+        "A",
+        {"n": 1},
+        GroupContext(
+            group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+        ),
+    )
     assert out4.config == {"n": 1}
 
 
@@ -269,10 +426,13 @@ async def test_config_endpoints():
 # in same-second bursts; repeated calls must not re-walk tools + group_tools.
 # ---------------------------------------------------------------------------
 
+
 def _make_cached_service():
     svc = ToolService(session=SimpleNamespace())
     svc.repository = AsyncMock()
-    svc.repository.find_enabled = AsyncMock(return_value=[mk_tool(1, title="A", enabled=True)])
+    svc.repository.find_enabled = AsyncMock(
+        return_value=[mk_tool(1, title="A", enabled=True)]
+    )
     return svc
 
 
@@ -288,20 +448,28 @@ async def test_enabled_tools_second_call_served_from_cache():
 @pytest.mark.asyncio
 async def test_enabled_tools_cache_is_group_scoped():
     svc = _make_cached_service()
-    gc1 = GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin")
-    gc2 = GroupContext(group_ids=["g2"], group_email="u@x", email_domain="x.com", user_role="admin")
+    gc1 = GroupContext(
+        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+    )
+    gc2 = GroupContext(
+        group_ids=["g2"], group_email="u@x", email_domain="x.com", user_role="admin"
+    )
 
     from src.services.tools import tool_service as module
+
     class FakeGRepo:
         def __init__(self, session): ...
         async def list_enabled_for_group(self, gid):
             return [SimpleNamespace(tool_id=1, config={})]
+
     orig = module.GroupToolRepository
     module.GroupToolRepository = FakeGRepo
     try:
         await svc.get_enabled_tools_for_group(gc1)
         await svc.get_enabled_tools_for_group(gc2)
-        assert svc.repository.find_enabled.await_count == 2  # different groups, separate entries
+        assert (
+            svc.repository.find_enabled.await_count == 2
+        )  # different groups, separate entries
         await svc.get_enabled_tools_for_group(gc1)
         assert svc.repository.find_enabled.await_count == 2  # g1 repeat is a cache hit
     finally:
@@ -326,12 +494,15 @@ async def test_tool_mutation_invalidates_enabled_tools_cache():
     await svc.toggle_tool_enabled(1)
 
     await svc.get_enabled_tools_for_group(None)
-    assert svc.repository.find_enabled.await_count == 2  # cache was cleared by the toggle
+    assert (
+        svc.repository.find_enabled.await_count == 2
+    )  # cache was cleared by the toggle
 
 
 @pytest.mark.asyncio
 async def test_group_tool_mutation_invalidates_enabled_tools_cache():
     from src.services.groups.group_tools import GroupToolService
+
     svc = _make_cached_service()
     await svc.get_enabled_tools_for_group(None)
 
@@ -340,15 +511,25 @@ async def test_group_tool_mutation_invalidates_enabled_tools_cache():
     now = datetime.utcnow()
     gsvc.group_tool_repo.set_enabled = AsyncMock(
         return_value=SimpleNamespace(
-            id=1, tool_id=1, group_id="g1", enabled=True, config={},
-            credentials_status="ok", created_at=now, updated_at=now,
+            id=1,
+            tool_id=1,
+            group_id="g1",
+            enabled=True,
+            config={},
+            credentials_status="ok",
+            created_at=now,
+            updated_at=now,
         )
     )
-    gc = GroupContext(group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin")
+    gc = GroupContext(
+        group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role="admin"
+    )
     await gsvc.set_group_tool_enabled(1, True, gc)
 
     await svc.get_enabled_tools_for_group(None)
-    assert svc.repository.find_enabled.await_count == 2  # mapping change cleared the cache
+    assert (
+        svc.repository.find_enabled.await_count == 2
+    )  # mapping change cleared the cache
 
 
 # ---------------------------------------------------------------------------
@@ -356,9 +537,10 @@ async def test_group_tool_mutation_invalidates_enabled_tools_cache():
 # (merged from test_tool_service_coverage.py)
 # ---------------------------------------------------------------------------
 
+
 def _make_service_with_mock_repo():
     session = AsyncMock()
-    with patch('src.services.tools.tool_service.ToolRepository') as MockRepo:
+    with patch("src.services.tools.tool_service.ToolRepository") as MockRepo:
         mock_repo = AsyncMock()
         MockRepo.return_value = mock_repo
         svc = ToolService(session)
@@ -387,8 +569,10 @@ async def test_get_enabled_tools():
     svc = _make_service_with_mock_repo()
     tools = [_make_mock_tool(id=1), _make_mock_tool(id=2)]
     svc.repository.find_enabled = AsyncMock(return_value=tools)
-    with patch('src.services.tools.tool_service.ToolResponse') as MockToolResp, \
-         patch('src.services.tools.tool_service.ToolListResponse') as MockListResp:
+    with (
+        patch("src.services.tools.tool_service.ToolResponse") as MockToolResp,
+        patch("src.services.tools.tool_service.ToolListResponse") as MockListResp,
+    ):
         MockToolResp.model_validate = MagicMock(side_effect=lambda t: MagicMock())
         MockListResp.return_value = MagicMock()
         result = await svc.get_enabled_tools()
@@ -402,8 +586,10 @@ async def test_get_enabled_tools_for_group_no_primary_group():
     svc.repository.find_enabled = AsyncMock(return_value=base_tools)
     ctx = _make_mock_group_ctx(primary_group_id=None)
 
-    with patch('src.services.tools.tool_service.ToolResponse') as MockResp, \
-         patch('src.services.tools.tool_service.ToolListResponse') as MockList:
+    with (
+        patch("src.services.tools.tool_service.ToolResponse") as MockResp,
+        patch("src.services.tools.tool_service.ToolListResponse") as MockList,
+    ):
         MockResp.model_validate = MagicMock(side_effect=lambda t: MagicMock())
         MockList.return_value = MagicMock()
         result = await svc.get_enabled_tools_for_group(ctx)
@@ -413,7 +599,10 @@ async def test_get_enabled_tools_for_group_no_primary_group():
 @pytest.mark.asyncio
 async def test_get_enabled_tools_for_group_with_primary_group():
     svc = _make_service_with_mock_repo()
-    base_tools = [_make_mock_tool(id=1, group_id=None), _make_mock_tool(id=2, group_id=None)]
+    base_tools = [
+        _make_mock_tool(id=1, group_id=None),
+        _make_mock_tool(id=2, group_id=None),
+    ]
     svc.repository.find_enabled = AsyncMock(return_value=base_tools)
     ctx = _make_mock_group_ctx(primary_group_id="g1")
 
@@ -421,9 +610,11 @@ async def test_get_enabled_tools_for_group_with_primary_group():
     mapping1.tool_id = 1
     mapping1.config = {"extra": "value"}
 
-    with patch('src.services.tools.tool_service.GroupToolRepository') as MockGroupRepo, \
-         patch('src.services.tools.tool_service.ToolResponse') as MockResp, \
-         patch('src.services.tools.tool_service.ToolListResponse') as MockList:
+    with (
+        patch("src.services.tools.tool_service.GroupToolRepository") as MockGroupRepo,
+        patch("src.services.tools.tool_service.ToolResponse") as MockResp,
+        patch("src.services.tools.tool_service.ToolListResponse") as MockList,
+    ):
         mock_group_repo = AsyncMock()
         mock_group_repo.list_enabled_for_group = AsyncMock(return_value=[mapping1])
         MockGroupRepo.return_value = mock_group_repo
@@ -449,20 +640,24 @@ async def test_get_enabled_tools_for_group_merge_exception():
     mapping1.tool_id = 1
     mapping1.config = None
 
-    with patch('src.services.tools.tool_service.GroupToolRepository') as MockGroupRepo, \
-         patch('src.services.tools.tool_service.ToolResponse') as MockResp, \
-         patch('src.services.tools.tool_service.ToolListResponse') as MockList:
+    with (
+        patch("src.services.tools.tool_service.GroupToolRepository") as MockGroupRepo,
+        patch("src.services.tools.tool_service.ToolResponse") as MockResp,
+        patch("src.services.tools.tool_service.ToolListResponse") as MockList,
+    ):
         mock_group_repo = AsyncMock()
         mock_group_repo.list_enabled_for_group = AsyncMock(return_value=[mapping1])
         MockGroupRepo.return_value = mock_group_repo
 
         # Make ToolResponse.model_validate raise on first call (triggers fallback)
         call_count = [0]
+
         def side_validate(t):
             call_count[0] += 1
             if call_count[0] == 1:
                 raise Exception("merge failed")
             return MagicMock()
+
         MockResp.model_validate = MagicMock(side_effect=side_validate)
         MockList.return_value = MagicMock()
 
@@ -477,8 +672,10 @@ async def test_get_enabled_tools_for_group_no_context():
     base_tools = [_make_mock_tool(id=1, group_id=None)]
     svc.repository.find_enabled = AsyncMock(return_value=base_tools)
 
-    with patch('src.services.tools.tool_service.ToolResponse') as MockResp, \
-         patch('src.services.tools.tool_service.ToolListResponse') as MockList:
+    with (
+        patch("src.services.tools.tool_service.ToolResponse") as MockResp,
+        patch("src.services.tools.tool_service.ToolListResponse") as MockList,
+    ):
         MockResp.model_validate = MagicMock(return_value=MagicMock())
         MockList.return_value = MagicMock()
         result = await svc.get_enabled_tools_for_group(None)

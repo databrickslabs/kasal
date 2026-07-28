@@ -8,17 +8,17 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.repositories.agent_repository import AgentRepository
+from src.repositories.crew_repository import CrewRepository
+from src.repositories.task_repository import TaskRepository
+from src.repositories.tool_repository import ToolRepository
+from src.schemas.crew_export import ExportFormat, ExportOptions
 from src.services.export import (
     DatabricksAppExporter,
     DatabricksNotebookExporter,
     PythonProjectExporter,
 )
 from src.services.export.secret_hints import SECRET_KEY_HINTS
-from src.repositories.agent_repository import AgentRepository
-from src.repositories.crew_repository import CrewRepository
-from src.repositories.task_repository import TaskRepository
-from src.repositories.tool_repository import ToolRepository
-from src.schemas.crew_export import ExportFormat, ExportOptions
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -119,7 +119,9 @@ class CrewExportService:
             if agent:
                 agent_dict = await self._agent_to_dict(agent)
                 agents.append(agent_dict)
-                mcp_names.update(self._extract_mcp_names(getattr(agent, "tool_configs", None)))
+                mcp_names.update(
+                    self._extract_mcp_names(getattr(agent, "tool_configs", None))
+                )
 
         # Get tasks (collect any MCP servers they explicitly reference)
         tasks = []
@@ -128,7 +130,9 @@ class CrewExportService:
             if task:
                 task_dict = await self._task_to_dict(task)
                 tasks.append(task_dict)
-                mcp_names.update(self._extract_mcp_names(getattr(task, "tool_configs", None)))
+                mcp_names.update(
+                    self._extract_mcp_names(getattr(task, "tool_configs", None))
+                )
 
         # MCP servers: include ONLY the ones the crew's agents/tasks explicitly
         # reference (via tool_configs.MCP_SERVERS), mirroring the runtime — which
@@ -302,14 +306,18 @@ class CrewExportService:
         """
         names = sorted({n for n in (server_names or []) if n})
         if not names:
-            logger.info("Export: crew references no MCP servers — exporting without MCP")
+            logger.info(
+                "Export: crew references no MCP servers — exporting without MCP"
+            )
             return []
         try:
             from src.services.mcp.service import MCPService
 
             mcp_service = MCPService(self.session)
             group_id = group_context.primary_group_id if group_context else None
-            resolved = await mcp_service.get_servers_by_names_group_aware(names, group_id)
+            resolved = await mcp_service.get_servers_by_names_group_aware(
+                names, group_id
+            )
             servers = []
             for server in resolved:
                 if not getattr(server, "enabled", True):
@@ -416,7 +424,9 @@ class CrewExportService:
             # MCP servers THIS agent is configured to use (from its tool_configs).
             # Emitted per-agent so the deployed app attaches each MCP server only
             # to the agent(s) that reference it — not to every agent.
-            "mcp_servers": self._extract_mcp_names(getattr(agent, "tool_configs", None)),
+            "mcp_servers": self._extract_mcp_names(
+                getattr(agent, "tool_configs", None)
+            ),
         }
 
     async def _task_to_dict(self, task) -> Dict[str, Any]:

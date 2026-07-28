@@ -25,8 +25,11 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-from src.services.execution.runtime import ToolExecutionBlockedError, register_tool_hooks, unregister_tool_hooks
-
+from src.services.execution.runtime import (
+    ToolExecutionBlockedError,
+    register_tool_hooks,
+    unregister_tool_hooks,
+)
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -44,7 +47,9 @@ _DEFAULT_SCOPE = "run"  # a decision sticks for the rest of the run; "call" re-a
 _run_decisions: Dict[tuple, str] = {}
 
 
-async def _prior_decision(execution_id: str, tool_name: str, group_id: str) -> Optional[str]:
+async def _prior_decision(
+    execution_id: str, tool_name: str, group_id: str
+) -> Optional[str]:
     """Latest approved/rejected tool_call decision for this tool in this run."""
     from src.db.session import request_scoped_session
     from src.repositories.hitl_repository import HITLApprovalRepository
@@ -165,7 +170,9 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
                         _prior_decision(execution_id, tool_name, group_id), timeout=15
                     )
                 except Exception as prior_err:  # noqa: BLE001
-                    logger.debug(f"[tool_approval] prior-decision lookup skipped: {prior_err}")
+                    logger.debug(
+                        f"[tool_approval] prior-decision lookup skipped: {prior_err}"
+                    )
                 if decision:
                     _run_decisions[(execution_id, tool_name)] = decision
             if decision == "approved":
@@ -176,7 +183,9 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
                 )
 
         timeout_seconds = int(policy.get("timeout_seconds", _DEFAULT_TIMEOUT_SECONDS))
-        timeout_action = str(policy.get("timeout_action", _DEFAULT_TIMEOUT_ACTION)).lower()
+        timeout_action = str(
+            policy.get("timeout_action", _DEFAULT_TIMEOUT_ACTION)
+        ).lower()
         gate_config = {
             "kind": "tool_call",
             "tool_name": tool_name,
@@ -205,11 +214,14 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
             f"[tool_approval] execution {execution_id}: '{tool_name}' waiting "
             f"for approval {approval_id} (timeout {timeout_seconds}s)"
         )
-        notify_input_needed(execution_id, {
-            "job_id": execution_id,
-            "approval_id": approval_id,
-            **gate_config,
-        })
+        notify_input_needed(
+            execution_id,
+            {
+                "job_id": execution_id,
+                "approval_id": approval_id,
+                **gate_config,
+            },
+        )
 
         def _record(decision: str) -> None:
             if scope != "call":
@@ -222,12 +234,16 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             try:
-                status = run_async_with_context(_approval_status(approval_id), timeout=15)
+                status = run_async_with_context(
+                    _approval_status(approval_id), timeout=15
+                )
             except Exception as poll_err:  # noqa: BLE001
                 logger.warning(f"[tool_approval] poll failed (retrying): {poll_err}")
                 status = None
             if status == "approved":
-                logger.info(f"[tool_approval] {approval_id} approved — running '{tool_name}'")
+                logger.info(
+                    f"[tool_approval] {approval_id} approved — running '{tool_name}'"
+                )
                 _record("approved")
                 return
             if status in ("rejected", "timeout"):
@@ -251,7 +267,9 @@ def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupCont
     return approval_hook
 
 
-def install_tool_approval_hook(execution_id: str, group_context: Optional[GroupContext]):
+def install_tool_approval_hook(
+    execution_id: str, group_context: Optional[GroupContext]
+):
     """Register the hook; returns a callable that unregisters it."""
     hook = make_tool_approval_hook(execution_id, group_context)
     register_tool_hooks(pre=hook)

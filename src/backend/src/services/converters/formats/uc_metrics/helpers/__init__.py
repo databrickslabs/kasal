@@ -20,7 +20,7 @@ from .uc_metrics_context import UCBaseKBIContext, UCKBIContextCache
 # to avoid circular dependencies (they import from ..generator)
 
 __all__ = [
-    'UCMetricsAggregationBuilder',
-    'UCBaseKBIContext',
-    'UCKBIContextCache',
+    "UCMetricsAggregationBuilder",
+    "UCBaseKBIContext",
+    "UCKBIContextCache",
 ]

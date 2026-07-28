@@ -1,20 +1,25 @@
 """
 Utilities for event loop management and handling asyncio operations across threads.
 """
+
 import asyncio
 import logging
-from typing import Any, Callable, List, TypeVar, Coroutine
+from typing import Any, Callable, Coroutine, List, TypeVar
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.core.logger import LoggerManager
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system
 
 # Type variable for the return value of the database operation
-T = TypeVar('T')
+T = TypeVar("T")
 
-async def execute_db_operation_with_fresh_engine(operation: Callable[[AsyncSession], Coroutine[Any, Any, T]]) -> T:
+
+async def execute_db_operation_with_fresh_engine(
+    operation: Callable[[AsyncSession], Coroutine[Any, Any, T]],
+) -> T:
     """
     Execute a database operation using the global engine to avoid corruption.
 
@@ -74,7 +79,10 @@ async def execute_db_operation_with_fresh_engine(operation: Callable[[AsyncSessi
         raise
     # No engine disposal - engine lifecycle managed by session.py
 
-async def execute_db_operation_smart(operation: Callable[[AsyncSession], Coroutine[Any, Any, T]]) -> T:
+
+async def execute_db_operation_smart(
+    operation: Callable[[AsyncSession], Coroutine[Any, Any, T]],
+) -> T:
     """
     Execute a database operation using the smart session (Lakebase-aware).
 
@@ -90,15 +98,19 @@ async def execute_db_operation_smart(operation: Callable[[AsyncSession], Corouti
 
     if await is_lakebase_enabled():
         import os
+
         from src.db.database_router import get_lakebase_config_from_db
         from src.db.lakebase_session import get_lakebase_session
-        from src.db.lakebase_state import is_fallback_allowed, record_successful_connection
+        from src.db.lakebase_state import (
+            is_fallback_allowed,
+            record_successful_connection,
+        )
         from src.utils.databricks_auth import get_auth_context
 
         config = await get_lakebase_config_from_db()
-        instance_name = (config.get("instance_name") if config else None) or os.environ.get(
-            "LAKEBASE_INSTANCE_NAME", "kasal-lakebase"
-        )
+        instance_name = (
+            config.get("instance_name") if config else None
+        ) or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
 
         user_token = None
         user_email = None
@@ -116,7 +128,9 @@ async def execute_db_operation_smart(operation: Callable[[AsyncSession], Corouti
 
         for attempt in range(max_retries):
             try:
-                async with get_lakebase_session(instance_name, user_token, user_email) as session:
+                async with get_lakebase_session(
+                    instance_name, user_token, user_email
+                ) as session:
                     record_successful_connection()
                     result = await operation(session)
                     return result
@@ -156,20 +170,28 @@ def create_and_run_loop(coroutine: Any) -> Any:
         # Properly clean up the event loop
         try:
             # Close all running event loop tasks
-            pending = asyncio.all_tasks(new_loop) if hasattr(asyncio, 'all_tasks') else []
+            pending = (
+                asyncio.all_tasks(new_loop) if hasattr(asyncio, "all_tasks") else []
+            )
             for task in pending:
                 task.cancel()
             # Run the event loop until all tasks are canceled
             if pending:
-                new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                new_loop.run_until_complete(
+                    asyncio.gather(*pending, return_exceptions=True)
+                )
             # Remove the loop from the current context and close it
             asyncio.set_event_loop(None)
             new_loop.close()
         except Exception as e:
             logger.error(f"Error cleaning up event loop: {str(e)}")
 
-def create_task_lifecycle_callback(loop_handler: Callable, callbacks: List, task_key: str) -> Callable:
+
+def create_task_lifecycle_callback(
+    loop_handler: Callable, callbacks: List, task_key: str
+) -> Callable:
     """Create a callback for task lifecycle events with proper event loop handling."""
+
     def callback_function(task_obj, success=True):
         logger.info(f"Task event for {task_key} (success: {success})")
         # Create a new event loop for the callback
@@ -179,9 +201,11 @@ def create_task_lifecycle_callback(loop_handler: Callable, callbacks: List, task
             for callback in callbacks:
                 try:
                     if hasattr(callback, loop_handler):
-                        logger.info(f"Calling {loop_handler} for {callback.__class__.__name__}")
+                        logger.info(
+                            f"Calling {loop_handler} for {callback.__class__.__name__}"
+                        )
                         handler = getattr(callback, loop_handler)
-                        if loop_handler == 'on_task_end':
+                        if loop_handler == "on_task_end":
                             new_loop.run_until_complete(handler(task_obj, success))
                         else:
                             new_loop.run_until_complete(handler(task_obj))
@@ -193,26 +217,31 @@ def create_task_lifecycle_callback(loop_handler: Callable, callbacks: List, task
             # Properly clean up the event loop
             try:
                 # Close all running event loop tasks
-                pending = asyncio.all_tasks(new_loop) if hasattr(asyncio, 'all_tasks') else []
+                pending = (
+                    asyncio.all_tasks(new_loop) if hasattr(asyncio, "all_tasks") else []
+                )
                 for task in pending:
                     task.cancel()
                 # Run the event loop until all tasks are canceled
                 if pending:
-                    new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                    new_loop.run_until_complete(
+                        asyncio.gather(*pending, return_exceptions=True)
+                    )
                 # Remove the loop from the current context and close it
                 asyncio.set_event_loop(None)
                 new_loop.close()
             except Exception as e:
                 logger.error(f"Error cleaning up {loop_handler} event loop: {str(e)}")
-    
+
     return callback_function
+
 
 def run_in_thread_with_loop(func: Callable, *args, **kwargs) -> Any:
     """Run a function in a thread with a properly managed event loop."""
     # Track whether we created a new event loop
     created_loop = False
     loop = None
-    
+
     try:
         # Set up event loop for this thread
         try:
@@ -227,7 +256,7 @@ def run_in_thread_with_loop(func: Callable, *args, **kwargs) -> Any:
 
         # Execute the function
         return func(*args, **kwargs)
-    
+
     finally:
         # Clean up the event loop only if we created it
         if created_loop and loop is not None:
@@ -235,6 +264,8 @@ def run_in_thread_with_loop(func: Callable, *args, **kwargs) -> Any:
                 # Only close the loop if we created it
                 asyncio.set_event_loop(None)
                 loop.close()
-                logger.info("Successfully closed the event loop created for this thread")
+                logger.info(
+                    "Successfully closed the event loop created for this thread"
+                )
             except Exception as e:
-                logger.error(f"Error cleaning up event loop: {str(e)}") 
+                logger.error(f"Error cleaning up event loop: {str(e)}")

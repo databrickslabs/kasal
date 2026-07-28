@@ -1,33 +1,35 @@
 """
 Unit tests for execution_history_router module.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from types import SimpleNamespace
+
 from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.api.execution_history_router import (
-    debug_execution_groups,
-    get_all_groups_execution_history,
-    get_execution_history,
     check_execution_exists,
-    get_execution_by_id,
-    get_execution_outputs,
-    get_execution_debug_outputs,
-    update_execution_result,
+    debug_execution_groups,
     delete_all_executions,
     delete_execution,
     delete_execution_by_job_id,
+    get_all_groups_execution_history,
+    get_execution_by_id,
+    get_execution_debug_outputs,
+    get_execution_history,
+    get_execution_outputs,
+    update_execution_result,
 )
+from src.core.exceptions import NotFoundError
 from src.schemas.execution_history import (
-    ExecutionHistoryList,
-    ExecutionOutputList,
-    ExecutionOutputDebugList,
     DeleteResponse,
+    ExecutionHistoryList,
+    ExecutionOutputDebugList,
+    ExecutionOutputList,
     UpdateExecutionResultRequest,
 )
 from src.utils.user_context import GroupContext
-from src.core.exceptions import NotFoundError
 
 
 def make_gc(role="admin"):
@@ -47,6 +49,7 @@ class TestDebugExecutionGroups:
         with patch("src.api.execution_history_router.settings") as mock_settings:
             mock_settings.DEBUG_MODE = False
             from fastapi import HTTPException
+
             with pytest.raises(HTTPException) as exc_info:
                 await debug_execution_groups(session=session)
             assert exc_info.value.status_code == 404
@@ -58,8 +61,13 @@ class TestDebugExecutionGroups:
         mock_svc = AsyncMock()
         mock_svc.get_execution_groups_with_counts = AsyncMock(return_value=[("g1", 5)])
 
-        with patch("src.api.execution_history_router.settings") as mock_settings, \
-             patch("src.api.execution_history_router.ExecutionHistoryService", return_value=mock_svc):
+        with (
+            patch("src.api.execution_history_router.settings") as mock_settings,
+            patch(
+                "src.api.execution_history_router.ExecutionHistoryService",
+                return_value=mock_svc,
+            ),
+        ):
             mock_settings.DEBUG_MODE = True
             result = await debug_execution_groups(
                 session=session,
@@ -85,10 +93,21 @@ class TestDebugExecutionGroups:
         mock_group_svc = AsyncMock()
         mock_group_svc.get_user_groups = AsyncMock(return_value=[mock_group])
 
-        with patch("src.api.execution_history_router.settings") as mock_settings, \
-             patch("src.api.execution_history_router.ExecutionHistoryService", return_value=mock_svc), \
-             patch("src.api.execution_history_router.UserService", return_value=mock_user_svc), \
-             patch("src.api.execution_history_router.GroupService", return_value=mock_group_svc):
+        with (
+            patch("src.api.execution_history_router.settings") as mock_settings,
+            patch(
+                "src.api.execution_history_router.ExecutionHistoryService",
+                return_value=mock_svc,
+            ),
+            patch(
+                "src.api.execution_history_router.UserService",
+                return_value=mock_user_svc,
+            ),
+            patch(
+                "src.api.execution_history_router.GroupService",
+                return_value=mock_group_svc,
+            ),
+        ):
             mock_settings.DEBUG_MODE = True
             result = await debug_execution_groups(
                 session=session,
@@ -124,7 +143,9 @@ class TestGetAllGroupsExecutionHistory:
         mock_user_svc = AsyncMock()
         mock_user_svc.get_or_create_user_by_email = AsyncMock(return_value=None)
 
-        with patch("src.api.execution_history_router.UserService", return_value=mock_user_svc):
+        with patch(
+            "src.api.execution_history_router.UserService", return_value=mock_user_svc
+        ):
             result = await get_all_groups_execution_history(
                 session=session,
                 service=service,
@@ -152,8 +173,16 @@ class TestGetAllGroupsExecutionHistory:
         service = AsyncMock()
         service.get_execution_history = AsyncMock(return_value=expected_list)
 
-        with patch("src.api.execution_history_router.UserService", return_value=mock_user_svc), \
-             patch("src.api.execution_history_router.GroupService", return_value=mock_group_svc):
+        with (
+            patch(
+                "src.api.execution_history_router.UserService",
+                return_value=mock_user_svc,
+            ),
+            patch(
+                "src.api.execution_history_router.GroupService",
+                return_value=mock_group_svc,
+            ),
+        ):
             result = await get_all_groups_execution_history(
                 session=session,
                 service=service,
@@ -179,8 +208,16 @@ class TestGetAllGroupsExecutionHistory:
         service = AsyncMock()
         service.get_execution_history = AsyncMock(return_value=expected_list)
 
-        with patch("src.api.execution_history_router.UserService", return_value=mock_user_svc), \
-             patch("src.api.execution_history_router.GroupService", return_value=mock_group_svc):
+        with (
+            patch(
+                "src.api.execution_history_router.UserService",
+                return_value=mock_user_svc,
+            ),
+            patch(
+                "src.api.execution_history_router.GroupService",
+                return_value=mock_group_svc,
+            ),
+        ):
             await get_all_groups_execution_history(
                 session=session,
                 service=service,
@@ -203,7 +240,9 @@ class TestGetAllGroupsExecutionHistory:
 
         service = AsyncMock()
 
-        with patch("src.api.execution_history_router.UserService", return_value=mock_user_svc):
+        with patch(
+            "src.api.execution_history_router.UserService", return_value=mock_user_svc
+        ):
             result = await get_all_groups_execution_history(
                 session=session,
                 service=service,
@@ -213,7 +252,9 @@ class TestGetAllGroupsExecutionHistory:
                 x_forwarded_email="fwd@example.com",
             )
         assert result.total == 0
-        mock_user_svc.get_or_create_user_by_email.assert_called_once_with("fwd@example.com")
+        mock_user_svc.get_or_create_user_by_email.assert_called_once_with(
+            "fwd@example.com"
+        )
 
 
 class TestGetExecutionHistory:
@@ -267,7 +308,9 @@ class TestCheckExecutionExists:
         ctx = make_gc()
 
         await check_execution_exists(execution_id=7, group_context=ctx, service=service)
-        service.check_execution_exists.assert_called_once_with(7, group_ids=ctx.group_ids)
+        service.check_execution_exists.assert_called_once_with(
+            7, group_ids=ctx.group_ids
+        )
 
 
 class TestGetExecutionById:
@@ -279,7 +322,9 @@ class TestGetExecutionById:
         ctx = make_gc()
 
         with pytest.raises(NotFoundError):
-            await get_execution_by_id(execution_id=42, group_context=ctx, service=service)
+            await get_execution_by_id(
+                execution_id=42, group_context=ctx, service=service
+            )
 
     @pytest.mark.asyncio
     async def test_returns_execution_when_found(self):
@@ -289,7 +334,9 @@ class TestGetExecutionById:
         service.get_execution_by_id = AsyncMock(return_value=mock_exec)
         ctx = make_gc()
 
-        result = await get_execution_by_id(execution_id=1, group_context=ctx, service=service)
+        result = await get_execution_by_id(
+            execution_id=1, group_context=ctx, service=service
+        )
         assert result == mock_exec
 
 
@@ -320,8 +367,11 @@ class TestGetExecutionOutputs:
         ctx = make_gc()
 
         await get_execution_outputs(
-            execution_id="exec-1", group_context=ctx, service=service,
-            limit=100, offset=5,
+            execution_id="exec-1",
+            group_context=ctx,
+            service=service,
+            limit=100,
+            offset=5,
         )
         service.get_execution_outputs.assert_called_once_with(
             "exec-1", 100, 5, group_ids=ctx.group_ids
@@ -368,7 +418,10 @@ class TestUpdateExecutionResult:
 
         with pytest.raises(NotFoundError):
             await update_execution_result(
-                job_id="missing-job", request=request, group_context=ctx, service=service
+                job_id="missing-job",
+                request=request,
+                group_context=ctx,
+                service=service,
             )
 
     @pytest.mark.asyncio
@@ -419,7 +472,9 @@ class TestDeleteExecution:
         service.delete_execution = AsyncMock(return_value=expected)
         ctx = make_gc()
 
-        result = await delete_execution(execution_id=1, group_context=ctx, service=service)
+        result = await delete_execution(
+            execution_id=1, group_context=ctx, service=service
+        )
         assert result == expected
 
     @pytest.mark.asyncio
@@ -468,5 +523,9 @@ class TestDeleteExecutionByJobId:
         service.delete_execution_by_job_id = AsyncMock(return_value=expected)
         ctx = make_gc()
 
-        await delete_execution_by_job_id(job_id="job-9", group_context=ctx, service=service)
-        service.delete_execution_by_job_id.assert_called_once_with("job-9", group_ids=ctx.group_ids)
+        await delete_execution_by_job_id(
+            job_id="job-9", group_context=ctx, service=service
+        )
+        service.delete_execution_by_job_id.assert_called_once_with(
+            "job-9", group_ids=ctx.group_ids
+        )

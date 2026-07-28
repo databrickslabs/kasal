@@ -3,14 +3,14 @@ API router for MCP server operations.
 
 This module provides endpoints for managing MCP (Model Context Protocol) servers.
 """
+
 import logging
 from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Request, status
 
-from src.core.exceptions import BadRequestError, ForbiddenError
-
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import BadRequestError, ForbiddenError
 from src.core.permissions import check_role_in_context
 from src.schemas.mcp import (
     MCPServerCreate,
@@ -159,7 +159,8 @@ async def _list_external_mcp_options(
         # tools instead (see gmail_tool.py).
         conn_options = conn.get("options") or {}
         is_mcp = any(
-            "mcp" in str(key).lower() and str(value).strip().lower() in ("true", "1", "yes")
+            "mcp" in str(key).lower()
+            and str(value).strip().lower() in ("true", "1", "yes")
             for key, value in conn_options.items()
         )
         if not is_mcp:
@@ -256,7 +257,9 @@ async def get_databricks_mcp_options(
             )
 
             group_id = (
-                getattr(group_context, "primary_group_id", None) if group_context else None
+                getattr(group_context, "primary_group_id", None)
+                if group_context
+                else None
             )
             config = await DatabricksConfigRepository(session).get_active_config(
                 group_id=group_id

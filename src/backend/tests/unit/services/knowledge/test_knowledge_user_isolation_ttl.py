@@ -9,13 +9,13 @@ flow's new guarantees:
 - the rewritten SQLite similarity search ranks by cosine in Python (the old
   json_each SQL took ~30s and blew the knowledge tool's timeout).
 """
+
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, patch
-
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.models.documentation_embedding import KnowledgeEmbedding
@@ -82,11 +82,13 @@ class TestSqliteSimilaritySearch:
     @pytest.mark.asyncio
     async def test_ranks_by_cosine_similarity_and_keeps_created_by(self, session):
         repo = DocumentationEmbeddingRepository(session, model=KnowledgeEmbedding)
-        session.add_all([
-            row(content="far", embedding=[0.0, 1.0, 0.0], created_by=ALICE),
-            row(content="near", embedding=[1.0, 0.05, 0.0], created_by=ALICE),
-            row(content="exact", embedding=[1.0, 0.0, 0.0], created_by=ALICE),
-        ])
+        session.add_all(
+            [
+                row(content="far", embedding=[0.0, 1.0, 0.0], created_by=ALICE),
+                row(content="near", embedding=[1.0, 0.05, 0.0], created_by=ALICE),
+                row(content="exact", embedding=[1.0, 0.0, 0.0], created_by=ALICE),
+            ]
+        )
         await session.commit()
 
         results = await repo.search_similar([1.0, 0.0, 0.0], limit=2, group_id=GROUP)
@@ -99,22 +101,32 @@ class TestSqliteSimilaritySearch:
     @pytest.mark.asyncio
     async def test_scopes_to_the_group(self, session):
         repo = DocumentationEmbeddingRepository(session, model=KnowledgeEmbedding)
-        session.add_all([
-            row(content="mine", embedding=[1.0, 0.0, 0.0]),
-            row(content="other tenant", embedding=[1.0, 0.0, 0.0], group_id=OTHER_GROUP),
-        ])
+        session.add_all(
+            [
+                row(content="mine", embedding=[1.0, 0.0, 0.0]),
+                row(
+                    content="other tenant",
+                    embedding=[1.0, 0.0, 0.0],
+                    group_id=OTHER_GROUP,
+                ),
+            ]
+        )
         await session.commit()
 
         results = await repo.search_similar([1.0, 0.0, 0.0], limit=10, group_id=GROUP)
         assert [r.content for r in results] == ["mine"]
 
     @pytest.mark.asyncio
-    async def test_tolerates_json_string_embeddings_and_skips_zero_vectors(self, session):
+    async def test_tolerates_json_string_embeddings_and_skips_zero_vectors(
+        self, session
+    ):
         repo = DocumentationEmbeddingRepository(session, model=KnowledgeEmbedding)
-        session.add_all([
-            row(content="ok", embedding=[0.5, 0.5, 0.0]),
-            row(content="zero", embedding=[0.0, 0.0, 0.0]),
-        ])
+        session.add_all(
+            [
+                row(content="ok", embedding=[0.5, 0.5, 0.0]),
+                row(content="zero", embedding=[0.0, 0.0, 0.0]),
+            ]
+        )
         await session.commit()
 
         results = await repo.search_similar([1.0, 0.0, 0.0], limit=10, group_id=GROUP)
@@ -130,14 +142,18 @@ class TestDeleteByFilePerUser:
     @pytest.mark.asyncio
     async def test_deletes_own_and_legacy_rows_but_not_other_users(self, session):
         repo = DocumentationEmbeddingRepository(session, model=KnowledgeEmbedding)
-        session.add_all([
-            row(content="alice chunk", embedding=[1.0], created_by=ALICE),
-            row(content="legacy chunk", embedding=[1.0], created_by=None),
-            row(content="bob chunk", embedding=[1.0], created_by=BOB),
-        ])
+        session.add_all(
+            [
+                row(content="alice chunk", embedding=[1.0], created_by=ALICE),
+                row(content="legacy chunk", embedding=[1.0], created_by=None),
+                row(content="bob chunk", embedding=[1.0], created_by=BOB),
+            ]
+        )
         await session.commit()
 
-        deleted = await repo.delete_by_file(GROUP, "exec-1", "doc.txt", created_by=ALICE)
+        deleted = await repo.delete_by_file(
+            GROUP, "exec-1", "doc.txt", created_by=ALICE
+        )
         await session.commit()
 
         assert deleted == 2  # alice's own + legacy shared
@@ -147,10 +163,12 @@ class TestDeleteByFilePerUser:
     @pytest.mark.asyncio
     async def test_without_created_by_deletes_group_wide(self, session):
         repo = DocumentationEmbeddingRepository(session, model=KnowledgeEmbedding)
-        session.add_all([
-            row(content="a", embedding=[1.0], created_by=ALICE),
-            row(content="b", embedding=[1.0], created_by=BOB),
-        ])
+        session.add_all(
+            [
+                row(content="a", embedding=[1.0], created_by=ALICE),
+                row(content="b", embedding=[1.0], created_by=BOB),
+            ]
+        )
         await session.commit()
 
         deleted = await repo.delete_by_file(GROUP, "exec-1", "doc.txt")
@@ -185,11 +203,13 @@ class TestSearchIsolationAndTtl:
 
     @pytest.mark.asyncio
     async def test_user_only_sees_their_own_and_legacy_chunks(self, session):
-        session.add_all([
-            row(content="alice doc", embedding=[1.0, 0.0, 0.0], created_by=ALICE),
-            row(content="bob doc", embedding=[1.0, 0.0, 0.0], created_by=BOB),
-            row(content="legacy doc", embedding=[1.0, 0.0, 0.0], created_by=None),
-        ])
+        session.add_all(
+            [
+                row(content="alice doc", embedding=[1.0, 0.0, 0.0], created_by=ALICE),
+                row(content="bob doc", embedding=[1.0, 0.0, 0.0], created_by=BOB),
+                row(content="legacy doc", embedding=[1.0, 0.0, 0.0], created_by=None),
+            ]
+        )
         await session.commit()
 
         results = await self._search(session, created_by=ALICE)
@@ -198,9 +218,11 @@ class TestSearchIsolationAndTtl:
 
     @pytest.mark.asyncio
     async def test_no_user_context_keeps_group_visibility(self, session):
-        session.add_all([
-            row(content="alice doc", embedding=[1.0, 0.0, 0.0], created_by=ALICE),
-        ])
+        session.add_all(
+            [
+                row(content="alice doc", embedding=[1.0, 0.0, 0.0], created_by=ALICE),
+            ]
+        )
         await session.commit()
 
         results = await self._search(session, created_by=None)
@@ -208,10 +230,17 @@ class TestSearchIsolationAndTtl:
 
     @pytest.mark.asyncio
     async def test_expired_chunks_are_excluded(self, session):
-        session.add_all([
-            row(content="fresh", embedding=[1.0, 0.0, 0.0], created_by=ALICE),
-            row(content="expired", embedding=[1.0, 0.0, 0.0], created_by=ALICE, age_days=45),
-        ])
+        session.add_all(
+            [
+                row(content="fresh", embedding=[1.0, 0.0, 0.0], created_by=ALICE),
+                row(
+                    content="expired",
+                    embedding=[1.0, 0.0, 0.0],
+                    created_by=ALICE,
+                    age_days=45,
+                ),
+            ]
+        )
         await session.commit()
 
         results = await self._search(session, created_by=ALICE, ttl_days=30)
@@ -219,9 +248,16 @@ class TestSearchIsolationAndTtl:
 
     @pytest.mark.asyncio
     async def test_ttl_zero_disables_expiry(self, session):
-        session.add_all([
-            row(content="old", embedding=[1.0, 0.0, 0.0], created_by=ALICE, age_days=400),
-        ])
+        session.add_all(
+            [
+                row(
+                    content="old",
+                    embedding=[1.0, 0.0, 0.0],
+                    created_by=ALICE,
+                    age_days=400,
+                ),
+            ]
+        )
         await session.commit()
 
         results = await self._search(session, created_by=ALICE, ttl_days=0)
@@ -272,11 +308,18 @@ class TestEmbedStampingAndPurge:
     async def test_purge_expired_is_group_scoped(self, session):
         from src.services.knowledge.embedding_service import KnowledgeEmbeddingService
 
-        session.add_all([
-            row(content="mine fresh", embedding=[1.0], age_days=1),
-            row(content="mine expired", embedding=[1.0], age_days=45),
-            row(content="other tenant expired", embedding=[1.0], group_id=OTHER_GROUP, age_days=45),
-        ])
+        session.add_all(
+            [
+                row(content="mine fresh", embedding=[1.0], age_days=1),
+                row(content="mine expired", embedding=[1.0], age_days=45),
+                row(
+                    content="other tenant expired",
+                    embedding=[1.0],
+                    group_id=OTHER_GROUP,
+                    age_days=45,
+                ),
+            ]
+        )
         await session.commit()
 
         svc = KnowledgeEmbeddingService(AsyncMock(), GROUP)

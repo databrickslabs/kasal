@@ -2,9 +2,10 @@
 Unit tests for base exporter class.
 """
 
-import pytest
 from datetime import datetime, timezone
 from unittest.mock import patch
+
+import pytest
 
 from src.services.export.base_exporter import BaseExporter
 
@@ -14,7 +15,7 @@ class ConcreteExporter(BaseExporter):
 
     async def export(self, crew_data, options):
         """Implement abstract export method."""
-        return {'exported': True}
+        return {"exported": True}
 
 
 class TestSanitizeName:
@@ -114,25 +115,25 @@ class TestExtractToolsFromConfig:
 
     def test_extract_tools_with_tools_list(self, exporter):
         """Test extracting tools from config with tools list."""
-        config = {'tools': ['SerperDevTool', 'ScrapeWebsiteTool']}
+        config = {"tools": ["SerperDevTool", "ScrapeWebsiteTool"]}
         result = exporter._extract_tools_from_config(config)
-        assert result == ['SerperDevTool', 'ScrapeWebsiteTool']
+        assert result == ["SerperDevTool", "ScrapeWebsiteTool"]
 
     def test_extract_tools_without_tools_key(self, exporter):
         """Test extracting tools from config without tools key."""
-        config = {'name': 'Agent', 'role': 'Researcher'}
+        config = {"name": "Agent", "role": "Researcher"}
         result = exporter._extract_tools_from_config(config)
         assert result == []
 
     def test_extract_tools_with_empty_list(self, exporter):
         """Test extracting tools from config with empty tools list."""
-        config = {'tools': []}
+        config = {"tools": []}
         result = exporter._extract_tools_from_config(config)
         assert result == []
 
     def test_extract_tools_with_non_list_tools(self, exporter):
         """Test extracting tools when tools is not a list."""
-        config = {'tools': 'SerperDevTool'}  # String instead of list
+        config = {"tools": "SerperDevTool"}  # String instead of list
         result = exporter._extract_tools_from_config(config)
         assert result == []
 
@@ -148,28 +149,28 @@ class TestGetUniqueTools:
     def test_unique_tools_from_agents_and_tasks(self, exporter):
         """Test getting unique tools from both agents and tasks."""
         agents = [
-            {'name': 'Agent1', 'tools': ['SerperDevTool', 'DallETool']},
-            {'name': 'Agent2', 'tools': ['SerperDevTool']},
+            {"name": "Agent1", "tools": ["SerperDevTool", "DallETool"]},
+            {"name": "Agent2", "tools": ["SerperDevTool"]},
         ]
         tasks = [
-            {'name': 'Task1', 'tools': ['ScrapeWebsiteTool']},
+            {"name": "Task1", "tools": ["ScrapeWebsiteTool"]},
         ]
 
         result = exporter._get_unique_tools(agents, tasks)
-        assert sorted(result) == ['DallETool', 'ScrapeWebsiteTool', 'SerperDevTool']
+        assert sorted(result) == ["DallETool", "ScrapeWebsiteTool", "SerperDevTool"]
 
     def test_unique_tools_removes_duplicates(self, exporter):
         """Test that duplicate tools are removed."""
         agents = [
-            {'name': 'Agent1', 'tools': ['SerperDevTool']},
-            {'name': 'Agent2', 'tools': ['SerperDevTool']},
+            {"name": "Agent1", "tools": ["SerperDevTool"]},
+            {"name": "Agent2", "tools": ["SerperDevTool"]},
         ]
         tasks = [
-            {'name': 'Task1', 'tools': ['SerperDevTool']},
+            {"name": "Task1", "tools": ["SerperDevTool"]},
         ]
 
         result = exporter._get_unique_tools(agents, tasks)
-        assert result == ['SerperDevTool']
+        assert result == ["SerperDevTool"]
 
     def test_unique_tools_empty_input(self, exporter):
         """Test with empty agents and tasks."""
@@ -178,8 +179,8 @@ class TestGetUniqueTools:
 
     def test_unique_tools_no_tools_defined(self, exporter):
         """Test with agents/tasks that have no tools."""
-        agents = [{'name': 'Agent1', 'role': 'Researcher'}]
-        tasks = [{'name': 'Task1', 'description': 'Do something'}]
+        agents = [{"name": "Agent1", "role": "Researcher"}]
+        tasks = [{"name": "Task1", "description": "Do something"}]
 
         result = exporter._get_unique_tools(agents, tasks)
         assert result == []
@@ -192,5 +193,5 @@ class TestAbstractExport:
     async def test_concrete_export_called(self):
         """Test that concrete export method can be called."""
         exporter = ConcreteExporter()
-        result = await exporter.export({'name': 'Test'}, {})
-        assert result == {'exported': True}
+        result = await exporter.export({"name": "Test"}, {})
+        assert result == {"exported": True}

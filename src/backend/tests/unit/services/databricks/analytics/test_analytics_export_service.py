@@ -9,23 +9,25 @@ Covers:
   - AnalyticsExportService.export_dashboard()   — with mocked repo
   - AnalyticsExportService.list_dashboards()    — with mocked repo
 """
+
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.databricks.analytics.export import (
-    _safe_folder_name,
-    _genie_space_to_files,
-    _dashboard_to_files,
-    _widget_layout_to_yaml_dict,
-    AnalyticsExportService,
-)
+import pytest
 import yaml
 
+from src.services.databricks.analytics.export import (
+    AnalyticsExportService,
+    _dashboard_to_files,
+    _genie_space_to_files,
+    _safe_folder_name,
+    _widget_layout_to_yaml_dict,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # _safe_folder_name
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestSafeFolderName:
     def test_simple_ascii(self):
@@ -57,6 +59,7 @@ class TestSafeFolderName:
 # Helper fixtures
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _make_genie_space(**overrides) -> dict:
     """Minimal valid Genie space API response."""
     base = {
@@ -64,54 +67,81 @@ def _make_genie_space(**overrides) -> dict:
         "title": "Supply Chain Analytics",
         "warehouse_id": "wh_xyz",
         "description": "Test space",
-        "serialized_space": json.dumps({
-            "version": 2,
-            "config": {
-                "sample_questions": [
-                    {"id": "q1", "question": ["What is total revenue?"]},
-                    {"id": "q2", "question": ["Top 10 customers?"]},
-                ]
-            },
-            "data_sources": {
-                "metric_views": [{"identifier": "main.sc.orders_mv"}],
-                "tables": [{"identifier": "main.sc.dim_customer"}],
-            },
-            "instructions": {
-                "text_instructions": [
-                    {"id": "t1", "content": ["Use fiscal periods for all time comparisons."]}
-                ],
-                "join_specs": [{
-                    "id": "j1",
-                    "left": {"identifier": "main.sc.orders_mv", "alias": "orders_mv"},
-                    "right": {"identifier": "main.sc.dim_customer", "alias": "dim_customer"},
-                    "sql": [
-                        "orders_mv.customer_id = dim_customer.id",
-                        "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--",
-                    ],
-                }],
-                "sql_snippets": {
-                    "expressions": [
-                        {"id": "e1", "display_name": "Total Revenue", "sql": ["SUM(revenue_eur)"]}
-                    ],
-                    "measures": [
+        "serialized_space": json.dumps(
+            {
+                "version": 2,
+                "config": {
+                    "sample_questions": [
+                        {"id": "q1", "question": ["What is total revenue?"]},
+                        {"id": "q2", "question": ["Top 10 customers?"]},
+                    ]
+                },
+                "data_sources": {
+                    "metric_views": [{"identifier": "main.sc.orders_mv"}],
+                    "tables": [{"identifier": "main.sc.dim_customer"}],
+                },
+                "instructions": {
+                    "text_instructions": [
                         {
-                            "id": "m1",
-                            "display_name": "Service Level %",
-                            "sql": ["100.0 * SUM(confirmed) / NULLIF(SUM(ordered), 0)"],
-                            "instruction": ["Order fill rate percentage"],
+                            "id": "t1",
+                            "content": ["Use fiscal periods for all time comparisons."],
                         }
                     ],
-                    "filters": [
-                        {"id": "f1", "display_name": "Active Orders", "sql": ["status = 'ACTIVE'"]}
+                    "join_specs": [
+                        {
+                            "id": "j1",
+                            "left": {
+                                "identifier": "main.sc.orders_mv",
+                                "alias": "orders_mv",
+                            },
+                            "right": {
+                                "identifier": "main.sc.dim_customer",
+                                "alias": "dim_customer",
+                            },
+                            "sql": [
+                                "orders_mv.customer_id = dim_customer.id",
+                                "--rt=FROM_RELATIONSHIP_TYPE_MANY_TO_ONE--",
+                            ],
+                        }
+                    ],
+                    "sql_snippets": {
+                        "expressions": [
+                            {
+                                "id": "e1",
+                                "display_name": "Total Revenue",
+                                "sql": ["SUM(revenue_eur)"],
+                            }
+                        ],
+                        "measures": [
+                            {
+                                "id": "m1",
+                                "display_name": "Service Level %",
+                                "sql": [
+                                    "100.0 * SUM(confirmed) / NULLIF(SUM(ordered), 0)"
+                                ],
+                                "instruction": ["Order fill rate percentage"],
+                            }
+                        ],
+                        "filters": [
+                            {
+                                "id": "f1",
+                                "display_name": "Active Orders",
+                                "sql": ["status = 'ACTIVE'"],
+                            }
+                        ],
+                    },
+                    "example_question_sqls": [
+                        {
+                            "id": "ex1",
+                            "question": ["Top 10 customers by PhC"],
+                            "sql": [
+                                "SELECT customer_name, SUM(phc) FROM orders GROUP BY 1 ORDER BY 2 DESC LIMIT 10"
+                            ],
+                        }
                     ],
                 },
-                "example_question_sqls": [{
-                    "id": "ex1",
-                    "question": ["Top 10 customers by PhC"],
-                    "sql": ["SELECT customer_name, SUM(phc) FROM orders GROUP BY 1 ORDER BY 2 DESC LIMIT 10"],
-                }],
-            },
-        }),
+            }
+        ),
     }
     base.update(overrides)
     return base
@@ -124,52 +154,71 @@ def _make_dashboard(**overrides) -> dict:
         "display_name": "Example Order Analytics",
         "warehouse_id": "wh_xyz",
         "parent_path": "/Workspace/Shared/Demo",
-        "serialized_dashboard": json.dumps({
-            "datasets": [
-                {
-                    "name": "ds_overview",
-                    "displayName": "KPI Overview",
-                    "query": "SELECT SUM(revenue) AS total_rev FROM orders",
-                },
-                {
-                    "name": "ds_trend",
-                    "displayName": "Monthly Trend",
-                    "query": "SELECT period, SUM(revenue) AS rev\nFROM orders\nGROUP BY period",
-                },
-            ],
-            "pages": [
-                {
-                    "name": "page_overview",
-                    "displayName": "Executive Overview",
-                    "layout": [
-                        {
-                            "widget": {
-                                "name": "title_text",
-                                "multilineTextboxSpec": {"lines": ["## Example Analytics\n"]},
-                            },
-                            "position": {"x": 0, "y": 0, "width": 6, "height": 1},
-                        },
-                        {
-                            "widget": {
-                                "name": "kpi_rev",
-                                "queries": [{"name": "main_query", "query": {
-                                    "datasetName": "ds_overview",
-                                    "fields": [{"name": "sum(revenue)", "expression": "SUM(`revenue`)"}],
-                                    "disaggregated": False,
-                                }}],
-                                "spec": {
-                                    "version": 2,
-                                    "widgetType": "counter",
-                                    "encodings": {"value": {"fieldName": "sum(revenue)"}},
-                                    "frame": {"title": "Total Revenue", "showTitle": True},
+        "serialized_dashboard": json.dumps(
+            {
+                "datasets": [
+                    {
+                        "name": "ds_overview",
+                        "displayName": "KPI Overview",
+                        "query": "SELECT SUM(revenue) AS total_rev FROM orders",
+                    },
+                    {
+                        "name": "ds_trend",
+                        "displayName": "Monthly Trend",
+                        "query": "SELECT period, SUM(revenue) AS rev\nFROM orders\nGROUP BY period",
+                    },
+                ],
+                "pages": [
+                    {
+                        "name": "page_overview",
+                        "displayName": "Executive Overview",
+                        "layout": [
+                            {
+                                "widget": {
+                                    "name": "title_text",
+                                    "multilineTextboxSpec": {
+                                        "lines": ["## Example Analytics\n"]
+                                    },
                                 },
+                                "position": {"x": 0, "y": 0, "width": 6, "height": 1},
                             },
-                            "position": {"x": 0, "y": 1, "width": 2, "height": 3},
-                        },
-                    ],
-                }
-            ],
-        }),
+                            {
+                                "widget": {
+                                    "name": "kpi_rev",
+                                    "queries": [
+                                        {
+                                            "name": "main_query",
+                                            "query": {
+                                                "datasetName": "ds_overview",
+                                                "fields": [
+                                                    {
+                                                        "name": "sum(revenue)",
+                                                        "expression": "SUM(`revenue`)",
+                                                    }
+                                                ],
+                                                "disaggregated": False,
+                                            },
+                                        }
+                                    ],
+                                    "spec": {
+                                        "version": 2,
+                                        "widgetType": "counter",
+                                        "encodings": {
+                                            "value": {"fieldName": "sum(revenue)"}
+                                        },
+                                        "frame": {
+                                            "title": "Total Revenue",
+                                            "showTitle": True,
+                                        },
+                                    },
+                                },
+                                "position": {"x": 0, "y": 1, "width": 2, "height": 3},
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
     }
     base.update(overrides)
     return base
@@ -178,6 +227,7 @@ def _make_dashboard(**overrides) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # _genie_space_to_files
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestGenieSpaceToFiles:
     """Tests for the new reference-implementation YAML structure.
@@ -272,6 +322,7 @@ class TestGenieSpaceToFiles:
 # _dashboard_to_files
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestDashboardToFiles:
     def test_returns_three_files(self):
         files = _dashboard_to_files(_make_dashboard())
@@ -361,16 +412,24 @@ class TestDashboardToFiles:
 # _widget_layout_to_yaml_dict  (per widget type)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestWidgetLayoutToYamlDict:
     def _counter_layout(self, name="kpi"):
         return {
             "widget": {
                 "name": name,
-                "queries": [{"name": "main_query", "query": {
-                    "datasetName": "ds_x",
-                    "fields": [{"name": "sum(revenue)", "expression": "SUM(`revenue`)"}],
-                    "disaggregated": False,
-                }}],
+                "queries": [
+                    {
+                        "name": "main_query",
+                        "query": {
+                            "datasetName": "ds_x",
+                            "fields": [
+                                {"name": "sum(revenue)", "expression": "SUM(`revenue`)"}
+                            ],
+                            "disaggregated": False,
+                        },
+                    }
+                ],
                 "spec": {
                     "version": 2,
                     "widgetType": "counter",
@@ -385,20 +444,31 @@ class TestWidgetLayoutToYamlDict:
         return {
             "widget": {
                 "name": name,
-                "queries": [{"name": "main_query", "query": {
-                    "datasetName": "ds_x",
-                    "fields": [
-                        {"name": "pack_type", "expression": "`pack_type`"},
-                        {"name": "sum(phc)", "expression": "SUM(`phc`)"},
-                    ],
-                    "disaggregated": False,
-                }}],
+                "queries": [
+                    {
+                        "name": "main_query",
+                        "query": {
+                            "datasetName": "ds_x",
+                            "fields": [
+                                {"name": "pack_type", "expression": "`pack_type`"},
+                                {"name": "sum(phc)", "expression": "SUM(`phc`)"},
+                            ],
+                            "disaggregated": False,
+                        },
+                    }
+                ],
                 "spec": {
                     "version": 3,
                     "widgetType": "bar",
                     "encodings": {
-                        "x": {"fieldName": "pack_type", "scale": {"type": "categorical"}},
-                        "y": {"fieldName": "sum(phc)", "scale": {"type": "quantitative"}},
+                        "x": {
+                            "fieldName": "pack_type",
+                            "scale": {"type": "categorical"},
+                        },
+                        "y": {
+                            "fieldName": "sum(phc)",
+                            "scale": {"type": "quantitative"},
+                        },
                         "color": {"fieldName": "region"},
                     },
                     "frame": {"title": "PhC by Pack Type", "showTitle": True},
@@ -411,17 +481,28 @@ class TestWidgetLayoutToYamlDict:
         return {
             "widget": {
                 "name": name,
-                "queries": [{"name": "q", "query": {
-                    "datasetName": "ds_x",
-                    "fields": [],
-                    "disaggregated": False,
-                }}],
+                "queries": [
+                    {
+                        "name": "q",
+                        "query": {
+                            "datasetName": "ds_x",
+                            "fields": [],
+                            "disaggregated": False,
+                        },
+                    }
+                ],
                 "spec": {
                     "version": 2,
                     "widgetType": "filter-multi-select",
-                    "encodings": {"fields": [
-                        {"fieldName": "salesorg_name", "displayName": "Sales Org", "queryName": "q"}
-                    ]},
+                    "encodings": {
+                        "fields": [
+                            {
+                                "fieldName": "salesorg_name",
+                                "displayName": "Sales Org",
+                                "queryName": "q",
+                            }
+                        ]
+                    },
                     "frame": {"title": "Sales Organization", "showTitle": True},
                 },
             },
@@ -466,21 +547,31 @@ class TestWidgetLayoutToYamlDict:
         layout = {
             "widget": {
                 "name": "tbl",
-                "queries": [{"name": "main_query", "query": {
-                    "datasetName": "ds_customer",
-                    "fields": [
-                        {"name": "customer_name", "expression": "`customer_name`"},
-                        {"name": "sum(rev)", "expression": "SUM(`rev`)"},
-                    ],
-                    "disaggregated": False,
-                }}],
+                "queries": [
+                    {
+                        "name": "main_query",
+                        "query": {
+                            "datasetName": "ds_customer",
+                            "fields": [
+                                {
+                                    "name": "customer_name",
+                                    "expression": "`customer_name`",
+                                },
+                                {"name": "sum(rev)", "expression": "SUM(`rev`)"},
+                            ],
+                            "disaggregated": False,
+                        },
+                    }
+                ],
                 "spec": {
                     "version": 2,
                     "widgetType": "table",
-                    "encodings": {"columns": [
-                        {"fieldName": "customer_name", "displayName": "Customer"},
-                        {"fieldName": "sum(rev)", "displayName": "Revenue"},
-                    ]},
+                    "encodings": {
+                        "columns": [
+                            {"fieldName": "customer_name", "displayName": "Customer"},
+                            {"fieldName": "sum(rev)", "displayName": "Revenue"},
+                        ]
+                    },
                     "frame": {"title": "Top Customers", "showTitle": True},
                 },
             },
@@ -512,6 +603,7 @@ class TestWidgetLayoutToYamlDict:
 # AnalyticsExportService — async tests with mocked dependencies
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestAnalyticsExportService:
     """Tests for the async service layer with mocked repositories."""
 
@@ -540,8 +632,9 @@ class TestAnalyticsExportService:
         service = AnalyticsExportService()
 
         with patch.object(
-            service, "_fetch_raw_genie_space",
-            new=AsyncMock(side_effect=Exception("HTTP 404"))
+            service,
+            "_fetch_raw_genie_space",
+            new=AsyncMock(side_effect=Exception("HTTP 404")),
         ):
             with pytest.raises(Exception):
                 await service.export_genie_space("missing_id")
@@ -554,12 +647,17 @@ class TestAnalyticsExportService:
 
         # Pass serialized_space directly — fetch is only for metadata enrichment
         with patch.object(
-            service, "_fetch_raw_genie_space",
-            new=AsyncMock(return_value={"title": "Supply Chain Analytics", "warehouse_id": "wh_xyz"})
+            service,
+            "_fetch_raw_genie_space",
+            new=AsyncMock(
+                return_value={
+                    "title": "Supply Chain Analytics",
+                    "warehouse_id": "wh_xyz",
+                }
+            ),
         ):
             result = await service.export_genie_space(
-                "space_abc123",
-                serialized_space=space["serialized_space"]
+                "space_abc123", serialized_space=space["serialized_space"]
             )
 
         assert result["space_id"] == "space_abc123"

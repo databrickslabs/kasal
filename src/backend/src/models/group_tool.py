@@ -1,7 +1,17 @@
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON, ForeignKey, UniqueConstraint, Index
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 
 from src.db.base import Base
@@ -22,7 +32,9 @@ class GroupTool(Base):
     id = Column(Integer, primary_key=True)
 
     # Parent tool from global catalog (tools.id)
-    tool_id = Column(Integer, ForeignKey("tools.id", ondelete="CASCADE"), nullable=False, index=True)
+    tool_id = Column(
+        Integer, ForeignKey("tools.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     # Group (workspace) this mapping applies to
     group_id = Column(String(100), nullable=False, index=True)
@@ -38,7 +50,9 @@ class GroupTool(Base):
 
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
     # Relationships (optional; avoids heavy joins unless needed)
     tool = relationship("Tool", backref="group_mappings", lazy="joined")
@@ -47,4 +61,3 @@ class GroupTool(Base):
         UniqueConstraint("tool_id", "group_id", name="uq_group_tools_tool_group"),
         Index("ix_group_tools_group_tool", "group_id", "tool_id"),
     )
-

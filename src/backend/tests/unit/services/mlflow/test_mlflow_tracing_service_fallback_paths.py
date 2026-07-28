@@ -6,26 +6,30 @@ flush_async_logging, and cleanup_async_db_connections.
 
 import asyncio
 import logging
-import pytest
 from contextlib import nullcontext
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # _get_mlflow helper
 # ---------------------------------------------------------------------------
+
 
 class TestGetMlflow:
     def test_returns_mlflow_when_available(self):
         mock_mlflow = MagicMock()
         with patch.dict("sys.modules", {"mlflow": mock_mlflow}):
             from importlib import reload
+
             import src.services.mlflow.tracing as mod
+
             result = mod._get_mlflow()
             assert result is not None
 
     def test_returns_none_when_mlflow_unavailable(self):
         import src.services.mlflow.tracing as mod
+
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=None):
             result = mod._get_mlflow()
             assert result is None
@@ -35,10 +39,12 @@ class TestGetMlflow:
 # start_root_trace
 # ---------------------------------------------------------------------------
 
+
 class TestStartRootTrace:
     def test_yields_none_when_mlflow_unavailable(self):
         """When mlflow is not importable, context manager yields None."""
         from src.services.mlflow.tracing import start_root_trace
+
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=None):
             with start_root_trace("test_trace") as span:
                 assert span is None
@@ -46,6 +52,7 @@ class TestStartRootTrace:
     def test_yields_none_with_no_inputs(self):
         """Yields None when mlflow unavailable and no inputs provided."""
         from src.services.mlflow.tracing import start_root_trace
+
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=None):
             with start_root_trace("trace_no_inputs") as span:
                 assert span is None
@@ -80,7 +87,9 @@ class TestStartRootTrace:
         mock_mlflow = MagicMock(spec=[])
         mock_mlflow.tracing = mock_tracing
         # start_trace is not directly on mock_mlflow
-        del mock_mlflow.start_trace  # ensure attribute missing triggers AttributeError via spec
+        del (
+            mock_mlflow.start_trace
+        )  # ensure attribute missing triggers AttributeError via spec
 
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             # The function does getattr(mlflow, "start_trace", None) -> None
@@ -158,6 +167,7 @@ class TestStartRootTrace:
     def test_empty_inputs_defaults_to_empty_dict(self):
         """Passing None inputs is converted to empty dict."""
         from src.services.mlflow.tracing import start_root_trace
+
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=None):
             with start_root_trace("trace", inputs=None) as span:
                 assert span is None
@@ -167,15 +177,18 @@ class TestStartRootTrace:
 # get_last_active_trace_id
 # ---------------------------------------------------------------------------
 
+
 class TestGetLastActiveTraceId:
     def test_returns_none_when_mlflow_unavailable(self):
         from src.services.mlflow.tracing import get_last_active_trace_id
+
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=None):
             result = get_last_active_trace_id()
         assert result is None
 
     def test_uses_tracing_submodule_method(self):
         from src.services.mlflow.tracing import get_last_active_trace_id
+
         mock_tracing = MagicMock()
         mock_tracing.get_last_active_trace_id = Mock(return_value="trace_123")
         mock_mlflow = MagicMock()
@@ -199,6 +212,7 @@ class TestGetLastActiveTraceId:
 
     def test_returns_none_on_exception(self):
         from src.services.mlflow.tracing import get_last_active_trace_id
+
         mock_mlflow = MagicMock()
         mock_mlflow.tracing.get_last_active_trace_id.side_effect = Exception("boom")
 
@@ -208,6 +222,7 @@ class TestGetLastActiveTraceId:
 
     def test_returns_none_when_no_method_found(self):
         from src.services.mlflow.tracing import get_last_active_trace_id
+
         mock_mlflow = MagicMock(spec=[])
 
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
@@ -219,10 +234,12 @@ class TestGetLastActiveTraceId:
 # flush_async_logging
 # ---------------------------------------------------------------------------
 
+
 class TestFlushAsyncLogging:
     @pytest.mark.asyncio
     async def test_calls_flush_when_available(self):
         from src.services.mlflow.tracing import flush_async_logging
+
         mock_mlflow = MagicMock()
         mock_mlflow.flush_trace_async_logging = Mock()
 
@@ -233,6 +250,7 @@ class TestFlushAsyncLogging:
     @pytest.mark.asyncio
     async def test_handles_no_flush_method(self):
         from src.services.mlflow.tracing import flush_async_logging
+
         mock_mlflow = MagicMock(spec=[])  # No flush_trace_async_logging
 
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
@@ -242,12 +260,14 @@ class TestFlushAsyncLogging:
     @pytest.mark.asyncio
     async def test_handles_mlflow_none(self):
         from src.services.mlflow.tracing import flush_async_logging
+
         with patch("src.services.mlflow.tracing._get_mlflow", return_value=None):
             await flush_async_logging()
 
     @pytest.mark.asyncio
     async def test_handles_flush_exception(self):
         from src.services.mlflow.tracing import flush_async_logging
+
         mock_mlflow = MagicMock()
         mock_mlflow.flush_trace_async_logging.side_effect = RuntimeError("flush error")
 
@@ -258,6 +278,7 @@ class TestFlushAsyncLogging:
     @pytest.mark.asyncio
     async def test_uses_provided_logger(self):
         from src.services.mlflow.tracing import flush_async_logging
+
         custom_logger = MagicMock(spec=logging.Logger)
         custom_logger.info = Mock()
 
@@ -270,10 +291,12 @@ class TestFlushAsyncLogging:
 # cleanup_async_db_connections
 # ---------------------------------------------------------------------------
 
+
 class TestCleanupAsyncDbConnections:
     def test_disposes_async_engines(self):
-        from src.services.mlflow.tracing import cleanup_async_db_connections
         from sqlalchemy.ext.asyncio import AsyncEngine
+
+        from src.services.mlflow.tracing import cleanup_async_db_connections
 
         mock_engine = MagicMock(spec=AsyncEngine)
         mock_engine.sync_engine = MagicMock()
@@ -286,8 +309,9 @@ class TestCleanupAsyncDbConnections:
         mock_engine.sync_engine.dispose.assert_called_once()
 
     def test_handles_dispose_exception(self):
-        from src.services.mlflow.tracing import cleanup_async_db_connections
         from sqlalchemy.ext.asyncio import AsyncEngine
+
+        from src.services.mlflow.tracing import cleanup_async_db_connections
 
         mock_engine = MagicMock(spec=AsyncEngine)
         mock_engine.sync_engine.dispose.side_effect = Exception("dispose error")
@@ -299,12 +323,14 @@ class TestCleanupAsyncDbConnections:
 
     def test_handles_outer_exception(self):
         from src.services.mlflow.tracing import cleanup_async_db_connections
+
         with patch("gc.get_objects", side_effect=Exception("gc error")):
             # Should not raise
             cleanup_async_db_connections()
 
     def test_uses_custom_logger(self):
         from src.services.mlflow.tracing import cleanup_async_db_connections
+
         custom_logger = MagicMock(spec=logging.Logger)
 
         with patch("gc.get_objects", return_value=[]):
@@ -313,6 +339,7 @@ class TestCleanupAsyncDbConnections:
 
     def test_no_async_engines_in_objects(self):
         from src.services.mlflow.tracing import cleanup_async_db_connections
+
         with patch("gc.get_objects", return_value=["string", 1, None, [], {}]):
             with patch("gc.collect"):
                 # Should complete without error

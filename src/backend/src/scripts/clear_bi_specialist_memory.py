@@ -22,9 +22,9 @@ USAGE:
     python -m src.scripts.clear_bi_specialist_memory --dry-run    # show target, delete nothing
 """
 
+import logging
 import shutil
 import sys
-import logging
 
 from src.utils.memory_paths import local_memory_store_dir
 
@@ -41,12 +41,18 @@ def clear_local_memory(group_id: str, dry_run: bool = False) -> bool:
     """
     store_dir = local_memory_store_dir(group_id)
     if not store_dir.exists():
-        logger.info("No local memory store found for group '%s' at %s — nothing to clear.",
-                    group_id, store_dir)
+        logger.info(
+            "No local memory store found for group '%s' at %s — nothing to clear.",
+            group_id,
+            store_dir,
+        )
         return False
     if dry_run:
-        logger.info("[dry-run] Would delete local memory store for '%s': %s",
-                    group_id, store_dir)
+        logger.info(
+            "[dry-run] Would delete local memory store for '%s': %s",
+            group_id,
+            store_dir,
+        )
         return True
     shutil.rmtree(store_dir)
     logger.info("Deleted local memory store for group '%s': %s", group_id, store_dir)

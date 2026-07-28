@@ -4,12 +4,13 @@ Unit tests for _process_log_queue method in ProcessCrewExecutor and ProcessFlowE
 Tests the changes that route execution logs through get_smart_db_session
 and ExecutionLogsRepository for writing execution logs to the database.
 """
+
 import asyncio
 import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, Mock, patch, mock_open
+from unittest.mock import AsyncMock, MagicMock, Mock, mock_open, patch
 
 import pytest
 
@@ -86,13 +87,18 @@ class TestProcessCrewExecutorLogQueue:
         execution_id = "12345678-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.database_router.get_smart_db_session', fake_smart_db), \
-                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=mock_repo):
+            with (
+                patch("src.db.database_router.get_smart_db_session", fake_smart_db),
+                patch(
+                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    return_value=mock_repo,
+                ),
+            ):
                 executor = ProcessCrewExecutor()
                 await executor._process_log_queue(
                     log_queue=None,
                     execution_id=execution_id,
-                    group_context=mock_group_context
+                    group_context=mock_group_context,
                 )
 
         # Verify create_log was called (header + matching logs)
@@ -125,13 +131,16 @@ class TestProcessCrewExecutorLogQueue:
         execution_id = "12345678-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.database_router.get_smart_db_session', fake_smart_db), \
-                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=mock_repo):
+            with (
+                patch("src.db.database_router.get_smart_db_session", fake_smart_db),
+                patch(
+                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    return_value=mock_repo,
+                ),
+            ):
                 executor = ProcessCrewExecutor()
                 await executor._process_log_queue(
-                    log_queue=None,
-                    execution_id=execution_id,
-                    group_context=None
+                    log_queue=None, execution_id=execution_id, group_context=None
                 )
 
         # Should have header + 4 matching logs (lines with 12345678)
@@ -154,9 +163,7 @@ class TestProcessCrewExecutorLogQueue:
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
             executor = ProcessCrewExecutor()
             await executor._process_log_queue(
-                log_queue=None,
-                execution_id=execution_id,
-                group_context=None
+                log_queue=None, execution_id=execution_id, group_context=None
             )
 
         # Repository should not be called if file doesn't exist
@@ -178,13 +185,16 @@ class TestProcessCrewExecutorLogQueue:
         execution_id = "12345678-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.database_router.get_smart_db_session', fake_smart_db), \
-                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=mock_repo):
+            with (
+                patch("src.db.database_router.get_smart_db_session", fake_smart_db),
+                patch(
+                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    return_value=mock_repo,
+                ),
+            ):
                 executor = ProcessCrewExecutor()
                 await executor._process_log_queue(
-                    log_queue=None,
-                    execution_id=execution_id,
-                    group_context=None
+                    log_queue=None, execution_id=execution_id, group_context=None
                 )
 
         # Should still write header log even with empty file
@@ -205,13 +215,11 @@ class TestProcessCrewExecutorLogQueue:
         execution_id = "12345678-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.database_router.get_smart_db_session', failing_smart_db):
+            with patch("src.db.database_router.get_smart_db_session", failing_smart_db):
                 executor = ProcessCrewExecutor()
                 # Should not raise, just log error
                 await executor._process_log_queue(
-                    log_queue=None,
-                    execution_id=execution_id,
-                    group_context=None
+                    log_queue=None, execution_id=execution_id, group_context=None
                 )
 
 
@@ -236,13 +244,18 @@ class TestProcessFlowExecutorLogQueue:
         execution_id = "abcd1234-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.database_router.get_smart_db_session', fake_smart_db), \
-                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=mock_repo):
+            with (
+                patch("src.db.database_router.get_smart_db_session", fake_smart_db),
+                patch(
+                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    return_value=mock_repo,
+                ),
+            ):
                 executor = ProcessFlowExecutor()
                 await executor._process_log_queue(
                     log_queue=None,
                     execution_id=execution_id,
-                    group_context=mock_group_context
+                    group_context=mock_group_context,
                 )
 
         assert mock_repo.create_log.call_count >= 2
@@ -272,13 +285,16 @@ class TestProcessFlowExecutorLogQueue:
         execution_id = "abcd1234-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.database_router.get_smart_db_session', fake_smart_db), \
-                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=mock_repo):
+            with (
+                patch("src.db.database_router.get_smart_db_session", fake_smart_db),
+                patch(
+                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    return_value=mock_repo,
+                ),
+            ):
                 executor = ProcessFlowExecutor()
                 await executor._process_log_queue(
-                    log_queue=None,
-                    execution_id=execution_id,
-                    group_context=None
+                    log_queue=None, execution_id=execution_id, group_context=None
                 )
 
         assert mock_repo.create_log.call_count == 5
@@ -299,9 +315,7 @@ class TestProcessFlowExecutorLogQueue:
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
             executor = ProcessFlowExecutor()
             await executor._process_log_queue(
-                log_queue=None,
-                execution_id=execution_id,
-                group_context=None
+                log_queue=None, execution_id=execution_id, group_context=None
             )
 
         mock_repo.create_log.assert_not_called()
@@ -322,13 +336,16 @@ class TestProcessFlowExecutorLogQueue:
         execution_id = "abcd1234-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.database_router.get_smart_db_session', fake_smart_db), \
-                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=mock_repo):
+            with (
+                patch("src.db.database_router.get_smart_db_session", fake_smart_db),
+                patch(
+                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    return_value=mock_repo,
+                ),
+            ):
                 executor = ProcessFlowExecutor()
                 await executor._process_log_queue(
-                    log_queue=None,
-                    execution_id=execution_id,
-                    group_context=None
+                    log_queue=None, execution_id=execution_id, group_context=None
                 )
 
         assert mock_repo.create_log.call_count == 1
@@ -348,12 +365,10 @@ class TestProcessFlowExecutorLogQueue:
         execution_id = "abcd1234-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.database_router.get_smart_db_session', failing_smart_db):
+            with patch("src.db.database_router.get_smart_db_session", failing_smart_db):
                 executor = ProcessFlowExecutor()
                 await executor._process_log_queue(
-                    log_queue=None,
-                    execution_id=execution_id,
-                    group_context=None
+                    log_queue=None, execution_id=execution_id, group_context=None
                 )
 
     @pytest.mark.asyncio
@@ -374,13 +389,16 @@ class TestProcessFlowExecutorLogQueue:
         execution_id = "abcd1234-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.database_router.get_smart_db_session', fake_smart_db), \
-                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=mock_repo):
+            with (
+                patch("src.db.database_router.get_smart_db_session", fake_smart_db),
+                patch(
+                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    return_value=mock_repo,
+                ),
+            ):
                 executor = ProcessFlowExecutor()
                 await executor._process_log_queue(
-                    log_queue=None,
-                    execution_id=execution_id,
-                    group_context=None
+                    log_queue=None, execution_id=execution_id, group_context=None
                 )
 
         first_call = mock_repo.create_log.call_args_list[0]
@@ -419,22 +437,28 @@ class TestBothExecutorsIntegration:
         flow_execution_id = "abcd1234-1234-1234-1234-123456789012"
 
         with patch.dict(os.environ, {"LOG_DIR": temp_log_dir}):
-            with patch('src.db.database_router.get_smart_db_session', crew_smart_db), \
-                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=crew_repo):
+            with (
+                patch("src.db.database_router.get_smart_db_session", crew_smart_db),
+                patch(
+                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    return_value=crew_repo,
+                ),
+            ):
                 crew_executor = ProcessCrewExecutor()
                 await crew_executor._process_log_queue(
-                    log_queue=None,
-                    execution_id=crew_execution_id,
-                    group_context=None
+                    log_queue=None, execution_id=crew_execution_id, group_context=None
                 )
 
-            with patch('src.db.database_router.get_smart_db_session', flow_smart_db), \
-                 patch('src.repositories.execution_logs_repository.ExecutionLogsRepository', return_value=flow_repo):
+            with (
+                patch("src.db.database_router.get_smart_db_session", flow_smart_db),
+                patch(
+                    "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                    return_value=flow_repo,
+                ),
+            ):
                 flow_executor = ProcessFlowExecutor()
                 await flow_executor._process_log_queue(
-                    log_queue=None,
-                    execution_id=flow_execution_id,
-                    group_context=None
+                    log_queue=None, execution_id=flow_execution_id, group_context=None
                 )
 
         # Both should have committed

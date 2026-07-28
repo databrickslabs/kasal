@@ -208,14 +208,15 @@ This pattern allows graceful fallback and clear error reporting.
 """
 
 import asyncio
-import hashlib
-import os
-import logging
-import httpx
-import json
 import contextlib
+import hashlib
+import json
+import logging
+import os
 import time
-from typing import Optional, Tuple, Dict
+from typing import Dict, Optional, Tuple
+
+import httpx
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.config import Config
 
@@ -249,7 +250,10 @@ def _obo_cache_put(token_hash: str, identity: Optional[str]) -> None:
             _OBO_VALIDATION_CACHE.pop(key, None)
         if len(_OBO_VALIDATION_CACHE) >= _OBO_VALIDATION_CACHE_MAX:
             _OBO_VALIDATION_CACHE.clear()
-    _OBO_VALIDATION_CACHE[token_hash] = (identity, time.time() + _OBO_VALIDATION_TTL_SECONDS)
+    _OBO_VALIDATION_CACHE[token_hash] = (
+        identity,
+        time.time() + _OBO_VALIDATION_TTL_SECONDS,
+    )
 
 
 # PAT lookup cache (PERF-005). Without it, every LLM completion paid a fresh
@@ -296,7 +300,7 @@ class AuthContext:
         token: str,
         workspace_url: str,
         auth_method: str,  # "obo", "pat", "service_principal"
-        user_identity: Optional[str] = None
+        user_identity: Optional[str] = None,
     ):
         """
         Initialize authentication context.
@@ -308,8 +312,8 @@ class AuthContext:
             user_identity: Optional user identity (email or service principal ID)
         """
         self.token = token
-        self.workspace_url = workspace_url.rstrip('/')
-        if not self.workspace_url.startswith('https://'):
+        self.workspace_url = workspace_url.rstrip("/")
+        if not self.workspace_url.startswith("https://"):
             self.workspace_url = f"https://{self.workspace_url}"
         self.auth_method = auth_method
         self.user_identity = user_identity
@@ -323,7 +327,7 @@ class AuthContext:
         """
         return {
             "Authorization": f"Bearer {self.token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
     def get_mcp_headers(self, include_sse: bool = False) -> Dict[str, str]:
@@ -338,11 +342,13 @@ class AuthContext:
         """
         headers = self.get_headers()
         if include_sse:
-            headers.update({
-                "Accept": "text/event-stream",
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive"
-            })
+            headers.update(
+                {
+                    "Accept": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                }
+            )
         return headers
 
     def get_litellm_params(self) -> Dict[str, str]:
@@ -354,9 +360,10 @@ class AuthContext:
             Dictionary with api_key and api_base for litellm.completion()
         """
         from src.utils.databricks_url_utils import DatabricksURLUtils
+
         return {
             "api_key": self.token,
-            "api_base": DatabricksURLUtils.construct_llm_base_url(self.workspace_url)
+            "api_base": DatabricksURLUtils.construct_llm_base_url(self.workspace_url),
         }
 
     def get_workspace_client(self) -> WorkspaceClient:
@@ -368,10 +375,7 @@ class AuthContext:
         """
         # Clean environment to prevent SDK conflicts
         with _clean_environment():
-            return WorkspaceClient(
-                host=self.workspace_url,
-                token=self.token
-            )
+            return WorkspaceClient(host=self.workspace_url, token=self.token)
 
     def __repr__(self) -> str:
         return f"AuthContext(method={self.auth_method}, user={self.user_identity or 'service'})"
@@ -390,7 +394,7 @@ def _clean_environment():
         "DATABRICKS_CLIENT_ID",
         "DATABRICKS_CLIENT_SECRET",
         "DATABRICKS_CONFIG_FILE",
-        "DATABRICKS_CONFIG_PROFILE"
+        "DATABRICKS_CONFIG_PROFILE",
     ]
 
     for var in env_vars_to_clean:
@@ -431,8 +435,8 @@ class DatabricksAuth:
 
             # Try to load workspace host from database configuration
             try:
-                from src.services.databricks.workspace.service import DatabricksService
                 from src.db.session import async_session_factory
+                from src.services.databricks.workspace.service import DatabricksService
 
                 async with async_session_factory() as session:
                     service = DatabricksService(session)
@@ -440,23 +444,36 @@ class DatabricksAuth:
                     try:
                         config = await service.get_databricks_config()
                         if config and config.workspace_url and not self._workspace_host:
-                            self._workspace_host = config.workspace_url.rstrip('/')
-                            if not self._workspace_host.startswith('https://'):
+                            self._workspace_host = config.workspace_url.rstrip("/")
+                            if not self._workspace_host.startswith("https://"):
                                 self._workspace_host = f"https://{self._workspace_host}"
-                            logger.info(f"Loaded workspace host from database: {self._workspace_host}")
+                            logger.info(
+                                f"Loaded workspace host from database: {self._workspace_host}"
+                            )
 
                         # Mirror the AI Gateway toggle into the environment so
                         # DatabricksURLUtils routes LLM/embedding traffic correctly
                         # (covers both the API server and the execution subprocess,
                         # which both reach this code path via get_auth_context()).
                         if config is not None:
-                            from src.utils.databricks_url_utils import DatabricksURLUtils
-                            gateway_on = bool(getattr(config, 'ai_gateway_enabled', False))
-                            os.environ[DatabricksURLUtils.AI_GATEWAY_ENV_VAR] = "true" if gateway_on else "false"
-                            logger.debug(f"AI Gateway routing {'enabled' if gateway_on else 'disabled'} from Databricks config")
+                            from src.utils.databricks_url_utils import (
+                                DatabricksURLUtils,
+                            )
+
+                            gateway_on = bool(
+                                getattr(config, "ai_gateway_enabled", False)
+                            )
+                            os.environ[DatabricksURLUtils.AI_GATEWAY_ENV_VAR] = (
+                                "true" if gateway_on else "false"
+                            )
+                            logger.debug(
+                                f"AI Gateway routing {'enabled' if gateway_on else 'disabled'} from Databricks config"
+                            )
 
                     except Exception as e:
-                        logger.warning(f"Failed to get databricks config from database: {e}")
+                        logger.warning(
+                            f"Failed to get databricks config from database: {e}"
+                        )
 
             except Exception as e:
                 logger.warning(f"Could not load database configuration: {e}")
@@ -467,7 +484,9 @@ class DatabricksAuth:
                     sdk_config = Config()
                     if sdk_config.host:
                         self._workspace_host = sdk_config.host
-                        logger.info(f"Auto-detected workspace host: {self._workspace_host}")
+                        logger.info(
+                            f"Auto-detected workspace host: {self._workspace_host}"
+                        )
                 except Exception as e:
                     logger.debug(f"SDK auto-detection failed: {e}")
 
@@ -486,22 +505,26 @@ class DatabricksAuth:
         """Check for OAuth credentials in environment variables (for service principal auth)."""
         try:
             # Check for OAuth environment variables
-            client_id = os.environ.get('DATABRICKS_CLIENT_ID')
-            client_secret = os.environ.get('DATABRICKS_CLIENT_SECRET')
-            databricks_host = os.environ.get('DATABRICKS_HOST')
+            client_id = os.environ.get("DATABRICKS_CLIENT_ID")
+            client_secret = os.environ.get("DATABRICKS_CLIENT_SECRET")
+            databricks_host = os.environ.get("DATABRICKS_HOST")
 
             # If we have OAuth credentials, store them for SPN auth
             if client_id and client_secret:
                 self._client_id = client_id
                 self._client_secret = client_secret
-                logger.info("Found OAuth credentials for service principal authentication")
+                logger.info(
+                    "Found OAuth credentials for service principal authentication"
+                )
 
             # Set workspace host from environment if available
             if databricks_host:
-                if not databricks_host.startswith('https://'):
+                if not databricks_host.startswith("https://"):
                     databricks_host = f"https://{databricks_host}"
-                self._workspace_host = databricks_host.rstrip('/')
-                logger.info(f"Using workspace host from environment: {self._workspace_host}")
+                self._workspace_host = databricks_host.rstrip("/")
+                logger.info(
+                    f"Using workspace host from environment: {self._workspace_host}"
+                )
 
         except Exception as e:
             logger.debug(f"Error checking OAuth environment: {e}")
@@ -517,6 +540,7 @@ class DatabricksAuth:
             return True
 
         import time
+
         elapsed = time.time() - self._service_token_fetched_at
         # Consider token expired if it's within the refresh buffer of actual expiration
         return elapsed >= (self._service_token_expires_in - self._token_refresh_buffer)
@@ -530,6 +554,7 @@ class DatabricksAuth:
             if new_token:
                 self._service_token = new_token
                 import time
+
                 self._service_token_fetched_at = time.time()
                 logger.info("Service principal token refreshed successfully")
                 return new_token
@@ -540,14 +565,16 @@ class DatabricksAuth:
             logger.error(f"Error refreshing service principal token: {e}")
             return None
 
-    async def get_auth_headers(self, mcp_server_url: str = None, user_token: str = None) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+    async def get_auth_headers(
+        self, mcp_server_url: str = None, user_token: str = None
+    ) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
         """
         Get authentication headers for Databricks API calls.
-        
+
         Args:
             mcp_server_url: Optional MCP server URL (for MCP-specific headers)
             user_token: Optional user access token for OBO authentication
-            
+
         Returns:
             Tuple[Optional[Dict[str, str]], Optional[str]]: Headers dict and error message if any
         """
@@ -555,7 +582,7 @@ class DatabricksAuth:
             # Load config if needed
             if not await self._load_config():
                 return None, "Failed to load Databricks configuration"
-            
+
             # Set user token if provided
             if user_token:
                 self.set_user_access_token(user_token)
@@ -567,7 +594,9 @@ class DatabricksAuth:
             logger.error(f"Error getting auth headers: {e}")
             return None, str(e)
 
-    async def _get_unified_auth_headers(self, mcp_server_url: str = None) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+    async def _get_unified_auth_headers(
+        self, mcp_server_url: str = None
+    ) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
         """
         Get authentication headers using unified fallback chain.
         Tries in order: OBO (user token) → PAT → SPN (service principal)
@@ -576,7 +605,9 @@ class DatabricksAuth:
             # Method 1: Try OBO (On-Behalf-Of) with user access token
             if self._user_access_token:
                 logger.info("Using OBO authentication with user access token")
-                return self._create_bearer_headers(self._user_access_token, mcp_server_url)
+                return self._create_bearer_headers(
+                    self._user_access_token, mcp_server_url
+                )
 
             # Method 2: Try PAT (Personal Access Token)
             if self._api_token:
@@ -600,7 +631,9 @@ class DatabricksAuth:
                         logger.warning("Failed to obtain service principal OAuth token")
                 else:
                     logger.info("Using cached service principal OAuth token")
-                    return self._create_bearer_headers(self._service_token, mcp_server_url)
+                    return self._create_bearer_headers(
+                        self._service_token, mcp_server_url
+                    )
 
             # No authentication method available — this is expected when
             # Databricks auth has not been configured yet; not an error.
@@ -611,29 +644,34 @@ class DatabricksAuth:
             logger.error(f"Error in unified auth: {e}")
             return None, str(e)
 
-    def _create_bearer_headers(self, token: str, mcp_server_url: str = None) -> Tuple[Dict[str, str], None]:
+    def _create_bearer_headers(
+        self, token: str, mcp_server_url: str = None
+    ) -> Tuple[Dict[str, str], None]:
         """Create Bearer token headers with optional MCP server headers."""
         headers = {
             "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         # Add SSE headers if it's an MCP server request
         if mcp_server_url:
-            headers.update({
-                "Accept": "text/event-stream",
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive"
-            })
+            headers.update(
+                {
+                    "Accept": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                }
+            )
 
         return headers, None
-
 
     async def _get_service_principal_token(self) -> Optional[str]:
         """Get OAuth token for service principal using client credentials flow."""
         try:
             if not self._client_id or not self._client_secret:
-                logger.error("Missing client credentials for service principal authentication")
+                logger.error(
+                    "Missing client credentials for service principal authentication"
+                )
                 return None
 
             # Use Databricks SDK for OAuth token
@@ -650,16 +688,25 @@ class DatabricksAuth:
                     )
                     headers = w.config.authenticate()
 
-                auth_header = headers.get("Authorization", "") if isinstance(headers, dict) else ""
+                auth_header = (
+                    headers.get("Authorization", "")
+                    if isinstance(headers, dict)
+                    else ""
+                )
                 if auth_header.startswith("Bearer "):
-                    token = auth_header[len("Bearer "):]
+                    token = auth_header[len("Bearer ") :]
                     import time
+
                     self._service_token = token
                     self._service_token_fetched_at = time.time()
-                    logger.info("Successfully obtained service principal OAuth token via SDK")
+                    logger.info(
+                        "Successfully obtained service principal OAuth token via SDK"
+                    )
                     return token
                 else:
-                    logger.debug(f"Unexpected auth header format from SDK: {auth_header[:20] if auth_header else '(empty)'}")
+                    logger.debug(
+                        f"Unexpected auth header format from SDK: {auth_header[:20] if auth_header else '(empty)'}"
+                    )
                     # Fall through to manual flow
 
             except Exception as sdk_error:
@@ -678,45 +725,40 @@ class DatabricksAuth:
             if not self._workspace_host:
                 logger.error("No workspace host available for OAuth")
                 return None
-            
+
             # OAuth token endpoint
             token_url = f"{self._workspace_host}/oidc/v1/token"
-            
+
             # Prepare the request
             auth = (self._client_id, self._client_secret)
             # Request comprehensive scopes matching deploy.py OAuth configuration
             # This ensures Service Principal has access to all required APIs including Unity Catalog
             scopes = [
-                'sql',
-                'sql.alerts',
-                'sql.alerts-legacy',
-                'sql.dashboards',
-                'sql.data-sources',
-                'sql.dbsql-permissions',
-                'sql.queries',
-                'sql.queries-legacy',
-                'sql.query-history',
-                'sql.statement-execution',
-                'sql.warehouses',
-                'vectorsearch.vector-search-endpoints',
-                'vectorsearch.vector-search-indexes',
-                'serving.serving-endpoints',
-                'files.files',
-                'dashboards.genie',
-                'catalog.connections',
-                'catalog.catalogs:read',
-                'catalog.tables:read',
-                'catalog.schemas:read',
+                "sql",
+                "sql.alerts",
+                "sql.alerts-legacy",
+                "sql.dashboards",
+                "sql.data-sources",
+                "sql.dbsql-permissions",
+                "sql.queries",
+                "sql.queries-legacy",
+                "sql.query-history",
+                "sql.statement-execution",
+                "sql.warehouses",
+                "vectorsearch.vector-search-endpoints",
+                "vectorsearch.vector-search-indexes",
+                "serving.serving-endpoints",
+                "files.files",
+                "dashboards.genie",
+                "catalog.connections",
+                "catalog.catalogs:read",
+                "catalog.tables:read",
+                "catalog.schemas:read",
             ]
-            data = {
-                'grant_type': 'client_credentials',
-                'scope': ' '.join(scopes)
-            }
-            
-            headers = {
-                'Content-Type': 'application/x-www-form-urlencoded'
-            }
-            
+            data = {"grant_type": "client_credentials", "scope": " ".join(scopes)}
+
+            headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
             # Make the token request
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
@@ -728,22 +770,27 @@ class DatabricksAuth:
 
             if response.status_code == 200:
                 token_data = response.json()
-                access_token = token_data.get('access_token')
+                access_token = token_data.get("access_token")
                 if access_token:
                     import time
+
                     self._service_token = access_token
                     self._service_token_fetched_at = time.time()
                     # Get expires_in from response, default to 3600 (1 hour)
-                    self._service_token_expires_in = token_data.get('expires_in', 3600)
-                    logger.info(f"Successfully obtained OAuth token via manual flow (expires in {self._service_token_expires_in}s)")
+                    self._service_token_expires_in = token_data.get("expires_in", 3600)
+                    logger.info(
+                        f"Successfully obtained OAuth token via manual flow (expires in {self._service_token_expires_in}s)"
+                    )
                     return access_token
                 else:
                     logger.error("No access token in OAuth response")
                     return None
             else:
-                logger.error(f"OAuth request failed with status {response.status_code}: {response.text}")
+                logger.error(
+                    f"OAuth request failed with status {response.status_code}: {response.text}"
+                )
                 return None
-                
+
         except Exception as e:
             logger.error(f"Error in manual OAuth flow: {e}")
             return None
@@ -753,14 +800,14 @@ class DatabricksAuth:
         try:
             if not self._api_token or not self._workspace_host:
                 return False
-            
+
             # Simple validation call to get current user
             url = f"{self._workspace_host}/api/2.0/preview/scim/v2/Me"
             headers = {
                 "Authorization": f"Bearer {self._api_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             }
-            
+
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(url, headers=headers)
 
@@ -770,9 +817,11 @@ class DatabricksAuth:
                 logger.info(f"Token validated for user: {username}")
                 return True
             else:
-                logger.error(f"Token validation failed with status {response.status_code}")
+                logger.error(
+                    f"Token validation failed with status {response.status_code}"
+                )
                 return False
-                
+
         except Exception as e:
             logger.error(f"Error validating token: {e}")
             return False
@@ -780,7 +829,7 @@ class DatabricksAuth:
     def get_workspace_host(self) -> Optional[str]:
         """Get the workspace host."""
         return self._workspace_host
-    
+
     async def get_workspace_url(self) -> Optional[str]:
         """Get the workspace URL (async version of get_workspace_host)."""
         if not self._config_loaded:
@@ -805,39 +854,45 @@ def reset_auth_config_cache() -> None:
     """
     _databricks_auth._config_loaded = False
     _databricks_auth._workspace_host = None
-    logger.info("Databricks auth config cache invalidated; will reload on next auth context")
+    logger.info(
+        "Databricks auth config cache invalidated; will reload on next auth context"
+    )
 
 
-async def get_databricks_auth_headers(host: str = None, mcp_server_url: str = None, user_token: str = None) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+async def get_databricks_auth_headers(
+    host: str = None, mcp_server_url: str = None, user_token: str = None
+) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
     """
     Get authentication headers for Databricks API calls.
-    
+
     Args:
         host: Optional host (for compatibility, ignored since we get it from config)
         mcp_server_url: Optional MCP server URL
         user_token: Optional user access token for OBO authentication
-        
+
     Returns:
         Tuple[Optional[Dict[str, str]], Optional[str]]: Headers dict and error message if any
     """
     return await _databricks_auth.get_auth_headers(mcp_server_url, user_token)
 
 
-def get_databricks_auth_headers_sync(host: str = None, mcp_server_url: str = None, user_token: str = None) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+def get_databricks_auth_headers_sync(
+    host: str = None, mcp_server_url: str = None, user_token: str = None
+) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
     """
     Synchronous version of get_databricks_auth_headers.
-    
+
     Args:
         host: Optional host (for compatibility, ignored since we get it from config)
         mcp_server_url: Optional MCP server URL
         user_token: Optional user access token for OBO authentication
-        
+
     Returns:
         Tuple[Optional[Dict[str, str]], Optional[str]]: Headers dict and error message if any
     """
     try:
         import asyncio
-        
+
         # Check if there's already a running event loop
         try:
             loop = asyncio.get_running_loop()
@@ -847,8 +902,10 @@ def get_databricks_auth_headers_sync(host: str = None, mcp_server_url: str = Non
             return None, "Cannot call sync version from async context"
         except RuntimeError:
             # No running loop, safe to create one
-            return asyncio.run(get_databricks_auth_headers(host, mcp_server_url, user_token))
-            
+            return asyncio.run(
+                get_databricks_auth_headers(host, mcp_server_url, user_token)
+            )
+
     except Exception as e:
         logger.error(f"Error in sync auth headers: {e}")
         return None, str(e)
@@ -857,20 +914,20 @@ def get_databricks_auth_headers_sync(host: str = None, mcp_server_url: str = Non
 async def validate_databricks_connection() -> Tuple[bool, Optional[str]]:
     """
     Validate the Databricks connection.
-    
+
     Returns:
         Tuple[bool, Optional[str]]: (is_valid, error_message)
     """
     try:
         if not await _databricks_auth._load_config():
             return False, "Failed to load configuration"
-        
+
         is_valid = await _databricks_auth._validate_token()
         if is_valid:
             return True, None
         else:
             return False, "Token validation failed"
-            
+
     except Exception as e:
         logger.error(f"Error validating connection: {e}")
         return False, str(e)
@@ -908,12 +965,13 @@ def setup_environment_variables(user_token: Optional[str] = None) -> bool:
         response = litellm.completion(model="databricks/model", messages=[...], **params)
     """
     import warnings
+
     warnings.warn(
         "setup_environment_variables() is deprecated and causes race conditions. "
         "Use get_auth_context() instead. "
         "See module docstring for migration examples.",
         DeprecationWarning,
-        stacklevel=2
+        stacklevel=2,
     )
 
     try:
@@ -927,7 +985,9 @@ def setup_environment_variables(user_token: Optional[str] = None) -> bool:
             if _databricks_auth._workspace_host:
                 os.environ["DATABRICKS_HOST"] = _databricks_auth._workspace_host
                 # Also set API_BASE for LiteLLM compatibility - must include /serving-endpoints
-                os.environ["DATABRICKS_API_BASE"] = f"{_databricks_auth._workspace_host}/serving-endpoints"
+                os.environ["DATABRICKS_API_BASE"] = (
+                    f"{_databricks_auth._workspace_host}/serving-endpoints"
+                )
 
             # Prefer OBO user token if provided
             if user_token:
@@ -952,6 +1012,7 @@ def setup_environment_variables(user_token: Optional[str] = None) -> bool:
             # OBO user token from UserContext survives the thread hop
             import concurrent.futures
             import contextvars
+
             ctx = contextvars.copy_context()
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(ctx.run, asyncio.run, _setup())
@@ -968,42 +1029,42 @@ def setup_environment_variables(user_token: Optional[str] = None) -> bool:
 def extract_user_token_from_request(request) -> Optional[str]:
     """
     Extract user access token from request headers for OBO authentication.
-    
+
     Args:
         request: FastAPI request object or similar with headers
-        
+
     Returns:
         Optional[str]: User access token if found
     """
     try:
         # Check for X-Forwarded-Access-Token header (Databricks Apps standard)
-        if hasattr(request, 'headers'):
-            token = request.headers.get('X-Forwarded-Access-Token')
+        if hasattr(request, "headers"):
+            token = request.headers.get("X-Forwarded-Access-Token")
             if token:
-                logger.debug("Found user access token in X-Forwarded-Access-Token header")
+                logger.debug(
+                    "Found user access token in X-Forwarded-Access-Token header"
+                )
                 return token
-        
+
         # Fallback to Authorization header if no forwarded token
-        if hasattr(request, 'headers'):
-            auth_header = request.headers.get('Authorization')
-            if auth_header and auth_header.startswith('Bearer '):
+        if hasattr(request, "headers"):
+            auth_header = request.headers.get("Authorization")
+            if auth_header and auth_header.startswith("Bearer "):
                 token = auth_header[7:]  # Remove 'Bearer ' prefix
                 logger.debug("Found user access token in Authorization header")
                 return token
-        
+
         return None
-        
+
     except Exception as e:
         logger.debug(f"Error extracting user token: {e}")
         return None
 
 
-
-
 async def get_auth_context(
     user_token: Optional[str] = None,
     group_id: Optional[str] = None,
-    skip_db_auth: bool = False
+    skip_db_auth: bool = False,
 ) -> Optional[AuthContext]:
     """
     Get authentication context with token, headers, and environment.
@@ -1048,12 +1109,14 @@ async def get_auth_context(
             messages=[...],
             **params
         )
-        
+
         # From callback during database transaction (skip PAT lookup)
         auth = await get_auth_context(user_token=None, skip_db_auth=True)
     """
     try:
-        logger.debug(f"get_auth_context called with user_token={'SET' if user_token else 'None'}")
+        logger.debug(
+            f"get_auth_context called with user_token={'SET' if user_token else 'None'}"
+        )
 
         # Load configuration
         if not await _databricks_auth._load_config():
@@ -1072,7 +1135,9 @@ async def get_auth_context(
 
         # Priority 1: Try OBO (On-Behalf-Of) if user token provided
         if user_token:
-            logger.debug("[AUTH] Priority 1: Attempting OBO authentication with user token")
+            logger.debug(
+                "[AUTH] Priority 1: Attempting OBO authentication with user token"
+            )
             token_hash = hashlib.sha256(user_token.encode()).hexdigest()
             cached = _obo_cache_get(token_hash)
             if cached is not None:
@@ -1081,9 +1146,10 @@ async def get_auth_context(
                     token=user_token,
                     workspace_url=workspace_url,
                     auth_method="obo",
-                    user_identity=cached[0]
+                    user_identity=cached[0],
                 )
             try:
+
                 def _validate_obo_token() -> Optional[str]:
                     # auth_type="pat" pins token auth explicitly so SPN env vars
                     # can't hijack the client — no _clean_environment os.environ
@@ -1092,19 +1158,22 @@ async def get_auth_context(
                         host=workspace_url, token=user_token, auth_type="pat"
                     )
                     current_user = client.current_user.me()
-                    return getattr(current_user, 'user_name', None) or \
-                        getattr(current_user, 'application_id', None)
+                    return getattr(current_user, "user_name", None) or getattr(
+                        current_user, "application_id", None
+                    )
 
                 # SCIM round trip runs in a worker thread so the event loop
                 # is never blocked (PERF-006).
                 user_identity = await asyncio.to_thread(_validate_obo_token)
                 _obo_cache_put(token_hash, user_identity)
-                logger.info(f"[AUTH] Priority 1: ✓ OBO authentication successful for user: {user_identity}")
+                logger.info(
+                    f"[AUTH] Priority 1: ✓ OBO authentication successful for user: {user_identity}"
+                )
                 return AuthContext(
                     token=user_token,
                     workspace_url=workspace_url,
                     auth_method="obo",
-                    user_identity=user_identity
+                    user_identity=user_identity,
                 )
             except Exception as e:
                 logger.warning(f"[AUTH] Priority 1: ✗ OBO authentication failed: {e}")
@@ -1119,10 +1188,12 @@ async def get_auth_context(
         if skip_db_auth:
             logger.info("[AUTH] Priority 2: Skipping PAT lookup (skip_db_auth=True)")
         else:
-            logger.debug("[AUTH] Priority 2: Attempting PAT authentication from API Keys Service")
+            logger.debug(
+                "[AUTH] Priority 2: Attempting PAT authentication from API Keys Service"
+            )
             try:
-                from src.services.settings.api_keys import ApiKeysService
                 from src.db.session import async_session_factory
+                from src.services.settings.api_keys import ApiKeysService
                 from src.utils.user_context import UserContext
 
                 # Build the candidate group_ids to look the PAT up under.
@@ -1139,46 +1210,67 @@ async def get_auth_context(
                     try:
                         group_context = UserContext.get_group_context()
                         if group_context is not None:
-                            gids = getattr(group_context, 'group_ids', None)
+                            gids = getattr(group_context, "group_ids", None)
                             gids = list(gids) if isinstance(gids, (list, tuple)) else []
-                            primary = getattr(group_context, 'primary_group_id', None)
+                            primary = getattr(group_context, "primary_group_id", None)
                             # Try the primary group first, then the rest.
                             if primary:
                                 gids = [primary] + [g for g in gids if g != primary]
                             candidate_group_ids = gids
-                            logger.debug(f"[AUTH PAT] Candidate group_ids for PAT lookup: {candidate_group_ids}")
+                            logger.debug(
+                                f"[AUTH PAT] Candidate group_ids for PAT lookup: {candidate_group_ids}"
+                            )
                     except Exception as e:
-                        logger.debug(f"[AUTH PAT] Could not get group_ids from UserContext: {e}")
+                        logger.debug(
+                            f"[AUTH PAT] Could not get group_ids from UserContext: {e}"
+                        )
 
                 if not candidate_group_ids:
-                    logger.debug("[AUTH] Priority 2: No group_id available for PAT lookup (neither passed nor from UserContext)")
+                    logger.debug(
+                        "[AUTH] Priority 2: No group_id available for PAT lookup (neither passed nor from UserContext)"
+                    )
 
                 for gid in candidate_group_ids:
                     cached_pat = _pat_cache_get(gid)
                     if cached_pat is not None:
                         if cached_pat[0]:
                             pat_token = cached_pat[0]
-                            logger.debug(f"[AUTH PAT] ✓ PAT cache hit for group_id={gid}")
+                            logger.debug(
+                                f"[AUTH PAT] ✓ PAT cache hit for group_id={gid}"
+                            )
                             break
                         # Cached negative result for this group — try the next one.
                         continue
-                    logger.debug(f"[AUTH PAT] Attempting to load PAT from database with group_id={gid}")
+                    logger.debug(
+                        f"[AUTH PAT] Attempting to load PAT from database with group_id={gid}"
+                    )
                     async with async_session_factory() as session:
                         api_service = ApiKeysService(session, group_id=gid)
                         for key_name in ["DATABRICKS_TOKEN", "DATABRICKS_API_KEY"]:
                             try:
                                 api_key = await api_service.find_by_name(key_name)
                                 if api_key and api_key.encrypted_value:
-                                    from src.utils.encryption_utils import EncryptionUtils
-                                    pat_token = EncryptionUtils.decrypt_value(api_key.encrypted_value)
-                                    logger.info(f"[AUTH] Priority 2: ✓ PAT loaded from database ({key_name}) with group_id={gid}")
+                                    from src.utils.encryption_utils import (
+                                        EncryptionUtils,
+                                    )
+
+                                    pat_token = EncryptionUtils.decrypt_value(
+                                        api_key.encrypted_value
+                                    )
+                                    logger.info(
+                                        f"[AUTH] Priority 2: ✓ PAT loaded from database ({key_name}) with group_id={gid}"
+                                    )
                                     break
                             except Exception as e:
-                                logger.warning(f"[AUTH PAT] Error loading {key_name}: {e}")
+                                logger.warning(
+                                    f"[AUTH PAT] Error loading {key_name}: {e}"
+                                )
                     _pat_cache_put(gid, pat_token)
                     if pat_token:
                         break
-                    logger.debug(f"[AUTH PAT] No PAT found in database with group_id={gid}")
+                    logger.debug(
+                        f"[AUTH PAT] No PAT found in database with group_id={gid}"
+                    )
 
             except Exception as e:
                 logger.error(f"[AUTH PAT] Error during PAT lookup: {e}")
@@ -1191,47 +1283,61 @@ async def get_auth_context(
                 env_val = os.environ.get(env_key)
                 if env_val:
                     pat_token = env_val
-                    logger.info(f"[AUTH] Priority 2b: ✓ PAT loaded from environment variable ({env_key})")
+                    logger.info(
+                        f"[AUTH] Priority 2b: ✓ PAT loaded from environment variable ({env_key})"
+                    )
                     break
             if not pat_token:
-                logger.debug("[AUTH] Priority 2b: No PAT found in environment variables")
+                logger.debug(
+                    "[AUTH] Priority 2b: No PAT found in environment variables"
+                )
 
         if pat_token:
             return AuthContext(
                 token=pat_token,
                 workspace_url=workspace_url,
                 auth_method="pat",
-                user_identity=None
+                user_identity=None,
             )
         elif not skip_db_auth:
             logger.debug("[AUTH] Priority 2: No PAT token available")
 
         # Priority 3: Try Service Principal OAuth as last resort
         if _databricks_auth._client_id and _databricks_auth._client_secret:
-            logger.debug("[AUTH] Priority 3: Attempting Service Principal OAuth authentication")
+            logger.debug(
+                "[AUTH] Priority 3: Attempting Service Principal OAuth authentication"
+            )
             if _databricks_auth._is_service_token_expired():
                 token = await _databricks_auth._refresh_service_token()
             else:
                 token = _databricks_auth._service_token
 
             if token:
-                logger.info("[AUTH] Priority 3: ✓ Service Principal authentication successful")
+                logger.info(
+                    "[AUTH] Priority 3: ✓ Service Principal authentication successful"
+                )
                 return AuthContext(
                     token=token,
                     workspace_url=workspace_url,
                     auth_method="service_principal",
-                    user_identity=None
+                    user_identity=None,
                 )
             else:
-                logger.debug("[AUTH] Priority 3: ✗ Service Principal authentication failed")
+                logger.debug(
+                    "[AUTH] Priority 3: ✗ Service Principal authentication failed"
+                )
         else:
-            logger.debug("[AUTH] Priority 3: Service Principal credentials not configured, skipping SPN")
+            logger.debug(
+                "[AUTH] Priority 3: Service Principal credentials not configured, skipping SPN"
+            )
 
         # No authentication method available — this is normal when Databricks
         # auth has not been configured.  Logged at DEBUG to avoid polluting
         # production logs (MLflow status is polled every few seconds).
-        logger.debug("No authentication method available. "
-                      "Configure OBO, PAT, or SPN to enable Databricks features.")
+        logger.debug(
+            "No authentication method available. "
+            "Configure OBO, PAT, or SPN to enable Databricks features."
+        )
         return None
 
     except Exception as e:
@@ -1253,12 +1359,15 @@ def is_scope_error(error: Exception) -> bool:
         True if error is due to missing OAuth scopes
     """
     error_str = str(error).lower()
-    return any(phrase in error_str for phrase in [
-        "does not have required scopes",
-        "required scopes",
-        "insufficient scopes",
-        "missing scopes"
-    ])
+    return any(
+        phrase in error_str
+        for phrase in [
+            "does not have required scopes",
+            "required scopes",
+            "insufficient scopes",
+            "missing scopes",
+        ]
+    )
 
 
 async def get_workspace_client(
@@ -1310,8 +1419,7 @@ async def get_workspace_client(
 
 
 async def get_workspace_client_with_fallback(
-    user_token: Optional[str] = None,
-    operation_name: str = "operation"
+    user_token: Optional[str] = None, operation_name: str = "operation"
 ) -> tuple[Optional[WorkspaceClient], Optional[str]]:
     """
     Get a Databricks WorkspaceClient with automatic PAT fallback capability.
@@ -1354,31 +1462,31 @@ async def get_mcp_access_token() -> Tuple[Optional[str], Optional[str]]:
     """
     Get an MCP access token by calling the Databricks CLI directly.
     This is the most reliable approach since we know 'databricks auth token -p mcp' works.
-    
+
     Returns:
         Tuple[Optional[str], Optional[str]]: (access_token, error_message)
     """
     try:
-        import subprocess
         import json
-        
+        import subprocess
+
         logger.info("Getting MCP token using Databricks CLI")
-        
+
         # Call the CLI command that we know works
         result = subprocess.run(
             ["databricks", "auth", "token", "-p", "mcp"],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
-        
+
         # Parse the JSON output
         token_data = json.loads(result.stdout)
         access_token = token_data.get("access_token")
-        
+
         if not access_token:
             return None, "No access token found in CLI response"
-        
+
         # Verify this is a JWT token (should start with eyJ)
         if access_token.startswith("eyJ"):
             logger.info("Successfully obtained JWT token from CLI for MCP")
@@ -1386,7 +1494,7 @@ async def get_mcp_access_token() -> Tuple[Optional[str], Optional[str]]:
         else:
             logger.warning(f"Token doesn't look like JWT: {access_token[:20]}...")
             return access_token, None
-            
+
     except subprocess.CalledProcessError as e:
         return None, f"CLI command failed: {e.stderr}"
     except json.JSONDecodeError as e:
@@ -1396,7 +1504,9 @@ async def get_mcp_access_token() -> Tuple[Optional[str], Optional[str]]:
         return None, str(e)
 
 
-async def get_current_databricks_user(user_token: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
+async def get_current_databricks_user(
+    user_token: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[str]]:
     """
     Get the current Databricks user identity (email or service principal ID).
     This centralizes the logic for determining the authenticated user.
@@ -1419,20 +1529,29 @@ async def get_current_databricks_user(user_token: Optional[str] = None) -> Tuple
             current_user = workspace_client.current_user.me()
             if current_user:
                 # For regular users, use user_name (email)
-                if hasattr(current_user, 'user_name') and current_user.user_name:
+                if hasattr(current_user, "user_name") and current_user.user_name:
                     logger.info(f"Identified Databricks user: {current_user.user_name}")
                     return current_user.user_name, None
                 # For service principals, use application_id
-                elif hasattr(current_user, 'applicationId') and getattr(current_user, 'applicationId'):
-                    app_id = getattr(current_user, 'applicationId')
+                elif hasattr(current_user, "applicationId") and getattr(
+                    current_user, "applicationId"
+                ):
+                    app_id = getattr(current_user, "applicationId")
                     logger.info(f"Identified Databricks service principal: {app_id}")
                     return app_id, None
                 # For display name fallback
-                elif hasattr(current_user, 'display_name') and current_user.display_name:
-                    logger.info(f"Using display name as identity: {current_user.display_name}")
+                elif (
+                    hasattr(current_user, "display_name") and current_user.display_name
+                ):
+                    logger.info(
+                        f"Using display name as identity: {current_user.display_name}"
+                    )
                     return current_user.display_name, None
                 else:
-                    return None, "Could not determine user identity from current_user object"
+                    return (
+                        None,
+                        "Could not determine user identity from current_user object",
+                    )
             else:
                 return None, "current_user.me() returned None"
 
@@ -1446,10 +1565,10 @@ async def get_current_databricks_user(user_token: Optional[str] = None) -> Tuple
 
 
 async def get_mcp_auth_headers(
-    mcp_server_url: str, 
+    mcp_server_url: str,
     user_token: Optional[str] = None,
     api_key: Optional[str] = None,
-    include_sse_headers: bool = False
+    include_sse_headers: bool = False,
 ) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
     """
     Get authentication headers for MCP server calls.
@@ -1457,19 +1576,19 @@ async def get_mcp_auth_headers(
     1. OBO (On-Behalf-Of) using user token
     2. API key from service
     3. Databricks CLI token
-    
+
     Args:
         mcp_server_url: MCP server URL
         user_token: Optional user access token for OBO
         api_key: Optional API key from the service
         include_sse_headers: Whether to include SSE-specific headers (for SSE endpoints only)
-        
+
     Returns:
         Tuple[Optional[Dict[str, str]], Optional[str]]: Headers dict and error message if any
     """
     try:
         access_token = None
-        
+
         # First try: OBO authentication if user token is provided
         if user_token:
             logger.info("Attempting OBO authentication for MCP")
@@ -1477,8 +1596,10 @@ async def get_mcp_auth_headers(
                 # Initialize DatabricksAuth instance for OBO
                 auth = DatabricksAuth()
                 auth.set_user_access_token(user_token)
-                headers, auth_error = await auth.get_auth_headers(mcp_server_url=mcp_server_url)
-                
+                headers, auth_error = await auth.get_auth_headers(
+                    mcp_server_url=mcp_server_url
+                )
+
                 # If OBO authentication succeeded, use those headers
                 if headers and not auth_error:
                     # Only add SSE headers if specifically requested (for SSE endpoints)
@@ -1491,7 +1612,7 @@ async def get_mcp_auth_headers(
                             headers["Cache-Control"] = "no-cache"
                         if "Connection" not in headers:
                             headers["Connection"] = "keep-alive"
-                    
+
                     logger.info("Successfully using OBO authentication for MCP")
                     return headers, None
                 else:
@@ -1500,43 +1621,47 @@ async def get_mcp_auth_headers(
             except Exception as obo_error:
                 logger.warning(f"Error in OBO authentication: {obo_error}")
                 # Continue to next authentication method
-        
+
         # Second try: API key from service if provided
         if api_key:
             logger.info("Using API key authentication for MCP")
             headers = {"Authorization": f"Bearer {api_key}"}
-            
+
             # Only add SSE headers if specifically requested
             if include_sse_headers:
-                headers.update({
-                    "Content-Type": "application/json",
-                    "Accept": "text/event-stream",
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive"
-                })
-            
+                headers.update(
+                    {
+                        "Content-Type": "application/json",
+                        "Accept": "text/event-stream",
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                    }
+                )
+
             return headers, None
-        
+
         # Third try: Get token from Databricks CLI
         logger.info("Falling back to Databricks CLI authentication for MCP")
         access_token, error = await get_mcp_access_token()
         if error:
             return None, error
-            
+
         # Return clean headers by default, add SSE headers only if requested
         headers = {"Authorization": f"Bearer {access_token}"}
-        
+
         # Only add SSE headers if specifically requested (for SSE endpoints)
         if include_sse_headers:
-            headers.update({
-                "Content-Type": "application/json",
-                "Accept": "text/event-stream",
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive"
-            })
-        
+            headers.update(
+                {
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                }
+            )
+
         return headers, None
-        
+
     except Exception as e:
         logger.error(f"Error getting MCP auth headers: {e}")
         return None, str(e)

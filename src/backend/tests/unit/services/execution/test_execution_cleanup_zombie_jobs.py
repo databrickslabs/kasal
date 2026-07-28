@@ -1,12 +1,14 @@
 """
 Unit tests for ExecutionCleanupService.cleanup_zombie_jobs
 """
+
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.execution.cleanup import ExecutionCleanupService
+import pytest
+
 from src.models.execution_status import ExecutionStatus
+from src.services.execution.cleanup import ExecutionCleanupService
 
 
 def _build_session_ctx():
@@ -25,9 +27,15 @@ class TestCleanupZombieJobs:
         """When no jobs are RUNNING, returns 0 recovered."""
         factory_mock, _ = _build_session_ctx()
 
-        with patch("src.services.execution.cleanup.async_session_factory", factory_mock), \
-             patch("src.services.execution.cleanup.ExecutionHistoryRepository") as MockHistoryRepo:
-            MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(return_value=[])
+        with (
+            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch(
+                "src.services.execution.cleanup.ExecutionHistoryRepository"
+            ) as MockHistoryRepo,
+        ):
+            MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(
+                return_value=[]
+            )
             result = await ExecutionCleanupService.cleanup_zombie_jobs()
 
         assert result == 0
@@ -37,11 +45,21 @@ class TestCleanupZombieJobs:
         """Running jobs without completion trace are not touched."""
         factory_mock, _ = _build_session_ctx()
 
-        with patch("src.services.execution.cleanup.async_session_factory", factory_mock), \
-             patch("src.services.execution.cleanup.ExecutionHistoryRepository") as MockHistoryRepo, \
-             patch("src.services.execution.cleanup.ExecutionTraceRepository") as MockTraceRepo:
-            MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(return_value=["job-1"])
-            MockTraceRepo.return_value.has_completed_trace = AsyncMock(return_value=(False, None))
+        with (
+            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch(
+                "src.services.execution.cleanup.ExecutionHistoryRepository"
+            ) as MockHistoryRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionTraceRepository"
+            ) as MockTraceRepo,
+        ):
+            MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(
+                return_value=["job-1"]
+            )
+            MockTraceRepo.return_value.has_completed_trace = AsyncMock(
+                return_value=(False, None)
+            )
 
             result = await ExecutionCleanupService.cleanup_zombie_jobs()
 
@@ -55,13 +73,25 @@ class TestCleanupZombieJobs:
 
         update_status_mock = AsyncMock(return_value=True)
 
-        with patch("src.services.execution.cleanup.async_session_factory", factory_mock), \
-             patch("src.services.execution.cleanup.ExecutionHistoryRepository") as MockHistoryRepo, \
-             patch("src.services.execution.cleanup.ExecutionTraceRepository") as MockTraceRepo, \
-             patch("src.services.execution.cleanup.ExecutionStatusService.update_status",
-                   update_status_mock):
-            MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(return_value=["job-zombie"])
-            MockTraceRepo.return_value.has_completed_trace = AsyncMock(return_value=(True, trace_output))
+        with (
+            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch(
+                "src.services.execution.cleanup.ExecutionHistoryRepository"
+            ) as MockHistoryRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionTraceRepository"
+            ) as MockTraceRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionStatusService.update_status",
+                update_status_mock,
+            ),
+        ):
+            MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(
+                return_value=["job-zombie"]
+            )
+            MockTraceRepo.return_value.has_completed_trace = AsyncMock(
+                return_value=(True, trace_output)
+            )
 
             result = await ExecutionCleanupService.cleanup_zombie_jobs()
 
@@ -81,13 +111,25 @@ class TestCleanupZombieJobs:
 
         update_status_mock = AsyncMock(return_value=True)
 
-        with patch("src.services.execution.cleanup.async_session_factory", factory_mock), \
-             patch("src.services.execution.cleanup.ExecutionHistoryRepository") as MockHistoryRepo, \
-             patch("src.services.execution.cleanup.ExecutionTraceRepository") as MockTraceRepo, \
-             patch("src.services.execution.cleanup.ExecutionStatusService.update_status",
-                   update_status_mock):
-            MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(return_value=["job-json"])
-            MockTraceRepo.return_value.has_completed_trace = AsyncMock(return_value=(True, json_output))
+        with (
+            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch(
+                "src.services.execution.cleanup.ExecutionHistoryRepository"
+            ) as MockHistoryRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionTraceRepository"
+            ) as MockTraceRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionStatusService.update_status",
+                update_status_mock,
+            ),
+        ):
+            MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(
+                return_value=["job-json"]
+            )
+            MockTraceRepo.return_value.has_completed_trace = AsyncMock(
+                return_value=(True, json_output)
+            )
 
             result = await ExecutionCleanupService.cleanup_zombie_jobs()
 
@@ -103,13 +145,25 @@ class TestCleanupZombieJobs:
 
         update_status_mock = AsyncMock(return_value=True)
 
-        with patch("src.services.execution.cleanup.async_session_factory", factory_mock), \
-             patch("src.services.execution.cleanup.ExecutionHistoryRepository") as MockHistoryRepo, \
-             patch("src.services.execution.cleanup.ExecutionTraceRepository") as MockTraceRepo, \
-             patch("src.services.execution.cleanup.ExecutionStatusService.update_status",
-                   update_status_mock):
-            MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(return_value=["job-plain"])
-            MockTraceRepo.return_value.has_completed_trace = AsyncMock(return_value=(True, plain_output))
+        with (
+            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch(
+                "src.services.execution.cleanup.ExecutionHistoryRepository"
+            ) as MockHistoryRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionTraceRepository"
+            ) as MockTraceRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionStatusService.update_status",
+                update_status_mock,
+            ),
+        ):
+            MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(
+                return_value=["job-plain"]
+            )
+            MockTraceRepo.return_value.has_completed_trace = AsyncMock(
+                return_value=(True, plain_output)
+            )
 
             result = await ExecutionCleanupService.cleanup_zombie_jobs()
 
@@ -124,13 +178,25 @@ class TestCleanupZombieJobs:
 
         update_status_mock = AsyncMock(return_value=True)
 
-        with patch("src.services.execution.cleanup.async_session_factory", factory_mock), \
-             patch("src.services.execution.cleanup.ExecutionHistoryRepository") as MockHistoryRepo, \
-             patch("src.services.execution.cleanup.ExecutionTraceRepository") as MockTraceRepo, \
-             patch("src.services.execution.cleanup.ExecutionStatusService.update_status",
-                   update_status_mock):
-            MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(return_value=["job-null"])
-            MockTraceRepo.return_value.has_completed_trace = AsyncMock(return_value=(True, None))
+        with (
+            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch(
+                "src.services.execution.cleanup.ExecutionHistoryRepository"
+            ) as MockHistoryRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionTraceRepository"
+            ) as MockTraceRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionStatusService.update_status",
+                update_status_mock,
+            ),
+        ):
+            MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(
+                return_value=["job-null"]
+            )
+            MockTraceRepo.return_value.has_completed_trace = AsyncMock(
+                return_value=(True, None)
+            )
 
             result = await ExecutionCleanupService.cleanup_zombie_jobs()
 
@@ -145,11 +211,19 @@ class TestCleanupZombieJobs:
 
         update_status_mock = AsyncMock(return_value=True)
 
-        with patch("src.services.execution.cleanup.async_session_factory", factory_mock), \
-             patch("src.services.execution.cleanup.ExecutionHistoryRepository") as MockHistoryRepo, \
-             patch("src.services.execution.cleanup.ExecutionTraceRepository") as MockTraceRepo, \
-             patch("src.services.execution.cleanup.ExecutionStatusService.update_status",
-                   update_status_mock):
+        with (
+            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch(
+                "src.services.execution.cleanup.ExecutionHistoryRepository"
+            ) as MockHistoryRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionTraceRepository"
+            ) as MockTraceRepo,
+            patch(
+                "src.services.execution.cleanup.ExecutionStatusService.update_status",
+                update_status_mock,
+            ),
+        ):
             MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(
                 return_value=["job-1", "job-2"]
             )
@@ -166,8 +240,12 @@ class TestCleanupZombieJobs:
         """Exception during cleanup returns 0."""
         factory_mock, _ = _build_session_ctx()
 
-        with patch("src.services.execution.cleanup.async_session_factory", factory_mock), \
-             patch("src.services.execution.cleanup.ExecutionHistoryRepository") as MockHistoryRepo:
+        with (
+            patch("src.services.execution.cleanup.async_session_factory", factory_mock),
+            patch(
+                "src.services.execution.cleanup.ExecutionHistoryRepository"
+            ) as MockHistoryRepo,
+        ):
             MockHistoryRepo.return_value.get_job_ids_by_statuses = AsyncMock(
                 side_effect=RuntimeError("DB error")
             )

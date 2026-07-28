@@ -5,7 +5,12 @@ from fastapi import APIRouter, Depends, Path, status
 from sqlalchemy.exc import IntegrityError
 
 from src.core.dependencies import GroupContextDep, SessionDep
-from src.core.exceptions import BadRequestError, ConflictError, ForbiddenError, NotFoundError
+from src.core.exceptions import (
+    BadRequestError,
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+)
 from src.core.permissions import check_role_in_context
 from src.models.agent import Agent
 from src.schemas.agent import Agent as AgentSchema
@@ -234,4 +239,6 @@ async def delete_all_agents(
         await service.delete_all_for_group(group_context)
     except IntegrityError as ie:
         logger.warning(f"Attempted to delete agents referenced by tasks: {ie}")
-        raise ConflictError("Cannot delete agents because some are still referenced by tasks. Please delete or reassign the associated tasks first.")
+        raise ConflictError(
+            "Cannot delete agents because some are still referenced by tasks. Please delete or reassign the associated tasks first."
+        )

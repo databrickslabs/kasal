@@ -15,6 +15,7 @@ any obvious aggregation) so fact detection can fire.
 Fail-open: any LLM error leaves the table exactly as it was (still non-fact) — it
 never blocks the tables that parsed fine.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -87,13 +88,13 @@ def _parse_response(response_text: str) -> dict:
     """Parse and validate LLM response JSON (tolerates markdown fences)."""
     try:
         text = response_text.strip()
-        if text.startswith('```json'):
-            text = text.split('```json')[1].split('```')[0].strip()
-        elif text.startswith('```'):
-            text = text.split('```')[1].split('```')[0].strip()
+        if text.startswith("```json"):
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif text.startswith("```"):
+            text = text.split("```")[1].split("```")[0].strip()
         return json.loads(text)
     except (json.JSONDecodeError, IndexError):
-        return {'success': False, 'error': 'Failed to parse LLM response'}
+        return {"success": False, "error": "Failed to parse LLM response"}
 
 
 _M_LEFTOVER = re.compile(
@@ -105,35 +106,35 @@ def _validate_source_sql(sql: str) -> bool:
     """Reject output that still contains M constructs or has no FROM."""
     if not sql or _M_LEFTOVER.search(sql):
         return False
-    return bool(re.search(r'\bFROM\b', sql, re.IGNORECASE))
+    return bool(re.search(r"\bFROM\b", sql, re.IGNORECASE))
 
 
 async def _call_llm(prompt: str, system_prompt: str, model: str) -> dict:
     """Call LLM via LLMManager.completion() — auth handled internally."""
     from src.services.llm.manager import LLMManager
-    from src.utils.telemetry import get_user_agent_header, KasalProduct
+    from src.utils.telemetry import KasalProduct, get_user_agent_header
 
     try:
         content = await LLMManager.completion(
             messages=[
-                {'role': 'system', 'content': system_prompt},
-                {'role': 'user', 'content': prompt},
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
             ],
             model=model,
             temperature=0.1,
             max_tokens=1500,
             extra_headers=get_user_agent_header(KasalProduct.POWERBI),
         )
-        return {'content': content}
+        return {"content": content}
     except Exception as e:  # noqa: BLE001 — fail-open
         logger.warning(f"[MQUERY_LLM] API call failed: {e}")
-        return {'content': None, 'error': str(e)}
+        return {"content": None, "error": str(e)}
 
 
 async def translate_mquery_to_sql(
     table_name: str,
     mquery: str,
-    model: str = 'databricks-claude-sonnet-4-5',
+    model: str = "databricks-claude-sonnet-4-5",
     cache: OrderedDict | None = None,
 ) -> dict:
     """Translate a raw M expression to a Spark SQL source SELECT.
@@ -147,27 +148,35 @@ async def translate_mquery_to_sql(
         _cache.move_to_end(cache_key)
         return _cache[cache_key]
 
-    response = await _call_llm(_build_user_prompt(table_name, mquery), _SYSTEM_PROMPT, model)
-    if not response.get('content'):
-        result = {'success': False, 'error': response.get('error', 'no response')}
+    response = await _call_llm(
+        _build_user_prompt(table_name, mquery), _SYSTEM_PROMPT, model
+    )
+    if not response.get("content"):
+        result = {"success": False, "error": response.get("error", "no response")}
     else:
-        parsed = _parse_response(response['content'])
-        sql = parsed.get('source_sql')
-        if parsed.get('success') and sql and _validate_source_sql(sql):
+        parsed = _parse_response(response["content"])
+        sql = parsed.get("source_sql")
+        if parsed.get("success") and sql and _validate_source_sql(sql):
             result = {
-                'success': True,
-                'source_sql': sql,
-                'source_table': parsed.get('source_table'),
-                'confidence': parsed.get('confidence', 'medium'),
-                'explanation': parsed.get('explanation', ''),
+                "success": True,
+                "source_sql": sql,
+                "source_table": parsed.get("source_table"),
+                "confidence": parsed.get("confidence", "medium"),
+                "explanation": parsed.get("explanation", ""),
             }
             logger.info(
                 "[MQUERY_LLM] %s → %s (confidence=%s)",
-                table_name, sql[:80], result['confidence'],
+                table_name,
+                sql[:80],
+                result["confidence"],
             )
         else:
-            reason = parsed.get('error') or parsed.get('explanation') or 'not a queryable source'
-            result = {'success': False, 'error': reason}
+            reason = (
+                parsed.get("error")
+                or parsed.get("explanation")
+                or "not a queryable source"
+            )
+            result = {"success": False, "error": reason}
             logger.info("[MQUERY_LLM] Could not translate %s: %s", table_name, reason)
 
     if len(_cache) >= _RUN_CACHE_MAX:
@@ -178,7 +187,7 @@ async def translate_mquery_to_sql(
 
 async def recover_sources_with_llm(
     mquery_entries: list[dict],
-    model: str = 'databricks-claude-sonnet-4-5',
+    model: str = "databricks-claude-sonnet-4-5",
 ) -> tuple[list[dict], int]:
     """Best-effort: rewrite raw-M entries' transpiled_sql to a Spark SQL SELECT.
 
@@ -199,25 +208,34 @@ async def recover_sources_with_llm(
         if not isinstance(entry, dict):
             out.append(entry)
             continue
-        sql = (entry.get('transpiled_sql') or '').strip()
-        table_name = entry.get('table_name') or ''
+        sql = (entry.get("transpiled_sql") or "").strip()
+        table_name = entry.get("table_name") or ""
         if not sql or not table_name or not looks_like_raw_mquery(sql):
             out.append(entry)
             continue
         try:
-            res = await translate_mquery_to_sql(table_name, sql, model=model, cache=cache)
+            res = await translate_mquery_to_sql(
+                table_name, sql, model=model, cache=cache
+            )
         except Exception as e:  # noqa: BLE001 — fail-open
             logger.warning("[MQUERY_LLM] recovery failed for %s: %s", table_name, e)
             out.append(entry)
             continue
-        if res.get('success') and res.get('source_sql'):
-            new_entry = {**entry, 'transpiled_sql': res['source_sql'], 'validation_passed': 'Yes'}
+        if res.get("success") and res.get("source_sql"):
+            new_entry = {
+                **entry,
+                "transpiled_sql": res["source_sql"],
+                "validation_passed": "Yes",
+            }
             out.append(new_entry)
             recovered += 1
         else:
             out.append(entry)
 
     if recovered:
-        logger.info("[MQUERY_LLM] Recovered SQL source for %d/%d raw-M table(s)",
-                    recovered, len(mquery_entries or []))
+        logger.info(
+            "[MQUERY_LLM] Recovered SQL source for %d/%d raw-M table(s)",
+            recovered,
+            len(mquery_entries or []),
+        )
     return out, recovered

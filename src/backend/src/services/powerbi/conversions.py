@@ -6,8 +6,8 @@ Orchestrates conversion repositories and integrates with KPI conversion infrastr
 
 import logging
 import uuid
-from typing import List, Optional, Dict, Any
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status
 
@@ -16,26 +16,23 @@ from src.repositories.conversion_repository import (
     ConversionJobRepository,
     SavedConverterConfigurationRepository,
 )
-from src.schemas.conversion import (
-    # History
+from src.schemas.conversion import (  # History; Jobs; Saved Configs
     ConversionHistoryCreate,
-    ConversionHistoryUpdate,
-    ConversionHistoryResponse,
-    ConversionHistoryListResponse,
     ConversionHistoryFilter,
-    ConversionStatistics,
-    # Jobs
+    ConversionHistoryListResponse,
+    ConversionHistoryResponse,
+    ConversionHistoryUpdate,
     ConversionJobCreate,
-    ConversionJobUpdate,
-    ConversionJobResponse,
     ConversionJobListResponse,
+    ConversionJobResponse,
     ConversionJobStatusUpdate,
-    # Saved Configs
+    ConversionJobUpdate,
+    ConversionStatistics,
     SavedConfigurationCreate,
-    SavedConfigurationUpdate,
-    SavedConfigurationResponse,
-    SavedConfigurationListResponse,
     SavedConfigurationFilter,
+    SavedConfigurationListResponse,
+    SavedConfigurationResponse,
+    SavedConfigurationUpdate,
 )
 from src.utils.user_context import GroupContext
 
@@ -68,8 +65,7 @@ class ConverterService:
     # ===== CONVERSION HISTORY METHODS =====
 
     async def create_history(
-        self,
-        history_data: ConversionHistoryCreate
+        self, history_data: ConversionHistoryCreate
     ) -> ConversionHistoryResponse:
         """
         Create a new conversion history entry.
@@ -83,8 +79,8 @@ class ConverterService:
         # Add group context
         history_dict = history_data.model_dump()
         if self.group_context:
-            history_dict['group_id'] = self.group_context.primary_group_id
-            history_dict['created_by_email'] = self.group_context.user_email
+            history_dict["group_id"] = self.group_context.primary_group_id
+            history_dict["created_by_email"] = self.group_context.user_email
 
         # Create history
         history = await self.history_repo.create(history_dict)
@@ -107,14 +103,12 @@ class ConverterService:
         if not history:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Conversion history {history_id} not found"
+                detail=f"Conversion history {history_id} not found",
             )
         return ConversionHistoryResponse.model_validate(history)
 
     async def update_history(
-        self,
-        history_id: int,
-        update_data: ConversionHistoryUpdate
+        self, history_id: int, update_data: ConversionHistoryUpdate
     ) -> ConversionHistoryResponse:
         """
         Update conversion history.
@@ -133,18 +127,16 @@ class ConverterService:
         if not history:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Conversion history {history_id} not found"
+                detail=f"Conversion history {history_id} not found",
             )
 
         updated = await self.history_repo.update(
-            history_id,
-            update_data.model_dump(exclude_unset=True)
+            history_id, update_data.model_dump(exclude_unset=True)
         )
         return ConversionHistoryResponse.model_validate(updated)
 
     async def list_history(
-        self,
-        filter_params: Optional[ConversionHistoryFilter] = None
+        self, filter_params: Optional[ConversionHistoryFilter] = None
     ) -> ConversionHistoryListResponse:
         """
         List conversion history with filters.
@@ -170,30 +162,28 @@ class ConverterService:
                 filter_params.source_format,
                 filter_params.target_format,
                 group_id=group_id,
-                limit=filter_params.limit
+                limit=filter_params.limit,
             )
         elif filter_params.status == "success":
             history_list = await self.history_repo.find_successful(
-                group_id=group_id,
-                limit=filter_params.limit
+                group_id=group_id, limit=filter_params.limit
             )
         elif filter_params.status == "failed":
             history_list = await self.history_repo.find_failed(
-                group_id=group_id,
-                limit=filter_params.limit
+                group_id=group_id, limit=filter_params.limit
             )
         else:
             history_list = await self.history_repo.find_by_group(
                 group_id=group_id,
                 limit=filter_params.limit,
-                offset=filter_params.offset
+                offset=filter_params.offset,
             )
 
         return ConversionHistoryListResponse(
             history=[ConversionHistoryResponse.model_validate(h) for h in history_list],
             count=len(history_list),
             limit=filter_params.limit,
-            offset=filter_params.offset
+            offset=filter_params.offset,
         )
 
     async def get_statistics(self, days: int = 30) -> ConversionStatistics:
@@ -212,10 +202,7 @@ class ConverterService:
 
     # ===== CONVERSION JOB METHODS =====
 
-    async def create_job(
-        self,
-        job_data: ConversionJobCreate
-    ) -> ConversionJobResponse:
+    async def create_job(self, job_data: ConversionJobCreate) -> ConversionJobResponse:
         """
         Create a new conversion job.
 
@@ -230,11 +217,11 @@ class ConverterService:
 
         # Add group context
         job_dict = job_data.model_dump()
-        job_dict['id'] = job_id
-        job_dict['status'] = 'pending'
+        job_dict["id"] = job_id
+        job_dict["status"] = "pending"
         if self.group_context:
-            job_dict['group_id'] = self.group_context.primary_group_id
-            job_dict['created_by_email'] = self.group_context.user_email
+            job_dict["group_id"] = self.group_context.primary_group_id
+            job_dict["created_by_email"] = self.group_context.user_email
 
         # Create job
         job = await self.job_repo.create(job_dict)
@@ -257,14 +244,12 @@ class ConverterService:
         if not job:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Conversion job {job_id} not found"
+                detail=f"Conversion job {job_id} not found",
             )
         return ConversionJobResponse.model_validate(job)
 
     async def update_job(
-        self,
-        job_id: str,
-        update_data: ConversionJobUpdate
+        self, job_id: str, update_data: ConversionJobUpdate
     ) -> ConversionJobResponse:
         """
         Update conversion job.
@@ -283,19 +268,16 @@ class ConverterService:
         if not job:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Conversion job {job_id} not found"
+                detail=f"Conversion job {job_id} not found",
             )
 
         updated = await self.job_repo.update(
-            job_id,
-            update_data.model_dump(exclude_unset=True)
+            job_id, update_data.model_dump(exclude_unset=True)
         )
         return ConversionJobResponse.model_validate(updated)
 
     async def update_job_status(
-        self,
-        job_id: str,
-        status_update: ConversionJobStatusUpdate
+        self, job_id: str, status_update: ConversionJobStatusUpdate
     ) -> ConversionJobResponse:
         """
         Update job status and progress.
@@ -314,21 +296,19 @@ class ConverterService:
             job_id,
             status=status_update.status,
             progress=status_update.progress,
-            error_message=status_update.error_message
+            error_message=status_update.error_message,
         )
 
         if not updated:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Conversion job {job_id} not found"
+                detail=f"Conversion job {job_id} not found",
             )
 
         return ConversionJobResponse.model_validate(updated)
 
     async def list_jobs(
-        self,
-        status: Optional[str] = None,
-        limit: int = 50
+        self, status: Optional[str] = None, limit: int = 50
     ) -> ConversionJobListResponse:
         """
         List conversion jobs with optional status filter.
@@ -344,9 +324,7 @@ class ConverterService:
 
         if status:
             jobs = await self.job_repo.find_by_status(
-                status=status,
-                group_id=group_id,
-                limit=limit
+                status=status, group_id=group_id, limit=limit
             )
         else:
             # Get all active jobs by default
@@ -354,7 +332,7 @@ class ConverterService:
 
         return ConversionJobListResponse(
             jobs=[ConversionJobResponse.model_validate(j) for j in jobs],
-            count=len(jobs)
+            count=len(jobs),
         )
 
     async def cancel_job(self, job_id: str) -> ConversionJobResponse:
@@ -375,7 +353,7 @@ class ConverterService:
         if not cancelled:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Job {job_id} not found or cannot be cancelled"
+                detail=f"Job {job_id} not found or cannot be cancelled",
             )
 
         return ConversionJobResponse.model_validate(cancelled)
@@ -383,8 +361,7 @@ class ConverterService:
     # ===== SAVED CONFIGURATION METHODS =====
 
     async def create_saved_config(
-        self,
-        config_data: SavedConfigurationCreate
+        self, config_data: SavedConfigurationCreate
     ) -> SavedConfigurationResponse:
         """
         Create a saved converter configuration.
@@ -401,13 +378,13 @@ class ConverterService:
         if not self.group_context or not self.group_context.user_email:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication required to save configurations"
+                detail="Authentication required to save configurations",
             )
 
         # Add group context
         config_dict = config_data.model_dump()
-        config_dict['group_id'] = self.group_context.primary_group_id
-        config_dict['created_by_email'] = self.group_context.user_email
+        config_dict["group_id"] = self.group_context.primary_group_id
+        config_dict["created_by_email"] = self.group_context.user_email
 
         # Create configuration
         config = await self.config_repo.create(config_dict)
@@ -430,14 +407,12 @@ class ConverterService:
         if not config:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Configuration {config_id} not found"
+                detail=f"Configuration {config_id} not found",
             )
         return SavedConfigurationResponse.model_validate(config)
 
     async def update_saved_config(
-        self,
-        config_id: int,
-        update_data: SavedConfigurationUpdate
+        self, config_id: int, update_data: SavedConfigurationUpdate
     ) -> SavedConfigurationResponse:
         """
         Update saved configuration.
@@ -456,19 +431,21 @@ class ConverterService:
         if not config:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Configuration {config_id} not found"
+                detail=f"Configuration {config_id} not found",
             )
 
         # Check ownership (unless admin)
-        if self.group_context and config.created_by_email != self.group_context.user_email:
+        if (
+            self.group_context
+            and config.created_by_email != self.group_context.user_email
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to update this configuration"
+                detail="Not authorized to update this configuration",
             )
 
         updated = await self.config_repo.update(
-            config_id,
-            update_data.model_dump(exclude_unset=True)
+            config_id, update_data.model_dump(exclude_unset=True)
         )
         return SavedConfigurationResponse.model_validate(updated)
 
@@ -489,22 +466,24 @@ class ConverterService:
         if not config:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Configuration {config_id} not found"
+                detail=f"Configuration {config_id} not found",
             )
 
         # Check ownership (unless admin)
-        if self.group_context and config.created_by_email != self.group_context.user_email:
+        if (
+            self.group_context
+            and config.created_by_email != self.group_context.user_email
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to delete this configuration"
+                detail="Not authorized to delete this configuration",
             )
 
         await self.config_repo.delete(config_id)
         return {"message": f"Configuration {config_id} deleted successfully"}
 
     async def list_saved_configs(
-        self,
-        filter_params: Optional[SavedConfigurationFilter] = None
+        self, filter_params: Optional[SavedConfigurationFilter] = None
     ) -> SavedConfigurationListResponse:
         """
         List saved configurations with filters.
@@ -530,29 +509,30 @@ class ConverterService:
                 source_format=filter_params.source_format,
                 target_format=filter_params.target_format,
                 group_id=group_id,
-                user_email=user_email
+                user_email=user_email,
             )
         elif filter_params.search:
             configs = await self.config_repo.search_by_name(
                 search_term=filter_params.search,
                 group_id=group_id,
-                user_email=user_email
+                user_email=user_email,
             )
         elif user_email:
             configs = await self.config_repo.find_by_user(
-                created_by_email=user_email,
-                group_id=group_id
+                created_by_email=user_email, group_id=group_id
             )
         else:
             # Return empty list if no user context
             configs = []
 
         # Apply limit
-        configs = configs[:filter_params.limit]
+        configs = configs[: filter_params.limit]
 
         return SavedConfigurationListResponse(
-            configurations=[SavedConfigurationResponse.model_validate(c) for c in configs],
-            count=len(configs)
+            configurations=[
+                SavedConfigurationResponse.model_validate(c) for c in configs
+            ],
+            count=len(configs),
         )
 
     async def use_saved_config(self, config_id: int) -> SavedConfigurationResponse:
@@ -573,7 +553,7 @@ class ConverterService:
         if not updated:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Configuration {config_id} not found"
+                detail=f"Configuration {config_id} not found",
             )
 
         return SavedConfigurationResponse.model_validate(updated)

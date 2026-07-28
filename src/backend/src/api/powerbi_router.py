@@ -1,29 +1,29 @@
-from typing import Dict, List, Annotated
 import logging
+from typing import Annotated, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError
+from src.core.permissions import is_workspace_admin
 from src.schemas.powerbi_config import (
+    DAXQueryRequest,
+    DAXQueryResponse,
     PowerBIConfigCreate,
     PowerBIConfigResponse,
-    DAXQueryRequest,
-    DAXQueryResponse
 )
 from src.schemas.powerbi_context_config import (
     PowerBIBusinessMappingCreate,
-    PowerBIBusinessMappingUpdate,
     PowerBIBusinessMappingResponse,
-    PowerBIFieldSynonymCreate,
-    PowerBIFieldSynonymUpdate,
-    PowerBIFieldSynonymResponse,
+    PowerBIBusinessMappingUpdate,
     PowerBIContextConfigBulkResponse,
-    PowerBIContextConfigDict
+    PowerBIContextConfigDict,
+    PowerBIFieldSynonymCreate,
+    PowerBIFieldSynonymResponse,
+    PowerBIFieldSynonymUpdate,
 )
-from src.services.powerbi.service import PowerBIService
 from src.services.powerbi.context_config import PowerBIContextConfigService
-from src.core.dependencies import SessionDep, GroupContextDep
-from src.core.permissions import is_workspace_admin
+from src.services.powerbi.service import PowerBIService
 
 router = APIRouter(
     prefix="/powerbi",
@@ -36,8 +36,7 @@ logger = logging.getLogger(__name__)
 
 # Dependency to get PowerBIService
 def get_powerbi_service(
-    session: SessionDep,
-    group_context: GroupContextDep
+    session: SessionDep, group_context: GroupContextDep
 ) -> PowerBIService:
     """
     Get a properly initialized PowerBIService instance with group context.
@@ -64,8 +63,7 @@ PowerBIServiceDep = Annotated[PowerBIService, Depends(get_powerbi_service)]
 
 # Dependency to get PowerBIContextConfigService
 def get_powerbi_context_config_service(
-    session: SessionDep,
-    group_context: GroupContextDep
+    session: SessionDep, group_context: GroupContextDep
 ) -> PowerBIContextConfigService:
     """
     Get a properly initialized PowerBIContextConfigService instance with group context.
@@ -89,7 +87,9 @@ def get_powerbi_context_config_service(
 
 
 # Type alias for cleaner function signatures
-PowerBIContextConfigServiceDep = Annotated[PowerBIContextConfigService, Depends(get_powerbi_context_config_service)]
+PowerBIContextConfigServiceDep = Annotated[
+    PowerBIContextConfigService, Depends(get_powerbi_context_config_service)
+]
 
 
 @router.post("/config", response_model=Dict)
@@ -114,7 +114,7 @@ async def set_powerbi_config(
     if not is_workspace_admin(group_context):
         raise HTTPException(
             status_code=403,
-            detail="Only workspace admins can set Power BI configuration"
+            detail="Only workspace admins can set Power BI configuration",
         )
 
     try:
@@ -126,8 +126,8 @@ async def set_powerbi_config(
 
         # Create configuration data
         config_data = request.model_dump()
-        config_data['group_id'] = group_id
-        config_data['created_by_email'] = created_by_email
+        config_data["group_id"] = group_id
+        config_data["created_by_email"] = created_by_email
 
         # Create configuration using repository
         config = await service.repository.create_config(config_data)
@@ -141,11 +141,13 @@ async def set_powerbi_config(
                 "semantic_model_id": config.semantic_model_id,
                 "is_enabled": config.is_enabled,
                 "is_active": config.is_active,
-            }
+            },
         }
     except Exception as e:
         logger.error(f"Error setting Power BI configuration: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error setting Power BI configuration: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error setting Power BI configuration: {str(e)}"
+        )
 
 
 @router.get("/config", response_model=PowerBIConfigResponse)
@@ -172,7 +174,7 @@ async def get_powerbi_config(
                 client_id="",
                 workspace_id=None,
                 semantic_model_id=None,
-                enabled=False
+                enabled=False,
             )
 
         return PowerBIConfigResponse(
@@ -180,13 +182,15 @@ async def get_powerbi_config(
             client_id=config.client_id,
             workspace_id=config.workspace_id,
             semantic_model_id=config.semantic_model_id,
-            enabled=config.is_enabled
+            enabled=config.is_enabled,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting Power BI configuration: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error getting Power BI configuration: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error getting Power BI configuration: {str(e)}"
+        )
 
 
 @router.post("/query", response_model=DAXQueryResponse)
@@ -213,7 +217,9 @@ async def execute_dax_query(
         raise
     except Exception as e:
         logger.error(f"Error executing DAX query: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error executing DAX query: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error executing DAX query: {str(e)}"
+        )
 
 
 @router.get("/status", response_model=Dict)
@@ -238,7 +244,7 @@ async def check_powerbi_status(
             return {
                 "configured": False,
                 "enabled": False,
-                "message": "Power BI is not configured. Please configure connection settings."
+                "message": "Power BI is not configured. Please configure connection settings.",
             }
 
         return {
@@ -246,16 +252,26 @@ async def check_powerbi_status(
             "enabled": config.is_enabled,
             "workspace_id": config.workspace_id,
             "semantic_model_id": config.semantic_model_id,
-            "message": "Power BI is configured and ready" if config.is_enabled else "Power BI is configured but disabled"
+            "message": (
+                "Power BI is configured and ready"
+                if config.is_enabled
+                else "Power BI is configured but disabled"
+            ),
         }
     except Exception as e:
         logger.error(f"Error checking Power BI status: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error checking Power BI status: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error checking Power BI status: {str(e)}"
+        )
 
 
 # ===== Context Configuration Endpoints =====
 
-@router.post("/models/{semantic_model_id}/business-mappings", response_model=PowerBIBusinessMappingResponse)
+
+@router.post(
+    "/models/{semantic_model_id}/business-mappings",
+    response_model=PowerBIBusinessMappingResponse,
+)
 async def create_business_mapping(
     semantic_model_id: str,
     mapping_data: PowerBIBusinessMappingCreate,
@@ -276,7 +292,10 @@ async def create_business_mapping(
     return await service.create_business_mapping(semantic_model_id, mapping_data)
 
 
-@router.get("/models/{semantic_model_id}/business-mappings", response_model=List[PowerBIBusinessMappingResponse])
+@router.get(
+    "/models/{semantic_model_id}/business-mappings",
+    response_model=List[PowerBIBusinessMappingResponse],
+)
 async def get_business_mappings(
     semantic_model_id: str,
     service: PowerBIContextConfigServiceDep,
@@ -294,7 +313,9 @@ async def get_business_mappings(
     return await service.get_business_mappings(semantic_model_id)
 
 
-@router.put("/business-mappings/{mapping_id}", response_model=PowerBIBusinessMappingResponse)
+@router.put(
+    "/business-mappings/{mapping_id}", response_model=PowerBIBusinessMappingResponse
+)
 async def update_business_mapping(
     mapping_id: int,
     mapping_data: PowerBIBusinessMappingUpdate,
@@ -333,7 +354,10 @@ async def delete_business_mapping(
     return {"message": "Business mapping deleted successfully"}
 
 
-@router.post("/models/{semantic_model_id}/field-synonyms", response_model=PowerBIFieldSynonymResponse)
+@router.post(
+    "/models/{semantic_model_id}/field-synonyms",
+    response_model=PowerBIFieldSynonymResponse,
+)
 async def create_field_synonym(
     semantic_model_id: str,
     synonym_data: PowerBIFieldSynonymCreate,
@@ -354,7 +378,10 @@ async def create_field_synonym(
     return await service.create_field_synonym(semantic_model_id, synonym_data)
 
 
-@router.get("/models/{semantic_model_id}/field-synonyms", response_model=List[PowerBIFieldSynonymResponse])
+@router.get(
+    "/models/{semantic_model_id}/field-synonyms",
+    response_model=List[PowerBIFieldSynonymResponse],
+)
 async def get_field_synonyms(
     semantic_model_id: str,
     service: PowerBIContextConfigServiceDep,
@@ -411,7 +438,10 @@ async def delete_field_synonym(
     return {"message": "Field synonym deleted successfully"}
 
 
-@router.get("/models/{semantic_model_id}/context-config", response_model=PowerBIContextConfigBulkResponse)
+@router.get(
+    "/models/{semantic_model_id}/context-config",
+    response_model=PowerBIContextConfigBulkResponse,
+)
 async def get_all_context_config(
     semantic_model_id: str,
     service: PowerBIContextConfigServiceDep,
@@ -429,7 +459,10 @@ async def get_all_context_config(
     return await service.get_all_context_config(semantic_model_id)
 
 
-@router.get("/models/{semantic_model_id}/context-config/dict", response_model=PowerBIContextConfigDict)
+@router.get(
+    "/models/{semantic_model_id}/context-config/dict",
+    response_model=PowerBIContextConfigDict,
+)
 async def get_context_config_dict(
     semantic_model_id: str,
     service: PowerBIContextConfigServiceDep,

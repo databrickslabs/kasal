@@ -6,21 +6,25 @@ and TableFromRowsConverter (static data table conversion to SQL).
 """
 
 import pytest
+
 from src.services.converters.formats.mquery.models import (
-    ExpressionType,
     ColumnDataType,
+    ExpressionType,
     MQueryExpression,
     PowerBITable,
     StorageMode,
     TableColumn,
     TableMeasure,
 )
-from src.services.converters.formats.mquery.parser import MQueryParser, TableFromRowsConverter
-
+from src.services.converters.formats.mquery.parser import (
+    MQueryParser,
+    TableFromRowsConverter,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def parser():
@@ -36,6 +40,7 @@ def from_rows_converter():
 # MQueryParser.detect_expression_type tests
 # ---------------------------------------------------------------------------
 
+
 def test_detect_native_query(parser):
     """Value.NativeQuery pattern is detected correctly."""
     expr = 'let Source = Value.NativeQuery(Sql.Database("server", "db"), "SELECT * FROM t") in Source'
@@ -50,7 +55,9 @@ def test_detect_databricks_catalog_multicloud(parser):
 
 def test_detect_databricks_catalog(parser):
     """Databricks.Catalogs (non-multicloud) is also detected."""
-    expr = 'let Source = Databricks.Catalogs("https://workspace.databricks.com") in Source'
+    expr = (
+        'let Source = Databricks.Catalogs("https://workspace.databricks.com") in Source'
+    )
     assert parser.detect_expression_type(expr) == ExpressionType.DATABRICKS_CATALOG
 
 
@@ -68,7 +75,9 @@ def test_detect_table_from_rows(parser):
 
 def test_detect_snowflake(parser):
     """Snowflake.Databases pattern is detected correctly."""
-    expr = 'let Source = Snowflake.Databases("myaccount.snowflakecomputing.com") in Source'
+    expr = (
+        'let Source = Snowflake.Databases("myaccount.snowflakecomputing.com") in Source'
+    )
     assert parser.detect_expression_type(expr) == ExpressionType.SNOWFLAKE
 
 
@@ -93,6 +102,7 @@ def test_detect_other(parser):
 # ---------------------------------------------------------------------------
 # MQueryParser.extract_databricks_catalog_info tests
 # ---------------------------------------------------------------------------
+
 
 def test_extract_databricks_catalog_info_full(parser):
     """Workspace URL and warehouse path are extracted; catalog via [Catalog=...] notation."""
@@ -124,6 +134,7 @@ def test_extract_databricks_catalog_info_missing_fields(parser):
 # MQueryParser.extract_sql_database_info tests
 # ---------------------------------------------------------------------------
 
+
 def test_extract_sql_database_info(parser):
     """SQL Server and database are extracted from Sql.Database expression."""
     expr = 'Sql.Database("myserver.database.windows.net", "SalesDB")'
@@ -142,6 +153,7 @@ def test_extract_sql_database_info_no_match(parser):
 # ---------------------------------------------------------------------------
 # MQueryParser.parse_expression tests
 # ---------------------------------------------------------------------------
+
 
 def test_parse_expression_sql_database(parser):
     """parse_expression fills server and database for SQL_DATABASE type."""
@@ -189,6 +201,7 @@ def test_parse_expression_other_type(parser):
 # MQueryParser.parse_table tests
 # ---------------------------------------------------------------------------
 
+
 def test_parse_table_updates_expressions(parser):
     """parse_table replaces raw expressions with typed parsed ones."""
     raw_expr = MQueryExpression(
@@ -211,6 +224,7 @@ def test_parse_table_updates_expressions(parser):
 # MQueryParser.get_expression_summary tests
 # ---------------------------------------------------------------------------
 
+
 def test_get_expression_summary(parser):
     """get_expression_summary returns a dict with expected keys."""
     expr = parser.parse_expression('Sql.Database("srv", "db")')
@@ -224,6 +238,7 @@ def test_get_expression_summary(parser):
 # ---------------------------------------------------------------------------
 # TableFromRowsConverter tests
 # ---------------------------------------------------------------------------
+
 
 def test_is_table_from_rows_true(from_rows_converter):
     """is_table_from_rows returns True for matching expression."""
@@ -239,14 +254,14 @@ def test_is_table_from_rows_false(from_rows_converter):
 
 def test_extract_rows_basic(from_rows_converter):
     """extract_rows correctly parses simple quoted string rows."""
-    expr = '''
+    expr = """
     let
       Source = Table.FromRows(
         { {"Alice", "30"}, {"Bob", "25"} },
         type table [Name = text, Age = text]
       )
     in Source
-    '''
+    """
     rows = from_rows_converter.extract_rows(expr)
     assert len(rows) == 2
     assert rows[0] == ("Alice", "30")
@@ -261,7 +276,7 @@ def test_extract_rows_no_match(from_rows_converter):
 
 def test_extract_column_definitions(from_rows_converter):
     """extract_column_definitions parses type table correctly."""
-    expr = 'type table [Name = text, Age = number, Active = logical]'
+    expr = "type table [Name = text, Age = number, Active = logical]"
     cols = from_rows_converter.extract_column_definitions(expr)
     assert len(cols) >= 2
     names = [c[0] for c in cols]
@@ -284,14 +299,14 @@ def test_mquery_type_to_sql_unknown_defaults_to_string(from_rows_converter):
 
 def test_convert_to_sql_full(from_rows_converter):
     """convert_to_sql generates valid CREATE VIEW with VALUES."""
-    expr = '''
+    expr = """
     let
       Source = Table.FromRows(
         { {"Red", "FF0000"}, {"Blue", "0000FF"} },
         type table [ColorName = text, HexCode = text]
       )
     in Source
-    '''
+    """
     sql = from_rows_converter.convert_to_sql(expr, "Colors")
     assert sql is not None
     assert "CREATE OR REPLACE VIEW" in sql
@@ -313,7 +328,9 @@ def test_convert_to_sql_uses_schema_columns_fallback(from_rows_converter):
         {"name": "id", "dataType": "Int64"},
         {"name": "name", "dataType": "String"},
     ]
-    sql = from_rows_converter.convert_to_sql(expr, "Fruit", columns_from_schema=cols_from_schema)
+    sql = from_rows_converter.convert_to_sql(
+        expr, "Fruit", columns_from_schema=cols_from_schema
+    )
     assert sql is not None
     assert "id" in sql or "col0" in sql
 
@@ -322,8 +339,15 @@ def test_convert_table_success(from_rows_converter):
     """convert_table returns dict with sql and metadata."""
     table_data = {
         "name": "StatusCodes",
-        "columns": [{"name": "Code", "dataType": "String"}, {"name": "Label", "dataType": "String"}],
-        "source": [{"expression": 'Table.FromRows( { {"A", "Active"}, {"I", "Inactive"} }, type table [Code = text, Label = text])'}],
+        "columns": [
+            {"name": "Code", "dataType": "String"},
+            {"name": "Label", "dataType": "String"},
+        ],
+        "source": [
+            {
+                "expression": 'Table.FromRows( { {"A", "Active"}, {"I", "Inactive"} }, type table [Code = text, Label = text])'
+            }
+        ],
     }
     result = from_rows_converter.convert_table(table_data)
     assert result is not None
@@ -340,8 +364,10 @@ def test_convert_table_no_source_returns_none(from_rows_converter):
 
 def test_convert_table_wrong_expression_type_returns_none(from_rows_converter):
     """convert_table returns None when expression is not Table.FromRows."""
-    result = from_rows_converter.convert_table({
-        "name": "SqlTable",
-        "source": [{"expression": 'Sql.Database("srv", "db")'}],
-    })
+    result = from_rows_converter.convert_table(
+        {
+            "name": "SqlTable",
+            "source": [{"expression": 'Sql.Database("srv", "db")'}],
+        }
+    )
     assert result is None

@@ -3,21 +3,22 @@ Unit tests for PowerBISemanticModelCacheRepository.
 
 Tests cache retrieval, creation, updating, and cleanup operations.
 """
-import pytest
+
 from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
 from src.repositories.powerbi_semantic_model_cache_repository import (
     PowerBISemanticModelCacheRepository,
 )
-from src.models.powerbi_semantic_model_cache import PowerBISemanticModelCache
-
 
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
 
 def _make_cache(
     id=1,
@@ -36,7 +37,7 @@ def _make_cache(
     obj.report_id = report_id
     obj.cached_date = cached_date or date.today()
     obj.cache_data = cache_data or {"measures": [], "schema": {}}
-    obj.is_valid_for_today.return_value = (obj.cached_date == date.today())
+    obj.is_valid_for_today.return_value = obj.cached_date == date.today()
     return obj
 
 
@@ -62,6 +63,7 @@ def _scalar_list_result(items):
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def mock_session():
     session = AsyncMock(spec=AsyncSession)
@@ -83,6 +85,7 @@ def repo(mock_session):
 # Initialisation
 # ---------------------------------------------------------------------------
 
+
 class TestRepositoryInit:
     def test_session_stored(self, mock_session):
         r = PowerBISemanticModelCacheRepository(session=mock_session)
@@ -92,6 +95,7 @@ class TestRepositoryInit:
 # ---------------------------------------------------------------------------
 # get_cache_for_today
 # ---------------------------------------------------------------------------
+
 
 class TestGetCacheForToday:
     @pytest.mark.asyncio
@@ -173,6 +177,7 @@ class TestGetCacheForToday:
 # create_cache
 # ---------------------------------------------------------------------------
 
+
 class TestCreateCache:
     @pytest.mark.asyncio
     async def test_create_adds_and_commits(self, repo, mock_session):
@@ -237,6 +242,7 @@ class TestCreateCache:
 # update_cache
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateCache:
     @pytest.mark.asyncio
     async def test_update_refreshes_and_commits(self, repo, mock_session):
@@ -265,12 +271,15 @@ class TestUpdateCache:
 # delete_old_caches
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteOldCaches:
     @pytest.mark.asyncio
     async def test_deletes_old_entries_and_returns_count(self, repo, mock_session):
         old_cache1 = _make_cache(id=1)
         old_cache2 = _make_cache(id=2)
-        mock_session.execute.return_value = _scalar_list_result([old_cache1, old_cache2])
+        mock_session.execute.return_value = _scalar_list_result(
+            [old_cache1, old_cache2]
+        )
 
         count = await repo.delete_old_caches(days_to_keep=7)
 

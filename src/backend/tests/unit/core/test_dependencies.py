@@ -4,31 +4,33 @@ Unit tests for dependencies module.
 Tests the functionality of dependency injection factories and
 group context extraction.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, Mock
-from typing import Optional
 
-from fastapi import Request, Header
+from typing import Optional
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
+from fastapi import Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.base_repository import BaseRepository
+from src.core.base_service import BaseService
 from src.core.dependencies import (
+    GroupContextDep,
+    SessionDep,
     get_group_context,
     get_repository,
     get_service,
-    GroupContextDep,
-    SessionDep
 )
-from src.core.base_repository import BaseRepository
-from src.core.base_service import BaseService
 from src.db.base import Base
-from src.utils.user_context import GroupContext
-from src.services.execution.logs.llm_log_service import LLMLogService
 from src.repositories.log_repository import LLMLogRepository
+from src.services.execution.logs.llm_log_service import LLMLogService
+from src.utils.user_context import GroupContext
 
 
 # Mock model class
 class MockModel:
     """Mock model that doesn't inherit from Base to avoid SQLAlchemy issues."""
+
     __tablename__ = "mock_model"
     __name__ = "MockModel"
 
@@ -44,7 +46,7 @@ class MockRepository(BaseRepository):
 class MockService(BaseService):
     model_class = MockModel
     repository_class = MockRepository
-    
+
     def __init__(self, session, repository_class=None, model_class=None):
         self.session = session
         self.repository_class = repository_class or self.repository_class
@@ -95,7 +97,7 @@ class TestGetGroupContext:
         }
 
         # Call get_group_context - should return cached value without DB query
-        with patch('src.utils.user_context.GroupContext.from_email') as mock_from_email:
+        with patch("src.utils.user_context.GroupContext.from_email") as mock_from_email:
             result = await get_group_context(
                 request=mock_request,
                 x_forwarded_email=None,
@@ -104,7 +106,7 @@ class TestGetGroupContext:
                 x_auth_request_user=None,
                 x_auth_request_access_token=None,
                 x_group_id=None,
-                x_group_domain=None
+                x_group_domain=None,
             )
 
             # Should NOT call from_email - should use cached value
@@ -112,7 +114,9 @@ class TestGetGroupContext:
             assert result == mock_group_context
 
     @pytest.mark.asyncio
-    async def test_get_group_context_request_scoped_cache_miss_then_set(self, mock_request):
+    async def test_get_group_context_request_scoped_cache_miss_then_set(
+        self, mock_request
+    ):
         """Test that GroupContext is cached in request state after first fetch."""
         mock_group_context = MagicMock(spec=GroupContext)
         mock_group_context.primary_group_id = "new-group"
@@ -122,8 +126,10 @@ class TestGetGroupContext:
         # Setup mock request without cache
         mock_request.state = MagicMock(spec=[])  # No _group_context_cache attribute
 
-        with patch('src.utils.user_context.GroupContext.from_email',
-                   return_value=mock_group_context) as mock_from_email:
+        with patch(
+            "src.utils.user_context.GroupContext.from_email",
+            return_value=mock_group_context,
+        ) as mock_from_email:
             result = await get_group_context(
                 request=mock_request,
                 x_forwarded_email=None,
@@ -132,7 +138,7 @@ class TestGetGroupContext:
                 x_auth_request_user=None,
                 x_auth_request_access_token=None,
                 x_group_id=None,
-                x_group_domain=None
+                x_group_domain=None,
             )
 
             # Should call from_email for cache miss
@@ -140,9 +146,11 @@ class TestGetGroupContext:
             assert result == mock_group_context
 
             # Verify cache was set on request.state
-            assert hasattr(mock_request.state, '_group_context_cache')
+            assert hasattr(mock_request.state, "_group_context_cache")
             cache_key = "group_context:new@example.com:None"
-            assert mock_request.state._group_context_cache[cache_key] == mock_group_context
+            assert (
+                mock_request.state._group_context_cache[cache_key] == mock_group_context
+            )
 
     @pytest.mark.asyncio
     async def test_get_group_context_cache_key_includes_group_id(self, mock_request):
@@ -159,8 +167,10 @@ class TestGetGroupContext:
         }
 
         # Request with different group_id should miss cache
-        with patch('src.utils.user_context.GroupContext.from_email',
-                   return_value=mock_group_context2) as mock_from_email:
+        with patch(
+            "src.utils.user_context.GroupContext.from_email",
+            return_value=mock_group_context2,
+        ) as mock_from_email:
             result = await get_group_context(
                 request=mock_request,
                 x_forwarded_email=None,
@@ -169,7 +179,7 @@ class TestGetGroupContext:
                 x_auth_request_user=None,
                 x_auth_request_access_token=None,
                 x_group_id="group-2",  # Different group
-                x_group_domain=None
+                x_group_domain=None,
             )
 
             # Should call from_email because group_id is different
@@ -191,8 +201,10 @@ class TestGetGroupContext:
         }
 
         # Request for user2 should miss and fetch
-        with patch('src.utils.user_context.GroupContext.from_email',
-                   return_value=mock_group_context2) as mock_from_email:
+        with patch(
+            "src.utils.user_context.GroupContext.from_email",
+            return_value=mock_group_context2,
+        ) as mock_from_email:
             result = await get_group_context(
                 request=mock_request,
                 x_forwarded_email=None,
@@ -201,7 +213,7 @@ class TestGetGroupContext:
                 x_auth_request_user=None,
                 x_auth_request_access_token=None,
                 x_group_id=None,
-                x_group_domain=None
+                x_group_domain=None,
             )
 
             mock_from_email.assert_called_once()
@@ -219,8 +231,10 @@ class TestGetGroupContext:
         # Ensure request.state has no _group_context_cache so cache logic is bypassed
         mock_request.state = MagicMock(spec=[])
 
-        with patch('src.utils.user_context.GroupContext.from_email',
-                   return_value=mock_group_context) as mock_from_email:
+        with patch(
+            "src.utils.user_context.GroupContext.from_email",
+            return_value=mock_group_context,
+        ) as mock_from_email:
             result = await get_group_context(
                 request=mock_request,
                 x_forwarded_email="old@example.com",
@@ -229,17 +243,15 @@ class TestGetGroupContext:
                 x_auth_request_user="testuser",
                 x_auth_request_access_token="auth-token",
                 x_group_id=None,
-                x_group_domain=None
+                x_group_domain=None,
             )
-            
+
             # Verify OAuth2-Proxy headers are preferred
             mock_from_email.assert_called_once_with(
-                email="test@example.com",
-                access_token="auth-token",
-                group_id=None
+                email="test@example.com", access_token="auth-token", group_id=None
             )
             assert result == mock_group_context
-    
+
     @pytest.mark.asyncio
     async def test_get_group_context_with_forwarded_email_fallback(self, mock_request):
         """Test group context extraction with Databricks Apps headers as fallback."""
@@ -252,8 +264,10 @@ class TestGetGroupContext:
         # Ensure request.state has no _group_context_cache so cache logic is bypassed
         mock_request.state = MagicMock(spec=[])
 
-        with patch('src.utils.user_context.GroupContext.from_email',
-                   return_value=mock_group_context) as mock_from_email:
+        with patch(
+            "src.utils.user_context.GroupContext.from_email",
+            return_value=mock_group_context,
+        ) as mock_from_email:
             result = await get_group_context(
                 request=mock_request,
                 x_forwarded_email="fallback@example.com",
@@ -262,29 +276,29 @@ class TestGetGroupContext:
                 x_auth_request_user=None,
                 x_auth_request_access_token=None,
                 x_group_id=None,
-                x_group_domain=None
+                x_group_domain=None,
             )
-            
+
             # Verify fallback headers are used
             mock_from_email.assert_called_once_with(
                 email="fallback@example.com",
                 access_token="fallback-token",
-                group_id=None
+                group_id=None,
             )
             assert result == mock_group_context
-    
+
     @pytest.mark.asyncio
     async def test_get_group_context_no_email(self, mock_request):
         """Test group context when no email headers are provided."""
         # Ensure request.state has no _group_context_cache so cache logic is bypassed
         mock_request.state = MagicMock(spec=[])
 
-        with patch('src.core.dependencies.GroupContext') as mock_group_context_class:
+        with patch("src.core.dependencies.GroupContext") as mock_group_context_class:
             mock_empty_context = MagicMock(spec=GroupContext)
             mock_group_context_class.return_value = mock_empty_context
 
             # Mock settings import inside the function to avoid admin@admin.com fallback
-            with patch('src.config.settings.settings') as mock_settings:
+            with patch("src.config.settings.settings") as mock_settings:
                 mock_settings.DEBUG_MODE = False
 
                 result = await get_group_context(
@@ -295,13 +309,13 @@ class TestGetGroupContext:
                     x_auth_request_user=None,
                     x_auth_request_access_token=None,
                     x_group_id=None,
-                    x_group_domain=None
+                    x_group_domain=None,
                 )
 
                 # Verify empty context is returned
                 mock_group_context_class.assert_called_once_with()
                 assert result == mock_empty_context
-    
+
     @pytest.mark.asyncio
     async def test_get_group_context_with_partial_headers(self, mock_request):
         """Test group context with email but no access token."""
@@ -314,8 +328,10 @@ class TestGetGroupContext:
         # Ensure request.state has no _group_context_cache so cache logic is bypassed
         mock_request.state = MagicMock(spec=[])
 
-        with patch('src.utils.user_context.GroupContext.from_email',
-                   return_value=mock_group_context) as mock_from_email:
+        with patch(
+            "src.utils.user_context.GroupContext.from_email",
+            return_value=mock_group_context,
+        ) as mock_from_email:
             result = await get_group_context(
                 request=mock_request,
                 x_forwarded_email=None,
@@ -324,72 +340,72 @@ class TestGetGroupContext:
                 x_auth_request_user=None,
                 x_auth_request_access_token=None,
                 x_group_id=None,
-                x_group_domain=None
+                x_group_domain=None,
             )
-            
+
             # Verify called with email only
             mock_from_email.assert_called_once_with(
-                email="partial@example.com",
-                access_token=None,
-                group_id=None
+                email="partial@example.com", access_token=None, group_id=None
             )
             assert result == mock_group_context
 
 
 class TestGetRepository:
     """Test cases for get_repository factory."""
-    
+
     def test_get_repository_returns_callable(self):
         """Test that get_repository returns a callable dependency."""
         repo_factory = get_repository(MockRepository, MockModel)
-        
+
         assert callable(repo_factory)
-    
+
     def test_get_repository_creates_instance(self, mock_session):
         """Test that the factory creates a repository instance."""
         repo_factory = get_repository(MockRepository, MockModel)
-        
+
         # Call the factory with a session
         repository = repo_factory(mock_session)
-        
+
         assert isinstance(repository, MockRepository)
         assert repository.model_class == MockModel
         assert repository.session == mock_session
-    
+
     def test_get_repository_with_different_classes(self, mock_session):
         """Test factory with different repository and model classes."""
+
         # Create another mock model
         class AnotherModel:
             __tablename__ = "another_model"
             __name__ = "AnotherModel"
-        
+
         repo_factory = get_repository(MockRepository, AnotherModel)
         repository = repo_factory(mock_session)
-        
+
         assert repository.model_class == AnotherModel
 
 
 class TestGetService:
     """Test cases for get_service factory."""
-    
+
     def test_get_service_returns_callable(self):
         """Test that get_service returns a callable dependency."""
         service_factory = get_service(MockService, MockRepository, MockModel)
-        
+
         assert callable(service_factory)
-    
+
     def test_get_service_creates_simple_instance(self, mock_session):
         """Test service creation with session-only constructor."""
         service_factory = get_service(SimpleService, MockRepository, MockModel)
-        
+
         # Call the factory with a session
         service = service_factory(mock_session)
-        
+
         assert isinstance(service, SimpleService)
         assert service.session == mock_session
-    
+
     def test_get_service_creates_complex_instance(self, mock_session):
         """Test service creation that falls back to complex constructor."""
+
         # Mock a service that raises exception on simple init
         class ComplexService(BaseService):
             def __init__(self, session, repository_class=None, model_class=None):
@@ -398,45 +414,48 @@ class TestGetService:
                 self.session = session
                 self.repository_class = repository_class
                 self.model_class = model_class
-        
+
         service_factory = get_service(ComplexService, MockRepository, MockModel)
-        
+
         # Patch the first service creation to fail
-        with patch.object(ComplexService, '__init__', side_effect=[
-            TypeError("Repository and model required"),
-            None  # Second call succeeds
-        ]) as mock_init:
+        with patch.object(
+            ComplexService,
+            "__init__",
+            side_effect=[
+                TypeError("Repository and model required"),
+                None,  # Second call succeeds
+            ],
+        ) as mock_init:
             service = service_factory(mock_session)
-            
+
             # Verify it was called twice - once simple, once with full params
             assert mock_init.call_count == 2
-    
+
     def test_get_service_handles_complete_failure(self, mock_session):
         """Test service creation when both attempts fail."""
         service_factory = get_service(BrokenService, MockRepository, MockModel)
-        
+
         with pytest.raises(ValueError, match="Service initialization failed"):
             service_factory(mock_session)
-    
+
     def test_get_service_logs_error(self, mock_session, caplog):
         """Test that service creation errors are logged."""
+
         # Create a service that fails on all attempts
         class FailingService(BaseService):
             attempt = 0
-            
+
             def __init__(self, *args, **kwargs):
                 FailingService.attempt += 1
                 if FailingService.attempt == 1:
                     raise TypeError("First attempt failed")
                 else:
                     raise RuntimeError("Second attempt failed")
-        
+
         service_factory = get_service(FailingService, MockRepository, MockModel)
-        
+
         with pytest.raises(RuntimeError, match="Second attempt failed"):
             service_factory(mock_session)
-        
+
         # Check that error was logged
         assert "Error creating service: Second attempt failed" in caplog.text
-
-

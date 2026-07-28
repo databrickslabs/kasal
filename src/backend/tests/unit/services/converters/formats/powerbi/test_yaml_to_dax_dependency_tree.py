@@ -5,8 +5,9 @@ Targets uncovered lines: 86-88, 98-100, 219-249, 253-271, 275-280, 361-366, 401-
 """
 
 import pytest
-from src.services.converters.formats.powerbi.yaml_to_dax import DAXGenerator
+
 from src.services.converters.base.models import KPI, KPIDefinition
+from src.services.converters.formats.powerbi.yaml_to_dax import DAXGenerator
 
 
 def make_definition(kpis=None, structures=None, default_variables=None):
@@ -117,9 +118,7 @@ class TestConvertFilterToDAX:
 
     def test_between_filter(self, generator):
         """Line ~246-252: BETWEEN conversion."""
-        result = generator.convert_filter_to_dax(
-            "Amount BETWEEN 100 AND 500", "Sales"
-        )
+        result = generator.convert_filter_to_dax("Amount BETWEEN 100 AND 500", "Sales")
         assert ">=" in result
         assert "<=" in result
         assert "Sales[Amount]" in result
@@ -181,9 +180,7 @@ class TestValidateDaxSyntax:
         assert "Unbalanced parentheses" in msg
 
     def test_invalid_not_in_syntax(self, generator):
-        is_valid, msg = generator.validate_dax_syntax(
-            "SUM(Sales[Amount] NOT IN {1,2})"
-        )
+        is_valid, msg = generator.validate_dax_syntax("SUM(Sales[Amount] NOT IN {1,2})")
         assert is_valid is False
         assert "NOT IN" in msg
 
@@ -201,7 +198,7 @@ class TestValidateDaxSyntax:
         assert is_valid is False
 
     def test_valid_calculate_with_filter(self, generator):
-        formula = "CALCULATE(SUM(Sales[Amount]), FILTER(Sales, Sales[Region] = \"West\"))"
+        formula = 'CALCULATE(SUM(Sales[Amount]), FILTER(Sales, Sales[Region] = "West"))'
         is_valid, msg = generator.validate_dax_syntax(formula)
         assert is_valid is True
 
@@ -260,27 +257,20 @@ class TestProcessDefinitionAndDependencyTree:
     def test_add_filters_to_dax_with_filters(self, generator):
         """Lines 188-215: _add_filters_to_dax with actual filters."""
         result = generator._add_filters_to_dax(
-            "SUM(Sales[Amount])",
-            ["Region = 'West'"],
-            "Sales",
-            None
+            "SUM(Sales[Amount])", ["Region = 'West'"], "Sales", None
         )
         assert "CALCULATE" in result
         assert "FILTER" in result
 
     def test_add_filters_to_dax_no_filters(self, generator):
         """_add_filters_to_dax with no filters returns base formula."""
-        result = generator._add_filters_to_dax(
-            "SUM(Sales[Amount])", [], "Sales", None
-        )
+        result = generator._add_filters_to_dax("SUM(Sales[Amount])", [], "Sales", None)
         assert result == "SUM(Sales[Amount])"
 
     def test_add_filters_to_dax_constant_selection(self, generator):
         """fields_for_constant_selection adds REMOVEFILTERS."""
         kpi = make_kpi(fields_for_constant_selection=["Region", "Year"])
-        result = generator._add_filters_to_dax(
-            "SUM(Sales[Amount])", [], "Sales", kpi
-        )
+        result = generator._add_filters_to_dax("SUM(Sales[Amount])", [], "Sales", kpi)
         assert "REMOVEFILTERS" in result
 
     def test_generate_dax_measure_with_multiple_filters(self, generator):
@@ -311,7 +301,8 @@ class TestProcessDefinitionAndDependencyTree:
     def test_build_kbi_dependency_tree_calculated_kbi(self, generator):
         """Lines 361-366: calculated KBI path - uses mock to avoid
         missing resolve_kbi on KBIDependencyResolver."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         # Simulate a KPI that has formula references so _is_base_kbi returns False
         calculated_kpi = make_kpi(
             technical_name="calc_metric",
@@ -320,22 +311,26 @@ class TestProcessDefinitionAndDependencyTree:
             aggregation_type="CALCULATED",
         )
         # Patch _is_base_kbi to return False (calculated) and _extract_formula_kbis to return []
-        with patch.object(generator, '_is_base_kbi', return_value=False):
-            with patch.object(generator, '_extract_formula_kbis', return_value=[]):
+        with patch.object(generator, "_is_base_kbi", return_value=False):
+            with patch.object(generator, "_extract_formula_kbis", return_value=[]):
                 # This exercises the else branch without hitting missing methods
                 generator._build_kbi_dependency_tree(calculated_kpi, [])
 
     def test_extract_formula_kbis_with_reference(self, generator):
         """Lines 405-408: _extract_formula_kbis with mock resolver."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         base_kpi = make_kpi(technical_name="base_metric", formula="amount")
         calculated_kpi = make_kpi(
             technical_name="calc_metric",
             formula="{base_metric} * 2",
         )
         # Patch the formula_parser to return a known reference
-        with patch.object(generator._formula_parser, 'extract_kbi_references',
-                          return_value=["base_metric"]):
+        with patch.object(
+            generator._formula_parser,
+            "extract_kbi_references",
+            return_value=["base_metric"],
+        ):
             # Patch the dependency_resolver to have a resolve_kbi method
             mock_resolver = MagicMock()
             mock_resolver.resolve_kbi.return_value = base_kpi

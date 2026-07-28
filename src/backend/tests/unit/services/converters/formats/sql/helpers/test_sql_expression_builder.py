@@ -6,8 +6,11 @@ filters, case statements, and window functions.
 """
 
 import pytest
-from src.services.converters.formats.sql.helpers.sql_expression_builder import SQLExpressionEngine
-from src.services.converters.formats.sql.models import SQLDialect, SQLAggregationType
+
+from src.services.converters.formats.sql.helpers.sql_expression_builder import (
+    SQLExpressionEngine,
+)
+from src.services.converters.formats.sql.models import SQLAggregationType, SQLDialect
 
 
 class TestSQLExpressionEngine:
@@ -38,19 +41,19 @@ class TestSQLExpressionEngine:
     def test_dialect_config_standard(self, standard_engine):
         """Test dialect configuration for STANDARD dialect"""
         config = standard_engine.dialect_config
-        assert config['quote_char'] == '"'
-        assert config['limit_syntax'] == 'LIMIT'
-        assert config['supports_cte'] is True
-        assert config['supports_window_functions'] is True
+        assert config["quote_char"] == '"'
+        assert config["limit_syntax"] == "LIMIT"
+        assert config["supports_cte"] is True
+        assert config["supports_window_functions"] is True
 
     def test_dialect_config_databricks(self, databricks_engine):
         """Test dialect configuration for DATABRICKS dialect"""
         config = databricks_engine.dialect_config
-        assert config['quote_char'] == '`'
-        assert config['limit_syntax'] == 'LIMIT'
-        assert config['supports_cte'] is True
-        assert config['supports_window_functions'] is True
-        assert config['unity_catalog'] is True
+        assert config["quote_char"] == "`"
+        assert config["limit_syntax"] == "LIMIT"
+        assert config["supports_cte"] is True
+        assert config["supports_window_functions"] is True
+        assert config["unity_catalog"] is True
 
     # ========== Identifier Quoting Tests ==========
 
@@ -96,113 +99,87 @@ class TestSQLExpressionEngine:
     def test_build_sum_aggregation(self, standard_engine):
         """Test building SUM aggregation"""
         result = standard_engine.build_aggregation(
-            SQLAggregationType.SUM,
-            "amount",
-            "Sales"
+            SQLAggregationType.SUM, "amount", "Sales"
         )
         assert result == 'SUM("Sales"."amount")'
 
     def test_build_sum_databricks(self, databricks_engine):
         """Test building SUM with DATABRICKS dialect"""
         result = databricks_engine.build_aggregation(
-            SQLAggregationType.SUM,
-            "revenue",
-            "FactSales"
+            SQLAggregationType.SUM, "revenue", "FactSales"
         )
         assert result == "SUM(`FactSales`.`revenue`)"
 
     def test_build_count_aggregation(self, standard_engine):
         """Test building COUNT aggregation"""
         result = standard_engine.build_aggregation(
-            SQLAggregationType.COUNT,
-            "order_id",
-            "Orders"
+            SQLAggregationType.COUNT, "order_id", "Orders"
         )
         assert result == 'COUNT("Orders"."order_id")'
 
     def test_build_count_star(self, standard_engine):
         """Test building COUNT(*) aggregation"""
         result = standard_engine.build_aggregation(
-            SQLAggregationType.COUNT,
-            "*",
-            "Customers"
+            SQLAggregationType.COUNT, "*", "Customers"
         )
         assert result == "COUNT(*)"
 
     def test_build_avg_aggregation(self, standard_engine):
         """Test building AVG aggregation"""
         result = standard_engine.build_aggregation(
-            SQLAggregationType.AVG,
-            "price",
-            "Products"
+            SQLAggregationType.AVG, "price", "Products"
         )
         assert result == 'AVG("Products"."price")'
 
     def test_build_min_aggregation(self, standard_engine):
         """Test building MIN aggregation"""
         result = standard_engine.build_aggregation(
-            SQLAggregationType.MIN,
-            "date",
-            "Events"
+            SQLAggregationType.MIN, "date", "Events"
         )
         assert result == 'MIN("Events"."date")'
 
     def test_build_max_aggregation(self, standard_engine):
         """Test building MAX aggregation"""
         result = standard_engine.build_aggregation(
-            SQLAggregationType.MAX,
-            "value",
-            "Metrics"
+            SQLAggregationType.MAX, "value", "Metrics"
         )
         assert result == 'MAX("Metrics"."value")'
 
     def test_build_count_distinct(self, standard_engine):
         """Test building COUNT DISTINCT aggregation"""
         result = standard_engine.build_aggregation(
-            SQLAggregationType.COUNT_DISTINCT,
-            "customer_id",
-            "Sales"
+            SQLAggregationType.COUNT_DISTINCT, "customer_id", "Sales"
         )
         assert result == 'COUNT(DISTINCT "Sales"."customer_id")'
 
     def test_build_stddev_aggregation(self, standard_engine):
         """Test building STDDEV aggregation"""
         result = standard_engine.build_aggregation(
-            SQLAggregationType.STDDEV,
-            "score",
-            "TestResults"
+            SQLAggregationType.STDDEV, "score", "TestResults"
         )
         assert result == 'STDDEV("TestResults"."score")'
 
     def test_build_median_aggregation(self, standard_engine):
         """Test building MEDIAN aggregation"""
         result = standard_engine.build_aggregation(
-            SQLAggregationType.MEDIAN,
-            "income",
-            "Demographics"
+            SQLAggregationType.MEDIAN, "income", "Demographics"
         )
         assert "PERCENTILE_CONT(0.5)" in result
         assert "income" in result
 
     def test_build_percentile_aggregation(self, standard_engine):
         """Test building PERCENTILE aggregation"""
-        context = {'percentile': 0.95}
+        context = {"percentile": 0.95}
         result = standard_engine.build_aggregation(
-            SQLAggregationType.PERCENTILE,
-            "response_time",
-            "Requests",
-            context
+            SQLAggregationType.PERCENTILE, "response_time", "Requests", context
         )
         assert "PERCENTILE_CONT(0.95)" in result
 
     def test_build_weighted_avg(self, standard_engine):
         """Test building weighted average aggregation"""
-        context = {'weight_column': 'quantity'}
+        context = {"weight_column": "quantity"}
         result = standard_engine.build_aggregation(
-            SQLAggregationType.WEIGHTED_AVG,
-            "price",
-            "Sales",
-            context
+            SQLAggregationType.WEIGHTED_AVG, "price", "Sales", context
         )
         assert "SUM" in result
         assert "price" in result
@@ -212,9 +189,7 @@ class TestSQLExpressionEngine:
     def test_build_ratio_aggregation(self, standard_engine):
         """Test building ratio aggregation"""
         result = standard_engine.build_aggregation(
-            SQLAggregationType.RATIO,
-            "revenue/cost",
-            "Finance"
+            SQLAggregationType.RATIO, "revenue/cost", "Finance"
         )
         # Ratio builds division expression
         assert "revenue/cost" in result or "revenue" in result
@@ -222,12 +197,9 @@ class TestSQLExpressionEngine:
 
     def test_build_running_sum(self, standard_engine):
         """Test building running sum with window function"""
-        context = {'order_column': 'date'}
+        context = {"order_column": "date"}
         result = standard_engine.build_aggregation(
-            SQLAggregationType.RUNNING_SUM,
-            "amount",
-            "Transactions",
-            context
+            SQLAggregationType.RUNNING_SUM, "amount", "Transactions", context
         )
         assert "SUM" in result
         assert "OVER" in result
@@ -236,36 +208,27 @@ class TestSQLExpressionEngine:
 
     def test_build_row_number(self, standard_engine):
         """Test building ROW_NUMBER window function"""
-        context = {'order_column': 'score'}
+        context = {"order_column": "score"}
         result = standard_engine.build_aggregation(
-            SQLAggregationType.ROW_NUMBER,
-            "id",
-            "Rankings",
-            context
+            SQLAggregationType.ROW_NUMBER, "id", "Rankings", context
         )
         assert "ROW_NUMBER()" in result
         assert "OVER" in result
 
     def test_build_rank(self, standard_engine):
         """Test building RANK window function"""
-        context = {'order_column': 'amount'}
+        context = {"order_column": "amount"}
         result = standard_engine.build_aggregation(
-            SQLAggregationType.RANK,
-            "value",
-            "Metrics",
-            context
+            SQLAggregationType.RANK, "value", "Metrics", context
         )
         assert "RANK()" in result
         assert "OVER" in result
 
     def test_build_dense_rank(self, standard_engine):
         """Test building DENSE_RANK window function"""
-        context = {'order_column': 'score'}
+        context = {"order_column": "score"}
         result = standard_engine.build_aggregation(
-            SQLAggregationType.DENSE_RANK,
-            "id",
-            "Leaderboard",
-            context
+            SQLAggregationType.DENSE_RANK, "id", "Leaderboard", context
         )
         assert "DENSE_RANK()" in result
         assert "OVER" in result
@@ -273,9 +236,7 @@ class TestSQLExpressionEngine:
     def test_build_coalesce(self, standard_engine):
         """Test building COALESCE expression"""
         result = standard_engine.build_aggregation(
-            SQLAggregationType.COALESCE,
-            "optional_value",
-            "Data"
+            SQLAggregationType.COALESCE, "optional_value", "Data"
         )
         assert "COALESCE" in result
         assert "optional_value" in result
@@ -313,10 +274,7 @@ class TestSQLExpressionEngine:
 
     def test_build_case_when_multiple_conditions(self, standard_engine):
         """Test building CASE WHEN with multiple conditions"""
-        conditions = [
-            ("status = 'active'", 1),
-            ("status = 'pending'", 0.5)
-        ]
+        conditions = [("status = 'active'", 1), ("status = 'pending'", 0.5)]
         result = standard_engine.build_case_when(conditions, 0)
         assert "CASE" in result
         assert "WHEN status = 'active' THEN 1" in result
@@ -326,10 +284,7 @@ class TestSQLExpressionEngine:
 
     def test_build_case_when_string_values(self, standard_engine):
         """Test building CASE WHEN with string values"""
-        conditions = [
-            ("type = 1", "Type A"),
-            ("type = 2", "Type B")
-        ]
+        conditions = [("type = 1", "Type A"), ("type = 2", "Type B")]
         result = standard_engine.build_case_when(conditions, "Unknown")
         assert "WHEN type = 1 THEN 'Type A'" in result
         assert "WHEN type = 2 THEN 'Type B'" in result
@@ -347,8 +302,7 @@ class TestSQLExpressionEngine:
     def test_build_window_function_with_partition(self, standard_engine):
         """Test building window function with PARTITION BY"""
         result = standard_engine.build_window_function(
-            "SUM(amount)",
-            partition_by=["region"]
+            "SUM(amount)", partition_by=["region"]
         )
         assert "PARTITION BY" in result
         assert '"region"' in result
@@ -356,8 +310,7 @@ class TestSQLExpressionEngine:
     def test_build_window_function_with_order(self, standard_engine):
         """Test building window function with ORDER BY"""
         result = standard_engine.build_window_function(
-            "ROW_NUMBER()",
-            order_by=[("date", "ASC")]
+            "ROW_NUMBER()", order_by=[("date", "ASC")]
         )
         assert "ORDER BY" in result
         assert '"date" ASC' in result
@@ -365,9 +318,7 @@ class TestSQLExpressionEngine:
     def test_build_window_function_partition_and_order(self, standard_engine):
         """Test building window function with both PARTITION and ORDER BY"""
         result = standard_engine.build_window_function(
-            "RANK()",
-            partition_by=["category"],
-            order_by=[("sales", "DESC")]
+            "RANK()", partition_by=["category"], order_by=[("sales", "DESC")]
         )
         assert "PARTITION BY" in result
         assert '"category"' in result
@@ -379,15 +330,14 @@ class TestSQLExpressionEngine:
         result = standard_engine.build_window_function(
             "SUM(amount)",
             order_by=[("date", "ASC")],
-            frame_clause="ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW"
+            frame_clause="ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW",
         )
         assert "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW" in result
 
     def test_build_window_function_multiple_partitions(self, standard_engine):
         """Test building window function with multiple partition columns"""
         result = standard_engine.build_window_function(
-            "AVG(price)",
-            partition_by=["region", "category"]
+            "AVG(price)", partition_by=["region", "category"]
         )
         assert "PARTITION BY" in result
         assert '"region"' in result
@@ -396,8 +346,7 @@ class TestSQLExpressionEngine:
     def test_build_window_function_multiple_order(self, standard_engine):
         """Test building window function with multiple ORDER BY columns"""
         result = standard_engine.build_window_function(
-            "RANK()",
-            order_by=[("sales", "DESC"), ("date", "ASC")]
+            "RANK()", order_by=[("sales", "DESC"), ("date", "ASC")]
         )
         assert "ORDER BY" in result
         assert '"sales" DESC' in result
@@ -408,9 +357,7 @@ class TestSQLExpressionEngine:
     def test_databricks_quoting(self, databricks_engine):
         """Test Databricks uses backticks for quoting"""
         result = databricks_engine.build_aggregation(
-            SQLAggregationType.SUM,
-            "amount",
-            "sales"
+            SQLAggregationType.SUM, "amount", "sales"
         )
         assert "`sales`.`amount`" in result
         assert '"' not in result
@@ -418,9 +365,7 @@ class TestSQLExpressionEngine:
     def test_databricks_window_function(self, databricks_engine):
         """Test window function with Databricks dialect"""
         result = databricks_engine.build_window_function(
-            "ROW_NUMBER()",
-            partition_by=["region"],
-            order_by=[("date", "DESC")]
+            "ROW_NUMBER()", partition_by=["region"], order_by=[("date", "DESC")]
         )
         assert "`region`" in result
         assert "`date`" in result
@@ -436,10 +381,7 @@ class TestSQLExpressionEngine:
     def test_build_aggregation_none_context(self, standard_engine):
         """Test building aggregation with None context"""
         result = standard_engine.build_aggregation(
-            SQLAggregationType.SUM,
-            "amount",
-            "Sales",
-            None
+            SQLAggregationType.SUM, "amount", "Sales", None
         )
         assert result == 'SUM("Sales"."amount")'
 
@@ -463,12 +405,9 @@ class TestSQLExpressionEngine:
     def test_complete_aggregation_workflow(self, standard_engine):
         """Test complete workflow for building complex aggregation"""
         # Build weighted average with context
-        context = {'weight_column': 'quantity'}
+        context = {"weight_column": "quantity"}
         result = standard_engine.build_aggregation(
-            SQLAggregationType.WEIGHTED_AVG,
-            "price",
-            "Sales",
-            context
+            SQLAggregationType.WEIGHTED_AVG, "price", "Sales", context
         )
         assert "SUM" in result
         assert "NULLIF" in result
@@ -480,7 +419,7 @@ class TestSQLExpressionEngine:
             "SUM(amount)",
             partition_by=["region", "product"],
             order_by=[("date", "ASC")],
-            frame_clause="ROWS BETWEEN 2 PRECEDING AND CURRENT ROW"
+            frame_clause="ROWS BETWEEN 2 PRECEDING AND CURRENT ROW",
         )
         assert "PARTITION BY" in result
         assert '"region"' in result
@@ -491,10 +430,7 @@ class TestSQLExpressionEngine:
 
     def test_case_when_with_case_expression(self, standard_engine):
         """Test CASE WHEN nested inside aggregation"""
-        conditions = [
-            ("status = 'active'", 1),
-            ("status = 'inactive'", 0)
-        ]
+        conditions = [("status = 'active'", 1), ("status = 'inactive'", 0)]
         case_expr = standard_engine.build_case_when(conditions)
         # This CASE expression could be used in SUM
         assert "CASE" in case_expr

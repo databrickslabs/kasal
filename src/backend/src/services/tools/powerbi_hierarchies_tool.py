@@ -19,12 +19,12 @@ import asyncio
 import base64
 import logging
 import re
-from typing import Any, Optional, Type, Dict, List
-
-from src.services.tools.base import BaseTool
-from pydantic import BaseModel, Field, PrivateAttr
+from typing import Any, Dict, List, Optional, Type
 
 import httpx
+from pydantic import BaseModel, Field, PrivateAttr
+
+from src.services.tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -40,21 +40,20 @@ class PowerBIHierarchiesSchema(BaseModel):
     # ===== UNITY CATALOG TARGET CONFIGURATION =====
     target_catalog: str = Field(
         "main",
-        description="[Target] Unity Catalog catalog name for dimension views (default: 'main'). Supports {placeholder} for dynamic mode."
+        description="[Target] Unity Catalog catalog name for dimension views (default: 'main'). Supports {placeholder} for dynamic mode.",
     )
     target_schema: str = Field(
         "default",
-        description="[Target] Unity Catalog schema name for dimension views (default: 'default'). Supports {placeholder} for dynamic mode."
+        description="[Target] Unity Catalog schema name for dimension views (default: 'default'). Supports {placeholder} for dynamic mode.",
     )
 
     # ===== OUTPUT OPTIONS =====
     skip_system_tables: bool = Field(
         True,
-        description="[Output] Skip system hierarchies like LocalDateTable (default: True)"
+        description="[Output] Skip system hierarchies like LocalDateTable (default: True)",
     )
     include_hidden: bool = Field(
-        False,
-        description="[Output] Include hidden hierarchies (default: False)"
+        False, description="[Output] Include hidden hierarchies (default: False)"
     )
 
 
@@ -113,10 +112,13 @@ class PowerBIHierarchiesTool(BaseTool):
     def __init__(self, **kwargs: Any) -> None:
         """Initialize the Power BI Hierarchies tool."""
         import uuid
+
         instance_id = str(uuid.uuid4())[:8]
 
         logger.info(f"[PowerBIHierarchiesTool.__init__] Instance ID: {instance_id}")
-        logger.info(f"[PowerBIHierarchiesTool.__init__] Received kwargs keys: {list(kwargs.keys())}")
+        logger.info(
+            f"[PowerBIHierarchiesTool.__init__] Received kwargs keys: {list(kwargs.keys())}"
+        )
 
         # Extract execution_inputs if provided (for dynamic parameter resolution)
         execution_inputs = kwargs.get("execution_inputs", {})
@@ -146,19 +148,26 @@ class PowerBIHierarchiesTool(BaseTool):
 
         # DYNAMIC PARAMETER RESOLUTION
         if execution_inputs:
-            logger.info(f"[PowerBIHierarchiesTool.__init__] Instance {instance_id} - Resolving parameters from execution_inputs")
+            logger.info(
+                f"[PowerBIHierarchiesTool.__init__] Instance {instance_id} - Resolving parameters from execution_inputs"
+            )
             resolved_config = {}
             for key, value in default_config.items():
-                if isinstance(value, str) and '{' in value:
+                if isinstance(value, str) and "{" in value:
                     import re
-                    placeholders = re.findall(r'\{(\w+)\}', value)
+
+                    placeholders = re.findall(r"\{(\w+)\}", value)
                     if placeholders:
                         resolved_value = value
                         for placeholder in placeholders:
                             if placeholder in execution_inputs:
                                 replacement = str(execution_inputs[placeholder])
-                                resolved_value = resolved_value.replace(f'{{{placeholder}}}', replacement)
-                                logger.info(f"[INIT RESOLUTION] Resolved {key}: {{{placeholder}}} → {replacement}")
+                                resolved_value = resolved_value.replace(
+                                    f"{{{placeholder}}}", replacement
+                                )
+                                logger.info(
+                                    f"[INIT RESOLUTION] Resolved {key}: {{{placeholder}}} → {replacement}"
+                                )
                         resolved_config[key] = resolved_value
                     else:
                         resolved_config[key] = value
@@ -174,7 +183,9 @@ class PowerBIHierarchiesTool(BaseTool):
         self._instance_id = instance_id
         self._default_config = default_config
 
-        logger.info(f"[PowerBIHierarchiesTool.__init__] Instance {instance_id} initialized")
+        logger.info(
+            f"[PowerBIHierarchiesTool.__init__] Instance {instance_id} initialized"
+        )
 
     def _resolve_parameter(self, value: Any, execution_inputs: Dict[str, Any]) -> Any:
         """Resolve parameter placeholders in configuration values."""
@@ -182,7 +193,8 @@ class PowerBIHierarchiesTool(BaseTool):
             return value
 
         import re
-        placeholders = re.findall(r'\{(\w+)\}', value)
+
+        placeholders = re.findall(r"\{(\w+)\}", value)
 
         if not placeholders:
             return value
@@ -191,36 +203,53 @@ class PowerBIHierarchiesTool(BaseTool):
         for placeholder in placeholders:
             if placeholder in execution_inputs:
                 replacement = str(execution_inputs[placeholder])
-                resolved_value = resolved_value.replace(f'{{{placeholder}}}', replacement)
-                logger.info(f"[PARAM RESOLUTION] Resolved {{{placeholder}}} → {replacement}")
+                resolved_value = resolved_value.replace(
+                    f"{{{placeholder}}}", replacement
+                )
+                logger.info(
+                    f"[PARAM RESOLUTION] Resolved {{{placeholder}}} → {replacement}"
+                )
 
         return resolved_value
 
     def _run(self, **kwargs: Any) -> str:
         """Execute hierarchy extraction."""
         try:
-            instance_id = getattr(self, '_instance_id', 'UNKNOWN')
-            logger.info(f"[PowerBIHierarchiesTool] Instance {instance_id} - _run() called")
+            instance_id = getattr(self, "_instance_id", "UNKNOWN")
+            logger.info(
+                f"[PowerBIHierarchiesTool] Instance {instance_id} - _run() called"
+            )
 
             # Extract execution_inputs if provided
-            execution_inputs = kwargs.pop('execution_inputs', {})
+            execution_inputs = kwargs.pop("execution_inputs", {})
 
             # Filter out placeholder values
             def is_placeholder(value: Any) -> bool:
                 if not isinstance(value, str):
                     return False
                 placeholder_patterns = [
-                    "your_", "your-", "<your", "[your",
-                    "placeholder", "example_", "example-",
-                    "xxx", "yyy", "zzz",
-                    "insert_", "enter_", "put_",
-                    "replace_", "fill_in",
+                    "your_",
+                    "your-",
+                    "<your",
+                    "[your",
+                    "placeholder",
+                    "example_",
+                    "example-",
+                    "xxx",
+                    "yyy",
+                    "zzz",
+                    "insert_",
+                    "enter_",
+                    "put_",
+                    "replace_",
+                    "fill_in",
                 ]
                 value_lower = value.lower()
                 return any(pattern in value_lower for pattern in placeholder_patterns)
 
             filtered_kwargs = {
-                k: v for k, v in kwargs.items()
+                k: v
+                for k, v in kwargs.items()
                 if v is not None and not is_placeholder(v)
             }
 
@@ -228,26 +257,45 @@ class PowerBIHierarchiesTool(BaseTool):
             # - CREDENTIALS: Use pre-configured values (prevent agent placeholder overrides)
             # - AUTH_METHOD: Use UI selection (deterministic, not auto-detected)
             # - OTHER: Agent can override
-            credential_fields = ['workspace_id', 'dataset_id', 'tenant_id', 'client_id', 'client_secret', 'username', 'password', 'access_token']
-            selection_fields = ['auth_method']  # User selection - must be deterministic
+            credential_fields = [
+                "workspace_id",
+                "dataset_id",
+                "tenant_id",
+                "client_id",
+                "client_secret",
+                "username",
+                "password",
+                "access_token",
+            ]
+            selection_fields = ["auth_method"]  # User selection - must be deterministic
 
             merged_kwargs = {}
-            for key in set(list(self._default_config.keys()) + list(filtered_kwargs.keys())):
+            for key in set(
+                list(self._default_config.keys()) + list(filtered_kwargs.keys())
+            ):
                 if key in credential_fields:
                     # Credentials: use pre-configured value (protected from agent)
-                    merged_kwargs[key] = self._default_config.get(key, filtered_kwargs.get(key))
+                    merged_kwargs[key] = self._default_config.get(
+                        key, filtered_kwargs.get(key)
+                    )
                 elif key in selection_fields:
                     # User selections: UI value takes precedence for deterministic behavior
-                    merged_kwargs[key] = self._default_config.get(key, filtered_kwargs.get(key))
+                    merged_kwargs[key] = self._default_config.get(
+                        key, filtered_kwargs.get(key)
+                    )
                 else:
                     # Other fields: agent can override (filtered_kwargs takes precedence)
-                    merged_kwargs[key] = filtered_kwargs.get(key, self._default_config.get(key))
+                    merged_kwargs[key] = filtered_kwargs.get(
+                        key, self._default_config.get(key)
+                    )
 
             # Dynamic parameter resolution
             if execution_inputs:
                 resolved_kwargs = {}
                 for key, value in merged_kwargs.items():
-                    resolved_kwargs[key] = self._resolve_parameter(value, execution_inputs)
+                    resolved_kwargs[key] = self._resolve_parameter(
+                        value, execution_inputs
+                    )
                 merged_kwargs = resolved_kwargs
 
             # Extract parameters
@@ -258,9 +306,13 @@ class PowerBIHierarchiesTool(BaseTool):
             logger.info("[PowerBIHierarchiesTool] MERGED KWARGS DEBUG:")
             logger.info(f"  workspace_id: {workspace_id}")
             logger.info(f"  dataset_id: {dataset_id}")
-            logger.info(f"  auth_method in merged_kwargs: {merged_kwargs.get('auth_method')}")
+            logger.info(
+                f"  auth_method in merged_kwargs: {merged_kwargs.get('auth_method')}"
+            )
             logger.info(f"  username in merged_kwargs: {merged_kwargs.get('username')}")
-            logger.info(f"  Has client_secret: {bool(merged_kwargs.get('client_secret'))}")
+            logger.info(
+                f"  Has client_secret: {bool(merged_kwargs.get('client_secret'))}"
+            )
 
             # Build auth config
             auth_config = {
@@ -279,11 +331,19 @@ class PowerBIHierarchiesTool(BaseTool):
             logger.info("=" * 80)
             logger.info(f"  tenant_id: {auth_config.get('tenant_id')}")
             logger.info(f"  client_id: {auth_config.get('client_id')}")
-            logger.info(f"  client_secret: {'*' * len(auth_config.get('client_secret') or '') if auth_config.get('client_secret') else 'None'}")
+            logger.info(
+                f"  client_secret: {'*' * len(auth_config.get('client_secret') or '') if auth_config.get('client_secret') else 'None'}"
+            )
             logger.info(f"  username: {auth_config.get('username')}")
-            logger.info(f"  password: {'*' * len(auth_config.get('password') or '') if auth_config.get('password') else 'None'}")
-            logger.info(f"  auth_method: {auth_config.get('auth_method')} (type: {type(auth_config.get('auth_method'))})")
-            logger.info(f"  access_token: {'*' * 10 if auth_config.get('access_token') else 'None'}")
+            logger.info(
+                f"  password: {'*' * len(auth_config.get('password') or '') if auth_config.get('password') else 'None'}"
+            )
+            logger.info(
+                f"  auth_method: {auth_config.get('auth_method')} (type: {type(auth_config.get('auth_method'))})"
+            )
+            logger.info(
+                f"  access_token: {'*' * 10 if auth_config.get('access_token') else 'None'}"
+            )
             logger.info("=" * 80)
 
             # Validate required parameters
@@ -294,22 +354,27 @@ class PowerBIHierarchiesTool(BaseTool):
 
             # Validate authentication using shared utility
             from src.services.tools.powerbi_auth_utils import validate_auth_config
+
             is_valid, error_msg = validate_auth_config(auth_config)
             if not is_valid:
                 return f"Error: {error_msg}"
 
-            logger.info(f"[PowerBIHierarchiesTool] Extracting hierarchies from dataset {dataset_id}")
+            logger.info(
+                f"[PowerBIHierarchiesTool] Extracting hierarchies from dataset {dataset_id}"
+            )
 
             # Run async extraction
-            result = self._run_sync(self._extract_hierarchies(
-                workspace_id=workspace_id,
-                dataset_id=dataset_id,
-                auth_config=auth_config,
-                target_catalog=merged_kwargs.get("target_catalog", "main"),
-                target_schema=merged_kwargs.get("target_schema", "default"),
-                skip_system_tables=merged_kwargs.get("skip_system_tables", True),
-                include_hidden=merged_kwargs.get("include_hidden", False),
-            ))
+            result = self._run_sync(
+                self._extract_hierarchies(
+                    workspace_id=workspace_id,
+                    dataset_id=dataset_id,
+                    auth_config=auth_config,
+                    target_catalog=merged_kwargs.get("target_catalog", "main"),
+                    target_schema=merged_kwargs.get("target_schema", "default"),
+                    skip_system_tables=merged_kwargs.get("skip_system_tables", True),
+                    include_hidden=merged_kwargs.get("include_hidden", False),
+                )
+            )
 
             return result
 
@@ -320,6 +385,7 @@ class PowerBIHierarchiesTool(BaseTool):
     def _run_sync(self, coro):
         """Run async coroutine from sync context (ContextVars preserved)."""
         from src.services.tools.async_bridge import run_async_with_context
+
         return run_async_with_context(coro)
 
     async def _extract_hierarchies(
@@ -335,7 +401,10 @@ class PowerBIHierarchiesTool(BaseTool):
         """Extract hierarchies and format output."""
 
         # Get access token using shared auth utility
-        from src.services.tools.powerbi_auth_utils import get_powerbi_access_token_from_config
+        from src.services.tools.powerbi_auth_utils import (
+            get_powerbi_access_token_from_config,
+        )
+
         token = await get_powerbi_access_token_from_config(auth_config)
 
         # Fetch hierarchies and levels
@@ -475,7 +544,7 @@ class PowerBIHierarchiesTool(BaseTool):
 
         headers = {
             "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         logger.info("Fetching semantic model definition from Fabric API...")
@@ -491,10 +560,17 @@ class PowerBIHierarchiesTool(BaseTool):
                 if response.status_code == 202:
                     location = response.headers.get("Location")
                     if not location:
-                        return [{"_error": "api_error", "_message": "No Location header in 202 response"}]
+                        return [
+                            {
+                                "_error": "api_error",
+                                "_message": "No Location header in 202 response",
+                            }
+                        ]
 
                     retry_after = int(response.headers.get("Retry-After", "5"))
-                    logger.info(f"Long-running operation started. Polling every {retry_after}s...")
+                    logger.info(
+                        f"Long-running operation started. Polling every {retry_after}s..."
+                    )
 
                     # Step 2: Poll until status is "Succeeded"
                     for attempt in range(60):  # Max 5 minutes of polling
@@ -506,18 +582,31 @@ class PowerBIHierarchiesTool(BaseTool):
                             status = poll_data.get("status", "")
 
                             if status == "Succeeded":
-                                logger.info(f"Operation succeeded after {attempt + 1} poll(s)")
+                                logger.info(
+                                    f"Operation succeeded after {attempt + 1} poll(s)"
+                                )
 
                                 # Step 3: GET the result from location + "/result"
-                                result_url = location + "/result" if not location.endswith("/result") else location
-                                result_response = await client.get(result_url, headers=headers)
+                                result_url = (
+                                    location + "/result"
+                                    if not location.endswith("/result")
+                                    else location
+                                )
+                                result_response = await client.get(
+                                    result_url, headers=headers
+                                )
                                 result_response.raise_for_status()
                                 definition_data = result_response.json()
                                 break
                             elif status == "Failed":
                                 error_msg = poll_data.get("error", "Unknown error")
                                 logger.error(f"Operation failed: {error_msg}")
-                                return [{"_error": "api_error", "_message": f"Operation failed: {error_msg}"}]
+                                return [
+                                    {
+                                        "_error": "api_error",
+                                        "_message": f"Operation failed: {error_msg}",
+                                    }
+                                ]
                             else:
                                 # Still running, continue polling
                                 logger.debug(f"Status: {status}, continuing to poll...")
@@ -525,12 +614,19 @@ class PowerBIHierarchiesTool(BaseTool):
 
                         elif poll_response.status_code == 202:
                             # Still processing
-                            retry_after = int(poll_response.headers.get("Retry-After", "5"))
+                            retry_after = int(
+                                poll_response.headers.get("Retry-After", "5")
+                            )
                             continue
                         else:
                             poll_response.raise_for_status()
                     else:
-                        return [{"_error": "timeout", "_message": "Fabric API request timed out after 5 minutes"}]
+                        return [
+                            {
+                                "_error": "timeout",
+                                "_message": "Fabric API request timed out after 5 minutes",
+                            }
+                        ]
 
                 elif response.status_code == 200:
                     # Direct response (no long-running operation)
@@ -539,7 +635,12 @@ class PowerBIHierarchiesTool(BaseTool):
                     response.raise_for_status()
 
                 if not definition_data:
-                    return [{"_error": "api_error", "_message": "No definition data received"}]
+                    return [
+                        {
+                            "_error": "api_error",
+                            "_message": "No definition data received",
+                        }
+                    ]
 
                 # Step 4: Parse the TMDL parts
                 parts = definition_data.get("definition", {}).get("parts", [])
@@ -561,9 +662,7 @@ class PowerBIHierarchiesTool(BaseTool):
 
                             # Parse hierarchies from TMDL
                             table_hierarchies = self._parse_tmdl_hierarchies(
-                                tmdl_content,
-                                skip_system_tables,
-                                include_hidden
+                                tmdl_content, skip_system_tables, include_hidden
                             )
                             hierarchies.extend(table_hierarchies)
 
@@ -593,17 +692,16 @@ class PowerBIHierarchiesTool(BaseTool):
                     )
                     return [{"_error": "forbidden"}]
                 else:
-                    logger.error(f"Fabric API error: {e.response.status_code} - {e.response.text}")
+                    logger.error(
+                        f"Fabric API error: {e.response.status_code} - {e.response.text}"
+                    )
                     return [{"_error": "api_error", "_status": e.response.status_code}]
             except Exception as e:
                 logger.error(f"Failed to fetch hierarchies from Fabric API: {e}")
                 return [{"_error": "api_error", "_message": str(e)}]
 
     def _parse_tmdl_hierarchies(
-        self,
-        tmdl_content: str,
-        skip_system_tables: bool,
-        include_hidden: bool
+        self, tmdl_content: str, skip_system_tables: bool, include_hidden: bool
     ) -> List[Dict[str, Any]]:
         """
         Parse hierarchy definitions from TMDL content.
@@ -638,8 +736,7 @@ class PowerBIHierarchiesTool(BaseTool):
         # Find all hierarchy blocks
         # Pattern matches: hierarchy 'Name' or hierarchy Name followed by indented content
         hierarchy_pattern = re.compile(
-            r"^\s*hierarchy\s+(?:'([^']+)'|(\w+))\s*\n((?:\s+.*\n)*)",
-            re.MULTILINE
+            r"^\s*hierarchy\s+(?:'([^']+)'|(\w+))\s*\n((?:\s+.*\n)*)", re.MULTILINE
         )
 
         for match in hierarchy_pattern.finditer(tmdl_content):
@@ -655,13 +752,15 @@ class PowerBIHierarchiesTool(BaseTool):
 
             # Extract description
             description_match = re.search(r"description:\s*(.+)", hier_content)
-            description = description_match.group(1).strip() if description_match else None
+            description = (
+                description_match.group(1).strip() if description_match else None
+            )
 
             # Parse levels
             levels = []
             level_pattern = re.compile(
                 r"level\s+(?:'([^']+)'|(\w+))\s*\n((?:\s+.*\n)*?(?=\s*level\s|\Z))",
-                re.MULTILINE
+                re.MULTILINE,
             )
 
             for ordinal, level_match in enumerate(level_pattern.finditer(hier_content)):
@@ -669,28 +768,34 @@ class PowerBIHierarchiesTool(BaseTool):
                 level_content = level_match.group(3)
 
                 # Extract column reference
-                column_match = re.search(r"column:\s*(?:'([^']+)'|(\w+))", level_content)
+                column_match = re.search(
+                    r"column:\s*(?:'([^']+)'|(\w+))", level_content
+                )
                 column_name = ""
                 if column_match:
                     column_name = column_match.group(1) or column_match.group(2)
 
-                levels.append({
-                    "name": level_name,
-                    "ordinal": ordinal,
-                    "column": column_name,
-                    "description": None,
-                })
+                levels.append(
+                    {
+                        "name": level_name,
+                        "ordinal": ordinal,
+                        "column": column_name,
+                        "description": None,
+                    }
+                )
 
             if levels:  # Only add hierarchies that have levels
-                hierarchies.append({
-                    "id": f"{table_name}_{hier_name}",
-                    "name": hier_name,
-                    "table": table_name,
-                    "is_hidden": is_hidden,
-                    "description": description,
-                    "levels": levels,
-                    "columns_ordered": [lvl["column"] for lvl in levels],
-                })
+                hierarchies.append(
+                    {
+                        "id": f"{table_name}_{hier_name}",
+                        "name": hier_name,
+                        "table": table_name,
+                        "is_hidden": is_hidden,
+                        "description": description,
+                        "levels": levels,
+                        "columns_ordered": [lvl["column"] for lvl in levels],
+                    }
+                )
 
         return hierarchies
 
@@ -830,7 +935,9 @@ VALUES
             # List levels
             output.append("**Level Details:**")
             for level in hier["levels"]:
-                output.append(f"  {level['ordinal']}. **{level['name']}** → Column: `{level['column']}`")
+                output.append(
+                    f"  {level['ordinal']}. **{level['name']}** → Column: `{level['column']}`"
+                )
             output.append("")
 
         # Option B: Dimension View SQL statements

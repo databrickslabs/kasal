@@ -2,9 +2,10 @@
 lookup must fetch the group's agent table ONCE per preparation (not once per
 crew agent) and must never dump the full table at INFO on a failed match."""
 
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.agent_builder.crew_preparation import CrewPreparation
 
@@ -58,16 +59,19 @@ async def test_failed_match_logs_bounded_summary_not_full_dump():
     prep = _prep()
     p_session, p_service, _ = _patch_session_and_service(agents)
 
-    with p_session, p_service, patch(
-        "src.services.agent_builder.crew_preparation.logger"
-    ) as mock_logger:
+    with (
+        p_session,
+        p_service,
+        patch("src.services.agent_builder.crew_preparation.logger") as mock_logger,
+    ):
         found = await prep._lookup_kasal_agent_uuid_via_service(
             {"role": "Nonexistent", "name": "nope"}, "missing-id"
         )
 
     assert found is None
     all_messages = [
-        str(c.args[0]) for c in mock_logger.info.call_args_list + mock_logger.warning.call_args_list
+        str(c.args[0])
+        for c in mock_logger.info.call_args_list + mock_logger.warning.call_args_list
     ]
     dump_lines = [m for m in all_messages if "UUID=" in m]
     assert len(dump_lines) == 0, "full agent-table dump must not happen"

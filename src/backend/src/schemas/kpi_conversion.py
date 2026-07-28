@@ -1,12 +1,14 @@
 """Pydantic schemas for KPI conversion API"""
 
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class ConversionFormat(str, Enum):
     """Supported conversion formats"""
+
     YAML = "yaml"
     DAX = "dax"
     SQL = "sql"
@@ -16,12 +18,16 @@ class ConversionFormat(str, Enum):
 
 class ConversionRequest(BaseModel):
     """Request model for KPI conversion"""
-    source_format: ConversionFormat = Field(..., description="Source format of the input data")
-    target_format: ConversionFormat = Field(..., description="Target format for conversion")
+
+    source_format: ConversionFormat = Field(
+        ..., description="Source format of the input data"
+    )
+    target_format: ConversionFormat = Field(
+        ..., description="Target format for conversion"
+    )
     input_data: Any = Field(..., description="Input data to convert")
     config: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Optional configuration for conversion behavior"
+        default=None, description="Optional configuration for conversion behavior"
     )
 
     class Config:
@@ -35,31 +41,27 @@ class ConversionRequest(BaseModel):
                     "kpis": [
                         {
                             "description": "Total Revenue",
-                            "formula": "SUM(Sales[Amount])"
+                            "formula": "SUM(Sales[Amount])",
                         }
-                    ]
+                    ],
                 },
-                "config": {
-                    "optimize": True,
-                    "validate": True
-                }
+                "config": {"optimize": True, "validate": True},
             }
         }
 
 
 class ConversionResponse(BaseModel):
     """Response model for KPI conversion"""
+
     success: bool = Field(..., description="Whether conversion succeeded")
     source_format: ConversionFormat = Field(..., description="Original source format")
     target_format: ConversionFormat = Field(..., description="Target format")
     output_data: Any = Field(..., description="Converted data in target format")
     metadata: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Additional metadata about the conversion"
+        default=None, description="Additional metadata about the conversion"
     )
     warnings: Optional[List[str]] = Field(
-        default=None,
-        description="Any warnings generated during conversion"
+        default=None, description="Any warnings generated during conversion"
     )
 
     class Config:
@@ -72,21 +74,19 @@ class ConversionResponse(BaseModel):
                     "measures": [
                         {
                             "name": "Total Revenue",
-                            "dax_formula": "Total Revenue = SUM(Sales[Amount])"
+                            "dax_formula": "Total Revenue = SUM(Sales[Amount])",
                         }
                     ]
                 },
-                "metadata": {
-                    "measures_count": 1,
-                    "conversion_time_ms": 125
-                },
-                "warnings": []
+                "metadata": {"measures_count": 1, "conversion_time_ms": 125},
+                "warnings": [],
             }
         }
 
 
 class ConversionPath(BaseModel):
     """Represents a supported conversion path"""
+
     source: ConversionFormat
     target: ConversionFormat
     description: Optional[str] = None
@@ -94,10 +94,10 @@ class ConversionPath(BaseModel):
 
 class ConversionFormatsResponse(BaseModel):
     """Response model for available conversion formats"""
+
     formats: List[ConversionFormat] = Field(..., description="All available formats")
     conversion_paths: List[ConversionPath] = Field(
-        ...,
-        description="Supported conversion paths"
+        ..., description="Supported conversion paths"
     )
 
     class Config:
@@ -108,14 +108,15 @@ class ConversionFormatsResponse(BaseModel):
                     {"source": "yaml", "target": "dax"},
                     {"source": "yaml", "target": "sql"},
                     {"source": "yaml", "target": "uc_metrics"},
-                    {"source": "powerbi", "target": "yaml"}
-                ]
+                    {"source": "powerbi", "target": "yaml"},
+                ],
             }
         }
 
 
 class ValidateRequest(BaseModel):
     """Request model for validation"""
+
     format: ConversionFormat = Field(..., description="Format of the data to validate")
     input_data: Any = Field(..., description="Data to validate")
 
@@ -126,14 +127,15 @@ class ValidateRequest(BaseModel):
                 "input_data": {
                     "description": "Sales Metrics",
                     "technical_name": "SALES_METRICS",
-                    "kbis": []
-                }
+                    "kbis": [],
+                },
             }
         }
 
 
 class ValidationError(BaseModel):
     """Validation error detail"""
+
     field: Optional[str] = Field(None, description="Field that caused the error")
     message: str = Field(..., description="Error message")
     severity: str = Field(..., description="Error severity: error, warning, info")
@@ -141,14 +143,13 @@ class ValidationError(BaseModel):
 
 class ValidationResponse(BaseModel):
     """Response model for validation"""
+
     valid: bool = Field(..., description="Whether the data is valid")
     errors: List[ValidationError] = Field(
-        default_factory=list,
-        description="List of validation errors"
+        default_factory=list, description="List of validation errors"
     )
     warnings: List[ValidationError] = Field(
-        default_factory=list,
-        description="List of validation warnings"
+        default_factory=list, description="List of validation warnings"
     )
 
     class Config:
@@ -159,9 +160,9 @@ class ValidationResponse(BaseModel):
                     {
                         "field": "kbis",
                         "message": "At least one KBI is required",
-                        "severity": "error"
+                        "severity": "error",
                     }
                 ],
-                "warnings": []
+                "warnings": [],
             }
         }

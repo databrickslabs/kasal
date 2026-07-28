@@ -106,8 +106,12 @@ class TestReachesTheTrace:
 
         tracer = MagicMock()
         span = MagicMock()
-        tracer.start_as_current_span.return_value.__enter__ = MagicMock(return_value=span)
-        tracer.start_as_current_span.return_value.__exit__ = MagicMock(return_value=False)
+        tracer.start_as_current_span.return_value.__enter__ = MagicMock(
+            return_value=span
+        )
+        tracer.start_as_current_span.return_value.__exit__ = MagicMock(
+            return_value=False
+        )
         bridge = OTelEventBridge(tracer, "job-a2ui")
 
         bridge._emit_span(
@@ -160,7 +164,9 @@ class TestEveryGateReportsItself:
         assert "plain text" in event.reason
 
     @pytest.mark.asyncio
-    async def test_a_prose_fallback_is_not_a_surface(self, captured_events, monkeypatch):
+    async def test_a_prose_fallback_is_not_a_surface(
+        self, captured_events, monkeypatch
+    ):
         async def _on(group_id, query):
             return True, {"components": []}, ""
 
@@ -273,9 +279,7 @@ class TestItBelongsToTheRunThatTriggeredIt:
             written["job_id"] = job_id
             written["metadata"] = rows[0][3]
 
-        monkeypatch.setattr(
-            "src.services.trace.writer.write_rows", _write
-        )
+        monkeypatch.setattr("src.services.trace.writer.write_rows", _write)
 
         a2ui_runner._emit_surface_event(
             "composed",
@@ -298,9 +302,7 @@ class TestItBelongsToTheRunThatTriggeredIt:
         async def _write(job_id, written_rows, **kwargs):
             rows.append(written_rows[0][3]["outcome"])
 
-        monkeypatch.setattr(
-            "src.services.trace.writer.write_rows", _write
-        )
+        monkeypatch.setattr("src.services.trace.writer.write_rows", _write)
 
         for outcome in ("no_text", "no_rich_intent", "disabled"):
             a2ui_runner._emit_surface_event(outcome, execution_id="job-42")
@@ -317,9 +319,7 @@ class TestItBelongsToTheRunThatTriggeredIt:
         async def _write(job_id, written_rows, **kwargs):
             rows.append(written_rows[0][3]["outcome"])
 
-        monkeypatch.setattr(
-            "src.services.trace.writer.write_rows", _write
-        )
+        monkeypatch.setattr("src.services.trace.writer.write_rows", _write)
 
         for outcome in (
             "composed",
@@ -342,9 +342,7 @@ class TestItBelongsToTheRunThatTriggeredIt:
         async def _write(job_id, rows, **kwargs):
             called.append(job_id)
 
-        monkeypatch.setattr(
-            "src.services.trace.writer.write_rows", _write
-        )
+        monkeypatch.setattr("src.services.trace.writer.write_rows", _write)
 
         a2ui_runner._emit_surface_event("composed", execution_id=None)
         await __import__("asyncio").sleep(0)
@@ -401,7 +399,9 @@ class TestItBelongsToTheRunThatTriggeredIt:
         from src.services.trace import writer
 
         session = MagicMock()
-        session.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+        session.execute = AsyncMock(
+            return_value=MagicMock(all=MagicMock(return_value=[]))
+        )
 
         assert await writer._root_span_id(session, "job-42") is None
 
@@ -424,7 +424,11 @@ class TestItFilesUnderTheRunsOwnAgentAndTask:
                     return_value=[
                         # Newest first; crew/System rows are not the agent.
                         ("crew", "crew", {}),
-                        ("Quantitative Analyst", "Solve this problem", {"task_id": "T1"}),
+                        (
+                            "Quantitative Analyst",
+                            "Solve this problem",
+                            {"task_id": "T1"},
+                        ),
                     ]
                 )
             )
@@ -443,6 +447,8 @@ class TestItFilesUnderTheRunsOwnAgentAndTask:
         from src.services.trace import writer
 
         session = MagicMock()
-        session.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+        session.execute = AsyncMock(
+            return_value=MagicMock(all=MagicMock(return_value=[]))
+        )
 
         assert await writer.resolve_attribution(session, "job-42") == {}

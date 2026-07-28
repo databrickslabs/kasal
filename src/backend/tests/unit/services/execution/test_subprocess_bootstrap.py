@@ -2,20 +2,21 @@
 Unit tests for src/services/execution/subprocess_bootstrap.py
 """
 
-import logging
-import sys
-import os
-import io
 import asyncio
-import pytest
-from unittest.mock import MagicMock, patch, call, AsyncMock, PropertyMock
+import io
+import logging
+import os
+import sys
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, call, patch
 
+import pytest
+
+from src.services.execution.logs.context import _execution_context
 from src.services.execution.subprocess_bootstrap import (
     configure_subprocess_logging,
-    suppress_stdout_stderr,
     restore_stdout_stderr,
+    suppress_stdout_stderr,
 )
-from src.services.execution.logs.context import _execution_context
 
 
 class TestSuppressRestoreStdout:
@@ -46,7 +47,6 @@ class TestSuppressRestoreStdout:
 # ---------------------------------------------------------------------------
 # ExecutionLogsDatabaseHandler
 # ---------------------------------------------------------------------------
-
 
 
 class TestConfigureSubprocessLogging:
@@ -209,7 +209,9 @@ class TestConfigureSubprocessLogging:
 
     @patch("src.core.logger.LoggerManager")
     @patch("src.core.logger.get_logger")
-    def test_existing_file_handler_gets_formatter_update(self, mock_get_logger, mock_lm_class):
+    def test_existing_file_handler_gets_formatter_update(
+        self, mock_get_logger, mock_lm_class
+    ):
         mock_logger_manager = MagicMock()
         mock_lm_class.get_instance.return_value = mock_logger_manager
         mock_exec_logger = MagicMock()

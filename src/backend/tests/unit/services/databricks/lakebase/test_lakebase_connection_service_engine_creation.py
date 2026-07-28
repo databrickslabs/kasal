@@ -4,17 +4,19 @@ Unit tests for LakebaseConnectionService.
 Tests all connection management, credential generation, engine creation,
 and SPN-based username resolution for Databricks Lakebase (PostgreSQL) instances.
 """
+
 import os
-import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.databricks.lakebase.connection import LakebaseConnectionService
+import pytest
 
+from src.services.databricks.lakebase.connection import LakebaseConnectionService
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def user_token():
@@ -65,6 +67,7 @@ def instance_name():
 # Test class: Constructor
 # ---------------------------------------------------------------------------
 
+
 class TestLakebaseConnectionServiceInit:
     """Tests for LakebaseConnectionService constructor."""
 
@@ -93,6 +96,7 @@ class TestLakebaseConnectionServiceInit:
 # ---------------------------------------------------------------------------
 # Test class: get_workspace_client
 # ---------------------------------------------------------------------------
+
 
 class TestGetWorkspaceClient:
     """Tests for the get_workspace_client method."""
@@ -154,8 +158,13 @@ class TestGetWorkspaceClient:
         }
         mock_ws = MagicMock()
 
-        with patch.dict("os.environ", env, clear=False), \
-             patch("src.services.databricks.lakebase.connection.WorkspaceClient", return_value=mock_ws) as mock_cls:
+        with (
+            patch.dict("os.environ", env, clear=False),
+            patch(
+                "src.services.databricks.lakebase.connection.WorkspaceClient",
+                return_value=mock_ws,
+            ) as mock_cls,
+        ):
             result = await svc.get_workspace_client()
 
             assert result is mock_ws
@@ -177,8 +186,13 @@ class TestGetWorkspaceClient:
         }
         mock_ws = MagicMock()
 
-        with patch.dict("os.environ", env, clear=False), \
-             patch("src.services.databricks.lakebase.connection.WorkspaceClient", return_value=mock_ws) as mock_cls:
+        with (
+            patch.dict("os.environ", env, clear=False),
+            patch(
+                "src.services.databricks.lakebase.connection.WorkspaceClient",
+                return_value=mock_ws,
+            ) as mock_cls,
+        ):
             first = await svc.get_workspace_client()
             second = await svc.get_workspace_client()
 
@@ -205,12 +219,16 @@ class TestGetWorkspaceClient:
 # Test class: get_spn_username
 # ---------------------------------------------------------------------------
 
+
 class TestGetSpnUsername:
     """Tests for the get_spn_username method."""
 
     def test_returns_client_id_from_env(self, service):
         """get_spn_username should return DATABRICKS_CLIENT_ID from environment."""
-        with patch.dict("os.environ", {"DATABRICKS_CLIENT_ID": "84698c5c-6144-44a2-b6d4-4a69c77fc442"}):
+        with patch.dict(
+            "os.environ",
+            {"DATABRICKS_CLIENT_ID": "84698c5c-6144-44a2-b6d4-4a69c77fc442"},
+        ):
             result = service.get_spn_username()
             assert result == "84698c5c-6144-44a2-b6d4-4a69c77fc442"
 
@@ -224,6 +242,7 @@ class TestGetSpnUsername:
 # ---------------------------------------------------------------------------
 # Test class: get_username
 # ---------------------------------------------------------------------------
+
 
 class TestGetUsername:
     """Tests for the get_username method."""
@@ -264,13 +283,16 @@ class TestGetUsername:
         with patch.dict("os.environ", {}, clear=True):
             mock_get_ws.return_value = None
 
-            with pytest.raises(ValueError, match="Cannot determine PostgreSQL username"):
+            with pytest.raises(
+                ValueError, match="Cannot determine PostgreSQL username"
+            ):
                 await svc.get_username()
 
 
 # ---------------------------------------------------------------------------
 # Test class: generate_credentials
 # ---------------------------------------------------------------------------
+
 
 class TestGenerateCredentials:
     """Tests for the generate_credentials method."""
@@ -299,7 +321,9 @@ class TestGenerateCredentials:
     ):
         """generate_credentials should propagate exceptions from workspace client."""
         mock_ws = MagicMock()
-        mock_ws.database.generate_database_credential.side_effect = RuntimeError("API error")
+        mock_ws.database.generate_database_credential.side_effect = RuntimeError(
+            "API error"
+        )
         mock_get_ws.return_value = mock_ws
 
         with pytest.raises(RuntimeError, match="API error"):
@@ -309,6 +333,7 @@ class TestGenerateCredentials:
 # ---------------------------------------------------------------------------
 # Test class: create_lakebase_engine_async
 # ---------------------------------------------------------------------------
+
 
 class TestCreateLakebaseEngineAsync:
     """Tests for the create_lakebase_engine_async method."""
@@ -323,15 +348,16 @@ class TestCreateLakebaseEngineAsync:
         mock_create_engine.return_value = mock_engine
 
         result = await service.create_lakebase_engine_async(
-            endpoint=endpoint,
-            username="testuser",
-            token="testtoken"
+            endpoint=endpoint, username="testuser", token="testtoken"
         )
 
         assert result is mock_engine
         call_args = mock_create_engine.call_args
         url = call_args[0][0]
-        assert url == f"postgresql+asyncpg://testuser" f":testtoken@{endpoint}:5432/databricks_postgres"
+        assert (
+            url == f"postgresql+asyncpg://testuser"
+            f":testtoken@{endpoint}:5432/databricks_postgres"
+        )
 
     @pytest.mark.asyncio
     @patch("src.services.databricks.lakebase.connection.create_async_engine")
@@ -383,6 +409,7 @@ class TestCreateLakebaseEngineAsync:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_connect_ctx(mock_conn):
     """Async context manager mock for engine.connect()."""
     ctx = AsyncMock()
@@ -403,6 +430,7 @@ def _make_sync_connect_ctx(mock_conn):
 # Test class: get_workspace_client SPN PAT backup (line 81)
 # ---------------------------------------------------------------------------
 
+
 class TestGetWorkspaceClientSpnPatBackup:
     """Tests for SPN OAuth path stripping/restoring PAT env vars."""
 
@@ -421,13 +449,19 @@ class TestGetWorkspaceClientSpnPatBackup:
 
         def _fake_ws(**kwargs):
             import os as _os
+
             # During the SDK call, PAT vars must be removed
             captured["token_present"] = "DATABRICKS_TOKEN" in _os.environ
             captured["api_key_present"] = "DATABRICKS_API_KEY" in _os.environ
             return MagicMock()
 
-        with patch.dict("os.environ", env, clear=True), \
-             patch("src.services.databricks.lakebase.connection.WorkspaceClient", side_effect=_fake_ws):
+        with (
+            patch.dict("os.environ", env, clear=True),
+            patch(
+                "src.services.databricks.lakebase.connection.WorkspaceClient",
+                side_effect=_fake_ws,
+            ),
+        ):
             result = await svc.get_workspace_client()
 
             assert result is svc._workspace_client
@@ -442,12 +476,15 @@ class TestGetWorkspaceClientSpnPatBackup:
 # Test class: test_connection (lines 232-270)
 # ---------------------------------------------------------------------------
 
+
 class TestTestConnection:
     """Tests for the test_connection method."""
 
     @pytest.mark.asyncio
     @patch("src.services.databricks.lakebase.connection.create_async_engine")
-    async def test_connection_success(self, mock_create_engine, service, endpoint, instance_name, mock_credential):
+    async def test_connection_success(
+        self, mock_create_engine, service, endpoint, instance_name, mock_credential
+    ):
         """test_connection returns success dict with connected_user and version."""
         mock_conn = AsyncMock()
         result_row = MagicMock()
@@ -472,7 +509,9 @@ class TestTestConnection:
 
     @pytest.mark.asyncio
     @patch("src.services.databricks.lakebase.connection.create_async_engine")
-    async def test_connection_failure(self, mock_create_engine, service, endpoint, instance_name, mock_credential):
+    async def test_connection_failure(
+        self, mock_create_engine, service, endpoint, instance_name, mock_credential
+    ):
         """test_connection returns failure dict when the connection raises."""
         mock_engine = MagicMock()
         failing_ctx = AsyncMock()
@@ -497,6 +536,7 @@ class TestTestConnection:
 # Test class: create_engine_with_token_refresh (lines 295-345)
 # ---------------------------------------------------------------------------
 
+
 class TestCreateEngineWithTokenRefresh:
     """Tests for create_engine_with_token_refresh (async + sync)."""
 
@@ -518,6 +558,7 @@ class TestCreateEngineWithTokenRefresh:
             def _decorator(fn):
                 captured["fn"] = fn
                 return fn
+
             return _decorator
 
         mock_event.listens_for.side_effect = _listens_for
@@ -529,7 +570,10 @@ class TestCreateEngineWithTokenRefresh:
 
         assert result is mock_engine
         url = mock_create_engine.call_args[0][0]
-        assert url == f"postgresql+asyncpg://u" f":placeholder@{endpoint}:5432/databricks_postgres"
+        assert (
+            url == f"postgresql+asyncpg://u"
+            f":placeholder@{endpoint}:5432/databricks_postgres"
+        )
         ck = mock_create_engine.call_args[1]
         assert ck["connect_args"]["server_settings"]["search_path"] == "kasal, public"
         assert ck["pool_pre_ping"] is False
@@ -556,6 +600,7 @@ class TestCreateEngineWithTokenRefresh:
             def _decorator(fn):
                 captured["fn"] = fn
                 return fn
+
             return _decorator
 
         mock_event.listens_for.side_effect = _listens_for
@@ -567,7 +612,10 @@ class TestCreateEngineWithTokenRefresh:
 
         assert result is mock_engine
         url = mock_create_engine.call_args[0][0]
-        assert url == f"postgresql+pg8000://u:placeholder@{endpoint}:5432/databricks_postgres"
+        assert (
+            url
+            == f"postgresql+pg8000://u:placeholder@{endpoint}:5432/databricks_postgres"
+        )
         ck = mock_create_engine.call_args[1]
         assert ck["connect_args"]["ssl_context"] is True
         # Exercise the registered do_connect listener
@@ -580,6 +628,7 @@ class TestCreateEngineWithTokenRefresh:
 # ---------------------------------------------------------------------------
 # Test class: create_lakebase_engine_sync statement_timeout (lines 424-430)
 # ---------------------------------------------------------------------------
+
 
 class TestCreateLakebaseEngineSyncTimeout:
     """Tests for create_lakebase_engine_sync with statement_timeout_ms."""
@@ -601,6 +650,7 @@ class TestCreateLakebaseEngineSyncTimeout:
             def _decorator(fn):
                 captured["fn"] = fn
                 return fn
+
             return _decorator
 
         mock_event.listens_for.side_effect = _listens_for
@@ -624,6 +674,7 @@ class TestCreateLakebaseEngineSyncTimeout:
 # Test class: get_connected_engine_async (lines 457-471)
 # ---------------------------------------------------------------------------
 
+
 class TestGetConnectedEngineAsync:
     """Tests for get_connected_engine_async."""
 
@@ -643,14 +694,18 @@ class TestGetConnectedEngineAsync:
         service.generate_credentials = AsyncMock(return_value=mock_credential)
         service.create_lakebase_engine_async = AsyncMock(return_value=mock_engine)
 
-        username, engine = await service.get_connected_engine_async(instance_name, endpoint)
+        username, engine = await service.get_connected_engine_async(
+            instance_name, endpoint
+        )
 
         assert username == "spn-user"
         assert engine is mock_engine
         mock_engine.dispose.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_failure_disposes_and_raises(self, service, endpoint, instance_name, mock_credential):
+    async def test_failure_disposes_and_raises(
+        self, service, endpoint, instance_name, mock_credential
+    ):
         """get_connected_engine_async disposes engine and raises on connect failure."""
         mock_engine = MagicMock()
         failing_ctx = AsyncMock()
@@ -672,6 +727,7 @@ class TestGetConnectedEngineAsync:
 # ---------------------------------------------------------------------------
 # Test class: get_connected_engine_sync (lines 493-504)
 # ---------------------------------------------------------------------------
+
 
 class TestGetConnectedEngineSync:
     """Tests for get_connected_engine_sync."""
@@ -714,6 +770,7 @@ class TestGetConnectedEngineSync:
 # Test class: create_lakebase_engine_sync
 # ---------------------------------------------------------------------------
 
+
 class TestCreateLakebaseEngineSync:
     """Tests for the create_lakebase_engine_sync method."""
 
@@ -726,15 +783,16 @@ class TestCreateLakebaseEngineSync:
         mock_create_engine.return_value = mock_engine
 
         result = service.create_lakebase_engine_sync(
-            endpoint=endpoint,
-            username="syncuser",
-            token="synctoken"
+            endpoint=endpoint, username="syncuser", token="synctoken"
         )
 
         assert result is mock_engine
         call_args = mock_create_engine.call_args
         url = call_args[0][0]
-        assert url == f"postgresql+pg8000://syncuser:synctoken@{endpoint}:5432/databricks_postgres"
+        assert (
+            url
+            == f"postgresql+pg8000://syncuser:synctoken@{endpoint}:5432/databricks_postgres"
+        )
 
     @patch("src.services.databricks.lakebase.connection.create_engine")
     def test_creates_engine_with_ssl_context_true(
@@ -743,25 +801,20 @@ class TestCreateLakebaseEngineSync:
         """create_lakebase_engine_sync should set ssl_context=True for pg8000."""
         mock_create_engine.return_value = MagicMock()
 
-        service.create_lakebase_engine_sync(
-            endpoint=endpoint, username="u", token="t"
-        )
+        service.create_lakebase_engine_sync(endpoint=endpoint, username="u", token="t")
 
         call_kwargs = mock_create_engine.call_args[1]
         assert call_kwargs["connect_args"]["ssl_context"] is True
 
     @patch("src.services.databricks.lakebase.connection.create_engine")
-    def test_creates_engine_with_null_pool(
-        self, mock_create_engine, service, endpoint
-    ):
+    def test_creates_engine_with_null_pool(self, mock_create_engine, service, endpoint):
         """create_lakebase_engine_sync should use NullPool."""
         mock_create_engine.return_value = MagicMock()
 
-        service.create_lakebase_engine_sync(
-            endpoint=endpoint, username="u", token="t"
-        )
+        service.create_lakebase_engine_sync(endpoint=endpoint, username="u", token="t")
 
         from sqlalchemy.pool import NullPool
+
         call_kwargs = mock_create_engine.call_args[1]
         assert call_kwargs["poolclass"] is NullPool
 
@@ -772,9 +825,7 @@ class TestCreateLakebaseEngineSync:
         """create_lakebase_engine_sync should set echo=False."""
         mock_create_engine.return_value = MagicMock()
 
-        service.create_lakebase_engine_sync(
-            endpoint=endpoint, username="u", token="t"
-        )
+        service.create_lakebase_engine_sync(endpoint=endpoint, username="u", token="t")
 
         call_kwargs = mock_create_engine.call_args[1]
         assert call_kwargs["echo"] is False

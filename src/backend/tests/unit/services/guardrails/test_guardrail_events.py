@@ -11,15 +11,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.services.execution.runtime.guardrail import LLMGuardrail
-from src.services.execution.runtime.task import Task
-from src.services.execution.runtime.types import TaskOutput
 from src.core.events import (
     LLMGuardrailCompletedEvent,
     LLMGuardrailFailedEvent,
     LLMGuardrailStartedEvent,
     event_bus,
 )
+from src.services.execution.runtime.guardrail import LLMGuardrail
+from src.services.execution.runtime.task import Task
+from src.services.execution.runtime.types import TaskOutput
 
 
 @pytest.fixture

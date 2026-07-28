@@ -69,7 +69,9 @@ class TestCodeGuardrail:
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as MockGF,
-            patch("src.services.execution.kernel.task_builder.GuardrailWrapper") as MockGW,
+            patch(
+                "src.services.execution.kernel.task_builder.GuardrailWrapper"
+            ) as MockGW,
         ):
             MockGF.create_guardrail.return_value = MagicMock()
             MockGW.return_value = MagicMock()

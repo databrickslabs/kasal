@@ -2,10 +2,10 @@
 Base exporter class for crew export operations.
 """
 
-from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Optional
-from datetime import datetime
 import logging
+from abc import ABC, abstractmethod
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,9 @@ class BaseExporter(ABC):
         self.logger = logger
 
     @abstractmethod
-    async def export(self, crew_data: Dict[str, Any], options: Dict[str, Any]) -> Dict[str, Any]:
+    async def export(
+        self, crew_data: Dict[str, Any], options: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         Export crew to target format
 
@@ -50,24 +52,24 @@ class BaseExporter(ABC):
         sanitized = name.lower()
 
         # Replace spaces and special characters with underscores
-        sanitized = ''.join(c if c.isalnum() or c == '_' else '_' for c in sanitized)
+        sanitized = "".join(c if c.isalnum() or c == "_" else "_" for c in sanitized)
 
         # Remove consecutive underscores
-        while '__' in sanitized:
-            sanitized = sanitized.replace('__', '_')
+        while "__" in sanitized:
+            sanitized = sanitized.replace("__", "_")
 
         # Remove leading/trailing underscores
-        sanitized = sanitized.strip('_')
+        sanitized = sanitized.strip("_")
 
         # Ensure it starts with a letter (for Python identifiers)
         if sanitized and not sanitized[0].isalpha():
-            sanitized = 'crew_' + sanitized
+            sanitized = "crew_" + sanitized
 
-        return sanitized or 'crew'
+        return sanitized or "crew"
 
     def _get_timestamp(self) -> str:
         """Get formatted timestamp"""
-        return datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+        return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
     def _extract_tools_from_config(self, config: Dict[str, Any]) -> List[str]:
         """
@@ -82,12 +84,14 @@ class BaseExporter(ABC):
         tools = []
 
         # Check for tools in config
-        if 'tools' in config and isinstance(config['tools'], list):
-            tools.extend(config['tools'])
+        if "tools" in config and isinstance(config["tools"], list):
+            tools.extend(config["tools"])
 
         return tools
 
-    def _get_unique_tools(self, agents: List[Dict[str, Any]], tasks: List[Dict[str, Any]]) -> List[str]:
+    def _get_unique_tools(
+        self, agents: List[Dict[str, Any]], tasks: List[Dict[str, Any]]
+    ) -> List[str]:
         """
         Get unique list of all tools used in crew
 
@@ -112,5 +116,7 @@ class BaseExporter(ABC):
             logger.info(f"[Export Debug] Task '{task.get('name')}' tools: {tools}")
             all_tools.update(tools)
 
-        logger.info(f"[Export Debug] All unique tools collected: {sorted(list(all_tools))}")
+        logger.info(
+            f"[Export Debug] All unique tools collected: {sorted(list(all_tools))}"
+        )
         return sorted(list(all_tools))

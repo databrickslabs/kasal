@@ -213,7 +213,9 @@ class TestMCPConnectionError:
         assert exc.detail == "custom failure message"
 
     def test_server_name_stored(self):
-        exc = MCPConnectionError(server_name="my-server", server_url="https://example.com")
+        exc = MCPConnectionError(
+            server_name="my-server", server_url="https://example.com"
+        )
         assert exc.server_name == "my-server"
 
     def test_server_url_stored(self):
@@ -236,7 +238,9 @@ class TestMCPConnectionError:
 
     def test_caught_as_kasal_error(self):
         with pytest.raises(KasalError):
-            raise MCPConnectionError(server_name="test", server_url="https://example.com")
+            raise MCPConnectionError(
+                server_name="test", server_url="https://example.com"
+            )
 
     def test_str_returns_detail(self):
         exc = MCPConnectionError(
@@ -252,7 +256,14 @@ class TestMCPConnectionError:
 # ---------------------------------------------------------------------------
 class TestExceptionHierarchy:
     def test_all_subclasses_are_kasal_error(self):
-        for cls in (NotFoundError, ConflictError, ForbiddenError, BadRequestError, LakebaseUnavailableError, MCPConnectionError):
+        for cls in (
+            NotFoundError,
+            ConflictError,
+            ForbiddenError,
+            BadRequestError,
+            LakebaseUnavailableError,
+            MCPConnectionError,
+        ):
             assert issubclass(cls, KasalError)
             assert issubclass(cls, Exception)
 

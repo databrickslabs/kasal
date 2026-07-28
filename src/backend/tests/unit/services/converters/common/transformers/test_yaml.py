@@ -4,11 +4,13 @@ Unit tests for converters/common/transformers/yaml.py
 Tests YAML KPI definition parsing.
 """
 
+from pathlib import Path
+
 import pytest
 import yaml
-from pathlib import Path
+
+from src.services.converters.base.models import KPI, KPIDefinition, Structure
 from src.services.converters.common.transformers.yaml import YAMLKPIParser
-from src.services.converters.base.models import KPI, Structure, KPIDefinition
 
 
 class TestYAMLKPIParser:
@@ -23,62 +25,55 @@ class TestYAMLKPIParser:
     def simple_yaml_data(self):
         """Simple KPI definition YAML data"""
         return {
-            'description': 'Test KPI Definition',
-            'technical_name': 'test_def',
-            'kbi': [
+            "description": "Test KPI Definition",
+            "technical_name": "test_def",
+            "kbi": [
                 {
-                    'description': 'Total Sales',
-                    'technical_name': 'total_sales',
-                    'formula': 'SUM(sales.amount)',
-                    'source_table': 'sales'
+                    "description": "Total Sales",
+                    "technical_name": "total_sales",
+                    "formula": "SUM(sales.amount)",
+                    "source_table": "sales",
                 }
-            ]
+            ],
         }
 
     @pytest.fixture
     def complex_yaml_data(self):
         """Complex KPI definition with structures and filters"""
         return {
-            'description': 'Revenue Metrics',
-            'technical_name': 'revenue_metrics',
-            'default_variables': {
-                'year': 2024,
-                'region': 'Global'
-            },
-            'filters': {
-                'query_filter': {
-                    'active_only': 'status = "active"'
-                }
-            },
-            'structures': {
-                'YTD': {
-                    'description': 'Year to Date',
-                    'filter': ['fiscyear = $year', 'fiscper3 < $period'],
-                    'display_sign': 1
+            "description": "Revenue Metrics",
+            "technical_name": "revenue_metrics",
+            "default_variables": {"year": 2024, "region": "Global"},
+            "filters": {"query_filter": {"active_only": 'status = "active"'}},
+            "structures": {
+                "YTD": {
+                    "description": "Year to Date",
+                    "filter": ["fiscyear = $year", "fiscper3 < $period"],
+                    "display_sign": 1,
                 },
-                'PY': {
-                    'description': 'Prior Year',
-                    'filter': ['fiscyear = $year - 1'],
-                    'display_sign': 1
-                }
+                "PY": {
+                    "description": "Prior Year",
+                    "filter": ["fiscyear = $year - 1"],
+                    "display_sign": 1,
+                },
             },
-            'kbi': [
+            "kbi": [
                 {
-                    'description': 'Revenue',
-                    'technical_name': 'revenue',
-                    'formula': 'SUM(sales.revenue)',
-                    'source_table': 'sales',
-                    'filter': ['region = $region'],
-                    'apply_structures': ['YTD', 'PY']
+                    "description": "Revenue",
+                    "technical_name": "revenue",
+                    "formula": "SUM(sales.revenue)",
+                    "source_table": "sales",
+                    "filter": ["region = $region"],
+                    "apply_structures": ["YTD", "PY"],
                 }
-            ]
+            ],
         }
 
     @pytest.fixture
     def temp_yaml_file(self, tmp_path, simple_yaml_data):
         """Create temporary YAML file for testing"""
         yaml_file = tmp_path / "test_kpi.yaml"
-        with open(yaml_file, 'w', encoding='utf-8') as f:
+        with open(yaml_file, "w", encoding="utf-8") as f:
             yaml.dump(simple_yaml_data, f)
         return yaml_file
 
@@ -87,34 +82,34 @@ class TestYAMLKPIParser:
         """Create temporary directory with multiple YAML files"""
         # Create first file
         yaml_data_1 = {
-            'description': 'Sales Metrics',
-            'technical_name': 'sales_metrics',
-            'kbi': [
+            "description": "Sales Metrics",
+            "technical_name": "sales_metrics",
+            "kbi": [
                 {
-                    'description': 'Total Sales',
-                    'technical_name': 'total_sales',
-                    'formula': 'SUM(sales.amount)'
+                    "description": "Total Sales",
+                    "technical_name": "total_sales",
+                    "formula": "SUM(sales.amount)",
                 }
-            ]
+            ],
         }
         yaml_file_1 = tmp_path / "sales.yaml"
-        with open(yaml_file_1, 'w', encoding='utf-8') as f:
+        with open(yaml_file_1, "w", encoding="utf-8") as f:
             yaml.dump(yaml_data_1, f)
 
         # Create second file with .yml extension
         yaml_data_2 = {
-            'description': 'Cost Metrics',
-            'technical_name': 'cost_metrics',
-            'kbi': [
+            "description": "Cost Metrics",
+            "technical_name": "cost_metrics",
+            "kbi": [
                 {
-                    'description': 'Total Cost',
-                    'technical_name': 'total_cost',
-                    'formula': 'SUM(costs.amount)'
+                    "description": "Total Cost",
+                    "technical_name": "total_cost",
+                    "formula": "SUM(costs.amount)",
                 }
-            ]
+            ],
         }
         yaml_file_2 = tmp_path / "costs.yml"
-        with open(yaml_file_2, 'w', encoding='utf-8') as f:
+        with open(yaml_file_2, "w", encoding="utf-8") as f:
             yaml.dump(yaml_data_2, f)
 
         return tmp_path
@@ -133,8 +128,8 @@ class TestYAMLKPIParser:
         definition = parser.parse_file(temp_yaml_file)
 
         assert isinstance(definition, KPIDefinition)
-        assert definition.description == 'Test KPI Definition'
-        assert definition.technical_name == 'test_def'
+        assert definition.description == "Test KPI Definition"
+        assert definition.technical_name == "test_def"
         assert len(definition.kpis) == 1
 
     def test_parse_file_kpi_details(self, parser, temp_yaml_file):
@@ -142,10 +137,10 @@ class TestYAMLKPIParser:
         definition = parser.parse_file(temp_yaml_file)
 
         kpi = definition.kpis[0]
-        assert kpi.description == 'Total Sales'
-        assert kpi.technical_name == 'total_sales'
-        assert kpi.formula == 'SUM(sales.amount)'
-        assert kpi.source_table == 'sales'
+        assert kpi.description == "Total Sales"
+        assert kpi.technical_name == "total_sales"
+        assert kpi.formula == "SUM(sales.amount)"
+        assert kpi.source_table == "sales"
 
     def test_parse_file_not_found(self, parser):
         """Test parsing non-existent file raises FileNotFoundError"""
@@ -179,8 +174,8 @@ class TestYAMLKPIParser:
         definitions = parser.parse_directory(temp_yaml_directory)
 
         technical_names = {d.technical_name for d in definitions}
-        assert 'sales_metrics' in technical_names
-        assert 'cost_metrics' in technical_names
+        assert "sales_metrics" in technical_names
+        assert "cost_metrics" in technical_names
 
     def test_parse_directory_stores_definitions(self, parser, temp_yaml_directory):
         """Test parsed definitions are stored in parser"""
@@ -210,8 +205,8 @@ class TestYAMLKPIParser:
         """Test parsing simple YAML data"""
         definition = parser._parse_yaml_data(simple_yaml_data)
 
-        assert definition.description == 'Test KPI Definition'
-        assert definition.technical_name == 'test_def'
+        assert definition.description == "Test KPI Definition"
+        assert definition.technical_name == "test_def"
         assert len(definition.kpis) == 1
 
     def test_parse_yaml_data_with_structures(self, parser, complex_yaml_data):
@@ -219,19 +214,19 @@ class TestYAMLKPIParser:
         definition = parser._parse_yaml_data(complex_yaml_data)
 
         assert definition.structures is not None
-        assert 'YTD' in definition.structures
-        assert 'PY' in definition.structures
+        assert "YTD" in definition.structures
+        assert "PY" in definition.structures
 
-        ytd_structure = definition.structures['YTD']
+        ytd_structure = definition.structures["YTD"]
         assert isinstance(ytd_structure, Structure)
-        assert ytd_structure.description == 'Year to Date'
+        assert ytd_structure.description == "Year to Date"
 
     def test_parse_yaml_data_with_query_filters(self, parser, complex_yaml_data):
         """Test parsing YAML data with query filters"""
         definition = parser._parse_yaml_data(complex_yaml_data)
 
         assert len(definition.query_filters) == 1
-        assert definition.query_filters[0].name == 'active_only'
+        assert definition.query_filters[0].name == "active_only"
         assert definition.query_filters[0].expression == 'status = "active"'
 
     def test_parse_yaml_data_with_default_variables(self, parser, complex_yaml_data):
@@ -239,8 +234,8 @@ class TestYAMLKPIParser:
         definition = parser._parse_yaml_data(complex_yaml_data)
 
         assert definition.default_variables is not None
-        assert definition.default_variables['year'] == 2024
-        assert definition.default_variables['region'] == 'Global'
+        assert definition.default_variables["year"] == 2024
+        assert definition.default_variables["region"] == "Global"
 
     def test_parse_yaml_data_kpi_with_structures(self, parser, complex_yaml_data):
         """Test KPI applies structures from YAML"""
@@ -248,8 +243,8 @@ class TestYAMLKPIParser:
 
         kpi = definition.kpis[0]
         assert kpi.apply_structures is not None
-        assert 'YTD' in kpi.apply_structures
-        assert 'PY' in kpi.apply_structures
+        assert "YTD" in kpi.apply_structures
+        assert "PY" in kpi.apply_structures
 
     def test_parse_yaml_data_kpi_with_filters(self, parser, complex_yaml_data):
         """Test KPI has filters from YAML"""
@@ -257,7 +252,7 @@ class TestYAMLKPIParser:
 
         kpi = definition.kpis[0]
         assert kpi.filters is not None
-        assert 'region = $region' in kpi.filters
+        assert "region = $region" in kpi.filters
 
     # ========== get_all_kbis Tests ==========
 
@@ -318,8 +313,8 @@ class TestYAMLKPIParser:
 
         assert len(all_kbis) == 1
         def_from_kbis, kpi = all_kbis[0]
-        assert def_from_kbis.technical_name == 'test_def'
-        assert kpi.technical_name == 'total_sales'
+        assert def_from_kbis.technical_name == "test_def"
+        assert kpi.technical_name == "total_sales"
 
     def test_full_workflow_directory(self, parser, temp_yaml_directory):
         """Test complete workflow: parse directory → get all KBIs"""
@@ -336,114 +331,120 @@ class TestYAMLKPIParser:
 
         # Check KBIs are from correct definitions
         kbi_names = {kpi.technical_name for _, kpi in all_kbis}
-        assert 'total_sales' in kbi_names
-        assert 'total_cost' in kbi_names
+        assert "total_sales" in kbi_names
+        assert "total_cost" in kbi_names
 
     def test_parse_kpi_with_all_fields(self, parser, tmp_path):
         """Test parsing KPI with all optional fields"""
         yaml_data = {
-            'description': 'Complex KPI',
-            'technical_name': 'complex',
-            'kbi': [
+            "description": "Complex KPI",
+            "technical_name": "complex",
+            "kbi": [
                 {
-                    'description': 'Weighted Average',
-                    'technical_name': 'weighted_avg',
-                    'formula': 'AVG(amount)',
-                    'source_table': 'transactions',
-                    'aggregation_type': 'AVG',
-                    'weight_column': 'weight',
-                    'target_column': 'target',
-                    'percentile': 95,
-                    'exceptions': [{'name': 'exception1', 'value': '1'}, {'name': 'exception2', 'value': '2'}],
-                    'exception_aggregation': 'SUM',
-                    'fields_for_exception_aggregation': ['field1', 'field2'],
-                    'fields_for_constant_selection': ['const1', 'const2'],
-                    'display_sign': -1
+                    "description": "Weighted Average",
+                    "technical_name": "weighted_avg",
+                    "formula": "AVG(amount)",
+                    "source_table": "transactions",
+                    "aggregation_type": "AVG",
+                    "weight_column": "weight",
+                    "target_column": "target",
+                    "percentile": 95,
+                    "exceptions": [
+                        {"name": "exception1", "value": "1"},
+                        {"name": "exception2", "value": "2"},
+                    ],
+                    "exception_aggregation": "SUM",
+                    "fields_for_exception_aggregation": ["field1", "field2"],
+                    "fields_for_constant_selection": ["const1", "const2"],
+                    "display_sign": -1,
                 }
-            ]
+            ],
         }
 
         yaml_file = tmp_path / "complex.yaml"
-        with open(yaml_file, 'w', encoding='utf-8') as f:
+        with open(yaml_file, "w", encoding="utf-8") as f:
             yaml.dump(yaml_data, f)
 
         definition = parser.parse_file(yaml_file)
         kpi = definition.kpis[0]
 
         # Verify all fields were parsed correctly
-        assert kpi.description == 'Weighted Average'
-        assert kpi.technical_name == 'weighted_avg'
-        assert kpi.formula == 'AVG(amount)'
-        assert kpi.source_table == 'transactions'
-        assert kpi.aggregation_type == 'AVG'
-        assert kpi.weight_column == 'weight'
-        assert kpi.target_column == 'target'
+        assert kpi.description == "Weighted Average"
+        assert kpi.technical_name == "weighted_avg"
+        assert kpi.formula == "AVG(amount)"
+        assert kpi.source_table == "transactions"
+        assert kpi.aggregation_type == "AVG"
+        assert kpi.weight_column == "weight"
+        assert kpi.target_column == "target"
         assert kpi.percentile == 95
-        assert kpi.exceptions == [{'name': 'exception1', 'value': '1'}, {'name': 'exception2', 'value': '2'}]
-        assert kpi.exception_aggregation == 'SUM'
-        assert kpi.fields_for_exception_aggregation == ['field1', 'field2']
-        assert kpi.fields_for_constant_selection == ['const1', 'const2']
+        assert kpi.exceptions == [
+            {"name": "exception1", "value": "1"},
+            {"name": "exception2", "value": "2"},
+        ]
+        assert kpi.exception_aggregation == "SUM"
+        assert kpi.fields_for_exception_aggregation == ["field1", "field2"]
+        assert kpi.fields_for_constant_selection == ["const1", "const2"]
         assert kpi.display_sign == -1
 
     def test_parse_structure_with_formula(self, parser, tmp_path):
         """Test parsing structure with formula (calculated measure)"""
         yaml_data = {
-            'description': 'Test Definition',
-            'technical_name': 'test_def',
-            'structures': {
-                'CALCULATED': {
-                    'description': 'Calculated Structure',
-                    'formula': '[base_measure] * 1.1',
-                    'display_sign': 1
+            "description": "Test Definition",
+            "technical_name": "test_def",
+            "structures": {
+                "CALCULATED": {
+                    "description": "Calculated Structure",
+                    "formula": "[base_measure] * 1.1",
+                    "display_sign": 1,
                 }
             },
-            'kbi': []
+            "kbi": [],
         }
 
         yaml_file = tmp_path / "calculated.yaml"
-        with open(yaml_file, 'w', encoding='utf-8') as f:
+        with open(yaml_file, "w", encoding="utf-8") as f:
             yaml.dump(yaml_data, f)
 
         definition = parser.parse_file(yaml_file)
 
-        calc_structure = definition.structures['CALCULATED']
-        assert calc_structure.formula == '[base_measure] * 1.1'
-        assert calc_structure.description == 'Calculated Structure'
+        calc_structure = definition.structures["CALCULATED"]
+        assert calc_structure.formula == "[base_measure] * 1.1"
+        assert calc_structure.description == "Calculated Structure"
 
     def test_parse_handles_missing_optional_fields(self, parser, tmp_path):
         """Test parsing handles missing optional fields gracefully"""
         yaml_data = {
-            'description': 'Minimal Definition',
-            'technical_name': 'minimal',
-            'kbi': [
+            "description": "Minimal Definition",
+            "technical_name": "minimal",
+            "kbi": [
                 {
-                    'description': 'Minimal KPI',
-                    'formula': 'SUM(amount)'
+                    "description": "Minimal KPI",
+                    "formula": "SUM(amount)",
                     # Missing technical_name and many optional fields
                 }
-            ]
+            ],
         }
 
         yaml_file = tmp_path / "minimal.yaml"
-        with open(yaml_file, 'w', encoding='utf-8') as f:
+        with open(yaml_file, "w", encoding="utf-8") as f:
             yaml.dump(yaml_data, f)
 
         # Should not raise an error
         definition = parser.parse_file(yaml_file)
 
-        assert definition.description == 'Minimal Definition'
+        assert definition.description == "Minimal Definition"
         assert len(definition.kpis) == 1
 
     def test_parse_empty_kbi_list(self, parser, tmp_path):
         """Test parsing definition with empty KBI list"""
         yaml_data = {
-            'description': 'Empty Definition',
-            'technical_name': 'empty',
-            'kbi': []
+            "description": "Empty Definition",
+            "technical_name": "empty",
+            "kbi": [],
         }
 
         yaml_file = tmp_path / "empty.yaml"
-        with open(yaml_file, 'w', encoding='utf-8') as f:
+        with open(yaml_file, "w", encoding="utf-8") as f:
             yaml.dump(yaml_data, f)
 
         definition = parser.parse_file(yaml_file)

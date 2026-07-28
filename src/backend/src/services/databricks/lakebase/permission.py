@@ -4,19 +4,21 @@ Lakebase Permission Service for managing database permissions.
 This service handles all permission-related operations for Lakebase instances,
 including schema permissions, default privileges, and error handling.
 """
+
 import logging
 import re
 from typing import Optional
+
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.engine import Connection
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.core.base_service import BaseService
 
 logger = logging.getLogger(__name__)
 
 # --- SQL injection prevention helpers ---
-_SAFE_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+_SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _quote_pg_role(identifier: str) -> str:
@@ -30,10 +32,14 @@ def _quote_pg_role(identifier: str) -> str:
     Raises:
         ValueError: If the identifier does not match expected formats.
     """
-    _EMAIL_RE = re.compile(r'^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$')
-    _UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+    _EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+    _UUID_RE = re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+    )
 
-    if not identifier or not (_EMAIL_RE.match(identifier) or _UUID_RE.match(identifier)):
+    if not identifier or not (
+        _EMAIL_RE.match(identifier) or _UUID_RE.match(identifier)
+    ):
         raise ValueError(f"Invalid PostgreSQL role identifier: {identifier!r}")
     return '"' + identifier.replace('"', '""') + '"'
 
@@ -52,9 +58,7 @@ class LakebasePermissionService(BaseService):
         pass
 
     async def grant_schema_permissions_async(
-        self,
-        engine: AsyncEngine,
-        user_email: str
+        self, engine: AsyncEngine, user_email: str
     ) -> None:
         """
         Grant schema permissions to a user asynchronously.
@@ -75,13 +79,9 @@ class LakebasePermissionService(BaseService):
             safe_role = _quote_pg_role(user_email)
             async with engine.begin() as conn:
                 # Grant all privileges on kasal schema
-                await conn.execute(
-                    text(f'GRANT ALL ON SCHEMA kasal TO {safe_role}')
-                )
+                await conn.execute(text(f"GRANT ALL ON SCHEMA kasal TO {safe_role}"))
                 # Grant all privileges on public schema
-                await conn.execute(
-                    text(f'GRANT ALL ON SCHEMA public TO {safe_role}')
-                )
+                await conn.execute(text(f"GRANT ALL ON SCHEMA public TO {safe_role}"))
                 logger.info(f"Granted schema permissions to {user_email}")
         except Exception as grant_error:
             # Log but don't fail - user might already have permissions
@@ -91,9 +91,7 @@ class LakebasePermissionService(BaseService):
             )
 
     def grant_schema_permissions_sync(
-        self,
-        connection: Connection,
-        user_email: str
+        self, connection: Connection, user_email: str
     ) -> None:
         """
         Grant schema permissions to a user synchronously.
@@ -113,13 +111,9 @@ class LakebasePermissionService(BaseService):
         try:
             safe_role = _quote_pg_role(user_email)
             # Grant all privileges on kasal schema
-            connection.execute(
-                text(f'GRANT ALL ON SCHEMA kasal TO {safe_role}')
-            )
+            connection.execute(text(f"GRANT ALL ON SCHEMA kasal TO {safe_role}"))
             # Grant all privileges on public schema
-            connection.execute(
-                text(f'GRANT ALL ON SCHEMA public TO {safe_role}')
-            )
+            connection.execute(text(f"GRANT ALL ON SCHEMA public TO {safe_role}"))
             logger.info(f"Granted schema permissions to {user_email}")
         except Exception as grant_error:
             # Log but don't fail - user might already have permissions
@@ -129,9 +123,7 @@ class LakebasePermissionService(BaseService):
             )
 
     async def grant_default_privileges_async(
-        self,
-        engine: AsyncEngine,
-        user_email: str
+        self, engine: AsyncEngine, user_email: str
     ) -> None:
         """
         Set default privileges for future objects asynchronously.
@@ -154,15 +146,15 @@ class LakebasePermissionService(BaseService):
                 # Set default privileges for tables
                 await conn.execute(
                     text(
-                        f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                        f'GRANT ALL ON TABLES TO {safe_role}'
+                        f"ALTER DEFAULT PRIVILEGES IN SCHEMA kasal "
+                        f"GRANT ALL ON TABLES TO {safe_role}"
                     )
                 )
                 # Set default privileges for sequences
                 await conn.execute(
                     text(
-                        f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                        f'GRANT ALL ON SEQUENCES TO {safe_role}'
+                        f"ALTER DEFAULT PRIVILEGES IN SCHEMA kasal "
+                        f"GRANT ALL ON SEQUENCES TO {safe_role}"
                     )
                 )
                 logger.info(f"Set default privileges for {user_email}")
@@ -174,9 +166,7 @@ class LakebasePermissionService(BaseService):
             )
 
     def grant_default_privileges_sync(
-        self,
-        connection: Connection,
-        user_email: str
+        self, connection: Connection, user_email: str
     ) -> None:
         """
         Set default privileges for future objects synchronously.
@@ -198,15 +188,15 @@ class LakebasePermissionService(BaseService):
             # Set default privileges for tables
             connection.execute(
                 text(
-                    f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                    f'GRANT ALL ON TABLES TO {safe_role}'
+                    f"ALTER DEFAULT PRIVILEGES IN SCHEMA kasal "
+                    f"GRANT ALL ON TABLES TO {safe_role}"
                 )
             )
             # Set default privileges for sequences
             connection.execute(
                 text(
-                    f'ALTER DEFAULT PRIVILEGES IN SCHEMA kasal '
-                    f'GRANT ALL ON SEQUENCES TO {safe_role}'
+                    f"ALTER DEFAULT PRIVILEGES IN SCHEMA kasal "
+                    f"GRANT ALL ON SEQUENCES TO {safe_role}"
                 )
             )
             logger.info(f"Set default privileges for {user_email}")
@@ -218,9 +208,7 @@ class LakebasePermissionService(BaseService):
             )
 
     async def grant_all_permissions_async(
-        self,
-        engine: AsyncEngine,
-        user_email: str
+        self, engine: AsyncEngine, user_email: str
     ) -> None:
         """
         Grant all permissions (schema + default privileges) asynchronously.
@@ -236,9 +224,7 @@ class LakebasePermissionService(BaseService):
         await self.grant_default_privileges_async(engine, user_email)
 
     def grant_all_permissions_sync(
-        self,
-        connection: Connection,
-        user_email: str
+        self, connection: Connection, user_email: str
     ) -> None:
         """
         Grant all permissions (schema + default privileges) synchronously.

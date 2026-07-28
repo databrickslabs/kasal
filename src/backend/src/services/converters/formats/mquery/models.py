@@ -9,24 +9,26 @@ Date: 2025
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 
 class ExpressionType(str, Enum):
     """Types of Power BI M-Query expressions"""
-    NATIVE_QUERY = "native_query"           # Value.NativeQuery - SQL passthrough
+
+    NATIVE_QUERY = "native_query"  # Value.NativeQuery - SQL passthrough
     DATABRICKS_CATALOG = "databricks_catalog"  # DatabricksMultiCloud.Catalogs
-    SQL_DATABASE = "sql_database"           # Sql.Database
-    TABLE_FROM_ROWS = "table_from_rows"     # Table.FromRows (static data)
-    ODBC = "odbc"                           # Odbc.Query
-    ORACLE = "oracle"                       # Oracle.Database
-    SNOWFLAKE = "snowflake"                 # Snowflake.Databases
-    OTHER = "other"                         # Unknown/complex expressions
+    SQL_DATABASE = "sql_database"  # Sql.Database
+    TABLE_FROM_ROWS = "table_from_rows"  # Table.FromRows (static data)
+    ODBC = "odbc"  # Odbc.Query
+    ORACLE = "oracle"  # Oracle.Database
+    SNOWFLAKE = "snowflake"  # Snowflake.Databases
+    OTHER = "other"  # Unknown/complex expressions
 
 
 class ColumnDataType(str, Enum):
     """Power BI column data types"""
+
     STRING = "String"
     INT64 = "Int64"
     DOUBLE = "Double"
@@ -41,6 +43,7 @@ class ColumnDataType(str, Enum):
 
 class StorageMode(str, Enum):
     """Power BI storage modes"""
+
     IMPORT = "Import"
     DIRECT_QUERY = "DirectQuery"
     DUAL = "Dual"
@@ -50,6 +53,7 @@ class StorageMode(str, Enum):
 @dataclass
 class TableColumn:
     """Represents a column in a Power BI table"""
+
     name: str
     data_type: ColumnDataType
     is_hidden: bool = False
@@ -68,7 +72,7 @@ class TableColumn:
             column_type=data.get("columnType", "Data"),
             description=data.get("description"),
             format_string=data.get("formatString"),
-            expression=data.get("expression")  # Capture DAX for calculated columns
+            expression=data.get("expression"),  # Capture DAX for calculated columns
         )
 
     @property
@@ -80,6 +84,7 @@ class TableColumn:
 @dataclass
 class TableMeasure:
     """Represents a DAX measure in a Power BI table"""
+
     name: str
     expression: str
     description: Optional[str] = None
@@ -96,13 +101,14 @@ class TableMeasure:
             description=data.get("description"),
             display_folder=data.get("displayFolder"),
             format_string=data.get("formatString"),
-            is_hidden=data.get("isHidden", False)
+            is_hidden=data.get("isHidden", False),
         )
 
 
 @dataclass
 class MQueryExpression:
     """Represents a parsed M-Query expression"""
+
     raw_expression: str
     expression_type: ExpressionType
 
@@ -130,6 +136,7 @@ class MQueryExpression:
 @dataclass
 class PowerBITable:
     """Represents a Power BI table with its M-Query source"""
+
     name: str
     is_hidden: bool
     storage_mode: StorageMode
@@ -145,25 +152,21 @@ class PowerBITable:
     def from_dict(cls, data: Dict[str, Any]) -> "PowerBITable":
         """Create PowerBITable from API response dict"""
         # Parse columns
-        columns = [
-            TableColumn.from_dict(col)
-            for col in data.get("columns", [])
-        ]
+        columns = [TableColumn.from_dict(col) for col in data.get("columns", [])]
 
         # Parse measures
-        measures = [
-            TableMeasure.from_dict(m)
-            for m in data.get("measures", [])
-        ]
+        measures = [TableMeasure.from_dict(m) for m in data.get("measures", [])]
 
         # Parse source expressions (raw, will be parsed later)
         source_expressions = []
         for source in data.get("source", []):
             expr = source.get("expression", "")
-            source_expressions.append(MQueryExpression(
-                raw_expression=expr,
-                expression_type=ExpressionType.OTHER  # Will be detected later
-            ))
+            source_expressions.append(
+                MQueryExpression(
+                    raw_expression=expr,
+                    expression_type=ExpressionType.OTHER,  # Will be detected later
+                )
+            )
 
         return cls(
             name=data.get("name", ""),
@@ -172,13 +175,14 @@ class PowerBITable:
             columns=columns,
             measures=measures,
             source_expressions=source_expressions,
-            description=data.get("description")
+            description=data.get("description"),
         )
 
 
 @dataclass
 class TableRelationship:
     """Represents a relationship between Power BI tables"""
+
     name: str
     from_table: str
     from_column: str
@@ -199,21 +203,24 @@ class TableRelationship:
             to_column=data.get("toColumn", ""),
             cross_filtering_behavior=data.get("crossFilteringBehavior", "OneDirection"),
             is_active=data.get("isActive", True),
-            cardinality=data.get("cardinality", "ManyToOne")
+            cardinality=data.get("cardinality", "ManyToOne"),
         )
 
 
 @dataclass
 class HierarchyLevel:
     """Represents a single level in a Power BI hierarchy"""
+
     name: str
     ordinal: int  # Position in the hierarchy (0 = top level)
     column_name: str  # The column this level is based on
     description: Optional[str] = None
 
+
 @dataclass
 class Hierarchy:
     """Represents a Power BI hierarchy with its levels"""
+
     name: str
     table_name: str
     levels: List[HierarchyLevel]
@@ -227,16 +234,19 @@ class Hierarchy:
 
     def to_sql_comment(self) -> str:
         """Generate SQL comment documenting the hierarchy"""
-        level_info = " → ".join([
-            f"{level.name} ({level.column_name})"
-            for level in sorted(self.levels, key=lambda x: x.ordinal)
-        ])
+        level_info = " → ".join(
+            [
+                f"{level.name} ({level.column_name})"
+                for level in sorted(self.levels, key=lambda x: x.ordinal)
+            ]
+        )
         return f"-- Hierarchy: {self.name} on table {self.table_name}\n-- Levels: {level_info}"
 
 
 @dataclass
 class SemanticModel:
     """Represents a complete Power BI semantic model"""
+
     id: str
     name: str
     tables: List[PowerBITable]
@@ -252,12 +262,14 @@ class SemanticModel:
     expressions: List[Dict[str, Any]] = field(default_factory=list)
 
     @classmethod
-    def from_scan_result(cls, dataset_data: Dict[str, Any], workspace_id: Optional[str] = None, workspace_name: Optional[str] = None) -> "SemanticModel":
+    def from_scan_result(
+        cls,
+        dataset_data: Dict[str, Any],
+        workspace_id: Optional[str] = None,
+        workspace_name: Optional[str] = None,
+    ) -> "SemanticModel":
         """Create SemanticModel from Admin API scan result"""
-        tables = [
-            PowerBITable.from_dict(t)
-            for t in dataset_data.get("tables", [])
-        ]
+        tables = [PowerBITable.from_dict(t) for t in dataset_data.get("tables", [])]
 
         relationships = [
             TableRelationship.from_dict(r)
@@ -273,13 +285,14 @@ class SemanticModel:
             workspace_name=workspace_name,
             description=dataset_data.get("description"),
             configured_by=dataset_data.get("configuredBy"),
-            expressions=dataset_data.get("expressions", [])
+            expressions=dataset_data.get("expressions", []),
         )
 
 
 @dataclass
 class CalculatedColumnResult:
     """Result from calculated column DAX to SQL conversion"""
+
     column_name: str
     original_dax: str
     sql_expression: Optional[str] = None
@@ -292,6 +305,7 @@ class CalculatedColumnResult:
 @dataclass
 class ConversionResult:
     """Result from M-Query to SQL conversion"""
+
     table_name: str
     expression_type: ExpressionType
     success: bool
@@ -329,6 +343,7 @@ class ConversionResult:
 @dataclass
 class ScanStatus:
     """Status of a Power BI Admin API scan"""
+
     scan_id: str
     status: str  # Running, Succeeded, Failed
     created_at: Optional[str] = None
@@ -338,6 +353,7 @@ class ScanStatus:
 @dataclass
 class MQueryConversionConfig:
     """Configuration for M-Query conversion"""
+
     # Power BI Admin API connection
     # Option 1: Service Principal (requires Admin-level permissions)
     tenant_id: Optional[str] = None
@@ -346,7 +362,9 @@ class MQueryConversionConfig:
     # Option 2: Service Account (username/password)
     username: Optional[str] = None
     password: Optional[str] = None
-    auth_method: Optional[str] = None  # 'service_principal', 'service_account', or auto-detect
+    auth_method: Optional[str] = (
+        None  # 'service_principal', 'service_account', or auto-detect
+    )
     # Option 3: User OAuth token (alternative to Service Principal/Service Account)
     access_token: Optional[str] = None
 

@@ -1,7 +1,9 @@
 """Crew thumbs feedback: service rules + repository aggregation + schemas."""
-import pytest
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from src.services.catalog.crew_feedback import CrewFeedbackService
 from src.utils.user_context import GroupContext
@@ -35,7 +37,9 @@ class TestAddFeedback:
     @pytest.mark.asyncio
     async def test_down_vote_with_comment(self):
         svc = _svc()
-        record = await svc.add_feedback("c1", "down", comment="wrong tool picked", group_context=_ctx())
+        record = await svc.add_feedback(
+            "c1", "down", comment="wrong tool picked", group_context=_ctx()
+        )
         assert record.rating == "down" and record.comment == "wrong tool picked"
 
     @pytest.mark.asyncio
@@ -52,7 +56,9 @@ class TestQueries:
         rows = [SimpleNamespace(id="f1")]
         svc.repository.list_by_crew_and_group = AsyncMock(return_value=rows)
         assert await svc.list_for_crew("c1", _ctx(["g1", "g2"])) == rows
-        svc.repository.list_by_crew_and_group.assert_awaited_once_with("c1", ["g1", "g2"])
+        svc.repository.list_by_crew_and_group.assert_awaited_once_with(
+            "c1", ["g1", "g2"]
+        )
 
     @pytest.mark.asyncio
     async def test_list_no_group_returns_empty(self):
@@ -62,14 +68,18 @@ class TestQueries:
     @pytest.mark.asyncio
     async def test_summary_scoped_to_group(self):
         svc = _svc()
-        svc.repository.summary_by_group = AsyncMock(return_value=[{"crew_id": "c1", "up": 2, "down": 1}])
+        svc.repository.summary_by_group = AsyncMock(
+            return_value=[{"crew_id": "c1", "up": 2, "down": 1}]
+        )
         assert (await svc.summary(_ctx()))[0]["up"] == 2
 
 
 class TestSchemas:
     def test_create_request_down_requires_comment(self):
         import pydantic
+
         from src.schemas.crew_feedback import CrewFeedbackCreateRequest
+
         with pytest.raises(pydantic.ValidationError):
             CrewFeedbackCreateRequest(rating="down")
         ok = CrewFeedbackCreateRequest(rating="down", comment="broken output")
@@ -77,10 +87,12 @@ class TestSchemas:
 
     def test_create_request_up_comment_optional(self):
         from src.schemas.crew_feedback import CrewFeedbackCreateRequest
+
         assert CrewFeedbackCreateRequest(rating="up").comment is None
 
     def test_summary_entry_defaults(self):
         from src.schemas.crew_feedback import CrewFeedbackSummaryEntry
+
         e = CrewFeedbackSummaryEntry(crew_id="c1")
         assert e.up == 0 and e.down == 0
 
@@ -89,6 +101,7 @@ class TestRepositorySummary:
     @pytest.mark.asyncio
     async def test_summary_aggregates_ratings(self):
         from src.repositories.crew_feedback_repository import CrewFeedbackRepository
+
         session = AsyncMock()
         result = MagicMock()
         result.all.return_value = [("c1", "up", 3), ("c1", "down", 1), ("c2", "up", 2)]
@@ -103,6 +116,7 @@ class TestRepositorySummary:
     @pytest.mark.asyncio
     async def test_summary_empty_groups_short_circuits(self):
         from src.repositories.crew_feedback_repository import CrewFeedbackRepository
+
         session = AsyncMock()
         repo = CrewFeedbackRepository(session)
         assert await repo.summary_by_group([]) == []

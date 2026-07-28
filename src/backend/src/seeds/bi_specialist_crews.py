@@ -22,16 +22,17 @@ their workspace_id, client_id, client_secret, catalog, schema, warehouse_id etc.
 All tool logic and agent configurations are ready to run.
 """
 
-import uuid
 import logging
+import uuid
+
 from sqlalchemy import select
 
 from src.db.session import async_session_factory
-from src.models.crew import Crew
 from src.models.agent import Agent
-from src.models.task import Task
+from src.models.crew import Crew
 from src.models.group import Group
 from src.models.group_tool import GroupTool
+from src.models.task import Task
 
 # Tools required by the PBI migration pipeline — pre-enabled for bi-specialist
 BI_TOOLS = [78, 86, 88, 90, 91, 92, 93, 94, 95]
@@ -60,6 +61,7 @@ BI_GROUP = {
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _agent_node(agent_id: str, agent_data: dict, x: int, y: int) -> dict:
     """Build a ReactFlow agentNode for the crew's visual graph."""
@@ -232,9 +234,19 @@ PIPELINE_CONFIG_CREW = {
     "task_ids": [PIPELINE_CONFIG_TASK_ID],
     "nodes": [
         _agent_node(PIPELINE_CONFIG_AGENT_ID, PIPELINE_CONFIG_AGENT, 68, 68),
-        _task_node(PIPELINE_CONFIG_TASK_ID, PIPELINE_CONFIG_AGENT_ID, PIPELINE_CONFIG_TASK, 368, 68),
+        _task_node(
+            PIPELINE_CONFIG_TASK_ID,
+            PIPELINE_CONFIG_AGENT_ID,
+            PIPELINE_CONFIG_TASK,
+            368,
+            68,
+        ),
     ],
-    "edges": [_agent_to_task_edge("pipeline-config", PIPELINE_CONFIG_AGENT_ID, PIPELINE_CONFIG_TASK_ID)],
+    "edges": [
+        _agent_to_task_edge(
+            "pipeline-config", PIPELINE_CONFIG_AGENT_ID, PIPELINE_CONFIG_TASK_ID
+        )
+    ],
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -519,7 +531,7 @@ REFERENCES_TASK = {
     "id": REFERENCES_TASK_ID,
     "name": "Extract Power BI Report References",
     "description": (
-        "IMMEDIATELY call the \"Power BI Report References Tool\" with parameters defined "
+        'IMMEDIATELY call the "Power BI Report References Tool" with parameters defined '
         "in the input task form.\n"
         "ALL required parameters (workspace_id, dataset_id, authentication credentials) "
         "are ALREADY PRE-CONFIGURED in the tool-task-form. "
@@ -561,7 +573,9 @@ REFERENCES_CREW = {
         _agent_node(REFERENCES_AGENT_ID, REFERENCES_AGENT, 68, 68),
         _task_node(REFERENCES_TASK_ID, REFERENCES_AGENT_ID, REFERENCES_TASK, 368, 68),
     ],
-    "edges": [_agent_to_task_edge("references", REFERENCES_AGENT_ID, REFERENCES_TASK_ID)],
+    "edges": [
+        _agent_to_task_edge("references", REFERENCES_AGENT_ID, REFERENCES_TASK_ID)
+    ],
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -895,20 +909,25 @@ GENIE_GEN_CREW = {
 # ─────────────────────────────────────────────────────────────────────────────
 
 ALL_CREWS = [
-    {"crew": PIPELINE_CONFIG_CREW, "agent": PIPELINE_CONFIG_AGENT, "task": PIPELINE_CONFIG_TASK},
-    {"crew": UCMV_GEN_CREW,        "agent": UCMV_GEN_AGENT,        "task": UCMV_GEN_TASK},
-    {"crew": UCMV_VAL_CREW,        "agent": UCMV_VAL_AGENT,        "task": UCMV_VAL_TASK},
-    {"crew": DEPLOYER_CREW,        "agent": DEPLOYER_AGENT,        "task": DEPLOYER_TASK},
-    {"crew": REFERENCES_CREW,      "agent": REFERENCES_AGENT,      "task": REFERENCES_TASK},
-    {"crew": MAPPER_CREW,          "agent": MAPPER_AGENT,          "task": MAPPER_TASK},
-    {"crew": DASHBOARD_CREW,       "agent": DASHBOARD_AGENT,       "task": DASHBOARD_TASK},
-    {"crew": GENIE_CFG_CREW,       "agent": GENIE_CFG_AGENT,       "task": GENIE_CFG_TASK},
-    {"crew": GENIE_GEN_CREW,       "agent": GENIE_GEN_AGENT,       "task": GENIE_GEN_TASK},
+    {
+        "crew": PIPELINE_CONFIG_CREW,
+        "agent": PIPELINE_CONFIG_AGENT,
+        "task": PIPELINE_CONFIG_TASK,
+    },
+    {"crew": UCMV_GEN_CREW, "agent": UCMV_GEN_AGENT, "task": UCMV_GEN_TASK},
+    {"crew": UCMV_VAL_CREW, "agent": UCMV_VAL_AGENT, "task": UCMV_VAL_TASK},
+    {"crew": DEPLOYER_CREW, "agent": DEPLOYER_AGENT, "task": DEPLOYER_TASK},
+    {"crew": REFERENCES_CREW, "agent": REFERENCES_AGENT, "task": REFERENCES_TASK},
+    {"crew": MAPPER_CREW, "agent": MAPPER_AGENT, "task": MAPPER_TASK},
+    {"crew": DASHBOARD_CREW, "agent": DASHBOARD_AGENT, "task": DASHBOARD_TASK},
+    {"crew": GENIE_CFG_CREW, "agent": GENIE_CFG_AGENT, "task": GENIE_CFG_TASK},
+    {"crew": GENIE_GEN_CREW, "agent": GENIE_GEN_AGENT, "task": GENIE_GEN_TASK},
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Seeder helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 async def _seed_group(session) -> None:
     result = await session.execute(select(Group).where(Group.id == BI_GROUP_ID))
@@ -1006,6 +1025,7 @@ async def _seed_crew(session, data: dict) -> None:
 # Entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 async def seed() -> None:
     """Seed the bi-specialist workspace with PBI migration crew templates."""
     logger.info("🚀 Seeding bi-specialist workspace with PBI migration crews...")
@@ -1017,8 +1037,10 @@ async def seed() -> None:
                 await _seed_task(session, entry["task"])
                 await _seed_crew(session, entry["crew"])
             # Enable required tools for the bi-specialist workspace
-            from sqlalchemy import select as _select
             from datetime import datetime as _dt
+
+            from sqlalchemy import select as _select
+
             for _tool_id in BI_TOOLS:
                 _exists = await session.execute(
                     _select(GroupTool).where(
@@ -1027,15 +1049,17 @@ async def seed() -> None:
                     )
                 )
                 if not _exists.scalar_one_or_none():
-                    session.add(GroupTool(
-                        tool_id=_tool_id,
-                        group_id=BI_GROUP_ID,
-                        enabled=True,
-                        config={},
-                        credentials_status="unknown",
-                        created_at=_dt.utcnow(),
-                        updated_at=_dt.utcnow(),
-                    ))
+                    session.add(
+                        GroupTool(
+                            tool_id=_tool_id,
+                            group_id=BI_GROUP_ID,
+                            enabled=True,
+                            config={},
+                            credentials_status="unknown",
+                            created_at=_dt.utcnow(),
+                            updated_at=_dt.utcnow(),
+                        )
+                    )
 
             await session.commit()
             logger.info(

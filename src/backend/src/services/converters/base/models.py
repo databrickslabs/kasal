@@ -1,11 +1,13 @@
 """Core data models for KPI (Key Performance Indicator) conversion"""
 
-from typing import List, Dict, Any, Optional, Union
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any, Dict, List, Optional, Union
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class KPIFilter(BaseModel):
     """Filter definition for KPI measures"""
+
     field: str
     operator: str
     value: Any
@@ -19,6 +21,7 @@ class Structure(BaseModel):
     Structures allow defining reusable calculation patterns that can be
     applied to multiple KPIs (e.g., YTD, QTD, prior year comparisons).
     """
+
     description: str
     formula: Optional[str] = None  # Formula can reference other structures
     filters: List[Union[str, Dict[str, Any]]] = Field(default=[], alias="filter")
@@ -36,6 +39,7 @@ class KPI(BaseModel):
     Represents a single business measure with its formula, filters,
     aggregation rules, and transformation logic.
     """
+
     model_config = ConfigDict(populate_by_name=True)
 
     description: str
@@ -56,19 +60,26 @@ class KPI(BaseModel):
     apply_structures: Optional[List[str]] = None
 
     # Currency conversion fields
-    currency_column: Optional[str] = None  # Dynamic: column name containing source currency
-    fixed_currency: Optional[str] = None  # Fixed: source currency code (e.g., "USD", "EUR")
+    currency_column: Optional[str] = (
+        None  # Dynamic: column name containing source currency
+    )
+    fixed_currency: Optional[str] = (
+        None  # Fixed: source currency code (e.g., "USD", "EUR")
+    )
     target_currency: Optional[str] = None  # Target currency for conversion
 
     # Unit of measure conversion fields
     uom_column: Optional[str] = None  # Dynamic: column name containing source UOM
     uom_fixed_unit: Optional[str] = None  # Fixed: source unit (e.g., "KG", "LB")
-    uom_preset: Optional[str] = None  # Conversion preset type (e.g., "mass", "length", "volume")
+    uom_preset: Optional[str] = (
+        None  # Conversion preset type (e.g., "mass", "length", "volume")
+    )
     target_uom: Optional[str] = None  # Target unit for conversion
 
 
 class QueryFilter(BaseModel):
     """Query-level filter definition"""
+
     name: str
     expression: str
 
@@ -80,6 +91,7 @@ class KPIDefinition(BaseModel):
     Contains the full specification including metadata, filters,
     structures, and all KPI measures.
     """
+
     description: str
     technical_name: str
     default_variables: Dict[str, Any] = {}
@@ -110,6 +122,7 @@ class KPIDefinition(BaseModel):
 
 class DAXMeasure(BaseModel):
     """DAX measure output model"""
+
     name: str
     description: str
     dax_formula: str
@@ -120,6 +133,7 @@ class DAXMeasure(BaseModel):
 
 class SQLMeasure(BaseModel):
     """SQL measure output model"""
+
     name: str
     description: str
     sql_query: str
@@ -129,6 +143,7 @@ class SQLMeasure(BaseModel):
 
 class UCMetric(BaseModel):
     """Unity Catalog Metric output model"""
+
     name: str
     description: str
     metric_definition: str

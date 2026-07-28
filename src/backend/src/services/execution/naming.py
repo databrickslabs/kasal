@@ -8,13 +8,16 @@ for executions based on agents and tasks configuration.
 import logging
 import traceback
 
-
-from src.schemas.execution import ExecutionNameGenerationRequest, ExecutionNameGenerationResponse
+from src.schemas.execution import (
+    ExecutionNameGenerationRequest,
+    ExecutionNameGenerationResponse,
+)
 from src.services.execution.logs.llm_log_service import LLMLogService
 from src.services.llm.manager import LLMManager
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
 
 class ExecutionNameService:
     """Service for execution name generation operations."""
@@ -34,7 +37,7 @@ class ExecutionNameService:
         self._session = session
 
     @classmethod
-    def create(cls, session) -> 'ExecutionNameService':
+    def create(cls, session) -> "ExecutionNameService":
         """
         Factory method to create a properly configured instance of the service.
 
@@ -60,7 +63,9 @@ class ExecutionNameService:
             return cls(log_service=None, template_service=None, session=None)
         log_service = LLMLogService.create(session)
         template_service = TemplateService(session)
-        return cls(log_service=log_service, template_service=template_service, session=session)
+        return cls(
+            log_service=log_service, template_service=template_service, session=session
+        )
 
     async def _get_name_template(self) -> str:
         """Fetch the ``generate_job_name`` template, opening a standalone session
@@ -69,10 +74,15 @@ class ExecutionNameService:
             return await self.template_service.get_template_content("generate_job_name")
         from src.db.session import request_scoped_session
         from src.services.catalog.templates import TemplateService
-        async with request_scoped_session() as session:
-            return await TemplateService(session).get_template_content("generate_job_name")
 
-    async def _log_llm_interaction(self, endpoint: str, prompt: str, response: str, model: str) -> None:
+        async with request_scoped_session() as session:
+            return await TemplateService(session).get_template_content(
+                "generate_job_name"
+            )
+
+    async def _log_llm_interaction(
+        self, endpoint: str, prompt: str, response: str, model: str
+    ) -> None:
         """
         Log LLM interaction using the log service.
 
@@ -89,19 +99,20 @@ class ExecutionNameService:
                     prompt=prompt,
                     response=response,
                     model=model,
-                    status='success'
+                    status="success",
                 )
             else:
                 # No injected session: open a standalone one and COMMIT (the
                 # repository only flushes — a request would normally commit at end).
                 from src.db.session import request_scoped_session
+
                 async with request_scoped_session() as session:
                     await LLMLogService.create(session).create_log(
                         endpoint=endpoint,
                         prompt=prompt,
                         response=response,
                         model=model,
-                        status='success'
+                        status="success",
                     )
                     await session.commit()
             logger.info(f"Logged {endpoint} interaction to database")
@@ -114,8 +125,10 @@ class ExecutionNameService:
                     await self.log_service.repository.session.rollback()
             except Exception:
                 pass
-    
-    async def generate_execution_name(self, request: ExecutionNameGenerationRequest) -> ExecutionNameGenerationResponse:
+
+    async def generate_execution_name(
+        self, request: ExecutionNameGenerationRequest
+    ) -> ExecutionNameGenerationResponse:
         """
         Generate a descriptive name for an execution based on agents and tasks configuration.
 
@@ -156,50 +169,52 @@ Tasks: {", ".join(task_names)}"""
             # Prepare messages for LLM
             messages = [
                 {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt},
             ]
-            
+
             # Generate completion via unified LLMManager.completion()
             # Note: Some models (like Gemini) may use reasoning_tokens internally before generating output.
             # We set max_tokens=100 to safely accommodate both reasoning and completion tokens,
             # ensuring we can generate a full 2-4 word name without hitting token limits.
             # For models without reasoning tokens, we'll truncate to ensure concise names.
-            from src.utils.telemetry import get_user_agent_header, KasalProduct
+            from src.utils.telemetry import KasalProduct, get_user_agent_header
+
             name = await LLMManager.completion(
                 messages=messages,
                 model=request.model,
                 temperature=0.7,
                 max_tokens=100,
-                extra_headers=get_user_agent_header(KasalProduct.NAME_GENERATION)
+                extra_headers=get_user_agent_header(KasalProduct.NAME_GENERATION),
             )
 
             # Clean the name
-            name = name.strip().replace('"', '').replace("'", "")
+            name = name.strip().replace('"', "").replace("'", "")
 
             # Ensure the name is concise: truncate to first 4 words (2-4 word requirement)
             words = name.split()
             if len(words) > 4:
                 name = " ".join(words[:4])
                 logger.info(f"Truncated name to 4 words: '{name}'")
-            
+
             # Log the interaction
             try:
                 await self._log_llm_interaction(
-                    endpoint='generate-execution-name',
+                    endpoint="generate-execution-name",
                     prompt=f"System: {system_message}\nUser: {prompt}",
                     response=name,
-                    model=request.model
+                    model=request.model,
                 )
             except Exception as e:
                 # Just log the error, don't fail the request
                 logger.error(f"Failed to log interaction: {str(e)}")
-            
+
             return ExecutionNameGenerationResponse(name=name)
-            
+
         except Exception as e:
             logger.error(f"Error generating execution name: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
             # Return a default name with timestamp
             from datetime import datetime
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            return ExecutionNameGenerationResponse(name=f"Execution-{timestamp}") 
+            return ExecutionNameGenerationResponse(name=f"Execution-{timestamp}")

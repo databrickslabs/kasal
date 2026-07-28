@@ -9,6 +9,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
+from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.exceptions import (
     ConflictError,
     ForbiddenError,
@@ -16,8 +17,6 @@ from src.core.exceptions import (
     KasalError,
     NotFoundError,
 )
-
-from src.core.dependencies import GroupContextDep, SessionDep
 from src.schemas.hitl import (
     ExecutionHITLStatus,
     HITLActionResponse,
@@ -154,8 +153,10 @@ async def get_approval(
     group_context: GroupContextDep,
     view: Annotated[
         str | None,
-        Query(description="'ui' strips downstream-handoff arrays from previous_crew_output "
-                          "to shrink the UI fetch; omit for the full output."),
+        Query(
+            description="'ui' strips downstream-handoff arrays from previous_crew_output "
+            "to shrink the UI fetch; omit for the full output."
+        ),
     ] = None,
 ) -> HITLApprovalResponse:
     """

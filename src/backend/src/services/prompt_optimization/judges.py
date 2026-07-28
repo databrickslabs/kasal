@@ -19,8 +19,11 @@ from typing import Any, Dict, List, Optional
 from src.core.exceptions import BadRequestError
 from src.repositories.log_repository import LLMLogRepository
 from src.repositories.model_config_repository import ModelConfigRepository
+from src.services.prompt_optimization.config import (
+    DEFAULT_TARGET_MODEL,
+    _pin_local_experiment,
+)
 from src.utils.user_context import GroupContext
-from src.services.prompt_optimization.config import DEFAULT_TARGET_MODEL, _pin_local_experiment
 
 
 class JudgeOperationsMixin:

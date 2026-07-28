@@ -1,12 +1,12 @@
 import asyncio
+from typing import Any, Dict, Optional
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from unittest.mock import Mock, MagicMock, patch, AsyncMock
-from typing import Optional, Dict, Any
-
-# Test LakebaseService - based on actual code inspection
 
 from src.services.databricks.lakebase.service import LakebaseService
+
+# Test LakebaseService - based on actual code inspection
 
 
 class TestLakebaseServiceInit:
@@ -17,13 +17,21 @@ class TestLakebaseServiceInit:
         mock_session = Mock()
         user_token = "test-token"
         user_email = "test@example.com"
-        
-        with patch('src.services.databricks.lakebase.service.LakebaseConnectionService') as mock_conn_service, \
-             patch('src.services.databricks.lakebase.service.LakebaseSchemaService') as mock_schema_service, \
-             patch('src.services.databricks.lakebase.service.LakebasePermissionService') as mock_perm_service:
-            
+
+        with (
+            patch(
+                "src.services.databricks.lakebase.service.LakebaseConnectionService"
+            ) as mock_conn_service,
+            patch(
+                "src.services.databricks.lakebase.service.LakebaseSchemaService"
+            ) as mock_schema_service,
+            patch(
+                "src.services.databricks.lakebase.service.LakebasePermissionService"
+            ) as mock_perm_service,
+        ):
+
             service = LakebaseService(mock_session, user_token, user_email)
-            
+
             assert service.session == mock_session
             assert service.user_token == user_token
             assert service.user_email == user_email
@@ -37,13 +45,21 @@ class TestLakebaseServiceInit:
         """Test LakebaseService __init__ without session"""
         user_token = "test-token"
         user_email = "test@example.com"
-        
-        with patch('src.services.databricks.lakebase.service.LakebaseConnectionService') as mock_conn_service, \
-             patch('src.services.databricks.lakebase.service.LakebaseSchemaService') as mock_schema_service, \
-             patch('src.services.databricks.lakebase.service.LakebasePermissionService') as mock_perm_service:
-            
+
+        with (
+            patch(
+                "src.services.databricks.lakebase.service.LakebaseConnectionService"
+            ) as mock_conn_service,
+            patch(
+                "src.services.databricks.lakebase.service.LakebaseSchemaService"
+            ) as mock_schema_service,
+            patch(
+                "src.services.databricks.lakebase.service.LakebasePermissionService"
+            ) as mock_perm_service,
+        ):
+
             service = LakebaseService(None, user_token, user_email)
-            
+
             assert service.session is None
             assert service.user_token == user_token
             assert service.user_email == user_email
@@ -55,12 +71,20 @@ class TestLakebaseServiceInit:
 
     def test_lakebase_service_init_defaults(self):
         """Test LakebaseService __init__ with default parameters"""
-        with patch('src.services.databricks.lakebase.service.LakebaseConnectionService') as mock_conn_service, \
-             patch('src.services.databricks.lakebase.service.LakebaseSchemaService') as mock_schema_service, \
-             patch('src.services.databricks.lakebase.service.LakebasePermissionService') as mock_perm_service:
-            
+        with (
+            patch(
+                "src.services.databricks.lakebase.service.LakebaseConnectionService"
+            ) as mock_conn_service,
+            patch(
+                "src.services.databricks.lakebase.service.LakebaseSchemaService"
+            ) as mock_schema_service,
+            patch(
+                "src.services.databricks.lakebase.service.LakebasePermissionService"
+            ) as mock_perm_service,
+        ):
+
             service = LakebaseService()
-            
+
             assert service.session is None
             assert service.user_token is None
             assert service.user_email is None
@@ -83,10 +107,12 @@ class TestLakebaseServiceWorkspaceClient:
     async def test_get_workspace_client(self):
         """Test get_workspace_client delegates to connection service"""
         mock_client = Mock()
-        self.service.connection_service.get_workspace_client = AsyncMock(return_value=mock_client)
-        
+        self.service.connection_service.get_workspace_client = AsyncMock(
+            return_value=mock_client
+        )
+
         result = await self.service.get_workspace_client()
-        
+
         assert result == mock_client
         self.service.connection_service.get_workspace_client.assert_called_once()
 
@@ -112,12 +138,12 @@ class TestLakebaseServiceGetConfig:
             "instance_status": "RUNNING",
             "endpoint": "test-endpoint",
             "created_at": "2023-01-01",
-            "database_type": "lakebase"
+            "database_type": "lakebase",
         }
         self.service.config_repository.get_by_key = AsyncMock(return_value=mock_config)
-        
+
         result = await self.service.get_config()
-        
+
         expected = {
             "enabled": True,
             "instance_name": "test-instance",
@@ -127,7 +153,7 @@ class TestLakebaseServiceGetConfig:
             "instance_status": "RUNNING",
             "endpoint": "test-endpoint",
             "created_at": "2023-01-01",
-            "database_type": "lakebase"
+            "database_type": "lakebase",
         }
         assert result == expected
         self.service.config_repository.get_by_key.assert_called_once_with("lakebase")
@@ -138,13 +164,13 @@ class TestLakebaseServiceGetConfig:
         mock_config = Mock()
         mock_config.value = {
             "enabled": True,
-            "instance_name": "test-instance"
+            "instance_name": "test-instance",
             # Missing other fields
         }
         self.service.config_repository.get_by_key = AsyncMock(return_value=mock_config)
-        
+
         result = await self.service.get_config()
-        
+
         expected = {
             "enabled": True,
             "instance_name": "test-instance",
@@ -154,7 +180,7 @@ class TestLakebaseServiceGetConfig:
             "instance_status": "NOT_CREATED",  # Default value
             "endpoint": None,  # Missing field
             "created_at": None,  # Missing field
-            "database_type": "lakebase"  # Default value
+            "database_type": "lakebase",  # Default value
         }
         assert result == expected
 
@@ -162,9 +188,9 @@ class TestLakebaseServiceGetConfig:
     async def test_get_config_no_existing_config(self):
         """Test get_config with no existing configuration"""
         self.service.config_repository.get_by_key = AsyncMock(return_value=None)
-        
+
         result = await self.service.get_config()
-        
+
         expected = {
             "enabled": False,
             "instance_name": "kasal-lakebase",
@@ -172,7 +198,7 @@ class TestLakebaseServiceGetConfig:
             "retention_days": 14,
             "node_count": 1,
             "instance_status": "NOT_CREATED",
-            "database_type": "lakebase"
+            "database_type": "lakebase",
         }
         assert result == expected
         self.service.config_repository.get_by_key.assert_called_once_with("lakebase")
@@ -180,8 +206,10 @@ class TestLakebaseServiceGetConfig:
     @pytest.mark.asyncio
     async def test_get_config_exception_handling(self):
         """Test get_config handles exceptions"""
-        self.service.config_repository.get_by_key = AsyncMock(side_effect=Exception("Database error"))
-        
+        self.service.config_repository.get_by_key = AsyncMock(
+            side_effect=Exception("Database error")
+        )
+
         with pytest.raises(Exception, match="Database error"):
             await self.service.get_config()
 
@@ -192,23 +220,25 @@ class TestLakebaseServiceAttributes:
     def test_service_has_required_attributes_with_session(self):
         """Test that service has all required attributes when initialized with session"""
         mock_session = Mock()
-        
-        with patch('src.services.databricks.lakebase.service.LakebaseConnectionService'), \
-             patch('src.services.databricks.lakebase.service.LakebaseSchemaService'), \
-             patch('src.services.databricks.lakebase.service.LakebasePermissionService'):
-            
+
+        with (
+            patch("src.services.databricks.lakebase.service.LakebaseConnectionService"),
+            patch("src.services.databricks.lakebase.service.LakebaseSchemaService"),
+            patch("src.services.databricks.lakebase.service.LakebasePermissionService"),
+        ):
+
             service = LakebaseService(mock_session, "token", "email@test.com")
-            
+
             # Check all required attributes exist
-            assert hasattr(service, 'session')
-            assert hasattr(service, 'user_token')
-            assert hasattr(service, 'user_email')
-            assert hasattr(service, 'config_repository')
-            assert hasattr(service, 'connection_service')
-            assert hasattr(service, 'schema_service')
-            assert hasattr(service, 'permission_service')
-            assert hasattr(service, 'migration_service')
-            
+            assert hasattr(service, "session")
+            assert hasattr(service, "user_token")
+            assert hasattr(service, "user_email")
+            assert hasattr(service, "config_repository")
+            assert hasattr(service, "connection_service")
+            assert hasattr(service, "schema_service")
+            assert hasattr(service, "permission_service")
+            assert hasattr(service, "migration_service")
+
             # Check attribute values
             assert service.session == mock_session
             assert service.user_token == "token"
@@ -218,22 +248,24 @@ class TestLakebaseServiceAttributes:
 
     def test_service_has_required_attributes_without_session(self):
         """Test that service has all required attributes when initialized without session"""
-        with patch('src.services.databricks.lakebase.service.LakebaseConnectionService'), \
-             patch('src.services.databricks.lakebase.service.LakebaseSchemaService'), \
-             patch('src.services.databricks.lakebase.service.LakebasePermissionService'):
-            
+        with (
+            patch("src.services.databricks.lakebase.service.LakebaseConnectionService"),
+            patch("src.services.databricks.lakebase.service.LakebaseSchemaService"),
+            patch("src.services.databricks.lakebase.service.LakebasePermissionService"),
+        ):
+
             service = LakebaseService(None, "token", "email@test.com")
-            
+
             # Check all required attributes exist
-            assert hasattr(service, 'session')
-            assert hasattr(service, 'user_token')
-            assert hasattr(service, 'user_email')
-            assert hasattr(service, 'config_repository')
-            assert hasattr(service, 'connection_service')
-            assert hasattr(service, 'schema_service')
-            assert hasattr(service, 'permission_service')
-            assert hasattr(service, 'migration_service')
-            
+            assert hasattr(service, "session")
+            assert hasattr(service, "user_token")
+            assert hasattr(service, "user_email")
+            assert hasattr(service, "config_repository")
+            assert hasattr(service, "connection_service")
+            assert hasattr(service, "schema_service")
+            assert hasattr(service, "permission_service")
+            assert hasattr(service, "migration_service")
+
             # Check attribute values
             assert service.session is None
             assert service.user_token == "token"
@@ -248,11 +280,13 @@ class TestLakebaseServiceConstants:
     def test_lakebase_available_constant(self):
         """Test LAKEBASE_AVAILABLE constant is defined"""
         from src.services.databricks.lakebase.service import LAKEBASE_AVAILABLE
+
         assert isinstance(LAKEBASE_AVAILABLE, bool)
 
     def test_logger_manager_initialization(self):
         """Test logger_manager is properly initialized"""
         from src.services.databricks.lakebase.service import logger_manager
+
         assert logger_manager is not None
 
 
@@ -274,14 +308,14 @@ class TestLakebaseServiceBasicMethods:
     def test_service_stores_user_credentials(self):
         """Test that service properly stores user credentials"""
         service = LakebaseService(self.mock_session, "test-token", "test@example.com")
-        
+
         assert service.user_token == "test-token"
         assert service.user_email == "test@example.com"
 
     def test_service_handles_none_credentials(self):
         """Test that service handles None credentials gracefully"""
         service = LakebaseService(self.mock_session, None, None)
-        
+
         assert service.user_token is None
         assert service.user_email is None
 
@@ -295,25 +329,31 @@ class TestLakebaseServiceUtilityMethods:
         self.user_token = "test-token"
         self.user_email = "test@example.com"
 
-        with patch('src.services.databricks.lakebase.service.LakebaseConnectionService'), \
-             patch('src.services.databricks.lakebase.service.LakebaseSchemaService'), \
-             patch('src.services.databricks.lakebase.service.LakebasePermissionService'):
-            self.service = LakebaseService(self.mock_session, self.user_token, self.user_email)
+        with (
+            patch("src.services.databricks.lakebase.service.LakebaseConnectionService"),
+            patch("src.services.databricks.lakebase.service.LakebaseSchemaService"),
+            patch("src.services.databricks.lakebase.service.LakebasePermissionService"),
+        ):
+            self.service = LakebaseService(
+                self.mock_session, self.user_token, self.user_email
+            )
 
     def test_service_attributes(self):
         """Test service has expected attributes"""
         assert self.service.session == self.mock_session
         assert self.service.user_token == self.user_token
         assert self.service.user_email == self.user_email
-        assert hasattr(self.service, 'connection_service')
-        assert hasattr(self.service, 'schema_service')
-        assert hasattr(self.service, 'permission_service')
+        assert hasattr(self.service, "connection_service")
+        assert hasattr(self.service, "schema_service")
+        assert hasattr(self.service, "permission_service")
 
     def test_service_with_none_session(self):
         """Test service initialization with None session"""
-        with patch('src.services.databricks.lakebase.service.LakebaseConnectionService'), \
-             patch('src.services.databricks.lakebase.service.LakebaseSchemaService'), \
-             patch('src.services.databricks.lakebase.service.LakebasePermissionService'):
+        with (
+            patch("src.services.databricks.lakebase.service.LakebaseConnectionService"),
+            patch("src.services.databricks.lakebase.service.LakebaseSchemaService"),
+            patch("src.services.databricks.lakebase.service.LakebasePermissionService"),
+        ):
             service = LakebaseService(None, self.user_token, self.user_email)
 
             assert service.session is None
@@ -325,18 +365,20 @@ class TestLakebaseServiceUtilityMethods:
 # _validate_identifier tests (across lakebase services)
 # ===========================================================================
 
-from src.services.databricks.lakebase.schema import (
-    _validate_identifier as schema_validate_identifier,
-    _quote_pg_role as schema_quote_pg_role,
-)
-from src.services.databricks.lakebase.service import (
-    _validate_identifier as service_validate_identifier,
-)
 from src.services.databricks.lakebase.migration import (
     _validate_identifier as migration_validate_identifier,
 )
 from src.services.databricks.lakebase.permission import (
     _quote_pg_role as permission_quote_pg_role,
+)
+from src.services.databricks.lakebase.schema import (
+    _quote_pg_role as schema_quote_pg_role,
+)
+from src.services.databricks.lakebase.schema import (
+    _validate_identifier as schema_validate_identifier,
+)
+from src.services.databricks.lakebase.service import (
+    _validate_identifier as service_validate_identifier,
 )
 
 VALIDATE_IDENTIFIER_FNS = [
@@ -490,16 +532,23 @@ class TestLakebaseCrossImplementationConsistency:
 
     @pytest.mark.parametrize("name", ["users", "_private", "Table123"])
     def test_validate_consistent(self, name):
-        results = [fn(name) for fn in [
-            schema_validate_identifier,
-            service_validate_identifier,
-            migration_validate_identifier,
-        ]]
+        results = [
+            fn(name)
+            for fn in [
+                schema_validate_identifier,
+                service_validate_identifier,
+                migration_validate_identifier,
+            ]
+        ]
         assert all(r == name for r in results)
 
     @pytest.mark.parametrize("bad", ["123x", "my-table", "a.b", ""])
     def test_validate_rejects_consistently(self, bad):
-        for fn in [schema_validate_identifier, service_validate_identifier, migration_validate_identifier]:
+        for fn in [
+            schema_validate_identifier,
+            service_validate_identifier,
+            migration_validate_identifier,
+        ]:
             with pytest.raises(ValueError):
                 fn(bad)
 
@@ -523,9 +572,17 @@ class TestLakebaseServiceTestConnection:
         svc.connection_service = MagicMock()
 
         # test_connection now uses self.get_instance() instead of w.database directly
-        with patch.object(svc, "get_instance", new_callable=AsyncMock,
-                         side_effect=Exception("Provided OAuth token does not have required scopes: postgres")), \
-             patch.dict("os.environ", {"DATABRICKS_CLIENT_ID": "test-spn-id"}):
+        with (
+            patch.object(
+                svc,
+                "get_instance",
+                new_callable=AsyncMock,
+                side_effect=Exception(
+                    "Provided OAuth token does not have required scopes: postgres"
+                ),
+            ),
+            patch.dict("os.environ", {"DATABRICKS_CLIENT_ID": "test-spn-id"}),
+        ):
             result = await svc.test_connection("my-instance")
 
         assert result["success"] is False
@@ -541,9 +598,17 @@ class TestLakebaseServiceTestConnection:
         svc = LakebaseService.__new__(LakebaseService)
         svc.connection_service = MagicMock()
 
-        with patch.object(svc, "get_instance", new_callable=AsyncMock,
-                         side_effect=Exception("Provided OAuth token does not have required scopes: postgres")), \
-             patch.dict("os.environ", {}, clear=True):
+        with (
+            patch.object(
+                svc,
+                "get_instance",
+                new_callable=AsyncMock,
+                side_effect=Exception(
+                    "Provided OAuth token does not have required scopes: postgres"
+                ),
+            ),
+            patch.dict("os.environ", {}, clear=True),
+        ):
             result = await svc.test_connection("my-instance")
 
         assert result["success"] is False
@@ -558,8 +623,12 @@ class TestLakebaseServiceTestConnection:
         svc = LakebaseService.__new__(LakebaseService)
         svc.connection_service = MagicMock()
 
-        with patch.object(svc, "get_instance", new_callable=AsyncMock,
-                         side_effect=Exception("Connection refused")):
+        with patch.object(
+            svc,
+            "get_instance",
+            new_callable=AsyncMock,
+            side_effect=Exception("Connection refused"),
+        ):
             result = await svc.test_connection("my-instance")
 
         assert result["success"] is False
@@ -627,7 +696,9 @@ class TestMigrateExistingDataStreamSequenceReset:
             mock_mig.reset_sequences_sync.return_value = [("users_id_seq", True, None)]
         return mock_mig
 
-    def _setup_service_and_mocks(self, MockMigSvc, mock_create_engine, mock_settings, mock_mig):
+    def _setup_service_and_mocks(
+        self, MockMigSvc, mock_create_engine, mock_settings, mock_mig
+    ):
         """Wire up service, credential mock, engine, and migration service."""
         mock_lb_engine = self._make_lb_engine()
         svc = self._build_service(mock_lb_engine)
@@ -642,7 +713,16 @@ class TestMigrateExistingDataStreamSequenceReset:
 
         svc.schema_service.create_schema_sync = MagicMock()
         svc.schema_service.create_tables_sync_stream = MagicMock(
-            return_value=iter([{"type": "success", "message": "ok", "table": "users", "success": True}])
+            return_value=iter(
+                [
+                    {
+                        "type": "success",
+                        "message": "ok",
+                        "table": "users",
+                        "success": True,
+                    }
+                ]
+            )
         )
         return svc, mock_lb_engine
 
@@ -661,7 +741,9 @@ class TestMigrateExistingDataStreamSequenceReset:
         )
 
         events = await self._collect_events(
-            svc.migrate_existing_data_stream("inst", "https://example.com", migrate_data=True)
+            svc.migrate_existing_data_stream(
+                "inst", "https://example.com", migrate_data=True
+            )
         )
         messages = [e.get("message", "") for e in events]
 
@@ -677,13 +759,17 @@ class TestMigrateExistingDataStreamSequenceReset:
         self, MockMigSvc, mock_create_engine, mock_settings
     ):
         """If reset_sequences_sync raises, a warning event should be yielded."""
-        mock_mig = self._make_mig_service(reset_side_effect=Exception("connection lost"))
+        mock_mig = self._make_mig_service(
+            reset_side_effect=Exception("connection lost")
+        )
         svc, _ = self._setup_service_and_mocks(
             MockMigSvc, mock_create_engine, mock_settings, mock_mig
         )
 
         events = await self._collect_events(
-            svc.migrate_existing_data_stream("inst", "https://example.com", migrate_data=True)
+            svc.migrate_existing_data_stream(
+                "inst", "https://example.com", migrate_data=True
+            )
         )
         messages = [e.get("message", "") for e in events]
 
@@ -698,16 +784,20 @@ class TestMigrateExistingDataStreamSequenceReset:
         self, MockMigSvc, mock_create_engine, mock_settings
     ):
         """Failed individual sequences should be reported as warnings."""
-        mock_mig = self._make_mig_service(reset_return=[
-            ("users_id_seq", True, None),
-            ("bad_id_seq", False, "table not found"),
-        ])
+        mock_mig = self._make_mig_service(
+            reset_return=[
+                ("users_id_seq", True, None),
+                ("bad_id_seq", False, "table not found"),
+            ]
+        )
         svc, _ = self._setup_service_and_mocks(
             MockMigSvc, mock_create_engine, mock_settings, mock_mig
         )
 
         events = await self._collect_events(
-            svc.migrate_existing_data_stream("inst", "https://example.com", migrate_data=True)
+            svc.migrate_existing_data_stream(
+                "inst", "https://example.com", migrate_data=True
+            )
         )
         messages = [e.get("message", "") for e in events]
 

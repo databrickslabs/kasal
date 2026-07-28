@@ -3,16 +3,18 @@ Unit tests for databricks_config Pydantic schemas.
 
 Tests validation, defaults, required fields, and schema interactions.
 """
-import pytest
+
 from datetime import datetime
+
+import pytest
 from pydantic import ValidationError
 
 from src.schemas.databricks_config import (
     DatabricksConfigBase,
     DatabricksConfigCreate,
-    DatabricksConfigUpdate,
     DatabricksConfigInDB,
     DatabricksConfigResponse,
+    DatabricksConfigUpdate,
     DatabricksTokenStatus,
 )
 

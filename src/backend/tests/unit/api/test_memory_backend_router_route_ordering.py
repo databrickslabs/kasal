@@ -5,9 +5,9 @@ Verifies that GET /configs/default is matched before GET /configs/{backend_id}
 so that "default" is not captured as a backend_id path parameter.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 

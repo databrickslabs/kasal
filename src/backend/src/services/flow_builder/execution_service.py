@@ -10,8 +10,9 @@ executionhistory table with execution_type='flow'.
 """
 
 import uuid
-from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
@@ -49,7 +50,7 @@ class FlowExecutionService:
         job_id: str,
         run_name: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
-        group_id: Optional[str] = None
+        group_id: Optional[str] = None,
     ) -> ExecutionHistory:
         """
         Create a new flow execution with multi-tenant isolation.
@@ -68,7 +69,9 @@ class FlowExecutionService:
         Raises:
             ValueError: If flow_id is invalid
         """
-        logger.info(f"Creating flow execution for flow {flow_id}, job {job_id}, run_name={run_name}, group {group_id}")
+        logger.info(
+            f"Creating flow execution for flow {flow_id}, job {job_id}, run_name={run_name}, group {group_id}"
+        )
 
         # Convert string to UUID if needed
         if flow_id is not None and isinstance(flow_id, str):
@@ -81,6 +84,7 @@ class FlowExecutionService:
         # If group_id not provided, inherit from the parent flow
         if group_id is None and flow_id is not None:
             from src.repositories.flow_repository import FlowRepository
+
             flow_repo = FlowRepository(self.session)
             flow = await flow_repo.get(flow_id)
             if flow and flow.group_id:
@@ -100,7 +104,9 @@ class FlowExecutionService:
 
         if execution:
             # Update existing record with flow-specific fields
-            logger.info(f"Found existing execution record for job_id={job_id}, updating with flow fields")
+            logger.info(
+                f"Found existing execution record for job_id={job_id}, updating with flow fields"
+            )
             execution.execution_type = "flow"
             execution.flow_id = flow_id
             if run_name:
@@ -119,14 +125,16 @@ class FlowExecutionService:
                 execution_type="flow",
                 flow_id=flow_id,
                 group_id=group_id,
-                created_at=datetime.utcnow()
+                created_at=datetime.utcnow(),
             )
             self.session.add(execution)
 
         await self.session.commit()
         await self.session.refresh(execution)
 
-        logger.info(f"Flow execution {execution.id} (job_id={job_id}) ready for group {group_id}")
+        logger.info(
+            f"Flow execution {execution.id} (job_id={job_id}) ready for group {group_id}"
+        )
 
         return execution
 
@@ -155,8 +163,7 @@ class FlowExecutionService:
         return await self.execution_repo.get_by_job_id_and_type(job_id, "flow")
 
     async def get_executions_by_flow(
-        self,
-        flow_id: Union[uuid.UUID, str]
+        self, flow_id: Union[uuid.UUID, str]
     ) -> List[ExecutionHistory]:
         """
         Get all executions for a specific flow.
@@ -177,7 +184,7 @@ class FlowExecutionService:
         execution_id: int,
         status: str,
         error: Optional[str] = None,
-        result: Optional[Dict[str, Any]] = None
+        result: Optional[Dict[str, Any]] = None,
     ) -> ExecutionHistory:
         """
         Update the status of a flow execution.
@@ -215,9 +222,7 @@ class FlowExecutionService:
         return execution
 
     async def update_execution_config(
-        self,
-        execution_id: int,
-        config: Dict[str, Any]
+        self, execution_id: int, config: Dict[str, Any]
     ) -> ExecutionHistory:
         """
         Update the configuration/state of a flow execution.

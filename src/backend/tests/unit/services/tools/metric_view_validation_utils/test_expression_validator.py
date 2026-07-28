@@ -1,14 +1,16 @@
 """Tests for metric_view_validation_utils.expression_validator (ExpressionValidator)."""
+
 import json
 import textwrap
-import pytest
 from unittest.mock import MagicMock
 
-from src.services.tools.metric_view_validation_utils.expression_validator import (
-    ExpressionValidator,
-)
+import pytest
+
 from src.services.tools.metric_view_validation_utils.data_input_handler import (
     DataInputHandler,
+)
+from src.services.tools.metric_view_validation_utils.expression_validator import (
+    ExpressionValidator,
 )
 
 # ---------------------------------------------------------------------------
@@ -56,6 +58,7 @@ def _make_handler_with_yaml(tmp_path, yaml_str, mappings) -> DataInputHandler:
 # Initialisation
 # ---------------------------------------------------------------------------
 
+
 class TestInit:
     def test_no_data_handler(self):
         v = ExpressionValidator()
@@ -80,6 +83,7 @@ class TestInit:
 # ---------------------------------------------------------------------------
 # validate()  – direct expression comparison
 # ---------------------------------------------------------------------------
+
 
 class TestValidate:
     def _v(self, **kwargs):
@@ -159,8 +163,15 @@ class TestValidate:
     def test_result_contains_required_keys(self):
         v = self._v()
         result = v.validate("SUM(source.amount)", "SUM(T[amount])")
-        for key in ("is_valid", "confidence", "differences", "similarities",
-                    "recommendations", "databricks_parsed", "dax_parsed"):
+        for key in (
+            "is_valid",
+            "confidence",
+            "differences",
+            "similarities",
+            "recommendations",
+            "databricks_parsed",
+            "dax_parsed",
+        ):
             assert key in result
 
     def test_confidence_low_when_mostly_differences(self):
@@ -173,6 +184,7 @@ class TestValidate:
 # ---------------------------------------------------------------------------
 # _compare_aggregations()
 # ---------------------------------------------------------------------------
+
 
 class TestCompareAggregations:
     def _v(self):
@@ -191,7 +203,9 @@ class TestCompareAggregations:
 
     def test_type_mismatch(self):
         db_agg = [{"type": "SUM", "content": "source.amount", "position": 0}]
-        dax_agg = [{"type": "COUNT", "content": "fact.amount", "position": 0, "node": {}}]
+        dax_agg = [
+            {"type": "COUNT", "content": "fact.amount", "position": 0, "node": {}}
+        ]
         v = ExpressionValidator(table_mappings={"fact": "source"})
         result = v._compare_aggregations(db_agg, dax_agg)
         assert result["match"] is False
@@ -212,6 +226,7 @@ class TestCompareAggregations:
 # _compare_filters()
 # ---------------------------------------------------------------------------
 
+
 class TestCompareFilters:
     def _v(self):
         return ExpressionValidator()
@@ -221,13 +236,29 @@ class TestCompareFilters:
         assert result["match"] is True
 
     def test_db_has_filter_dax_none(self):
-        db_f = [{"parsed_condition": {"type": "EQUALS", "column": "source.status", "value": "active"}}]
+        db_f = [
+            {
+                "parsed_condition": {
+                    "type": "EQUALS",
+                    "column": "source.status",
+                    "value": "active",
+                }
+            }
+        ]
         result = self._v()._compare_filters(db_f, [])
         assert result["match"] is False
         assert "recommendation" in result
 
     def test_dax_has_filter_db_none(self):
-        dax_f = [{"parsed_condition": {"type": "EQUALS", "column": "fact.status", "value": "active"}}]
+        dax_f = [
+            {
+                "parsed_condition": {
+                    "type": "EQUALS",
+                    "column": "fact.status",
+                    "value": "active",
+                }
+            }
+        ]
         result = self._v()._compare_filters([], dax_f)
         assert result["match"] is False
 
@@ -266,6 +297,7 @@ class TestCompareFilters:
 # _filter_signature()
 # ---------------------------------------------------------------------------
 
+
 class TestFilterSignature:
     def test_equals_signature(self):
         cond = {"type": "EQUALS", "column": "Source.Status", "value": "Active"}
@@ -290,6 +322,7 @@ class TestFilterSignature:
 # ---------------------------------------------------------------------------
 # _compare_columns()
 # ---------------------------------------------------------------------------
+
 
 class TestCompareColumns:
     def _v(self, **kwargs):
@@ -326,12 +359,17 @@ class TestCompareColumns:
 # _compare_structure()
 # ---------------------------------------------------------------------------
 
+
 class TestCompareStructure:
     def _v(self):
         return ExpressionValidator()
 
     def _s(self, is_div=False, has_filter=False, complexity="simple"):
-        return {"is_division": is_div, "has_filter": has_filter, "complexity": complexity}
+        return {
+            "is_division": is_div,
+            "has_filter": has_filter,
+            "complexity": complexity,
+        }
 
     def test_identical_structure_matches(self):
         s = self._s()
@@ -355,6 +393,7 @@ class TestCompareStructure:
 # ---------------------------------------------------------------------------
 # validate_measure_by_name()
 # ---------------------------------------------------------------------------
+
 
 class TestValidateMeasureByName:
     def test_raises_without_data_handler(self):
@@ -403,13 +442,14 @@ class TestValidateMeasureByName:
             table_mappings={"fact": "source"},
         )
         result = v.validate_measure_by_name("total_sales")
-        assert result["status"] in ("VALID", "INVALID")   # expression pair exists
+        assert result["status"] in ("VALID", "INVALID")  # expression pair exists
         assert "is_valid" in result
 
 
 # ---------------------------------------------------------------------------
 # validate_ucmv()
 # ---------------------------------------------------------------------------
+
 
 class TestValidateUcmv:
     def test_raises_without_data_handler(self):
@@ -458,6 +498,7 @@ class TestValidateUcmv:
 # ---------------------------------------------------------------------------
 # EQUIVALENT / REVIEW status classification
 # ---------------------------------------------------------------------------
+
 
 class TestEquivalentStatus:
     """Test that known DAX→SQL transformations produce EQUIVALENT instead of INVALID."""
@@ -508,8 +549,8 @@ class TestEquivalentStatus:
         v = ExpressionValidator()
         diff = "Reference mismatch (table.column): Missing in UCMV: {'fact.amount'}."
         result_with_matching_cols = {
-            'databricks_parsed': {'references': {'source.amount'}},
-            'dax_parsed': {'references': {'fact.amount'}},
+            "databricks_parsed": {"references": {"source.amount"}},
+            "dax_parsed": {"references": {"fact.amount"}},
         }
         assert v._is_expected_ref_mapping(diff, result_with_matching_cols)
 
@@ -517,15 +558,15 @@ class TestEquivalentStatus:
         """Similarities list triggers REVIEW classification."""
         v = ExpressionValidator()
         result = {
-            'similarities': ['Aggregations match: 1 match'],
-            'differences': ['Reference mismatch: ...'],
+            "similarities": ["Aggregations match: 1 match"],
+            "differences": ["Reference mismatch: ..."],
         }
         assert v._is_review_candidate(result)
 
     def test_is_review_candidate_no_data(self):
         """Empty similarities and differences → not a review candidate."""
         v = ExpressionValidator()
-        result = {'similarities': [], 'differences': []}
+        result = {"similarities": [], "differences": []}
         assert not v._is_review_candidate(result)
 
 

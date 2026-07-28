@@ -1,9 +1,14 @@
 """Crew synthesis from a chat transcript (``POST /crew/from-conversation``)."""
 
 import logging
-from typing import Dict, Any, List, Tuple, Optional
-from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse, CrewStreamingRequest
-from src.core.exceptions import KasalError, BadRequestError
+from typing import Any, Dict, List, Optional, Tuple
+
+from src.core.exceptions import BadRequestError, KasalError
+from src.schemas.crew import (
+    CrewGenerationRequest,
+    CrewGenerationResponse,
+    CrewStreamingRequest,
+)
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -41,7 +46,9 @@ class ConversationGenerationMixin:
         Returns:
             ``{"agents": [...], "tasks": [...]}`` — created DB entities.
         """
-        transcript = await self._build_conversation_transcript(session_id, group_context)
+        transcript = await self._build_conversation_transcript(
+            session_id, group_context
+        )
         if not transcript:
             raise BadRequestError(
                 "No conversation found for this session to build a crew from"
@@ -102,9 +109,10 @@ class ConversationGenerationMixin:
             return ""
 
         from src.repositories.chat_history_repository import ChatHistoryRepository
-        messages = await ChatHistoryRepository(self.session).get_recent_by_session_and_group(
-            session_id, group_ids, limit=200
-        )
+
+        messages = await ChatHistoryRepository(
+            self.session
+        ).get_recent_by_session_and_group(session_id, group_ids, limit=200)
 
         placeholders = {"thinking...", "[ui-card]", ""}
         user_cap = 800
@@ -134,7 +142,9 @@ class ConversationGenerationMixin:
 
         selected = list(entries)
         while selected and _total(selected) > max_chars:
-            drop_at = next((i for i, (role, _) in enumerate(selected) if role == "assistant"), None)
+            drop_at = next(
+                (i for i, (role, _) in enumerate(selected) if role == "assistant"), None
+            )
             if drop_at is None:
                 break  # only user turns remain — keep them even if slightly over
             selected.pop(drop_at)

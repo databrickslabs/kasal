@@ -3,23 +3,24 @@
 Tests all CRUD endpoints using direct async function calls with mocked
 SchemaService dependencies.
 """
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-from types import SimpleNamespace
-from datetime import datetime
 
+from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from fastapi import HTTPException
 
 from src.api.schemas_router import (
-    get_all_schemas,
-    get_schemas_by_type,
-    get_schema_by_name,
     create_schema,
-    update_schema,
     delete_schema,
+    get_all_schemas,
+    get_schema_by_name,
+    get_schemas_by_type,
     router,
+    update_schema,
 )
-from src.schemas.schema import SchemaCreate, SchemaUpdate, SchemaListResponse
+from src.schemas.schema import SchemaCreate, SchemaListResponse, SchemaUpdate
 from src.utils.user_context import GroupContext
 
 
@@ -64,6 +65,7 @@ def make_list_response(schemas=None, count=None):
 # GET /schemas
 # ---------------------------------------------------------------------------
 
+
 class TestGetAllSchemas:
     """Tests for get_all_schemas endpoint."""
 
@@ -102,6 +104,7 @@ class TestGetAllSchemas:
 # GET /schemas/by-type/{schema_type}
 # ---------------------------------------------------------------------------
 
+
 class TestGetSchemasByType:
     """Tests for get_schemas_by_type endpoint."""
 
@@ -133,6 +136,7 @@ class TestGetSchemasByType:
 # ---------------------------------------------------------------------------
 # GET /schemas/{schema_name}
 # ---------------------------------------------------------------------------
+
 
 class TestGetSchemaByName:
     """Tests for get_schema_by_name endpoint."""
@@ -168,6 +172,7 @@ class TestGetSchemaByName:
 # ---------------------------------------------------------------------------
 # POST /schemas
 # ---------------------------------------------------------------------------
+
 
 class TestCreateSchema:
     """Tests for create_schema endpoint."""
@@ -219,6 +224,7 @@ class TestCreateSchema:
 # PUT /schemas/{schema_name}
 # ---------------------------------------------------------------------------
 
+
 class TestUpdateSchema:
     """Tests for update_schema endpoint."""
 
@@ -265,6 +271,7 @@ class TestUpdateSchema:
 # DELETE /schemas/{schema_name}
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteSchema:
     """Tests for delete_schema endpoint."""
 
@@ -288,9 +295,7 @@ class TestDeleteSchema:
         )
 
         with pytest.raises(HTTPException) as exc_info:
-            await delete_schema(
-                schema_name="missing", service=svc, group_context=gc()
-            )
+            await delete_schema(schema_name="missing", service=svc, group_context=gc())
 
         assert exc_info.value.status_code == 404
 
@@ -300,14 +305,13 @@ class TestDeleteSchema:
         svc.delete_schema = AsyncMock(side_effect=RuntimeError("db error"))
 
         with pytest.raises(RuntimeError, match="db error"):
-            await delete_schema(
-                schema_name="schema1", service=svc, group_context=gc()
-            )
+            await delete_schema(schema_name="schema1", service=svc, group_context=gc())
 
 
 # ---------------------------------------------------------------------------
 # Router configuration
 # ---------------------------------------------------------------------------
+
 
 class TestRouterConfiguration:
     """Tests for router prefix and tags."""

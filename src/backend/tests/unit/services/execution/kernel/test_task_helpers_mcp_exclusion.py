@@ -5,13 +5,13 @@ auto-resolution logic in `create_task` must skip it because MCP servers are
 handled by the dedicated MCPIntegration code path, not the tool factory.
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-from src.services.execution.runtime import Agent, Task
+import pytest
 
 from src.services.agent_builder.task_adapter import create_task
+from src.services.execution.runtime import Agent, Task
 
 
 @asynccontextmanager
@@ -62,22 +62,28 @@ class TestMCPServersExcludedFromAutoResolution:
 
     # ----- Helper to run create_task with MCP/session patches -----
 
-    async def _run_create_task(self, task_config, agent, tool_factory=None, tool_service=None):
+    async def _run_create_task(
+        self, task_config, agent, tool_factory=None, tool_service=None
+    ):
         """Run create_task with all external I/O patched out."""
         mock_mcp_integration = MagicMock()
         mock_mcp_integration.create_mcp_tools_for_task = AsyncMock(return_value=[])
 
         mock_mcp_service_cls = MagicMock()
 
-        with patch(
-            "src.services.tools.mcp_integration.MCPIntegration",
-            mock_mcp_integration,
-        ), patch(
-            "src.services.mcp.service.MCPService",
-            mock_mcp_service_cls,
-        ), patch(
-            "src.db.session.request_scoped_session",
-            _fake_scoped_session,
+        with (
+            patch(
+                "src.services.tools.mcp_integration.MCPIntegration",
+                mock_mcp_integration,
+            ),
+            patch(
+                "src.services.mcp.service.MCPService",
+                mock_mcp_service_cls,
+            ),
+            patch(
+                "src.db.session.request_scoped_session",
+                _fake_scoped_session,
+            ),
         ):
             task = await create_task(
                 task_key="test_task",
@@ -230,7 +236,10 @@ class TestMCPServersExcludedFromAutoResolution:
             return_value=["ResolvedTool"],
         ):
             await self._run_create_task(
-                task_config, agent, tool_factory=tool_factory, tool_service=mock_tool_service
+                task_config,
+                agent,
+                tool_factory=tool_factory,
+                tool_service=mock_tool_service,
             )
 
         # The tool_factory should have been called via the normal resolution path

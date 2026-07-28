@@ -5,19 +5,20 @@ Handles KPI conversion endpoints for transforming key performance indicators
 between different formats (YAML, DAX, SQL, UC Metrics, Power BI).
 """
 
-from fastapi import APIRouter, HTTPException, Depends
-from typing import Optional, List, Dict, Any
 import logging
+from typing import Any, Dict, List, Optional
 
-from src.services.powerbi.kpi_conversion import KPIConversionService
+from fastapi import APIRouter, Depends, HTTPException
+
+from src.core.dependencies import GroupContextDep
 from src.schemas.kpi_conversion import (
+    ConversionFormatsResponse,
     ConversionRequest,
     ConversionResponse,
-    ConversionFormatsResponse,
     ValidateRequest,
     ValidationResponse,
 )
-from src.core.dependencies import GroupContextDep
+from src.services.powerbi.kpi_conversion import KPIConversionService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/kpi-conversion", tags=["kpi-conversion"])
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/api/kpi-conversion", tags=["kpi-conversion"])
 
 @router.get("/formats", response_model=ConversionFormatsResponse)
 async def get_available_formats(
-    group_context: GroupContextDep = None
+    group_context: GroupContextDep = None,
 ) -> ConversionFormatsResponse:
     """
     Get list of available conversion formats and supported conversion paths.
@@ -40,15 +41,13 @@ async def get_available_formats(
     except Exception as e:
         logger.error(f"Error fetching available formats: {e}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch available formats: {str(e)}"
+            status_code=500, detail=f"Failed to fetch available formats: {str(e)}"
         )
 
 
 @router.post("/convert", response_model=ConversionResponse)
 async def convert_measure(
-    request: ConversionRequest,
-    group_context: GroupContextDep = None
+    request: ConversionRequest, group_context: GroupContextDep = None
 ) -> ConversionResponse:
     """
     Convert measures from one format to another.
@@ -69,7 +68,7 @@ async def convert_measure(
             source_format=request.source_format,
             target_format=request.target_format,
             input_data=request.input_data,
-            config=request.config
+            config=request.config,
         )
         return result
     except ValueError as e:
@@ -77,16 +76,12 @@ async def convert_measure(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error during measure conversion: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Conversion failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
 
 
 @router.post("/validate", response_model=ValidationResponse)
 async def validate_measure(
-    request: ValidateRequest,
-    group_context: GroupContextDep = None
+    request: ValidateRequest, group_context: GroupContextDep = None
 ) -> ValidationResponse:
     """
     Validate measure definition before conversion.
@@ -104,22 +99,17 @@ async def validate_measure(
     try:
         service = KPIConversionService()
         result = await service.validate(
-            format=request.format,
-            input_data=request.input_data
+            format=request.format, input_data=request.input_data
         )
         return result
     except Exception as e:
         logger.error(f"Error during validation: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Validation failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
 
 
 @router.post("/batch-convert", response_model=List[ConversionResponse])
 async def batch_convert_measures(
-    requests: List[ConversionRequest],
-    group_context: GroupContextDep = None
+    requests: List[ConversionRequest], group_context: GroupContextDep = None
 ) -> List[ConversionResponse]:
     """
     Convert multiple measures in a single request.
@@ -144,6 +134,5 @@ async def batch_convert_measures(
     except Exception as e:
         logger.error(f"Error during batch conversion: {e}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Batch conversion failed: {str(e)}"
+            status_code=500, detail=f"Batch conversion failed: {str(e)}"
         )

@@ -16,8 +16,9 @@ Key features:
 """
 
 import logging
+from typing import Any, Dict, List, Optional, Union
+
 import yaml
-from typing import Dict, Any, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +69,7 @@ class UCMetricsToSqlTranspiler:
         self.logger = logging.getLogger(__name__)
 
     def transpile_from_yaml(
-        self,
-        uc_metrics_yaml: str,
-        table_reference: Optional[str] = None
+        self, uc_metrics_yaml: str, table_reference: Optional[str] = None
     ) -> List[str]:
         """
         Transpile UC Metrics YAML to standalone SQL queries.
@@ -92,9 +91,7 @@ class UCMetricsToSqlTranspiler:
             raise ValueError(f"Invalid YAML format: {ex}")
 
     def transpile(
-        self,
-        uc_metrics: Dict[str, Any],
-        table_reference: Optional[str] = None
+        self, uc_metrics: Dict[str, Any], table_reference: Optional[str] = None
     ) -> List[str]:
         """
         Transpile UC Metrics dictionary to standalone SQL queries.
@@ -121,9 +118,7 @@ class UCMetricsToSqlTranspiler:
         sql_queries = []
         for measure in measures:
             sql = self._build_sql_for_measure(
-                measure=measure,
-                source_table=source_table,
-                common_filter=common_filter
+                measure=measure, source_table=source_table, common_filter=common_filter
             )
             sql_queries.append(sql)
 
@@ -167,7 +162,7 @@ class UCMetricsToSqlTranspiler:
         self,
         measure: Dict[str, Any],
         source_table: Optional[str],
-        common_filter: Optional[str]
+        common_filter: Optional[str],
     ) -> str:
         """
         Build standalone SQL SELECT statement for a single measure.
@@ -215,9 +210,7 @@ class UCMetricsToSqlTranspiler:
         return sql
 
     def _build_window_expression(
-        self,
-        base_expr: str,
-        window_config: Union[List[Dict[str, str]], Dict[str, str]]
+        self, base_expr: str, window_config: Union[List[Dict[str, str]], Dict[str, str]]
     ) -> str:
         """
         Build SQL window function expression from window configuration.
@@ -270,9 +263,7 @@ class UCMetricsToSqlTranspiler:
         return f"{base_expr} /* window: {window_config} */"
 
     def transpile_to_single_query(
-        self,
-        uc_metrics: Dict[str, Any],
-        table_reference: Optional[str] = None
+        self, uc_metrics: Dict[str, Any], table_reference: Optional[str] = None
     ) -> str:
         """
         Transpile UC Metrics to a single SQL query with all measures.
@@ -357,7 +348,8 @@ class UCMetricsToSqlTranspiler:
             # Look for table.column patterns
             # This is a basic implementation - enhance as needed
             import re
-            table_refs = re.findall(r'(\w+\.\w+\.\w+)', expr)
+
+            table_refs = re.findall(r"(\w+\.\w+\.\w+)", expr)
             tables.extend(table_refs)
 
         # Remove duplicates while preserving order
@@ -371,9 +363,7 @@ class UCMetricsToSqlTranspiler:
         return unique_tables
 
     def generate_sql_documentation(
-        self,
-        uc_metrics: Dict[str, Any],
-        table_reference: Optional[str] = None
+        self, uc_metrics: Dict[str, Any], table_reference: Optional[str] = None
     ) -> str:
         """
         Generate SQL documentation with all queries and metadata.

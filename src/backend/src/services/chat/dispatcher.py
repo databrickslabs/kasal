@@ -42,20 +42,25 @@ def _set_mlflow_tracing(enabled: bool) -> None:
     except Exception:
         pass
 
+
 from src.core.cache import intent_cache
-from src.services.llm.manager import LLMManager
-from src.schemas.crew import CrewGenerationRequest, CrewGenerationResponse, CrewStreamingRequest
+from src.schemas.crew import (
+    CrewGenerationRequest,
+    CrewGenerationResponse,
+    CrewStreamingRequest,
+)
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse, IntentType
 from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationResponse
+from src.services.catalog.crews import CrewService
+from src.services.catalog.templates import TemplateService
+from src.services.databricks.workspace.service import DatabricksService
+from src.services.execution.logs.llm_log_service import LLMLogService
+from src.services.flow_builder.flow_service import FlowService
 from src.services.generation.agents import AgentGenerationService
 from src.services.generation.crews import CrewGenerationService
-from src.services.catalog.crews import CrewService
-from src.services.databricks.workspace.service import DatabricksService
-from src.services.flow_builder.flow_service import FlowService
-from src.services.execution.logs.llm_log_service import LLMLogService
-from src.services.mlflow.service import MLflowService
 from src.services.generation.tasks import TaskGenerationService
-from src.services.catalog.templates import TemplateService
+from src.services.llm.manager import LLMManager
+from src.services.mlflow.service import MLflowService
 from src.utils.prompt_utils import robust_json_parser
 from src.utils.user_context import GroupContext
 
@@ -85,9 +90,11 @@ DISPATCHER_FALLBACK_MODELS = [
 # First chain entry doubles as the default when no model is selected in chat.
 DEFAULT_DISPATCHER_MODEL = os.getenv(
     "DEFAULT_DISPATCHER_MODEL",
-    DISPATCHER_FALLBACK_MODELS[0]
-    if DISPATCHER_FALLBACK_MODELS
-    else "databricks-claude-haiku-4-5",
+    (
+        DISPATCHER_FALLBACK_MODELS[0]
+        if DISPATCHER_FALLBACK_MODELS
+        else "databricks-claude-haiku-4-5"
+    ),
 )
 
 
@@ -142,19 +149,65 @@ class DispatcherService:
     # words that overlap with EXECUTE_KEYWORDS or CONFIGURE_KEYWORDS are
     # excluded to avoid false signals.
     TASK_ACTION_WORDS = {
-        "find", "search", "locate", "discover", "identify",
-        "get", "fetch", "retrieve", "collect", "gather",
-        "analyze", "examine", "study", "investigate", "review",
-        "assess", "evaluate", "compare", "contrast",
-        "create", "make", "build", "generate", "produce", "develop",
-        "write", "compose", "draft", "prepare", "document",
-        "calculate", "compute", "determine", "measure",
-        "summarize", "condense", "extract", "compile",
-        "organize", "sort", "categorize", "classify",
-        "check", "verify", "validate", "test", "inspect", "audit",
-        "monitor", "track",
-        "send", "deliver", "share", "distribute",
-        "convert", "transform", "translate", "format", "parse",
+        "find",
+        "search",
+        "locate",
+        "discover",
+        "identify",
+        "get",
+        "fetch",
+        "retrieve",
+        "collect",
+        "gather",
+        "analyze",
+        "examine",
+        "study",
+        "investigate",
+        "review",
+        "assess",
+        "evaluate",
+        "compare",
+        "contrast",
+        "create",
+        "make",
+        "build",
+        "generate",
+        "produce",
+        "develop",
+        "write",
+        "compose",
+        "draft",
+        "prepare",
+        "document",
+        "calculate",
+        "compute",
+        "determine",
+        "measure",
+        "summarize",
+        "condense",
+        "extract",
+        "compile",
+        "organize",
+        "sort",
+        "categorize",
+        "classify",
+        "check",
+        "verify",
+        "validate",
+        "test",
+        "inspect",
+        "audit",
+        "monitor",
+        "track",
+        "send",
+        "deliver",
+        "share",
+        "distribute",
+        "convert",
+        "transform",
+        "translate",
+        "format",
+        "parse",
     }
 
     # Agent-related keywords — ONLY explicit agent entity words
@@ -187,8 +240,8 @@ class DispatcherService:
     # later SINGULAR occurrence and force-routed a five-topic crew into the
     # single-agent generator (it produced one "Swiss Sports News Reporter").
     MULTI_AGENT_PATTERNS = [
-        r"\bagents\b",                                   # plural entity
-        r"\b(crew|team|squad|panel)\b",                  # collective noun
+        r"\bagents\b",  # plural entity
+        r"\b(crew|team|squad|panel)\b",  # collective noun
         # explicit count before the entity, digit or spelled out, with a bounded
         # gap so "4 specialized agents" counts but a distant number does not
         r"\b(\d+|two|three|four|five|six|seven|eight|nine|ten)\s+"
@@ -206,12 +259,12 @@ class DispatcherService:
 
     # Multi-step workflow indicators — boost crew score
     MULTI_STEP_PATTERNS = [
-        r"\bthen\b",                       # "research then write then present"
-        r",\s*[a-z]+\s+(and|then)\b",      # comma-separated action chain
+        r"\bthen\b",  # "research then write then present"
+        r",\s*[a-z]+\s+(and|then)\b",  # comma-separated action chain
         r"\band\b.*\b(create|write|build|make|generate|analyze|review|produce|prepare)\b",
-        r"\bstep\s*\d+\b",                 # "step 1, step 2"
-        r"\bfirst\b.*\bthen\b",            # "first X then Y"
-        r"\b(after|before|once|finally)\b", # sequential indicators
+        r"\bstep\s*\d+\b",  # "step 1, step 2"
+        r"\bfirst\b.*\bthen\b",  # "first X then Y"
+        r"\b(after|before|once|finally)\b",  # sequential indicators
     ]
 
     # Crew-related keywords (includes plan/strategy terms since they're functionally the same)
@@ -577,7 +630,11 @@ class DispatcherService:
                 return {
                     "intent": "catalog_help",
                     "confidence": 1.0,
-                    "extracted_info": {"command": command, "args": args, "invalid_command": True},
+                    "extracted_info": {
+                        "command": command,
+                        "args": args,
+                        "invalid_command": True,
+                    },
                     "suggested_prompt": stripped,
                     "source": "slash_command",
                     "suggested_tools": [],
@@ -601,15 +658,34 @@ class DispatcherService:
             args = remaining[1].strip() if len(remaining) > 1 else ""
 
         # Check for crew/crews qualifier (e.g. "/list crews", "/save crew My Crew")
-        CREW_QUALIFIABLE = {"catalog_list", "catalog_load", "catalog_save", "catalog_schedule", "execute_crew", "catalog_delete"}
-        if not qualifier_found and args.lower().startswith(("crew", "crews")) and intent in CREW_QUALIFIABLE:
+        CREW_QUALIFIABLE = {
+            "catalog_list",
+            "catalog_load",
+            "catalog_save",
+            "catalog_schedule",
+            "execute_crew",
+            "catalog_delete",
+        }
+        if (
+            not qualifier_found
+            and args.lower().startswith(("crew", "crews"))
+            and intent in CREW_QUALIFIABLE
+        ):
             qualifier_found = True
             remaining = args.split(None, 1)
             args = remaining[1].strip() if len(remaining) > 1 else ""
 
         # Commands that require a crew/flow qualifier (bare /list, /load etc. show usage help)
         # /plans and /flows are aliases that already imply the qualifier, so they're excluded.
-        QUALIFIER_REQUIRED = {"/list", "/load", "/save", "/run", "/exec", "/schedule", "/delete"}
+        QUALIFIER_REQUIRED = {
+            "/list",
+            "/load",
+            "/save",
+            "/run",
+            "/exec",
+            "/schedule",
+            "/delete",
+        }
         if not qualifier_found and command in QUALIFIER_REQUIRED:
             COMMAND_USAGE = {
                 "/list": "Usage: `/list crews` or `/list flows`",
@@ -707,7 +783,10 @@ class DispatcherService:
             desc = (desc or "").strip()
             return desc if len(desc) <= max_desc else desc[: max_desc - 1] + "…"
 
-        lines = [f"- {t['title']}: {_short(t.get('description', ''))}" for t in available_tools]
+        lines = [
+            f"- {t['title']}: {_short(t.get('description', ''))}"
+            for t in available_tools
+        ]
         return (
             "\n\nAvailable tools in the workspace:\n"
             + "\n".join(lines)
@@ -946,7 +1025,8 @@ Please analyze this message and provide your intent classification."""
                 cached["source"] = "cache+surface_override"
             return cached
 
-        from src.utils.telemetry import get_user_agent_header, KasalProduct
+        from src.utils.telemetry import KasalProduct, get_user_agent_header
+
         intent_extra_headers = get_user_agent_header(KasalProduct.INTENT_DETECTION)
 
         # Walk the candidate chain: preferred model first, then the fast
@@ -960,9 +1040,7 @@ Please analyze this message and provide your intent classification."""
 
         for candidate in candidates:
             if self._check_circuit_breaker(candidate):
-                logger.info(
-                    f"Skipping intent model {candidate} (circuit breaker open)"
-                )
+                logger.info(f"Skipping intent model {candidate} (circuit breaker open)")
                 continue
             attempted += 1
             # Reset per attempt so a previous candidate's resolved name can
@@ -1144,8 +1222,12 @@ Please analyze this message and provide your intent classification."""
         force-routed to the single-agent generator looked inexplicable.
         """
         result = await self.detect_intent(
-            message, model, group_context, available_tools,
-            chat_mode=chat_mode, last_resort_model=last_resort_model,
+            message,
+            model,
+            group_context,
+            available_tools,
+            chat_mode=chat_mode,
+            last_resort_model=last_resort_model,
         )
         # Skip when no LLM actually ran (ChatMode fast-path / slash command),
         # otherwise every message records a phantom call against the model.
@@ -1167,7 +1249,8 @@ Please analyze this message and provide your intent classification."""
             status="error" if degraded else "success",
             error_message=(
                 f"no intent model answered; result came from {source}"
-                if degraded else None
+                if degraded
+                else None
             ),
             group_context=group_context,
         )
@@ -1246,8 +1329,11 @@ Please analyze this message and provide your intent classification."""
             # skipping the no-LLM paths and attributing the row to the model that
             # actually answered — one implementation for both surfaces.
             intent_result = await self.detect_intent_logged(
-                request.message, DEFAULT_DISPATCHER_MODEL, group_context,
-                available_tools, chat_mode=request.chat_mode,
+                request.message,
+                DEFAULT_DISPATCHER_MODEL,
+                group_context,
+                available_tools,
+                chat_mode=request.chat_mode,
                 last_resort_model=request.model,
             )
 
@@ -1283,20 +1369,31 @@ Please analyze this message and provide your intent classification."""
             else:
                 try:
                     from src.services.tools.tool_service import ToolService
+
                     tool_svc = ToolService(self.session)
                     if group_context:
-                        tools_resp = await tool_svc.get_enabled_tools_for_group(group_context)
+                        tools_resp = await tool_svc.get_enabled_tools_for_group(
+                            group_context
+                        )
                     else:
                         tools_resp = await tool_svc.get_enabled_tools()
                     enabled_titles = dict.fromkeys(t.title for t in tools_resp.tools)
                 except Exception as e:
                     logger.warning(f"Failed to fetch enabled workspace tools: {e}")
 
-            effective_tools = self._resolve_effective_tools(request.tools, enabled_titles)
+            effective_tools = self._resolve_effective_tools(
+                request.tools, enabled_titles
+            )
             if request.tools:
-                dropped = [t for t in request.tools if enabled_titles and t not in enabled_titles]
+                dropped = [
+                    t
+                    for t in request.tools
+                    if enabled_titles and t not in enabled_titles
+                ]
                 if dropped:
-                    logger.info(f"Dropped non-enabled tools from request.tools: {dropped}")
+                    logger.info(
+                        f"Dropped non-enabled tools from request.tools: {dropped}"
+                    )
 
             # Dispatch to appropriate service based on intent
             generation_result = None
@@ -1322,6 +1419,7 @@ Please analyze this message and provide your intent classification."""
 
                 elif dispatcher_response.intent == IntentType.GENERATE_CREW:
                     import uuid as _uuid
+
                     generation_id = str(_uuid.uuid4())
                     streaming_request = CrewStreamingRequest(
                         prompt=dispatcher_response.suggested_prompt or request.message,
@@ -1351,7 +1449,9 @@ Please analyze this message and provide your intent classification."""
                     # Spawn progressive generation in background
                     asyncio.create_task(
                         self.crew_service.create_crew_progressive(
-                            streaming_request, group_context, generation_id,
+                            streaming_request,
+                            group_context,
+                            generation_id,
                             mlflow_enabled=mlflow_enabled,
                         )
                     )
@@ -1663,11 +1763,17 @@ Please analyze this message and provide your intent classification."""
 
                 elif dispatcher_response.intent == IntentType.CATALOG_HELP:
                     # Command-specific usage help (e.g. bare /list without qualifier)
-                    command_help = dispatcher_response.extracted_info.get("command_help", "")
+                    command_help = dispatcher_response.extracted_info.get(
+                        "command_help", ""
+                    )
                     # Invalid/unrecognized command prefix
-                    invalid = dispatcher_response.extracted_info.get("invalid_command", False)
+                    invalid = dispatcher_response.extracted_info.get(
+                        "invalid_command", False
+                    )
                     invalid_cmd = dispatcher_response.extracted_info.get("command", "")
-                    invalid_prefix = f"Unknown command `{invalid_cmd}`.\n\n" if invalid else ""
+                    invalid_prefix = (
+                        f"Unknown command `{invalid_cmd}`.\n\n" if invalid else ""
+                    )
 
                     full_help = (
                         "**Crew Commands:**\n"

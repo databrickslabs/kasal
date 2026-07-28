@@ -21,6 +21,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+
 from src.api import api_router
 from src.config.settings import settings
 from src.core.logger import LoggerManager
@@ -51,7 +52,9 @@ os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
 # (MCP_SERVER_ENABLED=true + MLFLOW_TRACKING_URI=<local server>) reads the
 # value the process was STARTED with, which this override would otherwise erase.
 if os.environ.get("MLFLOW_TRACKING_URI"):
-    os.environ.setdefault("KASAL_LAUNCH_MLFLOW_TRACKING_URI", os.environ["MLFLOW_TRACKING_URI"])
+    os.environ.setdefault(
+        "KASAL_LAUNCH_MLFLOW_TRACKING_URI", os.environ["MLFLOW_TRACKING_URI"]
+    )
 os.environ["MLFLOW_TRACKING_URI"] = "databricks"
 
 # Set log directory environment variable
@@ -199,8 +202,10 @@ async def lifespan(app: FastAPI):
     # Periodic zombie-job recovery: every 5 min, fix RUNNING jobs whose
     # status update silently failed after subprocess completion.
     if db_initialized:
+
         async def _zombie_cleanup_loop():
             import asyncio as _asyncio
+
             while True:
                 await _asyncio.sleep(120)
                 try:
@@ -209,8 +214,13 @@ async def lifespan(app: FastAPI):
                         system_logger.info(f"[ZombieCleanup] Recovered {n} job(s)")
                 except Exception as _ze:
                     system_logger.error(f"[ZombieCleanup] Error: {_ze}")
-        import asyncio as _asyncio; _asyncio.create_task(_zombie_cleanup_loop())
-        system_logger.info("[ZombieCleanup] Periodic zombie cleanup task started (every 2 min)")
+
+        import asyncio as _asyncio
+
+        _asyncio.create_task(_zombie_cleanup_loop())
+        system_logger.info(
+            "[ZombieCleanup] Periodic zombie cleanup task started (every 2 min)"
+        )
 
     # Workflow recipes: distil completed crew runs into reusable recipes.
     #
@@ -223,16 +233,23 @@ async def lifespan(app: FastAPI):
     # back-fills history that finished while the server was down, or that
     # predates the feature.
     if db_initialized:
+
         async def _workflow_recipe_backfill():
             from src.services.recipes.mining import mine_now
+
             try:
                 n = await mine_now()
                 if n:
                     system_logger.info(f"[WorkflowRecipes] Back-filled {n} recipe(s)")
             except Exception as _re:
                 system_logger.error(f"[WorkflowRecipes] Back-fill error: {_re}")
-        import asyncio as _asyncio; _asyncio.create_task(_workflow_recipe_backfill())
-        system_logger.info("[WorkflowRecipes] Mining on run completion; back-filling history once")
+
+        import asyncio as _asyncio
+
+        _asyncio.create_task(_workflow_recipe_backfill())
+        system_logger.info(
+            "[WorkflowRecipes] Mining on run completion; back-filling history once"
+        )
 
     # Run database seeders after DB initialization
     if db_initialized:
@@ -292,11 +309,16 @@ async def lifespan(app: FastAPI):
     if db_initialized:
         try:
             async with async_session_factory() as session:
-                from src.repositories.engine_config_repository import EngineConfigRepository
+                from src.repositories.engine_config_repository import (
+                    EngineConfigRepository,
+                )
+
                 repo = EngineConfigRepository(session)
                 if await repo.get_otel_app_telemetry_enabled():
                     log_level = await repo.get_otel_app_telemetry_log_level()
-                    logger_manager.enable_otel_app_telemetry(enabled=True, log_level=log_level)
+                    logger_manager.enable_otel_app_telemetry(
+                        enabled=True, log_level=log_level
+                    )
         except Exception as e:
             system_logger.warning(f"OTel App Telemetry activation skipped: {e}")
 
@@ -305,18 +327,23 @@ async def lifespan(app: FastAPI):
     # (background tasks, services, UnitOfWork) automatically use Lakebase.
     if db_initialized:
         try:
-            from src.db.database_router import is_lakebase_enabled, get_lakebase_config_from_db
+            from src.db.database_router import (
+                get_lakebase_config_from_db,
+                is_lakebase_enabled,
+            )
+
             if await is_lakebase_enabled():
                 config = await get_lakebase_config_from_db()
-                instance_name = (
-                    (config or {}).get("instance_name")
-                    or os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+                instance_name = (config or {}).get("instance_name") or os.environ.get(
+                    "LAKEBASE_INSTANCE_NAME", "kasal-lakebase"
                 )
                 from src.db.lakebase_session import LakebaseSessionFactory
+
                 lb_factory = LakebaseSessionFactory(instance_name)
                 await lb_factory.create_engine()
                 async_session_factory.activate_lakebase(lb_factory._session_factory)
                 from src.db.lakebase_state import mark_lakebase_activated
+
                 mark_lakebase_activated()
                 system_logger.info(
                     f"Activated Lakebase session factory (instance: {instance_name})"
@@ -331,6 +358,7 @@ async def lifespan(app: FastAPI):
                 # destructive DROP SCHEMA the migrate UI would do. Best-effort.
                 try:
                     from src.db.session import run_schema_self_heal
+
                     async with lb_factory._session_factory() as _heal_session:
                         conn = await _heal_session.connection()
                         await run_schema_self_heal(conn)
@@ -483,7 +511,9 @@ async def lifespan(app: FastAPI):
         # queue semaphores so the resource_tracker does not report leaked
         # semaphore objects at interpreter shutdown.
         try:
-            from src.services.agent_builder.process_executor import process_crew_executor
+            from src.services.agent_builder.process_executor import (
+                process_crew_executor,
+            )
             from src.services.flow_builder.process_executor import process_flow_executor
 
             process_crew_executor.shutdown(wait=True)
@@ -553,11 +583,19 @@ class LocalDevAuthMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
             headers = dict(scope.get("headers", []))
-            if b"x-forwarded-email" not in headers and b"x-auth-request-email" not in headers:
+            if (
+                b"x-forwarded-email" not in headers
+                and b"x-auth-request-email" not in headers
+            ):
                 scope["headers"] = list(scope.get("headers", [])) + [
-                    (b"x-forwarded-email", (settings.LOCAL_DEV_USER_EMAIL or "dev@localhost").encode())
+                    (
+                        b"x-forwarded-email",
+                        (settings.LOCAL_DEV_USER_EMAIL or "dev@localhost").encode(),
+                    )
                 ]
-                logger.debug(f"[LOCAL_DEV_AUTH] Injected fallback email header: {settings.LOCAL_DEV_USER_EMAIL or 'dev@localhost'}")
+                logger.debug(
+                    f"[LOCAL_DEV_AUTH] Injected fallback email header: {settings.LOCAL_DEV_USER_EMAIL or 'dev@localhost'}"
+                )
         await self.app(scope, receive, send)
 
 

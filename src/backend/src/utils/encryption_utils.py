@@ -4,15 +4,16 @@ Encryption utilities module.
 This module provides utilities for encrypting and decrypting sensitive data.
 """
 
-import os
-import logging
 import base64
-from typing import Optional, Tuple
+import logging
+import os
 from pathlib import Path
+from typing import Optional, Tuple
+
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 class EncryptionUtils:
     """Utility class for encryption and decryption operations."""
-    
+
     @staticmethod
     def get_key_directory() -> Path:
         """Get the directory where SSH keys are stored"""
@@ -34,24 +35,22 @@ class EncryptionUtils:
     def generate_ssh_key_pair() -> Tuple[bytes, bytes]:
         """Generate a new RSA key pair for encryption"""
         private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-            backend=default_backend()
+            public_exponent=65537, key_size=2048, backend=default_backend()
         )
-        
+
         # Serialize private key
         private_key_bytes = private_key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()
+            encryption_algorithm=serialization.NoEncryption(),
         )
-        
+
         # Serialize public key
         public_key_bytes = private_key.public_key().public_bytes(
             encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
-        
+
         return private_key_bytes, public_key_bytes
 
     @staticmethod
@@ -60,7 +59,7 @@ class EncryptionUtils:
         key_dir = EncryptionUtils.get_key_directory()
         private_key_path = key_dir / "private_key.pem"
         public_key_path = key_dir / "public_key.pem"
-        
+
         # Check if keys already exist
         if private_key_path.exists() and public_key_path.exists():
             private_key = private_key_path.read_bytes()
@@ -76,7 +75,7 @@ class EncryptionUtils:
                 pass  # Best-effort on platforms where chmod may not apply
             public_key_path.write_bytes(public_key)
             logger.info("Generated new SSH key pair for encryption")
-        
+
         return private_key, public_key
 
     # Process-lifetime cache for the resolved key, so we don't hit the secrets
@@ -98,6 +97,7 @@ class EncryptionUtils:
         """
         try:
             from databricks.sdk import WorkspaceClient
+
             w = WorkspaceClient()
             # get_secret returns the base64-encoded bytes value.
             resp = w.secrets.get_secret(
@@ -108,6 +108,7 @@ class EncryptionUtils:
             if not raw:
                 return ""
             import base64
+
             return base64.b64decode(raw).decode()
         except Exception as e:  # noqa: BLE001 — fallback path, must never raise
             logger.debug(f"Could not read encryption key from secret scope: {e}")
@@ -164,28 +165,27 @@ class EncryptionUtils:
         try:
             _, public_key_bytes = EncryptionUtils.get_or_create_ssh_keys()
             public_key = serialization.load_pem_public_key(
-                public_key_bytes,
-                backend=default_backend()
+                public_key_bytes, backend=default_backend()
             )
-            
+
             # RSA can only encrypt limited data size, so we'll use a hybrid approach
             # Generate a symmetric key
             symmetric_key = Fernet.generate_key()
             f = Fernet(symmetric_key)
-            
+
             # Encrypt the value with the symmetric key
             encrypted_value = f.encrypt(value.encode())
-            
+
             # Encrypt the symmetric key with the public key
             encrypted_key = public_key.encrypt(
                 symmetric_key,
                 padding.OAEP(
                     mgf=padding.MGF1(algorithm=hashes.SHA256()),
                     algorithm=hashes.SHA256(),
-                    label=None
-                )
+                    label=None,
+                ),
             )
-            
+
             # Combine the encrypted key and value, with a separator
             combined = base64.b64encode(encrypted_key) + b":" + encrypted_value
             return base64.b64encode(combined).decode()
@@ -199,26 +199,24 @@ class EncryptionUtils:
         try:
             private_key_bytes, _ = EncryptionUtils.get_or_create_ssh_keys()
             private_key = serialization.load_pem_private_key(
-                private_key_bytes,
-                password=None,
-                backend=default_backend()
+                private_key_bytes, password=None, backend=default_backend()
             )
-            
+
             # Decode the combined value
             combined = base64.b64decode(encrypted_value.encode())
             encrypted_key, encrypted_data = combined.split(b":", 1)
             encrypted_key = base64.b64decode(encrypted_key)
-            
+
             # Decrypt the symmetric key
             symmetric_key = private_key.decrypt(
                 encrypted_key,
                 padding.OAEP(
                     mgf=padding.MGF1(algorithm=hashes.SHA256()),
                     algorithm=hashes.SHA256(),
-                    label=None
-                )
+                    label=None,
+                ),
             )
-            
+
             # Use the symmetric key to decrypt the value
             f = Fernet(symmetric_key)
             decrypted_value = f.decrypt(encrypted_data).decode()
@@ -263,4 +261,4 @@ class EncryptionUtils:
                 return f.decrypt(encrypted_value.encode()).decode()
         except Exception as e:
             logger.error(f"Error decrypting value: {str(e)}")
-            return "" 
+            return ""

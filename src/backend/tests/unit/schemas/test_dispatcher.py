@@ -5,11 +5,12 @@ Tests the functionality of Pydantic schemas for dispatcher service operations
 including validation, serialization, and field constraints.
 """
 
+from typing import Any, Dict, List
+
 import pytest
 from pydantic import ValidationError
-from typing import Dict, Any, List
 
-from src.schemas.dispatcher import IntentType, DispatcherRequest, DispatcherResponse
+from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse, IntentType
 
 
 class TestIntentType:

@@ -1,9 +1,10 @@
-import pytest
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
-from src.core.exceptions import KasalError, NotFoundError, BadRequestError
 
+import pytest
+
+from src.core.exceptions import BadRequestError, KasalError, NotFoundError
 from src.services.flow_builder.flow_service import FlowService as Svc
 
 
@@ -14,19 +15,25 @@ class FakeRepo:
         self.created = None
         self.updated = None
         self.deleted = []
+
     async def get(self, id):
         return self._get
+
     async def create(self, data: dict):
         self.created = data
         return SimpleNamespace(id=uuid.uuid4(), **data)
+
     async def update(self, id, data: dict):
         self.updated = (id, data)
         return SimpleNamespace(id=id, **data)
+
     async def delete(self, id):
         self.deleted.append(id)
         return True
+
     async def find_all(self):
         return []
+
     async def find_by_crew_id(self, crew_id):
         return []
 
@@ -36,21 +43,30 @@ class FakeSession:
         self.execution_count = execution_count
         self.committed = False
         self.rolled_back = False
+
     async def execute(self, query, params=None):
         class R:
             def __init__(self, count):
                 self.count = count
-                self.rowcount = count  # Add rowcount for SQLAlchemy result compatibility
+                self.rowcount = (
+                    count  # Add rowcount for SQLAlchemy result compatibility
+                )
+
             def scalar_one(self):
                 return self.count
+
             def first(self):
                 return SimpleNamespace(id=uuid.uuid4()) if self.count > 0 else None
+
             def fetchall(self):
                 # (id, job_id) — force-delete now selects both columns
                 return [(uuid.uuid4(), f"job-{i}") for i in range(self.count)]
+
         return R(self.execution_count)
+
     async def commit(self):
         self.committed = True
+
     async def rollback(self):
         self.rolled_back = True
 
@@ -60,7 +76,10 @@ async def test_get_flow_not_found_raises_404(monkeypatch):
     svc = Svc(FakeSession())
     fake_repo = FakeRepo(None)
     fake_repo._get = None
-    monkeypatch.setattr('src.services.flow_builder.flow_service.FlowRepository', lambda session: fake_repo)
+    monkeypatch.setattr(
+        "src.services.flow_builder.flow_service.FlowRepository",
+        lambda session: fake_repo,
+    )
     with pytest.raises(NotFoundError) as exc:
         await svc.get_flow(uuid.uuid4())
     assert exc.value.status_code == 404
@@ -78,7 +97,10 @@ async def test_get_flows_by_crew_invalid_uuid_returns_empty():
 async def test_get_flows_by_crew_valid_uuid_delegates(monkeypatch):
     svc = Svc(FakeSession())
     fake_repo = FakeRepo(None)
-    monkeypatch.setattr('src.services.flow_builder.flow_service.FlowRepository', lambda session: fake_repo)
+    monkeypatch.setattr(
+        "src.services.flow_builder.flow_service.FlowRepository",
+        lambda session: fake_repo,
+    )
     crew_id = uuid.uuid4()
     out = await svc.get_flows_by_crew(str(crew_id))
     assert out == []
@@ -89,8 +111,13 @@ async def test_update_flow_not_found_raises_404(monkeypatch):
     svc = Svc(FakeSession())
     fake_repo = FakeRepo(None)
     fake_repo._get = None
-    monkeypatch.setattr('src.services.flow_builder.flow_service.FlowRepository', lambda session: fake_repo)
-    upd = SimpleNamespace(name="NewFlow", flow_config={'actions': []}, nodes=None, edges=None)
+    monkeypatch.setattr(
+        "src.services.flow_builder.flow_service.FlowRepository",
+        lambda session: fake_repo,
+    )
+    upd = SimpleNamespace(
+        name="NewFlow", flow_config={"actions": []}, nodes=None, edges=None
+    )
     with pytest.raises(NotFoundError) as exc:
         await svc.update_flow(uuid.uuid4(), upd)
     assert exc.value.status_code == 404
@@ -102,11 +129,14 @@ async def test_update_flow_adds_empty_actions(monkeypatch):
     fake_repo = FakeRepo(None)
     flow = SimpleNamespace(id=uuid.uuid4(), nodes=[], edges=[], flow_config={})
     fake_repo._get = flow
-    monkeypatch.setattr('src.services.flow_builder.flow_service.FlowRepository', lambda session: fake_repo)
+    monkeypatch.setattr(
+        "src.services.flow_builder.flow_service.FlowRepository",
+        lambda session: fake_repo,
+    )
     # Create update object with all required attributes
     upd = SimpleNamespace(name="NewFlow", flow_config={}, nodes=None, edges=None)
     out = await svc.update_flow(flow.id, upd)
-    assert upd.flow_config['actions'] == []
+    assert upd.flow_config["actions"] == []
 
 
 @pytest.mark.asyncio
@@ -114,7 +144,10 @@ async def test_delete_flow_not_found_raises_404(monkeypatch):
     svc = Svc(FakeSession())
     fake_repo = FakeRepo(None)
     fake_repo._get = None
-    monkeypatch.setattr('src.services.flow_builder.flow_service.FlowRepository', lambda session: fake_repo)
+    monkeypatch.setattr(
+        "src.services.flow_builder.flow_service.FlowRepository",
+        lambda session: fake_repo,
+    )
     with pytest.raises(NotFoundError) as exc:
         await svc.delete_flow(uuid.uuid4())
     assert exc.value.status_code == 404
@@ -126,7 +159,10 @@ async def test_delete_flow_with_executions_raises_400(monkeypatch):
     fake_repo = FakeRepo(None)
     flow = SimpleNamespace(id=uuid.uuid4())
     fake_repo._get = flow
-    monkeypatch.setattr('src.services.flow_builder.flow_service.FlowRepository', lambda session: fake_repo)
+    monkeypatch.setattr(
+        "src.services.flow_builder.flow_service.FlowRepository",
+        lambda session: fake_repo,
+    )
     with pytest.raises(BadRequestError) as exc:
         await svc.delete_flow(flow.id)
     assert exc.value.status_code == 400
@@ -139,7 +175,10 @@ async def test_delete_flow_no_executions_succeeds(monkeypatch):
     fake_repo = FakeRepo(None)
     flow = SimpleNamespace(id=uuid.uuid4())
     fake_repo._get = flow
-    monkeypatch.setattr('src.services.flow_builder.flow_service.FlowRepository', lambda session: fake_repo)
+    monkeypatch.setattr(
+        "src.services.flow_builder.flow_service.FlowRepository",
+        lambda session: fake_repo,
+    )
     ok = await svc.delete_flow(flow.id)
     assert ok is True
 
@@ -165,18 +204,18 @@ async def test_validate_flow_data_success():
     svc = Svc(FakeSession())
     flow_in = SimpleNamespace(
         model_dump=lambda: {
-            'name': 'TestFlow',
-            'crew_id': str(uuid.uuid4()),
-            'nodes': [{'id': 'n1'}],
-            'edges': [{'id': 'e1'}],
-            'flow_config': {'type': 'test'}
+            "name": "TestFlow",
+            "crew_id": str(uuid.uuid4()),
+            "nodes": [{"id": "n1"}],
+            "edges": [{"id": "e1"}],
+            "flow_config": {"type": "test"},
         }
     )
     out = await svc.validate_flow_data(flow_in)
-    assert out['status'] == 'success'
-    assert out['data']['name'] == 'TestFlow'
-    assert out['data']['node_count'] == 1
-    assert out['data']['edge_count'] == 1
+    assert out["status"] == "success"
+    assert out["data"]["name"] == "TestFlow"
+    assert out["data"]["node_count"] == 1
+    assert out["data"]["edge_count"] == 1
 
 
 # Removed failing tests with incorrect schema assumptions
@@ -188,17 +227,17 @@ async def test_validate_flow_data_with_empty_nodes():
     svc = Svc(FakeSession())
     flow_in = SimpleNamespace(
         model_dump=lambda: {
-            'name': 'EmptyFlow',
-            'crew_id': str(uuid.uuid4()),
-            'nodes': [],
-            'edges': [],
-            'flow_config': {'type': 'empty'}
+            "name": "EmptyFlow",
+            "crew_id": str(uuid.uuid4()),
+            "nodes": [],
+            "edges": [],
+            "flow_config": {"type": "empty"},
         }
     )
     out = await svc.validate_flow_data(flow_in)
-    assert out['status'] == 'success'
-    assert out['data']['node_count'] == 0
-    assert out['data']['edge_count'] == 0
+    assert out["status"] == "success"
+    assert out["data"]["node_count"] == 0
+    assert out["data"]["edge_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -207,17 +246,17 @@ async def test_validate_flow_data_with_multiple_nodes():
     svc = Svc(FakeSession())
     flow_in = SimpleNamespace(
         model_dump=lambda: {
-            'name': 'MultiNodeFlow',
-            'crew_id': str(uuid.uuid4()),
-            'nodes': [{'id': 'n1'}, {'id': 'n2'}, {'id': 'n3'}],
-            'edges': [{'id': 'e1'}, {'id': 'e2'}],
-            'flow_config': {'type': 'multi'}
+            "name": "MultiNodeFlow",
+            "crew_id": str(uuid.uuid4()),
+            "nodes": [{"id": "n1"}, {"id": "n2"}, {"id": "n3"}],
+            "edges": [{"id": "e1"}, {"id": "e2"}],
+            "flow_config": {"type": "multi"},
         }
     )
     out = await svc.validate_flow_data(flow_in)
-    assert out['status'] == 'success'
-    assert out['data']['node_count'] == 3
-    assert out['data']['edge_count'] == 2
+    assert out["status"] == "success"
+    assert out["data"]["node_count"] == 3
+    assert out["data"]["edge_count"] == 2
 
 
 @pytest.mark.asyncio
@@ -226,16 +265,16 @@ async def test_validate_flow_data_with_complex_config():
     svc = Svc(FakeSession())
     flow_in = SimpleNamespace(
         model_dump=lambda: {
-            'name': 'ComplexFlow',
-            'crew_id': str(uuid.uuid4()),
-            'nodes': [{'id': 'n1', 'type': 'agent'}, {'id': 'n2', 'type': 'task'}],
-            'edges': [{'id': 'e1', 'source': 'n1', 'target': 'n2'}],
-            'flow_config': {
-                'type': 'complex',
-                'settings': {'parallel': True, 'timeout': 300}
-            }
+            "name": "ComplexFlow",
+            "crew_id": str(uuid.uuid4()),
+            "nodes": [{"id": "n1", "type": "agent"}, {"id": "n2", "type": "task"}],
+            "edges": [{"id": "e1", "source": "n1", "target": "n2"}],
+            "flow_config": {
+                "type": "complex",
+                "settings": {"parallel": True, "timeout": 300},
+            },
         }
     )
     out = await svc.validate_flow_data(flow_in)
-    assert out['status'] == 'success'
-    assert out['data']['name'] == 'ComplexFlow'
+    assert out["status"] == "success"
+    assert out["data"]["name"] == "ComplexFlow"

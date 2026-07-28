@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 
 class UIConfigBase(BaseModel):
     """Shared fields for the per-workspace Predefined UI configuration."""
+
     # Enabled by default: output formatting is owned by the shared A2UI composer
     # (composed post-execution by a2ui_runner), so every workspace renders through
     # the design-system A2UI renderer unless an admin explicitly disables it.
@@ -21,11 +22,13 @@ class UIConfigBase(BaseModel):
 
 class UIConfigUpdate(UIConfigBase):
     """Schema for updating the Predefined UI configuration (PUT body)."""
+
     pass
 
 
 class UIConfigResponse(UIConfigBase):
     """Full Predefined UI configuration as returned to clients."""
+
     id: Optional[int] = None
     group_id: Optional[str] = None
     created_by_email: Optional[str] = None

@@ -1,23 +1,26 @@
-from src.services.tools.base import BaseTool
-from typing import Optional, Type, Union, Dict, Any, List
-from pydantic import BaseModel, Field, PrivateAttr, field_validator
-import logging
-import aiohttp
 import asyncio
+import logging
 import os
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Type, Union
 
-from src.utils.telemetry import get_user_agent_header, KasalProduct
+import aiohttp
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
+
+from src.services.tools.base import BaseTool
 from src.utils.sensitive_data_utils import mask_sensitive_headers
+from src.utils.telemetry import KasalProduct, get_user_agent_header
 
 # Configure logger
 logger = logging.getLogger(__name__)
 
+
 class GenieInput(BaseModel):
     """Input schema for Genie."""
+
     question: str = Field(..., description="The question to be answered using Genie.")
-    
-    @field_validator('question', mode='before')
+
+    @field_validator("question", mode="before")
     @classmethod
     def parse_question(cls, value):
         """
@@ -27,22 +30,23 @@ class GenieInput(BaseModel):
         # If it's already a string, return as is
         if isinstance(value, str):
             return value
-            
+
         # If it's a dict with a description or text field, use that
         if isinstance(value, dict):
-            if 'description' in value:
-                return value['description']
-            elif 'text' in value:
-                return value['text']
-            elif 'query' in value:
-                return value['query']
-            elif 'question' in value:
-                return value['question']
+            if "description" in value:
+                return value["description"]
+            elif "text" in value:
+                return value["text"]
+            elif "query" in value:
+                return value["query"]
+            elif "question" in value:
+                return value["question"]
             # If we can't find a suitable field, convert the whole dict to string
             return str(value)
-            
+
         # If it's any other type, convert to string
         return str(value)
+
 
 class GenieTool(BaseTool):
     name: str = "GenieTool"
@@ -62,42 +66,72 @@ class GenieTool(BaseTool):
     aliases: List[str] = ["Genie", "DatabricksGenie", "DataSearch"]
     args_schema: Type[BaseModel] = GenieInput
     _space_id: str = PrivateAttr(default=None)
-    _base_polling_delay: int = PrivateAttr(default=5)  # Base polling interval in seconds
-    _max_polling_delay: int = PrivateAttr(default=30)  # Max delay for exponential backoff
+    _base_polling_delay: int = PrivateAttr(
+        default=5
+    )  # Base polling interval in seconds
+    _max_polling_delay: int = PrivateAttr(
+        default=30
+    )  # Max delay for exponential backoff
     _polling_timeout_minutes: int = PrivateAttr(default=10)  # Total timeout in minutes
     _max_retries: int = PrivateAttr(default=120)  # 10 minutes at 5s intervals
-    _enable_exponential_backoff: bool = PrivateAttr(default=True)  # Enable exponential backoff
-    _backoff_after_seconds: int = PrivateAttr(default=120)  # Start backoff after 2 minutes
+    _enable_exponential_backoff: bool = PrivateAttr(
+        default=True
+    )  # Enable exponential backoff
+    _backoff_after_seconds: int = PrivateAttr(
+        default=120
+    )  # Start backoff after 2 minutes
     _current_conversation_id: str = PrivateAttr(default=None)
     _tool_id: int = PrivateAttr(default=35)  # Default tool ID
     _user_token: str = PrivateAttr(default=None)  # For OBO authentication
     _group_id: str = PrivateAttr(default=None)  # For PAT authentication fallback
-    _call_count: int = PrivateAttr(default=0)  # Tracks how many times _run has been invoked
-    _max_calls: int = PrivateAttr(default=5)  # Configurable call limit per tool instance
+    _call_count: int = PrivateAttr(
+        default=0
+    )  # Tracks how many times _run has been invoked
+    _max_calls: int = PrivateAttr(
+        default=5
+    )  # Configurable call limit per tool instance
     _max_result_rows: int = PrivateAttr(default=200)  # Max rows returned per query
 
-    def __init__(self, tool_config: Optional[dict] = None, tool_id: Optional[int] = None, token_required: bool = True, user_token: str = None, group_id: str = None, result_as_answer: bool = False):
+    def __init__(
+        self,
+        tool_config: Optional[dict] = None,
+        tool_id: Optional[int] = None,
+        token_required: bool = True,
+        user_token: str = None,
+        group_id: str = None,
+        result_as_answer: bool = False,
+    ):
         super().__init__(result_as_answer=result_as_answer)
         if tool_config is None:
             tool_config = {}
 
-        logger.info(f"GenieTool.__init__ called with tool_config keys: {list(tool_config.keys()) if tool_config else []}")
+        logger.info(
+            f"GenieTool.__init__ called with tool_config keys: {list(tool_config.keys()) if tool_config else []}"
+        )
 
         # Configure polling parameters from tool_config
         if tool_config:
             self._base_polling_delay = tool_config.get("polling_delay", 5)
             self._max_polling_delay = tool_config.get("max_polling_delay", 30)
             self._polling_timeout_minutes = tool_config.get("timeout_minutes", 10)
-            self._enable_exponential_backoff = tool_config.get("exponential_backoff", True)
+            self._enable_exponential_backoff = tool_config.get(
+                "exponential_backoff", True
+            )
             self._backoff_after_seconds = tool_config.get("backoff_after_seconds", 120)
             # Calculate max retries based on timeout and base delay
-            self._max_retries = (self._polling_timeout_minutes * 60) // self._base_polling_delay
-            logger.info(f"Polling config: delay={self._base_polling_delay}s, timeout={self._polling_timeout_minutes}min, max_retries={self._max_retries}")
+            self._max_retries = (
+                self._polling_timeout_minutes * 60
+            ) // self._base_polling_delay
+            logger.info(
+                f"Polling config: delay={self._base_polling_delay}s, timeout={self._polling_timeout_minutes}min, max_retries={self._max_retries}"
+            )
 
             # Configure call limiter
             self._max_calls = tool_config.get("max_calls", 5)
             self._max_result_rows = tool_config.get("max_result_rows", 200)
-            logger.info(f"Call limiter config: max_calls={self._max_calls}, max_result_rows={self._max_result_rows}")
+            logger.info(
+                f"Call limiter config: max_calls={self._max_calls}, max_result_rows={self._max_result_rows}"
+            )
 
         # Set tool ID if provided
         if tool_id is not None:
@@ -112,37 +146,45 @@ class GenieTool(BaseTool):
         # This is essential because UserContext doesn't propagate to CrewAI threads
         if group_id:
             self._group_id = group_id
-            logger.info(f"Group ID provided for PAT authentication fallback: {group_id}")
+            logger.info(
+                f"Group ID provided for PAT authentication fallback: {group_id}"
+            )
         else:
-            logger.warning("No group_id provided - PAT authentication may fail if user_token unavailable")
+            logger.warning(
+                "No group_id provided - PAT authentication may fail if user_token unavailable"
+            )
 
         # Extract space_id from tool_config (ONLY config, never environment)
         if tool_config:
-            if 'spaceId' in tool_config:
+            if "spaceId" in tool_config:
                 # Handle if spaceId is a list
-                if isinstance(tool_config['spaceId'], list) and tool_config['spaceId']:
-                    self._space_id = tool_config['spaceId'][0]
+                if isinstance(tool_config["spaceId"], list) and tool_config["spaceId"]:
+                    self._space_id = tool_config["spaceId"][0]
                     logger.info(f"Using spaceId from config (list): {self._space_id}")
                 else:
-                    self._space_id = tool_config['spaceId']
+                    self._space_id = tool_config["spaceId"]
                     logger.info(f"Using spaceId from config: {self._space_id}")
-            elif 'space' in tool_config:
-                self._space_id = tool_config['space']
+            elif "space" in tool_config:
+                self._space_id = tool_config["space"]
                 logger.info(f"Using space from config: {self._space_id}")
-            elif 'space_id' in tool_config:
-                self._space_id = tool_config['space_id']
+            elif "space_id" in tool_config:
+                self._space_id = tool_config["space_id"]
                 logger.info(f"Using space_id from config: {self._space_id}")
 
         # Validate space_id is configured
         if not self._space_id:
-            logger.warning("Genie space ID not configured in tool_config. Tool will fail when used.")
+            logger.warning(
+                "Genie space ID not configured in tool_config. Tool will fail when used."
+            )
 
         # Log configuration
         logger.info("GenieTool Configuration:")
         logger.info(f"Tool ID: {self._tool_id}")
         logger.info(f"Space ID: {self._space_id}")
         logger.info(f"Has user token: {bool(self._user_token)}")
-        logger.info("Host and authentication will be obtained from databricks_auth module at runtime")
+        logger.info(
+            "Host and authentication will be obtained from databricks_auth module at runtime"
+        )
 
     def set_user_token(self, user_token: str):
         """Set user access token for OBO authentication."""
@@ -158,7 +200,9 @@ class GenieTool(BaseTool):
             workspace_url = await _databricks_auth.get_workspace_url()
 
             if not workspace_url:
-                raise ValueError("Could not obtain workspace URL from databricks_auth module")
+                raise ValueError(
+                    "Could not obtain workspace URL from databricks_auth module"
+                )
 
             return workspace_url
 
@@ -169,16 +213,18 @@ class GenieTool(BaseTool):
     def _make_url(self, workspace_url: str, path: str) -> str:
         """Create a full URL from workspace URL and path."""
         # Ensure workspace_url doesn't have trailing slash
-        workspace_url = workspace_url.rstrip('/')
+        workspace_url = workspace_url.rstrip("/")
 
         # Ensure path starts with a slash
-        if not path.startswith('/'):
-            path = '/' + path
+        if not path.startswith("/"):
+            path = "/" + path
 
         # Ensure spaceId is used correctly
         if "{self._space_id}" in path:
             if not self._space_id:
-                raise ValueError("Genie space ID is not configured. Please configure spaceId in tool_config.")
+                raise ValueError(
+                    "Genie space ID is not configured. Please configure spaceId in tool_config."
+                )
             path = path.replace("{self._space_id}", self._space_id)
 
         return f"{workspace_url}{path}"
@@ -187,7 +233,7 @@ class GenieTool(BaseTool):
         """Get authentication headers using unified authentication."""
         try:
             from src.utils.databricks_auth import get_auth_context
-            from src.utils.user_context import UserContext, GroupContext
+            from src.utils.user_context import GroupContext, UserContext
 
             # CRITICAL: Set UserContext with group_id before calling get_auth_context()
             # This is necessary because Python's contextvars don't propagate to CrewAI threads
@@ -198,12 +244,16 @@ class GenieTool(BaseTool):
                     group_context = GroupContext(
                         group_ids=[self._group_id],
                         group_email=f"{self._group_id}@tool_thread",
-                        access_token=self._user_token
+                        access_token=self._user_token,
                     )
                     UserContext.set_group_context(group_context)
-                    logger.info(f"[GenieTool] Set UserContext with group_id={self._group_id} for PAT authentication")
+                    logger.info(
+                        f"[GenieTool] Set UserContext with group_id={self._group_id} for PAT authentication"
+                    )
                 except Exception as ctx_error:
-                    logger.warning(f"[GenieTool] Could not set UserContext: {ctx_error}")
+                    logger.warning(
+                        f"[GenieTool] Could not set UserContext: {ctx_error}"
+                    )
 
             # Get unified auth context (handles OBO → PAT with group_id → SPN)
             auth = await get_auth_context(user_token=self._user_token)
@@ -214,12 +264,13 @@ class GenieTool(BaseTool):
 
             # Return headers from auth context with telemetry
             headers = auth.get_headers()
-            headers.update(get_user_agent_header(KasalProduct.GENIE))  # Kasal_genie User-Agent
+            headers.update(
+                get_user_agent_header(KasalProduct.GENIE)
+            )  # Kasal_genie User-Agent
             return headers
         except Exception as e:
             logger.error(f"Error getting auth headers: {e}")
             return None
-
 
     async def _test_token_permissions(self, headers: dict, workspace_url: str) -> bool:
         """Test if the token has proper permissions by trying a simple API call."""
@@ -234,33 +285,48 @@ class GenieTool(BaseTool):
             if auth_header.startswith("Bearer "):
                 token = auth_header[7:]
                 # SECURITY: never log token bytes (not even a preview). Length only.
-                logger.info(f"Token acquired for permission test (length: {len(token)})")
+                logger.info(
+                    f"Token acquired for permission test (length: {len(token)})"
+                )
 
                 # Try to decode JWT to see scopes (if it's a JWT)
-                if token.startswith('eyJ'):
+                if token.startswith("eyJ"):
                     try:
                         import base64
                         import json
+
                         # Decode JWT payload (without verification - just for debugging)
-                        payload_part = token.split('.')[1]
+                        payload_part = token.split(".")[1]
                         # Add padding if needed
-                        payload_part += '=' * (4 - len(payload_part) % 4)
+                        payload_part += "=" * (4 - len(payload_part) % 4)
                         payload = json.loads(base64.b64decode(payload_part))
-                        logger.info(f"Token scopes: {payload.get('scope', 'No scope found')}")
+                        logger.info(
+                            f"Token scopes: {payload.get('scope', 'No scope found')}"
+                        )
                         logger.info(f"Required scopes: sql, dashboards.genie")
                         # SECURITY: identity claims (subject / client_id) are only
                         # logged at DEBUG to avoid identity disclosure in prod logs.
-                        logger.debug(f"Token subject: {payload.get('sub', 'No subject found')}")
-                        logger.debug(f"Token client_id: {payload.get('client_id', 'No client_id found')}")
+                        logger.debug(
+                            f"Token subject: {payload.get('sub', 'No subject found')}"
+                        )
+                        logger.debug(
+                            f"Token client_id: {payload.get('client_id', 'No client_id found')}"
+                        )
 
                         # Check if token has required scopes
-                        token_scopes = payload.get('scope', '').split()
-                        required_scopes = ['sql', 'dashboards.genie']
-                        missing_scopes = [scope for scope in required_scopes if scope not in token_scopes]
+                        token_scopes = payload.get("scope", "").split()
+                        required_scopes = ["sql", "dashboards.genie"]
+                        missing_scopes = [
+                            scope
+                            for scope in required_scopes
+                            if scope not in token_scopes
+                        ]
 
                         if missing_scopes:
                             logger.error(f"❌ MISSING SCOPES: {missing_scopes}")
-                            logger.error(f"❌ SOLUTION: User needs to re-authorize app or token needs refresh")
+                            logger.error(
+                                f"❌ SOLUTION: User needs to re-authorize app or token needs refresh"
+                            )
                         else:
                             logger.info(f"✅ All required scopes present in token")
 
@@ -268,21 +334,29 @@ class GenieTool(BaseTool):
                         logger.warning(f"Could not decode JWT token: {jwt_error}")
 
             async with aiohttp.ClientSession() as session:
-                async with session.get(test_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                async with session.get(
+                    test_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
                     if response.status == 200:
                         logger.info("✅ Token has valid permissions for Genie API")
                         return True
                     elif response.status == 403:
                         error_text = await response.text()
-                        logger.error(f"❌ 403 FORBIDDEN: Token lacks permissions for Genie API")
+                        logger.error(
+                            f"❌ 403 FORBIDDEN: Token lacks permissions for Genie API"
+                        )
                         logger.error(f"❌ Response: {error_text}")
-                        logger.error(f"❌ This confirms the OAuth scope issue - user token doesn't have sql/dashboards.genie scopes")
+                        logger.error(
+                            f"❌ This confirms the OAuth scope issue - user token doesn't have sql/dashboards.genie scopes"
+                        )
                         return False
                     else:
                         error_text = await response.text()
-                        logger.warning(f"Unexpected response when testing token: {response.status} - {error_text}")
+                        logger.warning(
+                            f"Unexpected response when testing token: {response.status} - {error_text}"
+                        )
                         return False
-                
+
         except Exception as e:
             logger.error(f"Error testing token permissions: {e}")
             return False
@@ -311,7 +385,9 @@ class GenieTool(BaseTool):
 
             # Test token permissions before proceeding
             try:
-                has_permissions = await self._test_token_permissions(headers, workspace_url)
+                has_permissions = await self._test_token_permissions(
+                    headers, workspace_url
+                )
                 if not has_permissions:
                     raise Exception("Token lacks necessary permissions for Genie API")
                 else:
@@ -322,14 +398,19 @@ class GenieTool(BaseTool):
 
             if self._current_conversation_id:
                 # Continue existing conversation
-                url = self._make_url(workspace_url, f"/api/2.0/genie/spaces/{space_id}/conversations/{self._current_conversation_id}/messages")
+                url = self._make_url(
+                    workspace_url,
+                    f"/api/2.0/genie/spaces/{space_id}/conversations/{self._current_conversation_id}/messages",
+                )
                 payload = {"content": question}
 
                 logger.info(f"Continuing conversation at URL: {url}")
                 logger.info(f"Payload: {payload}")
 
                 async with aiohttp.ClientSession() as session:
-                    async with session.post(url, json=payload, headers=headers) as response:
+                    async with session.post(
+                        url, json=payload, headers=headers
+                    ) as response:
                         response.raise_for_status()
                         data = await response.json()
 
@@ -344,11 +425,14 @@ class GenieTool(BaseTool):
 
                 return {
                     "conversation_id": self._current_conversation_id,
-                    "message_id": message_id
+                    "message_id": message_id,
                 }
             else:
                 # Start new conversation
-                url = self._make_url(workspace_url, f"/api/2.0/genie/spaces/{space_id}/start-conversation")
+                url = self._make_url(
+                    workspace_url,
+                    f"/api/2.0/genie/spaces/{space_id}/start-conversation",
+                )
                 payload = {"content": question}
 
                 logger.info(f"Starting new conversation with URL: {url}")
@@ -356,7 +440,9 @@ class GenieTool(BaseTool):
                 logger.info(f"Headers: {mask_sensitive_headers(headers)}")
 
                 async with aiohttp.ClientSession() as session:
-                    async with session.post(url, json=payload, headers=headers) as response:
+                    async with session.post(
+                        url, json=payload, headers=headers
+                    ) as response:
                         try:
                             response.raise_for_status()
                         except aiohttp.ClientResponseError as e:
@@ -388,10 +474,7 @@ class GenieTool(BaseTool):
 
                 self._current_conversation_id = conversation_id
 
-                return {
-                    "conversation_id": conversation_id,
-                    "message_id": message_id
-                }
+                return {"conversation_id": conversation_id, "message_id": message_id}
         except Exception as e:
             logger.error(f"Error in _start_or_continue_conversation: {str(e)}")
             raise
@@ -406,7 +489,7 @@ class GenieTool(BaseTool):
         space_id = str(self._space_id)
         url = self._make_url(
             workspace_url,
-            f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}"
+            f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}",
         )
 
         # Get authentication headers
@@ -430,7 +513,7 @@ class GenieTool(BaseTool):
         space_id = str(self._space_id)
         url = self._make_url(
             workspace_url,
-            f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}/query-result"
+            f"/api/2.0/genie/spaces/{space_id}/conversations/{conversation_id}/messages/{message_id}/query-result",
         )
 
         # Get authentication headers
@@ -486,7 +569,7 @@ class GenieTool(BaseTool):
         suggested_questions: list = []
         meta_row_count = None
         meta_truncated = None
-        for attachment in (message_status.get("attachments") or []):
+        for attachment in message_status.get("attachments") or []:
             q = attachment.get("query")
             if isinstance(q, dict):
                 if not description and q.get("description"):
@@ -515,7 +598,7 @@ class GenieTool(BaseTool):
 
         # 4) The natural-language answer
         text_response = ""
-        for attachment in (message_status.get("attachments") or []):
+        for attachment in message_status.get("attachments") or []:
             text_att = attachment.get("text")
             if isinstance(text_att, dict) and text_att.get("content"):
                 text_response = text_att["content"]
@@ -538,17 +621,23 @@ class GenieTool(BaseTool):
             result = stmt.get("result", {}) or {}
             manifest = stmt.get("manifest", {}) or {}
             columns = (manifest.get("schema", {}) or {}).get("columns", []) or []
-            header_cells = [str(c.get("name") or f"col{i}") for i, c in enumerate(columns)]
+            header_cells = [
+                str(c.get("name") or f"col{i}") for i, c in enumerate(columns)
+            ]
 
             if "data_typed_array" in result and result["data_typed_array"]:
                 data_array = result["data_typed_array"]
                 returned_rows = len(data_array)
                 # Prefer Genie's authoritative count/truncation flag over the
                 # length of the (already-capped) returned array.
-                total_rows = meta_row_count if meta_row_count is not None else returned_rows
-                truncated = bool(meta_truncated) or returned_rows > self._max_result_rows
+                total_rows = (
+                    meta_row_count if meta_row_count is not None else returned_rows
+                )
+                truncated = (
+                    bool(meta_truncated) or returned_rows > self._max_result_rows
+                )
                 if returned_rows > self._max_result_rows:
-                    data_array = data_array[:self._max_result_rows]
+                    data_array = data_array[: self._max_result_rows]
 
                 if not has_answer:
                     response_parts.append(f"\nQuery returned {total_rows} rows.")
@@ -563,9 +652,15 @@ class GenieTool(BaseTool):
                     header_cells = [f"col{i}" for i in range(ncols)]
 
                 def _md(value: object) -> str:
-                    return str(value if value is not None else "").replace("|", "\\|").replace("\n", " ")
+                    return (
+                        str(value if value is not None else "")
+                        .replace("|", "\\|")
+                        .replace("\n", " ")
+                    )
 
-                response_parts.append("| " + " | ".join(_md(h) for h in header_cells) + " |")
+                response_parts.append(
+                    "| " + " | ".join(_md(h) for h in header_cells) + " |"
+                )
                 response_parts.append("| " + " | ".join(["---"] * ncols) + " |")
                 for row in data_array:
                     values = row.get("values", []) or []
@@ -592,7 +687,9 @@ class GenieTool(BaseTool):
         if conversation_url:
             response_parts.append(f"\nOpen in Genie: {conversation_url}")
 
-        return "\n".join(response_parts) if response_parts else "No response content found"
+        return (
+            "\n".join(response_parts) if response_parts else "No response content found"
+        )
 
     async def _run_async(self, question: str) -> str:
         """
@@ -601,7 +698,9 @@ class GenieTool(BaseTool):
         # Enforce call limit to prevent unbounded loops
         self._call_count += 1
         if self._call_count > self._max_calls:
-            logger.warning(f"GenieTool call limit reached ({self._max_calls}). Rejecting call #{self._call_count}.")
+            logger.warning(
+                f"GenieTool call limit reached ({self._max_calls}). Rejecting call #{self._call_count}."
+            )
             return (
                 f"You have reached the maximum number of Genie queries ({self._max_calls}) for this task. "
                 "You must now synthesize and analyze the data you have already collected to produce your final answer. "
@@ -615,9 +714,9 @@ class GenieTool(BaseTool):
 Please configure the Genie space ID in the agent/task tool configuration when setting up the workflow.
 To find your Genie space ID, go to your Databricks workspace and navigate to the Genie space.
 """
-        
+
         # Handle empty inputs or 'None' as an input
-        if not question or question.lower() == 'none':
+        if not question or question.lower() == "none":
             return """To use the GenieTool, provide a specific, focused business question.
 Prefer aggregated queries over raw data dumps:
 - "What are the top 10 customers by revenue?"
@@ -636,12 +735,14 @@ Avoid broad questions like "show me all data" — use filters and aggregations t
                 conv_data = await self._start_or_continue_conversation(question)
                 conversation_id = conv_data["conversation_id"]
                 message_id = conv_data["message_id"]
-                
+
                 if not conversation_id or not message_id:
                     return "Error: Failed to get conversation or message ID from Genie API."
-                
-                logger.info(f"Using conversation {conversation_id[:8]} with message {message_id[:8]}")
-                
+
+                logger.info(
+                    f"Using conversation {conversation_id[:8]} with message {message_id[:8]}"
+                )
+
                 # Status messages for better error reporting
                 status_messages = {
                     "FAILED": "Genie query failed. This may be due to invalid syntax, permission issues, or data access problems.",
@@ -649,23 +750,31 @@ Avoid broad questions like "show me all data" — use filters and aggregations t
                     "QUERY_RESULT_EXPIRED": "Query results have expired. Please retry your question.",
                     "EXECUTING_QUERY": "Executing SQL query...",
                     "COMPILING_QUERY": "Compiling SQL query...",
-                    "IN_PROGRESS": "Processing your question..."
+                    "IN_PROGRESS": "Processing your question...",
                 }
 
                 # Poll for completion with exponential backoff
                 attempt = 0
-                backoff_threshold = self._backoff_after_seconds // self._base_polling_delay
+                backoff_threshold = (
+                    self._backoff_after_seconds // self._base_polling_delay
+                )
 
                 while attempt < self._max_retries:
-                    status_data = await self._get_message_status(conversation_id, message_id)
+                    status_data = await self._get_message_status(
+                        conversation_id, message_id
+                    )
                     status = status_data.get("status")
 
                     # Log current status
                     status_msg = status_messages.get(status, f"Status: {status}")
-                    logger.info(f"Attempt {attempt + 1}/{self._max_retries}: {status_msg}")
+                    logger.info(
+                        f"Attempt {attempt + 1}/{self._max_retries}: {status_msg}"
+                    )
 
                     if status in ["FAILED", "CANCELLED", "QUERY_RESULT_EXPIRED"]:
-                        error_msg = status_messages.get(status, f"Query {status.lower()}")
+                        error_msg = status_messages.get(
+                            status, f"Query {status.lower()}"
+                        )
                         # Surface Genie's ACTUAL error (MessageError.error) instead of
                         # only the generic status message — tells the agent/user WHY.
                         err = status_data.get("error")
@@ -676,7 +785,9 @@ Avoid broad questions like "show me all data" — use filters and aggregations t
 
                     if status == "COMPLETED":
                         try:
-                            result_data = await self._get_query_result(conversation_id, message_id)
+                            result_data = await self._get_query_result(
+                                conversation_id, message_id
+                            )
                         except Exception as e:
                             logger.warning(f"Failed to get query result: {e}")
                             result_data = None
@@ -688,28 +799,40 @@ Avoid broad questions like "show me all data" — use filters and aggregations t
                         if "attachments" in status_data:
                             for attachment in status_data["attachments"]:
                                 # Extract text response
-                                if "text" in attachment and attachment["text"].get("content"):
+                                if "text" in attachment and attachment["text"].get(
+                                    "content"
+                                ):
                                     content = attachment["text"]["content"]
-                                    if content.strip() and content.strip() != question.strip():
+                                    if (
+                                        content.strip()
+                                        and content.strip() != question.strip()
+                                    ):
                                         has_meaningful_response = True
 
                                 # Extract the SQL Genie generated. The field name
                                 # varies across Genie API versions ('statement' or
                                 # 'query'), so accept either.
-                                if "query" in attachment and isinstance(attachment["query"], dict):
-                                    generated_sql = (
-                                        attachment["query"].get("statement")
-                                        or attachment["query"].get("query")
-                                    )
+                                if "query" in attachment and isinstance(
+                                    attachment["query"], dict
+                                ):
+                                    generated_sql = attachment["query"].get(
+                                        "statement"
+                                    ) or attachment["query"].get("query")
                                     if generated_sql:
                                         logger.info(f"Generated SQL: {generated_sql}")
 
                         has_query_results = (
-                            result_data is not None and
-                            "statement_response" in result_data and
-                            "result" in result_data["statement_response"] and
-                            "data_typed_array" in result_data["statement_response"]["result"] and
-                            len(result_data["statement_response"]["result"]["data_typed_array"]) > 0
+                            result_data is not None
+                            and "statement_response" in result_data
+                            and "result" in result_data["statement_response"]
+                            and "data_typed_array"
+                            in result_data["statement_response"]["result"]
+                            and len(
+                                result_data["statement_response"]["result"][
+                                    "data_typed_array"
+                                ]
+                            )
+                            > 0
                         )
 
                         if has_meaningful_response or has_query_results:
@@ -719,15 +842,23 @@ Avoid broad questions like "show me all data" — use filters and aggregations t
                             try:
                                 host = await self._get_workspace_url()
                                 if host and self._space_id:
-                                    base = host if str(host).startswith("http") else f"https://{host}"
-                                    conversation_url = f"{base}/genie/rooms/{self._space_id}"
+                                    base = (
+                                        host
+                                        if str(host).startswith("http")
+                                        else f"https://{host}"
+                                    )
+                                    conversation_url = (
+                                        f"{base}/genie/rooms/{self._space_id}"
+                                    )
                             except Exception:
                                 conversation_url = None
                             # Surface the full chain in the tool output (and trace):
                             # question → SQL → answer → results (with headers) → follow-ups.
                             response = self._extract_response(
-                                status_data, result_data,
-                                question=question, generated_sql=generated_sql,
+                                status_data,
+                                result_data,
+                                question=question,
+                                generated_sql=generated_sql,
                                 conversation_url=conversation_url,
                             )
                             # Warn the agent on the final allowed call
@@ -739,17 +870,25 @@ Avoid broad questions like "show me all data" — use filters and aggregations t
                             return response
 
                     # Calculate delay with exponential backoff after threshold
-                    if self._enable_exponential_backoff and attempt >= backoff_threshold:
+                    if (
+                        self._enable_exponential_backoff
+                        and attempt >= backoff_threshold
+                    ):
                         # Exponential backoff after configured threshold (default: 2 minutes)
                         backoff_multiplier = 2 ** ((attempt - backoff_threshold) // 5)
-                        delay = min(self._base_polling_delay * backoff_multiplier, self._max_polling_delay)
-                        logger.info(f"Applying exponential backoff: {delay}s (base: {self._base_polling_delay}s)")
+                        delay = min(
+                            self._base_polling_delay * backoff_multiplier,
+                            self._max_polling_delay,
+                        )
+                        logger.info(
+                            f"Applying exponential backoff: {delay}s (base: {self._base_polling_delay}s)"
+                        )
                     else:
                         delay = self._base_polling_delay
 
                     await asyncio.sleep(delay)
                     attempt += 1
-                
+
                 total_timeout = self._polling_timeout_minutes
                 return f"Query timed out after {total_timeout} minutes. Please try a simpler question or check your Databricks Genie configuration."
 
@@ -763,4 +902,3 @@ Avoid broad questions like "show me all data" — use filters and aggregations t
             error_msg = f"Error executing Genie request: {str(e)}"
             logger.error(error_msg)
             return f"Error using Genie: {str(e)}. Please verify your Databricks configuration."
-

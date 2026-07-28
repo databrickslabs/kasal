@@ -1,14 +1,16 @@
 """
 Comprehensive unit tests for services/scheduler_service.py
 """
-import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from typing import List, Dict, Any, Optional, Set
-from datetime import datetime, timezone
-import asyncio
 
+import asyncio
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Set
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
+
+from src.core.exceptions import BadRequestError, KasalError, NotFoundError
 from src.services.scheduling.scheduler import SchedulerService
-from src.core.exceptions import KasalError, NotFoundError, BadRequestError
 
 
 def _make_service():
@@ -19,7 +21,9 @@ def _make_service():
     return service
 
 
-def _make_schedule(id=1, name="Test", cron="0 * * * *", is_active=True, group_id="grp-1"):
+def _make_schedule(
+    id=1, name="Test", cron="0 * * * *", is_active=True, group_id="grp-1"
+):
     s = MagicMock()
     s.id = id
     s.name = name
@@ -35,10 +39,15 @@ def _make_schedule(id=1, name="Test", cron="0 * * * *", is_active=True, group_id
     s.created_at = datetime.now(timezone.utc)
     s.updated_at = datetime.now(timezone.utc)
     # Return dict for model_validate
-    s.model_dump = MagicMock(return_value={
-        "id": id, "name": name, "cron_expression": cron,
-        "is_active": is_active, "group_id": group_id,
-    })
+    s.model_dump = MagicMock(
+        return_value={
+            "id": id,
+            "name": name,
+            "cron_expression": cron,
+            "is_active": is_active,
+            "group_id": group_id,
+        }
+    )
     return s
 
 
@@ -56,16 +65,20 @@ class TestSchedulerServiceInit:
         mock_session = Mock()
         service = SchedulerService(mock_session)
         assert service.session == mock_session
-        assert hasattr(service, 'repository')
-        assert hasattr(service, 'execution_history_repository')
-        assert hasattr(service, '_running_tasks')
+        assert hasattr(service, "repository")
+        assert hasattr(service, "execution_history_repository")
+        assert hasattr(service, "_running_tasks")
         assert isinstance(service._running_tasks, set)
         assert len(service._running_tasks) == 0
 
     def test_init_creates_repositories(self):
         mock_session = Mock()
-        with patch('src.services.scheduling.scheduler.ScheduleRepository') as mock_schedule_repo:
-            with patch('src.services.scheduling.scheduler.ExecutionHistoryRepository') as mock_exec_repo:
+        with patch(
+            "src.services.scheduling.scheduler.ScheduleRepository"
+        ) as mock_schedule_repo:
+            with patch(
+                "src.services.scheduling.scheduler.ExecutionHistoryRepository"
+            ) as mock_exec_repo:
                 mock_schedule_repo.return_value = Mock()
                 mock_exec_repo.return_value = Mock()
                 service = SchedulerService(mock_session)
@@ -123,15 +136,21 @@ class TestCreateSchedule:
         service = _make_service()
         schedule_data = MagicMock()
         schedule_data.cron_expression = "0 * * * *"
-        schedule_data.model_dump = MagicMock(return_value={
-            "name": "Test", "cron_expression": "0 * * * *"
-        })
+        schedule_data.model_dump = MagicMock(
+            return_value={"name": "Test", "cron_expression": "0 * * * *"}
+        )
 
         mock_schedule = MagicMock()
         service.repository.create = AsyncMock(return_value=mock_schedule)
 
-        with patch('src.services.scheduling.scheduler.calculate_next_run_from_last', return_value=datetime.now(timezone.utc)):
-            with patch('src.schemas.schedule.ScheduleResponse.model_validate', return_value=MagicMock()):
+        with patch(
+            "src.services.scheduling.scheduler.calculate_next_run_from_last",
+            return_value=datetime.now(timezone.utc),
+        ):
+            with patch(
+                "src.schemas.schedule.ScheduleResponse.model_validate",
+                return_value=MagicMock(),
+            ):
                 result = await service.create_schedule(schedule_data)
 
         service.repository.create.assert_called_once()
@@ -142,7 +161,10 @@ class TestCreateSchedule:
         schedule_data = MagicMock()
         schedule_data.cron_expression = "invalid"
 
-        with patch('src.services.scheduling.scheduler.calculate_next_run_from_last', side_effect=ValueError("bad cron")):
+        with patch(
+            "src.services.scheduling.scheduler.calculate_next_run_from_last",
+            side_effect=ValueError("bad cron"),
+        ):
             with pytest.raises(BadRequestError):
                 await service.create_schedule(schedule_data)
 
@@ -151,10 +173,15 @@ class TestCreateSchedule:
         service = _make_service()
         schedule_data = MagicMock()
         schedule_data.cron_expression = "0 * * * *"
-        schedule_data.model_dump = MagicMock(return_value={"name": "T", "cron_expression": "0 * * * *"})
+        schedule_data.model_dump = MagicMock(
+            return_value={"name": "T", "cron_expression": "0 * * * *"}
+        )
         service.repository.create = AsyncMock(side_effect=RuntimeError("db error"))
 
-        with patch('src.services.scheduling.scheduler.calculate_next_run_from_last', return_value=datetime.now(timezone.utc)):
+        with patch(
+            "src.services.scheduling.scheduler.calculate_next_run_from_last",
+            return_value=datetime.now(timezone.utc),
+        ):
             with pytest.raises(KasalError):
                 await service.create_schedule(schedule_data)
 
@@ -164,15 +191,21 @@ class TestCreateSchedule:
         gc = _make_group_context("grp-42", "test@example.com")
         schedule_data = MagicMock()
         schedule_data.cron_expression = "0 * * * *"
-        schedule_data.model_dump = MagicMock(return_value={
-            "name": "T", "cron_expression": "0 * * * *"
-        })
+        schedule_data.model_dump = MagicMock(
+            return_value={"name": "T", "cron_expression": "0 * * * *"}
+        )
 
         mock_schedule = MagicMock()
         service.repository.create = AsyncMock(return_value=mock_schedule)
 
-        with patch('src.services.scheduling.scheduler.calculate_next_run_from_last', return_value=datetime.now(timezone.utc)):
-            with patch('src.schemas.schedule.ScheduleResponse.model_validate', return_value=MagicMock()):
+        with patch(
+            "src.services.scheduling.scheduler.calculate_next_run_from_last",
+            return_value=datetime.now(timezone.utc),
+        ):
+            with patch(
+                "src.schemas.schedule.ScheduleResponse.model_validate",
+                return_value=MagicMock(),
+            ):
                 await service.create_schedule(schedule_data, group_context=gc)
 
         # Verify group_id was passed to create
@@ -200,7 +233,10 @@ class TestGetAllSchedules:
         gc = _make_group_context("grp-1")
         service.repository.find_by_group = AsyncMock(return_value=[])
 
-        with patch('src.schemas.schedule.ScheduleResponse.model_validate', return_value=MagicMock()):
+        with patch(
+            "src.schemas.schedule.ScheduleResponse.model_validate",
+            return_value=MagicMock(),
+        ):
             result = await service.get_all_schedules(group_context=gc)
 
         service.repository.find_by_group.assert_called_once_with("grp-1")
@@ -210,7 +246,10 @@ class TestGetAllSchedules:
         service = _make_service()
         service.repository.find_all = AsyncMock(return_value=[])
 
-        with patch('src.schemas.schedule.ScheduleResponse.model_validate', return_value=MagicMock()):
+        with patch(
+            "src.schemas.schedule.ScheduleResponse.model_validate",
+            return_value=MagicMock(),
+        ):
             result = await service.get_all_schedules()
 
         assert result.count == 0
@@ -225,7 +264,10 @@ class TestGetScheduleById:
         mock_schedule = MagicMock()
         service.repository.find_by_id = AsyncMock(return_value=mock_schedule)
 
-        with patch('src.schemas.schedule.ScheduleResponse.model_validate', return_value=MagicMock()):
+        with patch(
+            "src.schemas.schedule.ScheduleResponse.model_validate",
+            return_value=MagicMock(),
+        ):
             result = await service.get_schedule_by_id(1)
 
         service.repository.find_by_id.assert_called_once_with(1)
@@ -250,7 +292,10 @@ class TestGetScheduleByIdWithGroupCheck:
         mock_schedule.group_id = "grp-1"
         service.repository.find_by_id = AsyncMock(return_value=mock_schedule)
 
-        with patch('src.schemas.schedule.ScheduleResponse.model_validate', return_value=MagicMock()):
+        with patch(
+            "src.schemas.schedule.ScheduleResponse.model_validate",
+            return_value=MagicMock(),
+        ):
             result = await service.get_schedule_by_id_with_group_check(1, gc)
 
     @pytest.mark.asyncio
@@ -284,7 +329,10 @@ class TestUpdateSchedule:
         mock_schedule = MagicMock()
         service.repository.update = AsyncMock(return_value=mock_schedule)
 
-        with patch('src.schemas.schedule.ScheduleResponse.model_validate', return_value=MagicMock()):
+        with patch(
+            "src.schemas.schedule.ScheduleResponse.model_validate",
+            return_value=MagicMock(),
+        ):
             await service.update_schedule(1, schedule_data)
 
         service.repository.update.assert_called_once_with(1, {"name": "New Name"})
@@ -392,7 +440,10 @@ class TestToggleSchedule:
         mock_schedule = MagicMock()
         service.repository.toggle_active = AsyncMock(return_value=mock_schedule)
 
-        with patch('src.schemas.schedule.ToggleResponse.model_validate', return_value=MagicMock()):
+        with patch(
+            "src.schemas.schedule.ToggleResponse.model_validate",
+            return_value=MagicMock(),
+        ):
             await service.toggle_schedule(1)
 
     @pytest.mark.asyncio
@@ -406,7 +457,9 @@ class TestToggleSchedule:
     @pytest.mark.asyncio
     async def test_toggle_generic_error_raises_kasal_error(self):
         service = _make_service()
-        service.repository.toggle_active = AsyncMock(side_effect=RuntimeError("db error"))
+        service.repository.toggle_active = AsyncMock(
+            side_effect=RuntimeError("db error")
+        )
 
         with pytest.raises(KasalError):
             await service.toggle_schedule(1)
@@ -418,8 +471,11 @@ class TestCreateScheduleFromExecution:
     @pytest.mark.asyncio
     async def test_raises_not_found_when_execution_missing(self):
         from src.schemas.schedule import ScheduleCreateFromExecution
+
         service = _make_service()
-        service.execution_history_repository.get_execution_by_id = AsyncMock(return_value=None)
+        service.execution_history_repository.get_execution_by_id = AsyncMock(
+            return_value=None
+        )
 
         schedule_data = MagicMock()
         schedule_data.execution_id = "exec-1"
@@ -437,7 +493,9 @@ class TestCreateScheduleFromExecution:
             "agents_yaml": {},
             "tasks_yaml": {},
         }
-        service.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_execution)
+        service.execution_history_repository.get_execution_by_id = AsyncMock(
+            return_value=mock_execution
+        )
 
         schedule_data = MagicMock()
         schedule_data.execution_id = "exec-1"
@@ -445,7 +503,10 @@ class TestCreateScheduleFromExecution:
         schedule_data.name = "Test"
         schedule_data.is_active = True
 
-        with patch('src.services.scheduling.scheduler.calculate_next_run_from_last', return_value=datetime.now(timezone.utc)):
+        with patch(
+            "src.services.scheduling.scheduler.calculate_next_run_from_last",
+            return_value=datetime.now(timezone.utc),
+        ):
             with pytest.raises(BadRequestError):
                 await service.create_schedule_from_execution(schedule_data)
 
@@ -460,7 +521,9 @@ class TestCreateScheduleFromExecution:
             "nodes": [],
             "edges": [],
         }
-        service.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_execution)
+        service.execution_history_repository.get_execution_by_id = AsyncMock(
+            return_value=mock_execution
+        )
 
         schedule_data = MagicMock()
         schedule_data.execution_id = "exec-flow-1"
@@ -468,7 +531,10 @@ class TestCreateScheduleFromExecution:
         schedule_data.name = "Flow Schedule"
         schedule_data.is_active = True
 
-        with patch('src.services.scheduling.scheduler.calculate_next_run_from_last', return_value=datetime.now(timezone.utc)):
+        with patch(
+            "src.services.scheduling.scheduler.calculate_next_run_from_last",
+            return_value=datetime.now(timezone.utc),
+        ):
             with pytest.raises(BadRequestError):
                 await service.create_schedule_from_execution(schedule_data)
 
@@ -482,7 +548,9 @@ class TestCreateScheduleFromExecution:
             "tasks_yaml": {"task1": {"description": "D"}},
             "inputs": {},
         }
-        service.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_execution)
+        service.execution_history_repository.get_execution_by_id = AsyncMock(
+            return_value=mock_execution
+        )
         service.repository.create = AsyncMock(return_value=MagicMock())
 
         schedule_data = MagicMock()
@@ -491,8 +559,14 @@ class TestCreateScheduleFromExecution:
         schedule_data.name = "Crew Sched"
         schedule_data.is_active = True
 
-        with patch('src.services.scheduling.scheduler.calculate_next_run_from_last', return_value=datetime.now(timezone.utc)):
-            with patch('src.schemas.schedule.ScheduleResponse.model_validate', return_value=MagicMock()):
+        with patch(
+            "src.services.scheduling.scheduler.calculate_next_run_from_last",
+            return_value=datetime.now(timezone.utc),
+        ):
+            with patch(
+                "src.schemas.schedule.ScheduleResponse.model_validate",
+                return_value=MagicMock(),
+            ):
                 result = await service.create_schedule_from_execution(schedule_data)
 
         service.repository.create.assert_called_once()
@@ -510,7 +584,9 @@ class TestCreateScheduleFromExecution:
             "edges": [{"id": "e1"}],
             "inputs": {},
         }
-        service.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_execution)
+        service.execution_history_repository.get_execution_by_id = AsyncMock(
+            return_value=mock_execution
+        )
         service.repository.create = AsyncMock(return_value=MagicMock())
 
         schedule_data = MagicMock()
@@ -519,8 +595,14 @@ class TestCreateScheduleFromExecution:
         schedule_data.name = "Flow Sched"
         schedule_data.is_active = True
 
-        with patch('src.services.scheduling.scheduler.calculate_next_run_from_last', return_value=datetime.now(timezone.utc)):
-            with patch('src.schemas.schedule.ScheduleResponse.model_validate', return_value=MagicMock()):
+        with patch(
+            "src.services.scheduling.scheduler.calculate_next_run_from_last",
+            return_value=datetime.now(timezone.utc),
+        ):
+            with patch(
+                "src.schemas.schedule.ScheduleResponse.model_validate",
+                return_value=MagicMock(),
+            ):
                 result = await service.create_schedule_from_execution(schedule_data)
 
         service.repository.create.assert_called_once()
@@ -534,7 +616,9 @@ class TestCreateScheduleFromExecution:
             "agents_yaml": {"a": {}},
             "tasks_yaml": {"t": {}},
         }
-        service.execution_history_repository.get_execution_by_id = AsyncMock(return_value=mock_execution)
+        service.execution_history_repository.get_execution_by_id = AsyncMock(
+            return_value=mock_execution
+        )
 
         schedule_data = MagicMock()
         schedule_data.execution_id = "exec-1"
@@ -542,6 +626,9 @@ class TestCreateScheduleFromExecution:
         schedule_data.name = "T"
         schedule_data.is_active = True
 
-        with patch('src.services.scheduling.scheduler.calculate_next_run_from_last', side_effect=ValueError("bad cron")):
+        with patch(
+            "src.services.scheduling.scheduler.calculate_next_run_from_last",
+            side_effect=ValueError("bad cron"),
+        ):
             with pytest.raises(BadRequestError):
                 await service.create_schedule_from_execution(schedule_data)

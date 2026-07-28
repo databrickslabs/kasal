@@ -1,16 +1,17 @@
 """Unit tests for GroupRepository and GroupUserRepository."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
+from src.models.group import Group, GroupUser
 from src.repositories.group_repository import (
     GroupRepository,
     GroupUserRepository,
     TenantRepository,
     TenantUserRepository,
 )
-from src.models.group import Group, GroupUser
 
 
 @pytest.fixture
@@ -91,9 +92,16 @@ class TestGroupRepository:
         users_result = MagicMock()
         users_result.scalar.return_value = 25
         status_result = MagicMock()
-        status_result.__iter__ = MagicMock(return_value=iter([("ACTIVE", 7), ("INACTIVE", 3)]))
+        status_result.__iter__ = MagicMock(
+            return_value=iter([("ACTIVE", 7), ("INACTIVE", 3)])
+        )
 
-        mock_session.execute.side_effect = [total_result, active_result, users_result, status_result]
+        mock_session.execute.side_effect = [
+            total_result,
+            active_result,
+            users_result,
+            status_result,
+        ]
 
         result = await repo.get_stats()
 
@@ -197,7 +205,12 @@ class TestGroupUserRepository:
 
     @pytest.mark.asyncio
     async def test_get_user_groups_with_roles(self, repo, mock_session):
-        group_user = MagicMock(role="member", status="active", joined_at=datetime(2024, 1, 1), auto_created=False)
+        group_user = MagicMock(
+            role="member",
+            status="active",
+            joined_at=datetime(2024, 1, 1),
+            auto_created=False,
+        )
         group = MagicMock(spec=Group)
         group.id = "g-1"
         group.name = "Group 1"

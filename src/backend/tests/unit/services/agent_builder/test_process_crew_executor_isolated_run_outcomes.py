@@ -54,21 +54,26 @@ Targets uncovered lines:
   1881   __enter__/__exit__
   1885   __exit__
 """
+
 import asyncio
 import queue
 import signal
-import pytest
-from unittest.mock import AsyncMock, MagicMock, Mock, patch, call
+from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_executor(max_concurrent=4):
-    with patch("src.services.agent_builder.process_executor.mp.get_context") as mock_ctx:
+    with patch(
+        "src.services.agent_builder.process_executor.mp.get_context"
+    ) as mock_ctx:
         mock_ctx.return_value = MagicMock()
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
         executor = ProcessCrewExecutor(max_concurrent=max_concurrent)
     executor._ctx = MagicMock()
     return executor
@@ -78,22 +83,26 @@ def _make_executor(max_concurrent=4):
 # run_crew_in_process — directly testable validation paths
 # ---------------------------------------------------------------------------
 
+
 class TestRunCrewInProcessValidation:
 
     def test_none_crew_config_returns_failed(self):
         from src.services.agent_builder.process_executor import run_crew_in_process
+
         result = run_crew_in_process("exec-1", None)
         assert result["status"] == "FAILED"
         assert "None" in result["error"]
 
     def test_invalid_json_string_returns_failed(self):
         from src.services.agent_builder.process_executor import run_crew_in_process
+
         result = run_crew_in_process("exec-1", "{not valid json}")
         assert result["status"] == "FAILED"
         assert "JSON" in result["error"] or "parse" in result["error"]
 
     def test_non_dict_non_string_returns_failed(self):
         from src.services.agent_builder.process_executor import run_crew_in_process
+
         result = run_crew_in_process("exec-1", 12345)
         assert result["status"] == "FAILED"
         assert "dict" in result["error"]
@@ -101,7 +110,9 @@ class TestRunCrewInProcessValidation:
     def test_valid_json_string_is_parsed(self):
         """JSON string is parsed to dict before further processing."""
         import json
+
         from src.services.agent_builder.process_executor import run_crew_in_process
+
         config = {"agents": [], "tasks": [], "group_id": "grp-1"}
         # This will fail later in actual processing, but the JSON parse itself should succeed
         result = run_crew_in_process("exec-1", json.dumps(config))
@@ -113,9 +124,12 @@ class TestRunCrewInProcessValidation:
 # ProcessCrewExecutor.run_crew_isolated — main branches
 # ---------------------------------------------------------------------------
 
+
 class TestRunCrewIsolated:
 
-    def _make_isolated_executor_with_mocks(self, pid, exitcode, queue_empty=True, queue_result=None):
+    def _make_isolated_executor_with_mocks(
+        self, pid, exitcode, queue_empty=True, queue_result=None
+    ):
         """Helper to create executor + mock process for run_crew_isolated tests.
 
         Updated for app-modes: the executor now drains result_queue via a
@@ -126,6 +140,7 @@ class TestRunCrewIsolated:
         result when queue_empty=False (so drained_result[0] is used).
         """
         import queue as _queue
+
         executor = _make_executor()
         mock_process = MagicMock()
         mock_process.pid = pid
@@ -153,9 +168,15 @@ class TestRunCrewIsolated:
     @pytest.mark.asyncio
     async def test_no_group_context_logs_error(self):
         """When group_context is None, an error is logged but execution continues."""
-        executor, mock_process, mock_q = self._make_isolated_executor_with_mocks(12345, 0)
+        executor, mock_process, mock_q = self._make_isolated_executor_with_mocks(
+            12345, 0
+        )
 
-        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False):
+        with patch(
+            "src.db.database_router.is_lakebase_enabled",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
             try:
                 result = await executor.run_crew_isolated(
                     execution_id="exec-1",
@@ -171,8 +192,10 @@ class TestRunCrewIsolated:
     async def test_group_context_with_group_id_adds_to_config(self):
         """group_id from group_context is added to crew_config."""
         executor, mock_process, mock_q = self._make_isolated_executor_with_mocks(
-            99, 0, queue_empty=False,
-            queue_result={"status": "COMPLETED", "execution_id": "exec-2"}
+            99,
+            0,
+            queue_empty=False,
+            queue_result={"status": "COMPLETED", "execution_id": "exec-2"},
         )
 
         group_ctx = MagicMock()
@@ -181,9 +204,19 @@ class TestRunCrewIsolated:
 
         crew_config = {"agents": [], "tasks": []}
 
-        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
-             patch.object(executor, "_process_log_queue", new_callable=AsyncMock), \
-             patch.object(executor, "_relay_task_events", return_value=_coro_that_raises_cancelled()):
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
+            patch.object(
+                executor,
+                "_relay_task_events",
+                return_value=_coro_that_raises_cancelled(),
+            ),
+        ):
             try:
                 await executor.run_crew_isolated("exec-2", crew_config, group_ctx)
             except Exception:
@@ -204,9 +237,19 @@ class TestRunCrewIsolated:
 
         crew_config = {"agents": [], "tasks": []}
 
-        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
-             patch.object(executor, "_process_log_queue", new_callable=AsyncMock), \
-             patch.object(executor, "_relay_task_events", return_value=_coro_that_raises_cancelled()):
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
+            patch.object(
+                executor,
+                "_relay_task_events",
+                return_value=_coro_that_raises_cancelled(),
+            ),
+        ):
             try:
                 await executor.run_crew_isolated("exec-no-tok", crew_config, group_ctx)
             except Exception:
@@ -223,9 +266,19 @@ class TestRunCrewIsolated:
         group_ctx.primary_group_id = "grp-1"
         group_ctx.access_token = "tok"
 
-        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
-             patch.object(executor, "_process_log_queue", new_callable=AsyncMock), \
-             patch.object(executor, "_relay_task_events", return_value=_coro_that_raises_cancelled()):
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
+            patch.object(
+                executor,
+                "_relay_task_events",
+                return_value=_coro_that_raises_cancelled(),
+            ),
+        ):
             try:
                 await executor.run_crew_isolated("exec-str", "not-a-dict", group_ctx)
             except Exception:
@@ -234,15 +287,27 @@ class TestRunCrewIsolated:
     @pytest.mark.asyncio
     async def test_exitcode_negative_15_returns_stopped(self):
         """Exit code -15 (SIGTERM) results in STOPPED status."""
-        executor, mock_process, mock_q = self._make_isolated_executor_with_mocks(11, -15)
+        executor, mock_process, mock_q = self._make_isolated_executor_with_mocks(
+            11, -15
+        )
 
         group_ctx = MagicMock()
         group_ctx.primary_group_id = "grp"
         group_ctx.access_token = None
 
-        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
-             patch.object(executor, "_process_log_queue", new_callable=AsyncMock), \
-             patch.object(executor, "_relay_task_events", return_value=_coro_that_raises_cancelled()):
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
+            patch.object(
+                executor,
+                "_relay_task_events",
+                return_value=_coro_that_raises_cancelled(),
+            ),
+        ):
             result = await executor.run_crew_isolated("exec-stop", {}, group_ctx)
 
         assert result["status"] == "STOPPED"
@@ -256,9 +321,19 @@ class TestRunCrewIsolated:
         group_ctx.primary_group_id = "grp"
         group_ctx.access_token = None
 
-        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
-             patch.object(executor, "_process_log_queue", new_callable=AsyncMock), \
-             patch.object(executor, "_relay_task_events", return_value=_coro_that_raises_cancelled()):
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
+            patch.object(
+                executor,
+                "_relay_task_events",
+                return_value=_coro_that_raises_cancelled(),
+            ),
+        ):
             result = await executor.run_crew_isolated("exec-ok", {}, group_ctx)
 
         assert result["status"] == "COMPLETED"
@@ -272,9 +347,19 @@ class TestRunCrewIsolated:
         group_ctx.primary_group_id = "grp"
         group_ctx.access_token = None
 
-        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
-             patch.object(executor, "_process_log_queue", new_callable=AsyncMock), \
-             patch.object(executor, "_relay_task_events", return_value=_coro_that_raises_cancelled()):
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
+            patch.object(
+                executor,
+                "_relay_task_events",
+                return_value=_coro_that_raises_cancelled(),
+            ),
+        ):
             result = await executor.run_crew_isolated("exec-fail", {}, group_ctx)
 
         assert result["status"] == "FAILED"
@@ -291,9 +376,19 @@ class TestRunCrewIsolated:
         group_ctx.primary_group_id = "grp"
         group_ctx.access_token = None
 
-        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
-             patch.object(executor, "_process_log_queue", new_callable=AsyncMock), \
-             patch.object(executor, "_relay_task_events", return_value=_coro_that_raises_cancelled()):
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
+            patch.object(
+                executor,
+                "_relay_task_events",
+                return_value=_coro_that_raises_cancelled(),
+            ),
+        ):
             result = await executor.run_crew_isolated("exec-q", {}, group_ctx)
 
         assert result["status"] == "COMPLETED"
@@ -323,11 +418,23 @@ class TestRunCrewIsolated:
 
         executor._running_processes["exec-timeout"] = mock_process
 
-        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
-             patch.object(executor, "terminate_execution", new_callable=AsyncMock), \
-             patch.object(executor, "_relay_task_events", return_value=_coro_that_raises_cancelled()), \
-             patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):
-            result = await executor.run_crew_isolated("exec-timeout", {}, group_ctx, timeout=1.0)
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(executor, "terminate_execution", new_callable=AsyncMock),
+            patch.object(
+                executor,
+                "_relay_task_events",
+                return_value=_coro_that_raises_cancelled(),
+            ),
+            patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()),
+        ):
+            result = await executor.run_crew_isolated(
+                "exec-timeout", {}, group_ctx, timeout=1.0
+            )
 
         assert result["status"] == "TIMEOUT"
 
@@ -341,9 +448,19 @@ class TestRunCrewIsolated:
         group_ctx.primary_group_id = "grp"
         group_ctx.access_token = None
 
-        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=False), \
-             patch.object(executor, "_process_log_queue", new_callable=AsyncMock), \
-             patch.object(executor, "_relay_task_events", return_value=_coro_that_raises_cancelled()):
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
+            patch.object(
+                executor,
+                "_relay_task_events",
+                return_value=_coro_that_raises_cancelled(),
+            ),
+        ):
             await executor.run_crew_isolated("exec-metrics", {}, group_ctx)
 
         assert executor._metrics["total_executions"] == initial_total + 1
@@ -357,10 +474,24 @@ class TestRunCrewIsolated:
         group_ctx.primary_group_id = "grp"
         group_ctx.access_token = None
 
-        with patch("src.db.database_router.is_lakebase_enabled", new_callable=AsyncMock, return_value=True), \
-             patch("src.db.database_router.get_lakebase_config_from_db", new_callable=AsyncMock, return_value={"instance_name": "my-inst"}), \
-             patch.object(executor, "_process_log_queue", new_callable=AsyncMock), \
-             patch.object(executor, "_relay_task_events", return_value=_coro_that_raises_cancelled()):
+        with (
+            patch(
+                "src.db.database_router.is_lakebase_enabled",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch(
+                "src.db.database_router.get_lakebase_config_from_db",
+                new_callable=AsyncMock,
+                return_value={"instance_name": "my-inst"},
+            ),
+            patch.object(executor, "_process_log_queue", new_callable=AsyncMock),
+            patch.object(
+                executor,
+                "_relay_task_events",
+                return_value=_coro_that_raises_cancelled(),
+            ),
+        ):
             await executor.run_crew_isolated("exec-lb", {}, group_ctx)
 
         # After the call, LAKEBASE_ACTIVE should have been restored (not left set)
@@ -370,6 +501,7 @@ class TestRunCrewIsolated:
 # ---------------------------------------------------------------------------
 # terminate_execution
 # ---------------------------------------------------------------------------
+
 
 class TestTerminateExecution:
 
@@ -432,7 +564,9 @@ class TestTerminateExecution:
         """When execution not in tracking, searches for orphaned process."""
         executor = _make_executor()
 
-        with patch.object(executor, "_terminate_orphaned_process", return_value=True) as mock_orphan:
+        with patch.object(
+            executor, "_terminate_orphaned_process", return_value=True
+        ) as mock_orphan:
             result = await executor.terminate_execution("exec-not-tracked")
 
         mock_orphan.assert_called_once_with("exec-not-tracked")
@@ -453,8 +587,10 @@ class TestTerminateExecution:
         mock_psutil_proc = MagicMock()
         mock_psutil_proc.kill = MagicMock()
 
-        with patch("psutil.Process", return_value=mock_psutil_proc), \
-             patch.object(executor, "_terminate_orphaned_process", return_value=False):
+        with (
+            patch("psutil.Process", return_value=mock_psutil_proc),
+            patch.object(executor, "_terminate_orphaned_process", return_value=False),
+        ):
             result = await executor.terminate_execution("exec-err")
 
         # Either terminated via psutil or not — but should not raise
@@ -477,6 +613,7 @@ class TestTerminateExecution:
 # ---------------------------------------------------------------------------
 # _terminate_orphaned_process
 # ---------------------------------------------------------------------------
+
 
 class TestTerminateOrphanedProcess:
 
@@ -501,12 +638,18 @@ class TestTerminateOrphanedProcess:
         mock_parent_proc.kill = MagicMock()
 
         mock_proc = MagicMock()
-        mock_proc.info = {"pid": 9999, "name": "python", "cmdline": ["python", "run.py"]}
+        mock_proc.info = {
+            "pid": 9999,
+            "name": "python",
+            "cmdline": ["python", "run.py"],
+        }
         mock_proc.environ = MagicMock(return_value={"KASAL_EXECUTION_ID": exec_id})
 
-        with patch("psutil.process_iter", return_value=[mock_proc]), \
-             patch("psutil.Process", return_value=mock_parent_proc), \
-             patch("psutil.wait_procs", return_value=([], [])):
+        with (
+            patch("psutil.process_iter", return_value=[mock_proc]),
+            patch("psutil.Process", return_value=mock_parent_proc),
+            patch("psutil.wait_procs", return_value=([], [])),
+        ):
             result = executor._terminate_orphaned_process(exec_id)
 
         assert result is True
@@ -516,6 +659,7 @@ class TestTerminateOrphanedProcess:
         executor = _make_executor()
         with patch.dict("sys.modules", {"psutil": None}):
             import sys
+
             original = sys.modules.get("psutil")
             sys.modules["psutil"] = None
             try:
@@ -541,6 +685,7 @@ class TestTerminateOrphanedProcess:
 # get_metrics
 # ---------------------------------------------------------------------------
 
+
 class TestGetMetrics:
 
     def test_returns_copy_of_metrics(self):
@@ -557,6 +702,7 @@ class TestGetMetrics:
 # shutdown
 # ---------------------------------------------------------------------------
 
+
 class TestShutdown:
 
     def test_shutdown_terminates_running_processes(self):
@@ -570,8 +716,10 @@ class TestShutdown:
 
         executor._running_processes["exec-1"] = mock_proc
 
-        with patch("psutil.Process") as mock_psutil, \
-             patch("psutil.wait_procs", return_value=([], [])):
+        with (
+            patch("psutil.Process") as mock_psutil,
+            patch("psutil.wait_procs", return_value=([], [])),
+        ):
             mock_current = MagicMock()
             mock_current.children.return_value = []
             mock_psutil.return_value = mock_current
@@ -588,8 +736,10 @@ class TestShutdown:
         mock_proc.pid = 888
         executor._running_processes["exec-nowait"] = mock_proc
 
-        with patch("psutil.Process") as mock_psutil, \
-             patch("psutil.wait_procs", return_value=([], [])):
+        with (
+            patch("psutil.Process") as mock_psutil,
+            patch("psutil.wait_procs", return_value=([], [])),
+        ):
             mock_current = MagicMock()
             mock_current.children.return_value = []
             mock_psutil.return_value = mock_current
@@ -602,8 +752,10 @@ class TestShutdown:
         executor._running_futures["exec-1"] = MagicMock()
         executor._running_executors["exec-1"] = MagicMock()
 
-        with patch("psutil.Process") as mock_psutil, \
-             patch("psutil.wait_procs", return_value=([], [])):
+        with (
+            patch("psutil.Process") as mock_psutil,
+            patch("psutil.wait_procs", return_value=([], [])),
+        ):
             mock_psutil.return_value.children.return_value = []
             executor.shutdown()
 
@@ -620,13 +772,21 @@ class TestShutdown:
 # kill_orphan_crew_processes (static method)
 # ---------------------------------------------------------------------------
 
+
 class TestKillOrphanCrewProcesses:
 
     def test_no_orphaned_processes_returns_0(self):
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
         # No matching processes
         mock_proc = MagicMock()
-        mock_proc.info = {"pid": 1, "name": "chrome", "cmdline": [], "ppid": 1000, "create_time": 0}
+        mock_proc.info = {
+            "pid": 1,
+            "name": "chrome",
+            "cmdline": [],
+            "ppid": 1000,
+            "create_time": 0,
+        }
         mock_proc.create_time = MagicMock(return_value=0)
 
         with patch("psutil.process_iter", return_value=[]):
@@ -635,8 +795,9 @@ class TestKillOrphanCrewProcesses:
         assert result == 0
 
     def test_orphaned_python_process_with_crew_keyword_is_killed(self):
-        from src.services.agent_builder.process_executor import ProcessCrewExecutor
         import time
+
+        from src.services.agent_builder.process_executor import ProcessCrewExecutor
 
         mock_proc = MagicMock()
         # Old orphaned process
@@ -659,12 +820,14 @@ class TestKillOrphanCrewProcesses:
 
     def test_psutil_import_error_returns_0(self):
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
         with patch("psutil.process_iter", side_effect=ImportError("no psutil")):
             result = ProcessCrewExecutor.kill_orphan_crew_processes()
         assert result == 0
 
     def test_exception_returns_0(self):
         from src.services.agent_builder.process_executor import ProcessCrewExecutor
+
         with patch("psutil.process_iter", side_effect=RuntimeError("bad")):
             result = ProcessCrewExecutor.kill_orphan_crew_processes()
         assert result == 0
@@ -673,6 +836,7 @@ class TestKillOrphanCrewProcesses:
 # ---------------------------------------------------------------------------
 # Context manager (__enter__ / __exit__)
 # ---------------------------------------------------------------------------
+
 
 class TestContextManager:
 
@@ -698,30 +862,41 @@ class TestContextManager:
 # ExecutionMode
 # ---------------------------------------------------------------------------
 
+
 class TestExecutionMode:
 
     def test_should_use_process_require_isolation(self):
         from src.services.agent_builder.process_executor import ExecutionMode
+
         assert ExecutionMode.should_use_process({"require_isolation": True}) is True
 
     def test_should_use_process_long_duration(self):
         from src.services.agent_builder.process_executor import ExecutionMode
-        assert ExecutionMode.should_use_process({"expected_duration_minutes": 15}) is True
+
+        assert (
+            ExecutionMode.should_use_process({"expected_duration_minutes": 15}) is True
+        )
 
     def test_should_use_process_exactly_10_minutes_returns_false(self):
         from src.services.agent_builder.process_executor import ExecutionMode
-        assert ExecutionMode.should_use_process({"expected_duration_minutes": 10}) is False
+
+        assert (
+            ExecutionMode.should_use_process({"expected_duration_minutes": 10}) is False
+        )
 
     def test_should_use_process_experimental(self):
         from src.services.agent_builder.process_executor import ExecutionMode
+
         assert ExecutionMode.should_use_process({"experimental": True}) is True
 
     def test_should_use_process_default_false(self):
         from src.services.agent_builder.process_executor import ExecutionMode
+
         assert ExecutionMode.should_use_process({}) is False
 
     def test_thread_and_process_constants(self):
         from src.services.agent_builder.process_executor import ExecutionMode
+
         assert ExecutionMode.THREAD == "thread"
         assert ExecutionMode.PROCESS == "process"
 
@@ -730,16 +905,22 @@ class TestExecutionMode:
 # Global instance
 # ---------------------------------------------------------------------------
 
+
 class TestGlobalInstance:
 
     def test_global_process_crew_executor_exists(self):
-        from src.services.agent_builder.process_executor import process_crew_executor, ProcessCrewExecutor
+        from src.services.agent_builder.process_executor import (
+            ProcessCrewExecutor,
+            process_crew_executor,
+        )
+
         assert isinstance(process_crew_executor, ProcessCrewExecutor)
 
 
 # ---------------------------------------------------------------------------
 # _relay_task_events
 # ---------------------------------------------------------------------------
+
 
 class TestRelayTaskEvents:
 
@@ -753,6 +934,7 @@ class TestRelayTaskEvents:
         from queue import Empty
 
         call_count = {"n": 0}
+
         def get_side_effect(block=True, timeout=0.5):
             call_count["n"] += 1
             if call_count["n"] == 1:
@@ -762,7 +944,9 @@ class TestRelayTaskEvents:
         mock_queue.get = MagicMock(side_effect=get_side_effect)
 
         # Create the relay task and cancel it
-        task = asyncio.create_task(executor._relay_task_events(mock_queue, "exec-relay"))
+        task = asyncio.create_task(
+            executor._relay_task_events(mock_queue, "exec-relay")
+        )
         await asyncio.sleep(0)
         task.cancel()
         try:
@@ -807,6 +991,7 @@ class TestRelayTaskEvents:
 # _process_log_queue
 # ---------------------------------------------------------------------------
 
+
 class TestProcessLogQueue:
 
     @pytest.mark.asyncio
@@ -844,12 +1029,21 @@ class TestProcessLogQueue:
             yield mock_session
 
         from unittest.mock import mock_open
+
         m = mock_open(read_data="".join(log_lines))
 
-        with patch("os.path.exists", return_value=True), \
-             patch("builtins.open", m), \
-             patch("src.db.database_router.get_smart_db_session", return_value=mock_smart_session()), \
-             patch("src.repositories.execution_logs_repository.ExecutionLogsRepository", return_value=mock_repo):
+        with (
+            patch("os.path.exists", return_value=True),
+            patch("builtins.open", m),
+            patch(
+                "src.db.database_router.get_smart_db_session",
+                return_value=mock_smart_session(),
+            ),
+            patch(
+                "src.repositories.execution_logs_repository.ExecutionLogsRepository",
+                return_value=mock_repo,
+            ),
+        ):
             await executor._process_log_queue(mock_queue, execution_id, group_ctx)
 
     @pytest.mark.asyncio
@@ -867,6 +1061,7 @@ class TestProcessLogQueue:
 # Helper coroutines for testing
 # ---------------------------------------------------------------------------
 
+
 async def _coro_that_raises_cancelled():
     """Coroutine that immediately raises CancelledError."""
     raise asyncio.CancelledError()
@@ -875,6 +1070,7 @@ async def _coro_that_raises_cancelled():
 # ---------------------------------------------------------------------------
 # run_crew_in_process — module-level import paths
 # ---------------------------------------------------------------------------
+
 
 class TestModuleLevelImports:
 
@@ -886,6 +1082,7 @@ class TestModuleLevelImports:
         """The suppression function returns 'n' for any prompt."""
         # Access the patched builtins.input behavior
         import builtins
+
         result = builtins.input("test prompt")
         # It was overridden at module import time to return "n"
         assert result == "n"

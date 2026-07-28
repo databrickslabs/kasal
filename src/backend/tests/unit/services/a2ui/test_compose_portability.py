@@ -14,14 +14,34 @@ convention, and a convention cannot fail a build. This can.
 import ast
 import pathlib
 
-COMPOSER = pathlib.Path(__file__).parents[4] / "src" / "services" / "a2ui" / "compose.py"
+COMPOSER = (
+    pathlib.Path(__file__).parents[4] / "src" / "services" / "a2ui" / "compose.py"
+)
 
 #: Everything the composer is allowed to import. Standard library only — the LLM
 #: is injected by the caller as an ``llm_call`` callable, never imported.
 ALLOWED_ROOTS = {
-    "__future__", "abc", "collections", "copy", "dataclasses", "datetime", "enum",
-    "functools", "hashlib", "itertools", "json", "logging", "math", "os",
-    "pathlib", "random", "re", "string", "textwrap", "typing", "uuid",
+    "__future__",
+    "abc",
+    "collections",
+    "copy",
+    "dataclasses",
+    "datetime",
+    "enum",
+    "functools",
+    "hashlib",
+    "itertools",
+    "json",
+    "logging",
+    "math",
+    "os",
+    "pathlib",
+    "random",
+    "re",
+    "string",
+    "textwrap",
+    "typing",
+    "uuid",
 }
 
 
@@ -46,9 +66,9 @@ def test_the_composer_imports_nothing_from_kasal():
     """A ``src.`` import here ships a broken export, silently."""
     offenders = sorted({r for r in _imported_roots(COMPOSER) if r == "src"})
 
-    assert not offenders, (
-        "compose.py is vendored into exported apps, which have no 'src' package"
-    )
+    assert (
+        not offenders
+    ), "compose.py is vendored into exported apps, which have no 'src' package"
 
 
 def test_the_composer_imports_only_the_standard_library():

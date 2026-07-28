@@ -13,4 +13,4 @@ happen to target MLflow, so they sit with the rest of the OTel pipeline.
 
 from src.services.mlflow.service import MLflowService
 
-__all__ = ['MLflowService']
+__all__ = ["MLflowService"]

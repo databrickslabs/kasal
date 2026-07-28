@@ -1,14 +1,12 @@
 """Unit tests for AgentBricksTool."""
 
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
 import asyncio
-import aiohttp
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.tools.agentbricks_tool import (
-    AgentBricksTool,
-    AgentBricksInput
-)
+import aiohttp
+import pytest
+
+from src.services.tools.agentbricks_tool import AgentBricksInput, AgentBricksTool
 
 
 class TestAgentBricksInput:
@@ -76,7 +74,9 @@ class TestAgentBricksToolInitialization:
 
     def test_initialization_with_endpoint_name_list(self):
         """Test initialization with endpointName as list."""
-        tool = AgentBricksTool(tool_config={"endpointName": ["endpoint-1", "endpoint-2"]})
+        tool = AgentBricksTool(
+            tool_config={"endpointName": ["endpoint-1", "endpoint-2"]}
+        )
         assert tool._endpoint_name == "endpoint-1"
 
     def test_initialization_with_endpoint_key(self):
@@ -169,16 +169,17 @@ class TestAgentBricksToolAsyncMethods:
     def tool_with_endpoint(self):
         """Create a tool with endpoint configured."""
         return AgentBricksTool(
-            tool_config={"endpointName": "test-agent"},
-            user_token="test-token"
+            tool_config={"endpointName": "test-agent"}, user_token="test-token"
         )
 
     @pytest.mark.asyncio
     async def test_get_workspace_url_success(self, tool_with_endpoint):
         """Test _get_workspace_url returns workspace URL."""
         # Patch at the import location inside the method
-        with patch('src.utils.databricks_auth._databricks_auth') as mock_auth:
-            mock_auth.get_workspace_url = AsyncMock(return_value="https://workspace.databricks.com")
+        with patch("src.utils.databricks_auth._databricks_auth") as mock_auth:
+            mock_auth.get_workspace_url = AsyncMock(
+                return_value="https://workspace.databricks.com"
+            )
 
             url = await tool_with_endpoint._get_workspace_url()
 
@@ -187,7 +188,7 @@ class TestAgentBricksToolAsyncMethods:
     @pytest.mark.asyncio
     async def test_get_workspace_url_empty_raises(self, tool_with_endpoint):
         """Test _get_workspace_url raises when URL is empty."""
-        with patch('src.utils.databricks_auth._databricks_auth') as mock_auth:
+        with patch("src.utils.databricks_auth._databricks_auth") as mock_auth:
             mock_auth.get_workspace_url = AsyncMock(return_value=None)
 
             with pytest.raises(ValueError, match="Could not obtain workspace URL"):
@@ -197,13 +198,17 @@ class TestAgentBricksToolAsyncMethods:
     async def test_get_auth_headers_success(self, tool_with_endpoint):
         """Test _get_auth_headers returns headers from auth context."""
         mock_auth_context = MagicMock()
-        mock_auth_context.get_headers.return_value = {"Authorization": "Bearer test-token"}
+        mock_auth_context.get_headers.return_value = {
+            "Authorization": "Bearer test-token"
+        }
 
         # Patch where the function is actually called
-        with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with patch(
+            "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+        ) as mock_get_auth:
             mock_get_auth.return_value = mock_auth_context
 
-            with patch('src.utils.user_context.UserContext'):
+            with patch("src.utils.user_context.UserContext"):
                 headers = await tool_with_endpoint._get_auth_headers()
 
             assert headers == {"Authorization": "Bearer test-token"}
@@ -211,10 +216,12 @@ class TestAgentBricksToolAsyncMethods:
     @pytest.mark.asyncio
     async def test_get_auth_headers_no_auth(self, tool_with_endpoint):
         """Test _get_auth_headers returns None when no auth available."""
-        with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with patch(
+            "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+        ) as mock_get_auth:
             mock_get_auth.return_value = None
 
-            with patch('src.utils.user_context.UserContext'):
+            with patch("src.utils.user_context.UserContext"):
                 headers = await tool_with_endpoint._get_auth_headers()
 
             assert headers is None
@@ -223,24 +230,25 @@ class TestAgentBricksToolAsyncMethods:
     async def test_get_auth_headers_with_group_id(self):
         """Test _get_auth_headers sets UserContext with group_id."""
         tool = AgentBricksTool(
-            tool_config={"endpointName": "test-agent"},
-            group_id="test-group-123"
+            tool_config={"endpointName": "test-agent"}, group_id="test-group-123"
         )
 
         mock_auth_context = MagicMock()
         mock_auth_context.get_headers.return_value = {"Authorization": "Bearer token"}
 
-        with patch('src.utils.databricks_auth.get_auth_context', new_callable=AsyncMock) as mock_get_auth:
+        with patch(
+            "src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock
+        ) as mock_get_auth:
             mock_get_auth.return_value = mock_auth_context
 
-            with patch('src.utils.user_context.UserContext') as mock_user_context:
-                with patch('src.utils.user_context.GroupContext') as mock_group_context:
+            with patch("src.utils.user_context.UserContext") as mock_user_context:
+                with patch("src.utils.user_context.GroupContext") as mock_group_context:
                     await tool._get_auth_headers()
 
                     # Verify GroupContext was created with group_id
                     mock_group_context.assert_called_once()
                     call_kwargs = mock_group_context.call_args[1]
-                    assert "test-group-123" in call_kwargs['group_ids']
+                    assert "test-group-123" in call_kwargs["group_ids"]
 
 
 class TestAgentBricksToolQueryEndpoint:
@@ -250,8 +258,7 @@ class TestAgentBricksToolQueryEndpoint:
     def tool_with_endpoint(self):
         """Create a tool with endpoint configured."""
         return AgentBricksTool(
-            tool_config={"endpointName": "test-agent"},
-            user_token="test-token"
+            tool_config={"endpointName": "test-agent"}, user_token="test-token"
         )
 
     @pytest.mark.asyncio
@@ -259,25 +266,37 @@ class TestAgentBricksToolQueryEndpoint:
         """Test successful query to AgentBricks endpoint."""
         mock_response = MagicMock()
         mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={
-            "choices": [{
-                "message": {"content": "This is the response"}
-            }]
-        })
+        mock_response.json = AsyncMock(
+            return_value={"choices": [{"message": {"content": "This is the response"}}]}
+        )
 
-        with patch.object(tool_with_endpoint, '_get_workspace_url', return_value="https://workspace.databricks.com"):
-            with patch.object(tool_with_endpoint, '_get_auth_headers', return_value={"Authorization": "Bearer test"}):
-                with patch('aiohttp.ClientSession') as mock_session_class:
+        with patch.object(
+            tool_with_endpoint,
+            "_get_workspace_url",
+            return_value="https://workspace.databricks.com",
+        ):
+            with patch.object(
+                tool_with_endpoint,
+                "_get_auth_headers",
+                return_value={"Authorization": "Bearer test"},
+            ):
+                with patch("aiohttp.ClientSession") as mock_session_class:
                     mock_session = MagicMock()
-                    mock_session_class.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-                    mock_session_class.return_value.__aexit__ = AsyncMock(return_value=None)
+                    mock_session_class.return_value.__aenter__ = AsyncMock(
+                        return_value=mock_session
+                    )
+                    mock_session_class.return_value.__aexit__ = AsyncMock(
+                        return_value=None
+                    )
 
                     mock_post_context = MagicMock()
                     mock_post_context.__aenter__ = AsyncMock(return_value=mock_response)
                     mock_post_context.__aexit__ = AsyncMock(return_value=None)
                     mock_session.post.return_value = mock_post_context
 
-                    result = await tool_with_endpoint._query_agentbricks_endpoint("Test question")
+                    result = await tool_with_endpoint._query_agentbricks_endpoint(
+                        "Test question"
+                    )
 
         assert result == "This is the response"
 
@@ -293,10 +312,22 @@ class TestAgentBricksToolQueryEndpoint:
     @pytest.mark.asyncio
     async def test_query_endpoint_no_auth_headers(self, tool_with_endpoint):
         """Test query returns error when no auth headers available."""
-        with patch.object(tool_with_endpoint, '_get_workspace_url', new_callable=AsyncMock, return_value="https://workspace.databricks.com"):
-            with patch.object(tool_with_endpoint, '_get_auth_headers', new_callable=AsyncMock, return_value=None):
+        with patch.object(
+            tool_with_endpoint,
+            "_get_workspace_url",
+            new_callable=AsyncMock,
+            return_value="https://workspace.databricks.com",
+        ):
+            with patch.object(
+                tool_with_endpoint,
+                "_get_auth_headers",
+                new_callable=AsyncMock,
+                return_value=None,
+            ):
                 # The method returns an error string rather than raising an exception
-                result = await tool_with_endpoint._query_agentbricks_endpoint("Test question")
+                result = await tool_with_endpoint._query_agentbricks_endpoint(
+                    "Test question"
+                )
                 assert "Error" in result or "No authentication headers" in result
 
     @pytest.mark.asyncio
@@ -307,19 +338,33 @@ class TestAgentBricksToolQueryEndpoint:
         mock_response.status = 200
         mock_response.json = AsyncMock(return_value={"response": "Direct response"})
 
-        with patch.object(tool_with_endpoint, '_get_workspace_url', return_value="https://workspace.databricks.com"):
-            with patch.object(tool_with_endpoint, '_get_auth_headers', return_value={"Authorization": "Bearer test"}):
-                with patch('aiohttp.ClientSession') as mock_session_class:
+        with patch.object(
+            tool_with_endpoint,
+            "_get_workspace_url",
+            return_value="https://workspace.databricks.com",
+        ):
+            with patch.object(
+                tool_with_endpoint,
+                "_get_auth_headers",
+                return_value={"Authorization": "Bearer test"},
+            ):
+                with patch("aiohttp.ClientSession") as mock_session_class:
                     mock_session = MagicMock()
-                    mock_session_class.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-                    mock_session_class.return_value.__aexit__ = AsyncMock(return_value=None)
+                    mock_session_class.return_value.__aenter__ = AsyncMock(
+                        return_value=mock_session
+                    )
+                    mock_session_class.return_value.__aexit__ = AsyncMock(
+                        return_value=None
+                    )
 
                     mock_post_context = MagicMock()
                     mock_post_context.__aenter__ = AsyncMock(return_value=mock_response)
                     mock_post_context.__aexit__ = AsyncMock(return_value=None)
                     mock_session.post.return_value = mock_post_context
 
-                    result = await tool_with_endpoint._query_agentbricks_endpoint("Test question")
+                    result = await tool_with_endpoint._query_agentbricks_endpoint(
+                        "Test question"
+                    )
 
         assert result == "Direct response"
 
@@ -328,21 +373,37 @@ class TestAgentBricksToolQueryEndpoint:
         """Test query handles predictions format."""
         mock_response = MagicMock()
         mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={"predictions": ["Prediction result"]})
+        mock_response.json = AsyncMock(
+            return_value={"predictions": ["Prediction result"]}
+        )
 
-        with patch.object(tool_with_endpoint, '_get_workspace_url', return_value="https://workspace.databricks.com"):
-            with patch.object(tool_with_endpoint, '_get_auth_headers', return_value={"Authorization": "Bearer test"}):
-                with patch('aiohttp.ClientSession') as mock_session_class:
+        with patch.object(
+            tool_with_endpoint,
+            "_get_workspace_url",
+            return_value="https://workspace.databricks.com",
+        ):
+            with patch.object(
+                tool_with_endpoint,
+                "_get_auth_headers",
+                return_value={"Authorization": "Bearer test"},
+            ):
+                with patch("aiohttp.ClientSession") as mock_session_class:
                     mock_session = MagicMock()
-                    mock_session_class.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-                    mock_session_class.return_value.__aexit__ = AsyncMock(return_value=None)
+                    mock_session_class.return_value.__aenter__ = AsyncMock(
+                        return_value=mock_session
+                    )
+                    mock_session_class.return_value.__aexit__ = AsyncMock(
+                        return_value=None
+                    )
 
                     mock_post_context = MagicMock()
                     mock_post_context.__aenter__ = AsyncMock(return_value=mock_response)
                     mock_post_context.__aexit__ = AsyncMock(return_value=None)
                     mock_session.post.return_value = mock_post_context
 
-                    result = await tool_with_endpoint._query_agentbricks_endpoint("Test question")
+                    result = await tool_with_endpoint._query_agentbricks_endpoint(
+                        "Test question"
+                    )
 
         assert result == "Prediction result"
 
@@ -354,38 +415,70 @@ class TestAgentBricksToolQueryEndpoint:
         raw {'object': 'response', ...} repr into the chat)."""
         mock_response = MagicMock()
         mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={
-            "object": "response",
-            "status": "completed",
-            "output": [
-                {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": "I'll search your inbox."}],
-                },
-                {"type": "function_call", "call_id": "c1", "name": "gmail_search", "arguments": "{}"},
-                {"type": "function_call_output", "call_id": "c1", "output": "{...}"},
-                {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": "# Email Digest\n2 emails today."}],
-                },
-            ],
-        })
+        mock_response.json = AsyncMock(
+            return_value={
+                "object": "response",
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {"type": "output_text", "text": "I'll search your inbox."}
+                        ],
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "c1",
+                        "name": "gmail_search",
+                        "arguments": "{}",
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "c1",
+                        "output": "{...}",
+                    },
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "# Email Digest\n2 emails today.",
+                            }
+                        ],
+                    },
+                ],
+            }
+        )
 
-        with patch.object(tool_with_endpoint, '_get_workspace_url', return_value="https://workspace.databricks.com"):
-            with patch.object(tool_with_endpoint, '_get_auth_headers', return_value={"Authorization": "Bearer test"}):
-                with patch('aiohttp.ClientSession') as mock_session_class:
+        with patch.object(
+            tool_with_endpoint,
+            "_get_workspace_url",
+            return_value="https://workspace.databricks.com",
+        ):
+            with patch.object(
+                tool_with_endpoint,
+                "_get_auth_headers",
+                return_value={"Authorization": "Bearer test"},
+            ):
+                with patch("aiohttp.ClientSession") as mock_session_class:
                     mock_session = MagicMock()
-                    mock_session_class.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-                    mock_session_class.return_value.__aexit__ = AsyncMock(return_value=None)
+                    mock_session_class.return_value.__aenter__ = AsyncMock(
+                        return_value=mock_session
+                    )
+                    mock_session_class.return_value.__aexit__ = AsyncMock(
+                        return_value=None
+                    )
 
                     mock_post_context = MagicMock()
                     mock_post_context.__aenter__ = AsyncMock(return_value=mock_response)
                     mock_post_context.__aexit__ = AsyncMock(return_value=None)
                     mock_session.post.return_value = mock_post_context
 
-                    result = await tool_with_endpoint._query_agentbricks_endpoint("Test question")
+                    result = await tool_with_endpoint._query_agentbricks_endpoint(
+                        "Test question"
+                    )
 
         # The final assistant message wins; commentary + tool items are dropped.
         assert result == "# Email Digest\n2 emails today."
@@ -399,27 +492,48 @@ class TestAgentBricksToolQueryEndpoint:
         concise note, never the raw repr."""
         mock_response = MagicMock()
         mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={
-            "object": "response",
-            "status": "incomplete",
-            "output": [
-                {"type": "function_call", "call_id": "c1", "name": "gmail_search", "arguments": "{}"},
-            ],
-        })
+        mock_response.json = AsyncMock(
+            return_value={
+                "object": "response",
+                "status": "incomplete",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "call_id": "c1",
+                        "name": "gmail_search",
+                        "arguments": "{}",
+                    },
+                ],
+            }
+        )
 
-        with patch.object(tool_with_endpoint, '_get_workspace_url', return_value="https://workspace.databricks.com"):
-            with patch.object(tool_with_endpoint, '_get_auth_headers', return_value={"Authorization": "Bearer test"}):
-                with patch('aiohttp.ClientSession') as mock_session_class:
+        with patch.object(
+            tool_with_endpoint,
+            "_get_workspace_url",
+            return_value="https://workspace.databricks.com",
+        ):
+            with patch.object(
+                tool_with_endpoint,
+                "_get_auth_headers",
+                return_value={"Authorization": "Bearer test"},
+            ):
+                with patch("aiohttp.ClientSession") as mock_session_class:
                     mock_session = MagicMock()
-                    mock_session_class.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-                    mock_session_class.return_value.__aexit__ = AsyncMock(return_value=None)
+                    mock_session_class.return_value.__aenter__ = AsyncMock(
+                        return_value=mock_session
+                    )
+                    mock_session_class.return_value.__aexit__ = AsyncMock(
+                        return_value=None
+                    )
 
                     mock_post_context = MagicMock()
                     mock_post_context.__aenter__ = AsyncMock(return_value=mock_response)
                     mock_post_context.__aexit__ = AsyncMock(return_value=None)
                     mock_session.post.return_value = mock_post_context
 
-                    result = await tool_with_endpoint._query_agentbricks_endpoint("Test question")
+                    result = await tool_with_endpoint._query_agentbricks_endpoint(
+                        "Test question"
+                    )
 
         assert "no text answer" in result
         assert "incomplete" in result
@@ -428,36 +542,68 @@ class TestAgentBricksToolQueryEndpoint:
     @pytest.mark.asyncio
     async def test_query_endpoint_timeout(self, tool_with_endpoint):
         """Test query handles timeout error."""
-        with patch.object(tool_with_endpoint, '_get_workspace_url', return_value="https://workspace.databricks.com"):
-            with patch.object(tool_with_endpoint, '_get_auth_headers', return_value={"Authorization": "Bearer test"}):
-                with patch('aiohttp.ClientSession') as mock_session_class:
+        with patch.object(
+            tool_with_endpoint,
+            "_get_workspace_url",
+            return_value="https://workspace.databricks.com",
+        ):
+            with patch.object(
+                tool_with_endpoint,
+                "_get_auth_headers",
+                return_value={"Authorization": "Bearer test"},
+            ):
+                with patch("aiohttp.ClientSession") as mock_session_class:
                     mock_session = MagicMock()
-                    mock_session_class.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-                    mock_session_class.return_value.__aexit__ = AsyncMock(return_value=None)
+                    mock_session_class.return_value.__aenter__ = AsyncMock(
+                        return_value=mock_session
+                    )
+                    mock_session_class.return_value.__aexit__ = AsyncMock(
+                        return_value=None
+                    )
 
                     mock_post_context = MagicMock()
-                    mock_post_context.__aenter__ = AsyncMock(side_effect=asyncio.TimeoutError())
+                    mock_post_context.__aenter__ = AsyncMock(
+                        side_effect=asyncio.TimeoutError()
+                    )
                     mock_session.post.return_value = mock_post_context
 
-                    result = await tool_with_endpoint._query_agentbricks_endpoint("Test question")
+                    result = await tool_with_endpoint._query_agentbricks_endpoint(
+                        "Test question"
+                    )
 
         assert "timed out" in result.lower()
 
     @pytest.mark.asyncio
     async def test_query_endpoint_connection_error(self, tool_with_endpoint):
         """Test query handles connection error."""
-        with patch.object(tool_with_endpoint, '_get_workspace_url', return_value="https://workspace.databricks.com"):
-            with patch.object(tool_with_endpoint, '_get_auth_headers', return_value={"Authorization": "Bearer test"}):
-                with patch('aiohttp.ClientSession') as mock_session_class:
+        with patch.object(
+            tool_with_endpoint,
+            "_get_workspace_url",
+            return_value="https://workspace.databricks.com",
+        ):
+            with patch.object(
+                tool_with_endpoint,
+                "_get_auth_headers",
+                return_value={"Authorization": "Bearer test"},
+            ):
+                with patch("aiohttp.ClientSession") as mock_session_class:
                     mock_session = MagicMock()
-                    mock_session_class.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-                    mock_session_class.return_value.__aexit__ = AsyncMock(return_value=None)
+                    mock_session_class.return_value.__aenter__ = AsyncMock(
+                        return_value=mock_session
+                    )
+                    mock_session_class.return_value.__aexit__ = AsyncMock(
+                        return_value=None
+                    )
 
                     mock_post_context = MagicMock()
-                    mock_post_context.__aenter__ = AsyncMock(side_effect=aiohttp.ClientConnectionError("Connection failed"))
+                    mock_post_context.__aenter__ = AsyncMock(
+                        side_effect=aiohttp.ClientConnectionError("Connection failed")
+                    )
                     mock_session.post.return_value = mock_post_context
 
-                    result = await tool_with_endpoint._query_agentbricks_endpoint("Test question")
+                    result = await tool_with_endpoint._query_agentbricks_endpoint(
+                        "Test question"
+                    )
 
         assert "Error connecting" in result
 
@@ -468,19 +614,33 @@ class TestAgentBricksToolQueryEndpoint:
         mock_response.status = 401
         mock_response.text = AsyncMock(return_value="Unauthorized")
 
-        with patch.object(tool_with_endpoint, '_get_workspace_url', return_value="https://workspace.databricks.com"):
-            with patch.object(tool_with_endpoint, '_get_auth_headers', return_value={"Authorization": "Bearer test"}):
-                with patch('aiohttp.ClientSession') as mock_session_class:
+        with patch.object(
+            tool_with_endpoint,
+            "_get_workspace_url",
+            return_value="https://workspace.databricks.com",
+        ):
+            with patch.object(
+                tool_with_endpoint,
+                "_get_auth_headers",
+                return_value={"Authorization": "Bearer test"},
+            ):
+                with patch("aiohttp.ClientSession") as mock_session_class:
                     mock_session = MagicMock()
-                    mock_session_class.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-                    mock_session_class.return_value.__aexit__ = AsyncMock(return_value=None)
+                    mock_session_class.return_value.__aenter__ = AsyncMock(
+                        return_value=mock_session
+                    )
+                    mock_session_class.return_value.__aexit__ = AsyncMock(
+                        return_value=None
+                    )
 
                     mock_post_context = MagicMock()
                     mock_post_context.__aenter__ = AsyncMock(return_value=mock_response)
                     mock_post_context.__aexit__ = AsyncMock(return_value=None)
                     mock_session.post.return_value = mock_post_context
 
-                    result = await tool_with_endpoint._query_agentbricks_endpoint("Test question")
+                    result = await tool_with_endpoint._query_agentbricks_endpoint(
+                        "Test question"
+                    )
 
         assert "HTTP 401" in result
 
@@ -492,14 +652,17 @@ class TestAgentBricksToolRun:
     def tool_with_endpoint(self):
         """Create a tool with endpoint configured."""
         return AgentBricksTool(
-            tool_config={"endpointName": "test-agent"},
-            user_token="test-token"
+            tool_config={"endpointName": "test-agent"}, user_token="test-token"
         )
 
     @pytest.mark.asyncio
     async def test_run_async_success(self, tool_with_endpoint):
         """Test successful async run."""
-        with patch.object(tool_with_endpoint, '_query_agentbricks_endpoint', return_value="Success response"):
+        with patch.object(
+            tool_with_endpoint,
+            "_query_agentbricks_endpoint",
+            return_value="Success response",
+        ):
             result = await tool_with_endpoint._run_async("Test question")
 
         assert result == "Success response"
@@ -531,7 +694,11 @@ class TestAgentBricksToolRun:
     @pytest.mark.asyncio
     async def test_run_async_exception_handling(self, tool_with_endpoint):
         """Test async run handles exceptions."""
-        with patch.object(tool_with_endpoint, '_query_agentbricks_endpoint', side_effect=Exception("Unexpected error")):
+        with patch.object(
+            tool_with_endpoint,
+            "_query_agentbricks_endpoint",
+            side_effect=Exception("Unexpected error"),
+        ):
             result = await tool_with_endpoint._run_async("Test question")
 
         assert "Error using AgentBricks" in result
@@ -539,7 +706,9 @@ class TestAgentBricksToolRun:
 
     def test_run_sync_wrapper(self, tool_with_endpoint):
         """Test synchronous _run wrapper."""
-        with patch.object(tool_with_endpoint, '_run_async', new_callable=AsyncMock) as mock_async:
+        with patch.object(
+            tool_with_endpoint, "_run_async", new_callable=AsyncMock
+        ) as mock_async:
             mock_async.return_value = "Sync result"
 
             result = tool_with_endpoint._run("Test question")
@@ -554,26 +723,33 @@ class TestAgentBricksToolWithTrace:
     async def test_query_with_trace_enabled(self):
         """Test query includes trace when enabled."""
         tool = AgentBricksTool(
-            tool_config={
-                "endpointName": "test-agent",
-                "return_trace": True
-            },
-            user_token="test-token"
+            tool_config={"endpointName": "test-agent", "return_trace": True},
+            user_token="test-token",
         )
 
         mock_response = MagicMock()
         mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={
-            "choices": [{"message": {"content": "Response"}}],
-            "trace": {"steps": ["step1", "step2"]}
-        })
+        mock_response.json = AsyncMock(
+            return_value={
+                "choices": [{"message": {"content": "Response"}}],
+                "trace": {"steps": ["step1", "step2"]},
+            }
+        )
 
-        with patch.object(tool, '_get_workspace_url', return_value="https://workspace.databricks.com"):
-            with patch.object(tool, '_get_auth_headers', return_value={"Authorization": "Bearer test"}):
-                with patch('aiohttp.ClientSession') as mock_session_class:
+        with patch.object(
+            tool, "_get_workspace_url", return_value="https://workspace.databricks.com"
+        ):
+            with patch.object(
+                tool, "_get_auth_headers", return_value={"Authorization": "Bearer test"}
+            ):
+                with patch("aiohttp.ClientSession") as mock_session_class:
                     mock_session = MagicMock()
-                    mock_session_class.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-                    mock_session_class.return_value.__aexit__ = AsyncMock(return_value=None)
+                    mock_session_class.return_value.__aenter__ = AsyncMock(
+                        return_value=mock_session
+                    )
+                    mock_session_class.return_value.__aexit__ = AsyncMock(
+                        return_value=None
+                    )
 
                     mock_post_context = MagicMock()
                     mock_post_context.__aenter__ = AsyncMock(return_value=mock_response)
@@ -595,31 +771,41 @@ class TestAgentBricksToolWithCustomInputs:
         tool = AgentBricksTool(
             tool_config={
                 "endpointName": "test-agent",
-                "custom_inputs": {"context": "test context", "mode": "fast"}
+                "custom_inputs": {"context": "test context", "mode": "fast"},
             },
-            user_token="test-token"
+            user_token="test-token",
         )
 
         captured_payload = None
 
         mock_response = MagicMock()
         mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={
-            "choices": [{"message": {"content": "Response"}}]
-        })
+        mock_response.json = AsyncMock(
+            return_value={"choices": [{"message": {"content": "Response"}}]}
+        )
 
-        with patch.object(tool, '_get_workspace_url', return_value="https://workspace.databricks.com"):
-            with patch.object(tool, '_get_auth_headers', return_value={"Authorization": "Bearer test"}):
-                with patch('aiohttp.ClientSession') as mock_session_class:
+        with patch.object(
+            tool, "_get_workspace_url", return_value="https://workspace.databricks.com"
+        ):
+            with patch.object(
+                tool, "_get_auth_headers", return_value={"Authorization": "Bearer test"}
+            ):
+                with patch("aiohttp.ClientSession") as mock_session_class:
                     mock_session = MagicMock()
-                    mock_session_class.return_value.__aenter__ = AsyncMock(return_value=mock_session)
-                    mock_session_class.return_value.__aexit__ = AsyncMock(return_value=None)
+                    mock_session_class.return_value.__aenter__ = AsyncMock(
+                        return_value=mock_session
+                    )
+                    mock_session_class.return_value.__aexit__ = AsyncMock(
+                        return_value=None
+                    )
 
                     def capture_post(*args, **kwargs):
                         nonlocal captured_payload
-                        captured_payload = kwargs.get('json')
+                        captured_payload = kwargs.get("json")
                         mock_post_context = MagicMock()
-                        mock_post_context.__aenter__ = AsyncMock(return_value=mock_response)
+                        mock_post_context.__aenter__ = AsyncMock(
+                            return_value=mock_response
+                        )
                         mock_post_context.__aexit__ = AsyncMock(return_value=None)
                         return mock_post_context
 

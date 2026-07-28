@@ -6,7 +6,8 @@ after the entities exist. Both are best-effort — generation predates this
 feature and must keep working without it."""
 
 import logging
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
 from src.utils.user_context import GroupContext
 
 logger = logging.getLogger(__name__)
@@ -20,8 +21,9 @@ class RecipeHooksMixin:
     after the entities exist. Both are best-effort — generation predates this
     feature and must keep working without it."""
 
-    async def _prepare_exemplars(self, request: Any, group_context: Optional[GroupContext],
-                                 session: Any = None) -> Optional[Any]:
+    async def _prepare_exemplars(
+        self, request: Any, group_context: Optional[GroupContext], session: Any = None
+    ) -> Optional[Any]:
         """Ask the recipe library what it can contribute to this generation.
 
         Returns the decision (text + candidates + arm) or None when reuse is not
@@ -38,16 +40,20 @@ class RecipeHooksMixin:
         try:
             from src.services.recipes.recipes import WorkflowRecipeService
 
-            return await WorkflowRecipeService(session or self.session).prepare_exemplars(
-                prompt, group_context.group_ids or []
-            )
+            return await WorkflowRecipeService(
+                session or self.session
+            ).prepare_exemplars(prompt, group_context.group_ids or [])
         except Exception as exemplar_err:  # noqa: BLE001
             logger.warning(f"CREATE CREW: exemplar injection skipped: {exemplar_err}")
             return None
 
-    async def _record_recipe_trial(self, decision: Optional[Any], result: Dict[str, Any],
-                                   group_context: Optional[GroupContext],
-                                   session: Any = None) -> None:
+    async def _record_recipe_trial(
+        self,
+        decision: Optional[Any],
+        result: Dict[str, Any],
+        group_context: Optional[GroupContext],
+        session: Any = None,
+    ) -> None:
         """Record what the recipe library did for this generation, and what came
         out of it. Best-effort — the service's own recorder never raises."""
         if decision is None:
@@ -85,15 +91,15 @@ class RecipeHooksMixin:
 
         if await is_lakebase_enabled():
             lb_config = await get_lakebase_config_from_db()
-            lb_instance = (
-                (lb_config or {}).get("instance_name")
-                or _os.environ.get("LAKEBASE_INSTANCE_NAME", "kasal-lakebase")
+            lb_instance = (lb_config or {}).get("instance_name") or _os.environ.get(
+                "LAKEBASE_INSTANCE_NAME", "kasal-lakebase"
             )
             return get_lakebase_session(lb_instance)
         return get_isolated_db_session()
 
-    async def _recipe_decision_isolated(self, request: Any,
-                                        group_context: Optional[GroupContext]) -> Optional[Any]:
+    async def _recipe_decision_isolated(
+        self, request: Any, group_context: Optional[GroupContext]
+    ) -> Optional[Any]:
         """Exemplar decision on a session of its own.
 
         The progressive path plans BEFORE it opens its working session (planning
@@ -110,10 +116,13 @@ class RecipeHooksMixin:
             logger.warning(f"PROGRESSIVE: exemplar lookup skipped: {exc}")
             return None
 
-    async def _record_recipe_trial_isolated(self, decision: Optional[Any],
-                                            agents: List[Dict[str, Any]],
-                                            tasks: List[Dict[str, Any]],
-                                            group_context: Optional[GroupContext]) -> None:
+    async def _record_recipe_trial_isolated(
+        self,
+        decision: Optional[Any],
+        agents: List[Dict[str, Any]],
+        tasks: List[Dict[str, Any]],
+        group_context: Optional[GroupContext],
+    ) -> None:
         """Trial write on a session of its own, for the same reason."""
         if decision is None:
             return

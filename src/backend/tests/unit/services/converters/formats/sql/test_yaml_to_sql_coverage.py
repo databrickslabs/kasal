@@ -3,17 +3,27 @@ Coverage tests for src/services/converters/formats/sql/yaml_to_sql.py
 Targets uncovered lines: 150-157, 161-162, 166, 169, 179, 338, 381-382,
 444-470, 479-514, 520-551
 """
-import pytest
+
 from unittest.mock import MagicMock, patch
-from src.services.converters.formats.sql.yaml_to_sql import SQLGenerator
-from src.services.converters.formats.sql.models import (
-    SQLDialect, SQLAggregationType, SQLQuery, SQLMeasure, SQLDefinition,
-    SQLTranslationOptions, SQLTranslationResult
-)
+
+import pytest
+
 from src.services.converters.base.models import KPI, KPIDefinition
+from src.services.converters.formats.sql.models import (
+    SQLAggregationType,
+    SQLDefinition,
+    SQLDialect,
+    SQLMeasure,
+    SQLQuery,
+    SQLTranslationOptions,
+    SQLTranslationResult,
+)
+from src.services.converters.formats.sql.yaml_to_sql import SQLGenerator
 
 
-def make_kpi(name="revenue", formula="sales_amount", agg="SUM", table="fact_sales", filters=None):
+def make_kpi(
+    name="revenue", formula="sales_amount", agg="SUM", table="fact_sales", filters=None
+):
     return KPI(
         technical_name=name,
         description=f"KPI {name}",
@@ -24,7 +34,9 @@ def make_kpi(name="revenue", formula="sales_amount", agg="SUM", table="fact_sale
     )
 
 
-def make_definition(kpis=None, structures=None, description="Test Definition", variables=None):
+def make_definition(
+    kpis=None, structures=None, description="Test Definition", variables=None
+):
     return KPIDefinition(
         technical_name="test_def",
         description=description,
@@ -35,6 +47,7 @@ def make_definition(kpis=None, structures=None, description="Test Definition", v
 
 
 # ─── SQLGenerator construction ────────────────────────────────────────────────
+
 
 def test_sql_generator_databricks_dialect():
     gen = SQLGenerator(dialect=SQLDialect.DATABRICKS)
@@ -54,6 +67,7 @@ def test_quote_identifier():
 
 
 # ─── _estimate_complexity ─────────────────────────────────────────────────────
+
 
 def test_estimate_complexity_low():
     gen = SQLGenerator()
@@ -102,11 +116,16 @@ def test_estimate_complexity_high_has_structures():
 
 # ─── _enhance_result_with_analysis ────────────────────────────────────────────
 
+
 def make_result(sql_queries=None, sql_measures=None):
     """Make a SQLTranslationResult with proper defaults."""
     from src.services.converters.formats.sql.models import (
-        SQLDefinition, SQLTranslationOptions, SQLDialect, SQLQuery
+        SQLDefinition,
+        SQLDialect,
+        SQLQuery,
+        SQLTranslationOptions,
     )
+
     # Convert any MagicMock queries into real SQLQuery objects or skip them
     real_queries = []
     if sql_queries:
@@ -117,7 +136,9 @@ def make_result(sql_queries=None, sql_measures=None):
     return SQLTranslationResult(
         sql_queries=real_queries,
         sql_measures=sql_measures or [],
-        sql_definition=SQLDefinition(dialect=SQLDialect.DATABRICKS, technical_name="test", description="test"),
+        sql_definition=SQLDefinition(
+            dialect=SQLDialect.DATABRICKS, technical_name="test", description="test"
+        ),
         translation_options=SQLTranslationOptions(target_dialect=SQLDialect.DATABRICKS),
         measures_count=0,
         queries_count=0,
@@ -206,6 +227,7 @@ def test_enhance_result_complex_filters_suggestion():
 
 # ─── _map_aggregation_type ────────────────────────────────────────────────────
 
+
 def test_map_aggregation_type_infer_count():
     gen = SQLGenerator()
     result = gen._map_aggregation_type("", "COUNT(orders)")
@@ -239,13 +261,17 @@ def test_map_aggregation_type_infer_sum_default():
 def test_map_aggregation_type_direct_mapping():
     gen = SQLGenerator()
     assert gen._map_aggregation_type("AVERAGE", "x") == SQLAggregationType.AVG
-    assert gen._map_aggregation_type("DISTINCTCOUNT", "x") == SQLAggregationType.COUNT_DISTINCT
+    assert (
+        gen._map_aggregation_type("DISTINCTCOUNT", "x")
+        == SQLAggregationType.COUNT_DISTINCT
+    )
     assert gen._map_aggregation_type("COUNTROWS", "x") == SQLAggregationType.COUNT
     assert gen._map_aggregation_type("CALCULATED", "x") == SQLAggregationType.SUM
     assert gen._map_aggregation_type("UNKNOWN_TYPE", "x") == SQLAggregationType.SUM
 
 
 # ─── _generate_sql_expression ─────────────────────────────────────────────────
+
 
 def test_generate_sql_expression_sum_simple():
     gen = SQLGenerator(SQLDialect.DATABRICKS)
@@ -294,7 +320,9 @@ def test_generate_sql_expression_count_distinct():
     kpi.formula = "customer_id"
     kpi.source_table = "fact_orders"
     definition = make_definition()
-    result = gen._generate_sql_expression(kpi, SQLAggregationType.COUNT_DISTINCT, definition)
+    result = gen._generate_sql_expression(
+        kpi, SQLAggregationType.COUNT_DISTINCT, definition
+    )
     assert "COUNT(DISTINCT" in result
 
 
@@ -304,7 +332,9 @@ def test_generate_sql_expression_count_distinct_no_simple_col():
     kpi.formula = "complex expression"
     kpi.source_table = "fact_orders"
     definition = make_definition()
-    result = gen._generate_sql_expression(kpi, SQLAggregationType.COUNT_DISTINCT, definition)
+    result = gen._generate_sql_expression(
+        kpi, SQLAggregationType.COUNT_DISTINCT, definition
+    )
     # Falls back to id
     assert "COUNT(DISTINCT" in result
 
@@ -351,6 +381,7 @@ def test_generate_sql_expression_max():
 
 # ─── _convert_formula_to_sql ──────────────────────────────────────────────────
 
+
 def test_convert_formula_empty():
     gen = SQLGenerator()
     result = gen._convert_formula_to_sql("", "fact_sales", None)
@@ -380,10 +411,13 @@ def test_convert_formula_column_refs():
 
 # ─── _process_filters ─────────────────────────────────────────────────────────
 
+
 def test_process_filters_success():
     gen = SQLGenerator()
     definition = make_definition(variables={"year": "2024"})
-    result = gen._process_filters(["region = 'US'", "date > '2024-01-01'"], definition, MagicMock())
+    result = gen._process_filters(
+        ["region = 'US'", "date > '2024-01-01'"], definition, MagicMock()
+    )
     assert len(result) == 2
 
 
@@ -396,6 +430,7 @@ def test_process_filters_with_exception():
 
 
 # ─── _substitute_variables ────────────────────────────────────────────────────
+
 
 def test_substitute_variables_single_value():
     gen = SQLGenerator()
@@ -418,12 +453,15 @@ def test_substitute_variables_no_match():
 
 # ─── generate_sql_from_kbi_definition - error handling ──────────────────────
 
+
 def test_generate_sql_from_kbi_definition_returns_error_result_on_exception():
     gen = SQLGenerator()
     definition = make_definition(kpis=[make_kpi()])
 
     # Force the structure processor to raise
-    gen.structure_processor.process_definition = MagicMock(side_effect=Exception("processing error"))
+    gen.structure_processor.process_definition = MagicMock(
+        side_effect=Exception("processing error")
+    )
 
     options = SQLTranslationOptions(target_dialect=SQLDialect.DATABRICKS)
     result = gen.generate_sql_from_kbi_definition(definition, options)
@@ -444,7 +482,9 @@ def test_generate_sql_from_kbi_definition_no_options():
     mock_sql_def.technical_name = "test"
 
     gen.structure_processor.process_definition = MagicMock(return_value=mock_sql_def)
-    gen.structure_processor.generate_sql_queries_from_definition = MagicMock(return_value=[])
+    gen.structure_processor.generate_sql_queries_from_definition = MagicMock(
+        return_value=[]
+    )
 
     result = gen.generate_sql_from_kbi_definition(definition)
     assert result is not None

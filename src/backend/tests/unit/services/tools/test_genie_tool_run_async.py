@@ -7,15 +7,16 @@ _run_async (mocked HTTP), and _extract_response.
 
 import asyncio
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-from src.services.tools.genie_tool import GenieInput, GenieTool
+import pytest
 
+from src.services.tools.genie_tool import GenieInput, GenieTool
 
 # ---------------------------------------------------------------------------
 # GenieInput validator tests
 # ---------------------------------------------------------------------------
+
 
 class TestGenieInput:
     def test_string_passthrough(self):
@@ -51,6 +52,7 @@ class TestGenieInput:
 # GenieTool.__init__ tests
 # ---------------------------------------------------------------------------
 
+
 class TestGenieToolInit:
     def test_defaults_when_no_config(self):
         tool = GenieTool()
@@ -75,15 +77,17 @@ class TestGenieToolInit:
         assert tool._space_id == "sid-123"
 
     def test_polling_config_from_tool_config(self):
-        tool = GenieTool(tool_config={
-            "polling_delay": 2,
-            "max_polling_delay": 15,
-            "timeout_minutes": 5,
-            "exponential_backoff": False,
-            "backoff_after_seconds": 60,
-            "max_calls": 3,
-            "max_result_rows": 50,
-        })
+        tool = GenieTool(
+            tool_config={
+                "polling_delay": 2,
+                "max_polling_delay": 15,
+                "timeout_minutes": 5,
+                "exponential_backoff": False,
+                "backoff_after_seconds": 60,
+                "max_calls": 3,
+                "max_result_rows": 50,
+            }
+        )
         assert tool._base_polling_delay == 2
         assert tool._max_polling_delay == 15
         assert tool._polling_timeout_minutes == 5
@@ -113,6 +117,7 @@ class TestGenieToolInit:
 # _make_url
 # ---------------------------------------------------------------------------
 
+
 class TestMakeUrl:
     def test_basic_url_construction(self):
         tool = GenieTool()
@@ -139,6 +144,7 @@ class TestMakeUrl:
 # _get_workspace_url
 # ---------------------------------------------------------------------------
 
+
 class TestGetWorkspaceUrl:
     @pytest.mark.asyncio
     async def test_returns_workspace_url(self):
@@ -164,7 +170,9 @@ class TestGetWorkspaceUrl:
     async def test_raises_on_exception(self):
         tool = GenieTool()
         mock_auth = AsyncMock()
-        mock_auth.get_workspace_url = AsyncMock(side_effect=RuntimeError("network down"))
+        mock_auth.get_workspace_url = AsyncMock(
+            side_effect=RuntimeError("network down")
+        )
 
         with patch("src.utils.databricks_auth._databricks_auth", mock_auth):
             with pytest.raises(ValueError):
@@ -175,6 +183,7 @@ class TestGetWorkspaceUrl:
 # _get_auth_headers
 # ---------------------------------------------------------------------------
 
+
 class TestGetAuthHeaders:
     @pytest.mark.asyncio
     async def test_returns_headers_when_auth_ok(self):
@@ -182,8 +191,10 @@ class TestGetAuthHeaders:
         mock_auth_ctx = MagicMock()
         mock_auth_ctx.get_headers.return_value = {"Authorization": "Bearer tok"}
 
-        with patch("src.utils.databricks_auth.get_auth_context",
-                   AsyncMock(return_value=mock_auth_ctx)):
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            AsyncMock(return_value=mock_auth_ctx),
+        ):
             with patch("src.utils.user_context.UserContext"):
                 headers = await tool._get_auth_headers()
         assert headers["Authorization"] == "Bearer tok"
@@ -192,8 +203,9 @@ class TestGetAuthHeaders:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_auth(self):
         tool = GenieTool()
-        with patch("src.utils.databricks_auth.get_auth_context",
-                   AsyncMock(return_value=None)):
+        with patch(
+            "src.utils.databricks_auth.get_auth_context", AsyncMock(return_value=None)
+        ):
             with patch("src.utils.user_context.UserContext"):
                 headers = await tool._get_auth_headers()
         assert headers is None
@@ -201,8 +213,10 @@ class TestGetAuthHeaders:
     @pytest.mark.asyncio
     async def test_returns_none_on_exception(self):
         tool = GenieTool()
-        with patch("src.utils.databricks_auth.get_auth_context",
-                   AsyncMock(side_effect=Exception("boom"))):
+        with patch(
+            "src.utils.databricks_auth.get_auth_context",
+            AsyncMock(side_effect=Exception("boom")),
+        ):
             headers = await tool._get_auth_headers()
         assert headers is None
 
@@ -210,6 +224,7 @@ class TestGetAuthHeaders:
 # ---------------------------------------------------------------------------
 # _run_async — no space_id configured
 # ---------------------------------------------------------------------------
+
 
 class TestRunAsyncNoSpaceId:
     @pytest.mark.asyncio
@@ -235,6 +250,7 @@ class TestRunAsyncNoSpaceId:
 # _run_async — call limit enforcement
 # ---------------------------------------------------------------------------
 
+
 class TestRunAsyncCallLimit:
     @pytest.mark.asyncio
     async def test_call_limit_rejection(self):
@@ -249,6 +265,7 @@ class TestRunAsyncCallLimit:
 # _run_async — happy path: COMPLETED with text attachment
 # ---------------------------------------------------------------------------
 
+
 class TestRunAsyncHappyPath:
     @pytest.mark.asyncio
     async def test_completed_with_text_attachment(self):
@@ -258,19 +275,23 @@ class TestRunAsyncHappyPath:
         conv_response = {"conversation_id": "conv-1", "message_id": "msg-1"}
         status_completed = {
             "status": "COMPLETED",
-            "attachments": [
-                {"text": {"content": "Total revenue is $1M"}}
-            ]
+            "attachments": [{"text": {"content": "Total revenue is $1M"}}],
         }
 
-        with patch.object(tool, "_start_or_continue_conversation",
-                          AsyncMock(return_value=conv_response)):
-            with patch.object(tool, "_get_message_status",
-                              AsyncMock(return_value=status_completed)):
-                with patch.object(tool, "_get_query_result",
-                                  AsyncMock(return_value={})):
-                    with patch("src.services.tools.genie_tool.asyncio.sleep",
-                               AsyncMock()):
+        with patch.object(
+            tool,
+            "_start_or_continue_conversation",
+            AsyncMock(return_value=conv_response),
+        ):
+            with patch.object(
+                tool, "_get_message_status", AsyncMock(return_value=status_completed)
+            ):
+                with patch.object(
+                    tool, "_get_query_result", AsyncMock(return_value={})
+                ):
+                    with patch(
+                        "src.services.tools.genie_tool.asyncio.sleep", AsyncMock()
+                    ):
                         result = await tool._run_async("What is revenue?")
 
         assert "Total revenue is $1M" in result
@@ -293,14 +314,20 @@ class TestRunAsyncHappyPath:
             }
         }
 
-        with patch.object(tool, "_start_or_continue_conversation",
-                          AsyncMock(return_value=conv_response)):
-            with patch.object(tool, "_get_message_status",
-                              AsyncMock(return_value=status_completed)):
-                with patch.object(tool, "_get_query_result",
-                                  AsyncMock(return_value=query_result)):
-                    with patch("src.services.tools.genie_tool.asyncio.sleep",
-                               AsyncMock()):
+        with patch.object(
+            tool,
+            "_start_or_continue_conversation",
+            AsyncMock(return_value=conv_response),
+        ):
+            with patch.object(
+                tool, "_get_message_status", AsyncMock(return_value=status_completed)
+            ):
+                with patch.object(
+                    tool, "_get_query_result", AsyncMock(return_value=query_result)
+                ):
+                    with patch(
+                        "src.services.tools.genie_tool.asyncio.sleep", AsyncMock()
+                    ):
                         result = await tool._run_async("Show me data")
 
         assert "row1col1" in result
@@ -313,12 +340,15 @@ class TestRunAsyncHappyPath:
         conv_response = {"conversation_id": "c1", "message_id": "m1"}
         status_failed = {"status": "FAILED"}
 
-        with patch.object(tool, "_start_or_continue_conversation",
-                          AsyncMock(return_value=conv_response)):
-            with patch.object(tool, "_get_message_status",
-                              AsyncMock(return_value=status_failed)):
-                with patch("src.services.tools.genie_tool.asyncio.sleep",
-                           AsyncMock()):
+        with patch.object(
+            tool,
+            "_start_or_continue_conversation",
+            AsyncMock(return_value=conv_response),
+        ):
+            with patch.object(
+                tool, "_get_message_status", AsyncMock(return_value=status_failed)
+            ):
+                with patch("src.services.tools.genie_tool.asyncio.sleep", AsyncMock()):
                     result = await tool._run_async("Any question")
 
         assert "failed" in result.lower() or "Genie" in result
@@ -329,12 +359,17 @@ class TestRunAsyncHappyPath:
         tool._base_polling_delay = 1
 
         conv_response = {"conversation_id": "c1", "message_id": "m1"}
-        with patch.object(tool, "_start_or_continue_conversation",
-                          AsyncMock(return_value=conv_response)):
-            with patch.object(tool, "_get_message_status",
-                              AsyncMock(return_value={"status": "CANCELLED"})):
-                with patch("src.services.tools.genie_tool.asyncio.sleep",
-                           AsyncMock()):
+        with patch.object(
+            tool,
+            "_start_or_continue_conversation",
+            AsyncMock(return_value=conv_response),
+        ):
+            with patch.object(
+                tool,
+                "_get_message_status",
+                AsyncMock(return_value={"status": "CANCELLED"}),
+            ):
+                with patch("src.services.tools.genie_tool.asyncio.sleep", AsyncMock()):
                     result = await tool._run_async("question")
         assert "cancel" in result.lower()
 
@@ -347,12 +382,15 @@ class TestRunAsyncHappyPath:
         conv_response = {"conversation_id": "c1", "message_id": "m1"}
         in_progress = {"status": "IN_PROGRESS"}
 
-        with patch.object(tool, "_start_or_continue_conversation",
-                          AsyncMock(return_value=conv_response)):
-            with patch.object(tool, "_get_message_status",
-                              AsyncMock(return_value=in_progress)):
-                with patch("src.services.tools.genie_tool.asyncio.sleep",
-                           AsyncMock()):
+        with patch.object(
+            tool,
+            "_start_or_continue_conversation",
+            AsyncMock(return_value=conv_response),
+        ):
+            with patch.object(
+                tool, "_get_message_status", AsyncMock(return_value=in_progress)
+            ):
+                with patch("src.services.tools.genie_tool.asyncio.sleep", AsyncMock()):
                     result = await tool._run_async("question")
 
         assert "timed out" in result.lower() or "timeout" in result.lower()
@@ -362,8 +400,12 @@ class TestRunAsyncHappyPath:
         tool = GenieTool(tool_config={"spaceId": "s1"})
 
         import aiohttp
-        with patch.object(tool, "_start_or_continue_conversation",
-                          AsyncMock(side_effect=aiohttp.ClientConnectionError("conn refused"))):
+
+        with patch.object(
+            tool,
+            "_start_or_continue_conversation",
+            AsyncMock(side_effect=aiohttp.ClientConnectionError("conn refused")),
+        ):
             result = await tool._run_async("question")
 
         assert "connecting" in result.lower() or "error" in result.lower()
@@ -373,9 +415,11 @@ class TestRunAsyncHappyPath:
         tool = GenieTool(tool_config={"spaceId": "s1"})
 
         import aiohttp
+
         err = aiohttp.ClientResponseError(None, None, status=403)
-        with patch.object(tool, "_start_or_continue_conversation",
-                          AsyncMock(side_effect=err)):
+        with patch.object(
+            tool, "_start_or_continue_conversation", AsyncMock(side_effect=err)
+        ):
             result = await tool._run_async("question")
 
         assert "403" in result or "HTTP" in result or "error" in result.lower()
@@ -384,8 +428,11 @@ class TestRunAsyncHappyPath:
     async def test_generic_exception_caught(self):
         tool = GenieTool(tool_config={"spaceId": "s1"})
 
-        with patch.object(tool, "_start_or_continue_conversation",
-                          AsyncMock(side_effect=RuntimeError("unexpected"))):
+        with patch.object(
+            tool,
+            "_start_or_continue_conversation",
+            AsyncMock(side_effect=RuntimeError("unexpected")),
+        ):
             result = await tool._run_async("question")
 
         assert "error" in result.lower()
@@ -394,8 +441,11 @@ class TestRunAsyncHappyPath:
     async def test_conv_returns_no_ids(self):
         tool = GenieTool(tool_config={"spaceId": "s1"})
         conv_response = {"conversation_id": None, "message_id": None}
-        with patch.object(tool, "_start_or_continue_conversation",
-                          AsyncMock(return_value=conv_response)):
+        with patch.object(
+            tool,
+            "_start_or_continue_conversation",
+            AsyncMock(return_value=conv_response),
+        ):
             result = await tool._run_async("question")
         assert "error" in result.lower() or "Failed" in result
 
@@ -410,16 +460,22 @@ class TestRunAsyncHappyPath:
             "attachments": [
                 {"text": {"content": "Result is X"}},
                 {"query": {"statement": "SELECT * FROM t"}},
-            ]
+            ],
         }
-        with patch.object(tool, "_start_or_continue_conversation",
-                          AsyncMock(return_value=conv_response)):
-            with patch.object(tool, "_get_message_status",
-                              AsyncMock(return_value=status_completed)):
-                with patch.object(tool, "_get_query_result",
-                                  AsyncMock(return_value={})):
-                    with patch("src.services.tools.genie_tool.asyncio.sleep",
-                               AsyncMock()):
+        with patch.object(
+            tool,
+            "_start_or_continue_conversation",
+            AsyncMock(return_value=conv_response),
+        ):
+            with patch.object(
+                tool, "_get_message_status", AsyncMock(return_value=status_completed)
+            ):
+                with patch.object(
+                    tool, "_get_query_result", AsyncMock(return_value={})
+                ):
+                    with patch(
+                        "src.services.tools.genie_tool.asyncio.sleep", AsyncMock()
+                    ):
                         result = await tool._run_async("question")
 
         assert "SELECT * FROM t" in result
@@ -435,14 +491,20 @@ class TestRunAsyncHappyPath:
             "status": "COMPLETED",
             "attachments": [{"text": {"content": "Answer"}}],
         }
-        with patch.object(tool, "_start_or_continue_conversation",
-                          AsyncMock(return_value=conv_response)):
-            with patch.object(tool, "_get_message_status",
-                              AsyncMock(return_value=status_completed)):
-                with patch.object(tool, "_get_query_result",
-                                  AsyncMock(return_value={})):
-                    with patch("src.services.tools.genie_tool.asyncio.sleep",
-                               AsyncMock()):
+        with patch.object(
+            tool,
+            "_start_or_continue_conversation",
+            AsyncMock(return_value=conv_response),
+        ):
+            with patch.object(
+                tool, "_get_message_status", AsyncMock(return_value=status_completed)
+            ):
+                with patch.object(
+                    tool, "_get_query_result", AsyncMock(return_value={})
+                ):
+                    with patch(
+                        "src.services.tools.genie_tool.asyncio.sleep", AsyncMock()
+                    ):
                         result = await tool._run_async("question")
 
         assert "NOTICE" in result or "last allowed" in result
@@ -464,10 +526,14 @@ class TestRunAsyncHappyPath:
         async def mock_sleep(delay):
             sleep_calls.append(delay)
 
-        with patch.object(tool, "_start_or_continue_conversation",
-                          AsyncMock(return_value=conv_response)):
-            with patch.object(tool, "_get_message_status",
-                              AsyncMock(return_value=in_progress)):
+        with patch.object(
+            tool,
+            "_start_or_continue_conversation",
+            AsyncMock(return_value=conv_response),
+        ):
+            with patch.object(
+                tool, "_get_message_status", AsyncMock(return_value=in_progress)
+            ):
                 with patch("src.services.tools.genie_tool.asyncio.sleep", mock_sleep):
                     await tool._run_async("question")
 
@@ -478,6 +544,7 @@ class TestRunAsyncHappyPath:
 # ---------------------------------------------------------------------------
 # _run — synchronous wrapper
 # ---------------------------------------------------------------------------
+
 
 class TestRunSync:
     def test_run_calls_run_async(self):
@@ -495,6 +562,7 @@ class TestRunSync:
 # ---------------------------------------------------------------------------
 # _extract_response
 # ---------------------------------------------------------------------------
+
 
 class TestExtractResponse:
     def _make_tool(self):
@@ -542,9 +610,7 @@ class TestExtractResponse:
         tool._max_result_rows = 1
         data_rows = [{"values": [{"str": str(i)}]} for i in range(5)]
         result_data = {
-            "statement_response": {
-                "result": {"data_typed_array": data_rows}
-            }
+            "statement_response": {"result": {"data_typed_array": data_rows}}
         }
         result = tool._extract_response({}, result_data)
         assert "5" in result  # total rows mentioned
@@ -559,10 +625,7 @@ class TestExtractResponse:
         """Text matching the 'content' field should not become the response."""
         tool = self._make_tool()
         question = "my question"
-        status = {
-            "content": question,
-            "attachments": [{"text": {"content": question}}]
-        }
+        status = {"content": question, "attachments": [{"text": {"content": question}}]}
         result = tool._extract_response(status)
         # The text attachment content equals the question, so it should be excluded
         assert result == "No response content found"
@@ -571,9 +634,7 @@ class TestExtractResponse:
         tool = self._make_tool()
         data_rows = [{"values": [{"str": "val"}]}]
         result_data = {
-            "statement_response": {
-                "result": {"data_typed_array": data_rows}
-            }
+            "statement_response": {"result": {"data_typed_array": data_rows}}
         }
         result = tool._extract_response({}, result_data)
         assert "1 row" in result or "Query returned" in result
@@ -583,6 +644,7 @@ class TestExtractResponse:
 # _get_message_status
 # ---------------------------------------------------------------------------
 
+
 class TestGetMessageStatus:
     @pytest.mark.asyncio
     async def test_returns_parsed_json(self):
@@ -590,12 +652,18 @@ class TestGetMessageStatus:
 
         mock_session = _make_aiohttp_mock(200, json_data={"status": "COMPLETED"})
 
-        with patch.object(tool, "_get_workspace_url",
-                          AsyncMock(return_value="https://ws.example.com")):
-            with patch.object(tool, "_get_auth_headers",
-                              AsyncMock(return_value={"Authorization": "Bearer tok"})):
-                with patch("src.services.tools.genie_tool.aiohttp.ClientSession",
-                           return_value=mock_session):
+        with patch.object(
+            tool, "_get_workspace_url", AsyncMock(return_value="https://ws.example.com")
+        ):
+            with patch.object(
+                tool,
+                "_get_auth_headers",
+                AsyncMock(return_value={"Authorization": "Bearer tok"}),
+            ):
+                with patch(
+                    "src.services.tools.genie_tool.aiohttp.ClientSession",
+                    return_value=mock_session,
+                ):
                     result = await tool._get_message_status("conv-1", "msg-1")
 
         assert result == {"status": "COMPLETED"}
@@ -603,16 +671,18 @@ class TestGetMessageStatus:
     @pytest.mark.asyncio
     async def test_raises_when_no_space_id(self):
         tool = GenieTool()
-        with patch.object(tool, "_get_workspace_url",
-                          AsyncMock(return_value="https://ws.example.com")):
+        with patch.object(
+            tool, "_get_workspace_url", AsyncMock(return_value="https://ws.example.com")
+        ):
             with pytest.raises(ValueError, match="space ID"):
                 await tool._get_message_status("conv-1", "msg-1")
 
     @pytest.mark.asyncio
     async def test_raises_when_no_auth(self):
         tool = GenieTool(tool_config={"spaceId": "s1"})
-        with patch.object(tool, "_get_workspace_url",
-                          AsyncMock(return_value="https://ws.example.com")):
+        with patch.object(
+            tool, "_get_workspace_url", AsyncMock(return_value="https://ws.example.com")
+        ):
             with patch.object(tool, "_get_auth_headers", AsyncMock(return_value=None)):
                 with pytest.raises(Exception, match="No authentication"):
                     await tool._get_message_status("conv-1", "msg-1")
@@ -622,20 +692,23 @@ class TestGetMessageStatus:
 # _get_query_result
 # ---------------------------------------------------------------------------
 
+
 class TestGetQueryResult:
     @pytest.mark.asyncio
     async def test_raises_when_no_space_id(self):
         tool = GenieTool()
-        with patch.object(tool, "_get_workspace_url",
-                          AsyncMock(return_value="https://ws.example.com")):
+        with patch.object(
+            tool, "_get_workspace_url", AsyncMock(return_value="https://ws.example.com")
+        ):
             with pytest.raises(ValueError, match="space ID"):
                 await tool._get_query_result("conv-1", "msg-1")
 
     @pytest.mark.asyncio
     async def test_raises_when_no_auth(self):
         tool = GenieTool(tool_config={"spaceId": "s1"})
-        with patch.object(tool, "_get_workspace_url",
-                          AsyncMock(return_value="https://ws.example.com")):
+        with patch.object(
+            tool, "_get_workspace_url", AsyncMock(return_value="https://ws.example.com")
+        ):
             with patch.object(tool, "_get_auth_headers", AsyncMock(return_value=None)):
                 with pytest.raises(Exception, match="No authentication"):
                     await tool._get_query_result("conv-1", "msg-1")
@@ -645,20 +718,23 @@ class TestGetQueryResult:
 # _start_or_continue_conversation
 # ---------------------------------------------------------------------------
 
+
 class TestStartOrContinueConversation:
     @pytest.mark.asyncio
     async def test_raises_when_no_space_id(self):
         tool = GenieTool()
-        with patch.object(tool, "_get_workspace_url",
-                          AsyncMock(return_value="https://ws.example.com")):
+        with patch.object(
+            tool, "_get_workspace_url", AsyncMock(return_value="https://ws.example.com")
+        ):
             with pytest.raises(ValueError, match="space ID"):
                 await tool._start_or_continue_conversation("question")
 
     @pytest.mark.asyncio
     async def test_raises_when_no_auth(self):
         tool = GenieTool(tool_config={"spaceId": "s1"})
-        with patch.object(tool, "_get_workspace_url",
-                          AsyncMock(return_value="https://ws.example.com")):
+        with patch.object(
+            tool, "_get_workspace_url", AsyncMock(return_value="https://ws.example.com")
+        ):
             with patch.object(tool, "_get_auth_headers", AsyncMock(return_value=None)):
                 with pytest.raises(Exception, match="No authentication"):
                     await tool._start_or_continue_conversation("question")
@@ -671,15 +747,24 @@ class TestStartOrContinueConversation:
         mock_session = _make_aiohttp_mock(200, json_data={"id": "msg-new"})
 
         # Suppress permission test
-        with patch.object(tool, "_get_workspace_url",
-                          AsyncMock(return_value="https://ws.example.com")):
-            with patch.object(tool, "_get_auth_headers",
-                              AsyncMock(return_value={"Authorization": "Bearer tok"})):
-                with patch.object(tool, "_test_token_permissions",
-                                  AsyncMock(return_value=True)):
-                    with patch("src.services.tools.genie_tool.aiohttp.ClientSession",
-                               return_value=mock_session):
-                        result = await tool._start_or_continue_conversation("follow-up question")
+        with patch.object(
+            tool, "_get_workspace_url", AsyncMock(return_value="https://ws.example.com")
+        ):
+            with patch.object(
+                tool,
+                "_get_auth_headers",
+                AsyncMock(return_value={"Authorization": "Bearer tok"}),
+            ):
+                with patch.object(
+                    tool, "_test_token_permissions", AsyncMock(return_value=True)
+                ):
+                    with patch(
+                        "src.services.tools.genie_tool.aiohttp.ClientSession",
+                        return_value=mock_session,
+                    ):
+                        result = await tool._start_or_continue_conversation(
+                            "follow-up question"
+                        )
 
         assert result["conversation_id"] == "existing-conv"
 
@@ -692,15 +777,24 @@ class TestStartOrContinueConversation:
             json_data={"conversation_id": "new-conv", "message_id": "msg-1"},
         )
 
-        with patch.object(tool, "_get_workspace_url",
-                          AsyncMock(return_value="https://ws.example.com")):
-            with patch.object(tool, "_get_auth_headers",
-                              AsyncMock(return_value={"Authorization": "Bearer tok"})):
-                with patch.object(tool, "_test_token_permissions",
-                                  AsyncMock(return_value=True)):
-                    with patch("src.services.tools.genie_tool.aiohttp.ClientSession",
-                               return_value=mock_session):
-                        result = await tool._start_or_continue_conversation("new question")
+        with patch.object(
+            tool, "_get_workspace_url", AsyncMock(return_value="https://ws.example.com")
+        ):
+            with patch.object(
+                tool,
+                "_get_auth_headers",
+                AsyncMock(return_value={"Authorization": "Bearer tok"}),
+            ):
+                with patch.object(
+                    tool, "_test_token_permissions", AsyncMock(return_value=True)
+                ):
+                    with patch(
+                        "src.services.tools.genie_tool.aiohttp.ClientSession",
+                        return_value=mock_session,
+                    ):
+                        result = await tool._start_or_continue_conversation(
+                            "new question"
+                        )
 
         assert result["conversation_id"] == "new-conv"
         assert tool._current_conversation_id == "new-conv"
@@ -712,17 +806,27 @@ class TestStartOrContinueConversation:
 
         mock_session = _make_aiohttp_mock(
             200,
-            json_data={"conversation": {"id": "nested-conv"}, "message": {"id": "nested-msg"}},
+            json_data={
+                "conversation": {"id": "nested-conv"},
+                "message": {"id": "nested-msg"},
+            },
         )
 
-        with patch.object(tool, "_get_workspace_url",
-                          AsyncMock(return_value="https://ws.example.com")):
-            with patch.object(tool, "_get_auth_headers",
-                              AsyncMock(return_value={"Authorization": "Bearer tok"})):
-                with patch.object(tool, "_test_token_permissions",
-                                  AsyncMock(return_value=True)):
-                    with patch("src.services.tools.genie_tool.aiohttp.ClientSession",
-                               return_value=mock_session):
+        with patch.object(
+            tool, "_get_workspace_url", AsyncMock(return_value="https://ws.example.com")
+        ):
+            with patch.object(
+                tool,
+                "_get_auth_headers",
+                AsyncMock(return_value={"Authorization": "Bearer tok"}),
+            ):
+                with patch.object(
+                    tool, "_test_token_permissions", AsyncMock(return_value=True)
+                ):
+                    with patch(
+                        "src.services.tools.genie_tool.aiohttp.ClientSession",
+                        return_value=mock_session,
+                    ):
                         result = await tool._start_or_continue_conversation("question")
 
         assert result["conversation_id"] == "nested-conv"
@@ -732,6 +836,7 @@ class TestStartOrContinueConversation:
 # ---------------------------------------------------------------------------
 # _test_token_permissions
 # ---------------------------------------------------------------------------
+
 
 def _make_aiohttp_mock(status, text="", json_data=None):
     """Helper to build a properly-configured aiohttp mock session."""
@@ -760,9 +865,13 @@ class TestTestTokenPermissions:
 
         mock_session = _make_aiohttp_mock(200)
 
-        with patch("src.services.tools.genie_tool.aiohttp.ClientSession",
-                   return_value=mock_session):
-            result = await tool._test_token_permissions(headers, "https://ws.example.com")
+        with patch(
+            "src.services.tools.genie_tool.aiohttp.ClientSession",
+            return_value=mock_session,
+        ):
+            result = await tool._test_token_permissions(
+                headers, "https://ws.example.com"
+            )
 
         assert result is True
 
@@ -773,9 +882,13 @@ class TestTestTokenPermissions:
 
         mock_session = _make_aiohttp_mock(403, text="Forbidden")
 
-        with patch("src.services.tools.genie_tool.aiohttp.ClientSession",
-                   return_value=mock_session):
-            result = await tool._test_token_permissions(headers, "https://ws.example.com")
+        with patch(
+            "src.services.tools.genie_tool.aiohttp.ClientSession",
+            return_value=mock_session,
+        ):
+            result = await tool._test_token_permissions(
+                headers, "https://ws.example.com"
+            )
 
         assert result is False
 
@@ -786,9 +899,13 @@ class TestTestTokenPermissions:
 
         mock_session = _make_aiohttp_mock(500, text="Internal Error")
 
-        with patch("src.services.tools.genie_tool.aiohttp.ClientSession",
-                   return_value=mock_session):
-            result = await tool._test_token_permissions(headers, "https://ws.example.com")
+        with patch(
+            "src.services.tools.genie_tool.aiohttp.ClientSession",
+            return_value=mock_session,
+        ):
+            result = await tool._test_token_permissions(
+                headers, "https://ws.example.com"
+            )
 
         assert result is False
 
@@ -797,9 +914,13 @@ class TestTestTokenPermissions:
         tool = GenieTool()
         headers = {"Authorization": "Bearer tok"}
 
-        with patch("src.services.tools.genie_tool.aiohttp.ClientSession",
-                   side_effect=Exception("network error")):
-            result = await tool._test_token_permissions(headers, "https://ws.example.com")
+        with patch(
+            "src.services.tools.genie_tool.aiohttp.ClientSession",
+            side_effect=Exception("network error"),
+        ):
+            result = await tool._test_token_permissions(
+                headers, "https://ws.example.com"
+            )
 
         assert result is False
 
@@ -808,16 +929,25 @@ class TestTestTokenPermissions:
         """JWT token with missing scopes logs warning but 200 response returns True."""
         tool = GenieTool()
         import base64
-        payload = base64.urlsafe_b64encode(
-            json.dumps({"sub": "test", "scope": "other-scope"}).encode()
-        ).decode().rstrip("=")
+
+        payload = (
+            base64.urlsafe_b64encode(
+                json.dumps({"sub": "test", "scope": "other-scope"}).encode()
+            )
+            .decode()
+            .rstrip("=")
+        )
         fake_jwt = f"eyJhbGciOiJSUzI1NiJ9.{payload}.sig"
         headers = {"Authorization": f"Bearer {fake_jwt}"}
 
         mock_session = _make_aiohttp_mock(200)
 
-        with patch("src.services.tools.genie_tool.aiohttp.ClientSession",
-                   return_value=mock_session):
-            result = await tool._test_token_permissions(headers, "https://ws.example.com")
+        with patch(
+            "src.services.tools.genie_tool.aiohttp.ClientSession",
+            return_value=mock_session,
+        ):
+            result = await tool._test_token_permissions(
+                headers, "https://ws.example.com"
+            )
 
         assert result is True  # 200 response means success regardless of scope warning

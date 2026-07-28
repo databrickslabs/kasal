@@ -1,10 +1,16 @@
 """Unit tests for the ui_config_router handlers (workspace-admin gated PUT)."""
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.api.ui_config_router import get_ui_config, update_ui_config, get_ui_config_service
-from src.schemas.ui_config import UIConfigUpdate, UIConfigResponse
+import pytest
+
+from src.api.ui_config_router import (
+    get_ui_config,
+    get_ui_config_service,
+    update_ui_config,
+)
 from src.core.exceptions import ForbiddenError
+from src.schemas.ui_config import UIConfigResponse, UIConfigUpdate
 
 
 @pytest.mark.asyncio

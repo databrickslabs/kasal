@@ -14,24 +14,27 @@ Targets uncovered lines:
   572-578 set_search_path_async
   592-598 set_search_path_sync
 """
+
 import asyncio
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 from sqlalchemy import text
 
 from src.services.databricks.lakebase.schema import (
     LakebaseSchemaService,
-    _validate_identifier,
     _quote_pg_role,
+    _validate_identifier,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class _AsyncCtxMgr:
     """Reusable async context manager that returns a given mock connection."""
+
     def __init__(self, conn):
         self._conn = conn
 
@@ -44,6 +47,7 @@ class _AsyncCtxMgr:
 
 class _FailingAsyncCtxMgr:
     """Async context manager that raises on __aenter__."""
+
     def __init__(self, exc):
         self._exc = exc
 
@@ -56,6 +60,7 @@ class _FailingAsyncCtxMgr:
 
 class _SyncCtxMgr:
     """Sync context manager that returns a given mock connection."""
+
     def __init__(self, conn):
         self._conn = conn
 
@@ -77,12 +82,14 @@ def _async_engine_sequence(*conns):
     """Build a mock async engine whose begin() cycles through connections."""
     engine = MagicMock()
     conns_iter = iter(conns)
+
     def _begin():
         try:
             return _AsyncCtxMgr(next(conns_iter))
         except StopIteration:
             # Return the last conn repeated
             return _AsyncCtxMgr(conns[-1])
+
     engine.begin = MagicMock(side_effect=_begin)
     return engine
 
@@ -98,11 +105,13 @@ def _sync_engine_sequence(*conns):
     """Build a mock sync engine whose begin() cycles through connections."""
     engine = MagicMock()
     conns_iter = iter(conns)
+
     def _begin():
         try:
             return _SyncCtxMgr(next(conns_iter))
         except StopIteration:
             return _SyncCtxMgr(conns[-1])
+
     engine.begin = MagicMock(side_effect=_begin)
     return engine
 
@@ -110,6 +119,7 @@ def _sync_engine_sequence(*conns):
 # ---------------------------------------------------------------------------
 # create_schema_async — recreate=True paths (lines 93-148)
 # ---------------------------------------------------------------------------
+
 
 class TestCreateSchemaAsyncRecreatePaths:
 
@@ -161,13 +171,15 @@ class TestCreateSchemaAsyncRecreatePaths:
         # 2nd execute: GRANT fails
         # 3rd execute: GRANT public fails
         # 4th: DEFAULT PRIVILEGES succeeds
-        conn.execute = AsyncMock(side_effect=[
-            None,
-            Exception("permission denied for schema"),
-            None,
-            None,
-            None,
-        ])
+        conn.execute = AsyncMock(
+            side_effect=[
+                None,
+                Exception("permission denied for schema"),
+                None,
+                None,
+                None,
+            ]
+        )
         engine = _async_engine(conn)
 
         await service.create_schema_async(engine, "user@example.com")
@@ -179,13 +191,15 @@ class TestCreateSchemaAsyncRecreatePaths:
         """ALTER DEFAULT PRIVILEGES error is caught."""
         conn = AsyncMock()
         # All GRANT statements fail, but CREATE succeeds
-        conn.execute = AsyncMock(side_effect=[
-            None,  # CREATE SCHEMA
-            None,  # GRANT schema
-            None,  # GRANT public
-            Exception("privilege error"),  # ALTER DEFAULT on tables
-            Exception("privilege error"),  # ALTER DEFAULT on sequences
-        ])
+        conn.execute = AsyncMock(
+            side_effect=[
+                None,  # CREATE SCHEMA
+                None,  # GRANT schema
+                None,  # GRANT public
+                Exception("privilege error"),  # ALTER DEFAULT on tables
+                Exception("privilege error"),  # ALTER DEFAULT on sequences
+            ]
+        )
         engine = _async_engine(conn)
         # Should not raise
         await service.create_schema_async(engine, "user@example.com")
@@ -194,7 +208,9 @@ class TestCreateSchemaAsyncRecreatePaths:
     async def test_engine_begin_raises_propagates(self, service):
         """If engine.begin() itself raises, the error propagates."""
         engine = MagicMock()
-        engine.begin = MagicMock(return_value=_FailingAsyncCtxMgr(RuntimeError("engine fail")))
+        engine.begin = MagicMock(
+            return_value=_FailingAsyncCtxMgr(RuntimeError("engine fail"))
+        )
         with pytest.raises(RuntimeError, match="engine fail"):
             await service.create_schema_async(engine, "user@example.com")
 
@@ -202,6 +218,7 @@ class TestCreateSchemaAsyncRecreatePaths:
 # ---------------------------------------------------------------------------
 # create_schema_sync — recreate paths (lines 167-213)
 # ---------------------------------------------------------------------------
+
 
 class TestCreateSchemaSyncRecreatePaths:
 
@@ -244,12 +261,14 @@ class TestCreateSchemaSyncRecreatePaths:
     def test_grant_failure_is_swallowed(self, service):
         """Grant error in sync path is caught."""
         conn = MagicMock()
-        conn.execute = MagicMock(side_effect=[
-            None,  # CREATE SCHEMA
-            Exception("GRANT failed"),  # GRANT schema
-            None,
-            None,
-        ])
+        conn.execute = MagicMock(
+            side_effect=[
+                None,  # CREATE SCHEMA
+                Exception("GRANT failed"),  # GRANT schema
+                None,
+                None,
+            ]
+        )
         engine = _sync_engine(conn)
         # Should not raise
         service.create_schema_sync(engine, "user@example.com")
@@ -257,11 +276,14 @@ class TestCreateSchemaSyncRecreatePaths:
     def test_engine_error_propagates(self, service):
         """Errors in create_schema_sync propagate after logging."""
         engine = MagicMock()
+
         class FailCtx:
             def __enter__(self):
                 raise RuntimeError("engine fail")
+
             def __exit__(self, *args):
                 return False
+
         engine.begin = MagicMock(return_value=FailCtx())
         with pytest.raises(RuntimeError, match="engine fail"):
             service.create_schema_sync(engine, "user@example.com")
@@ -270,6 +292,7 @@ class TestCreateSchemaSyncRecreatePaths:
 # ---------------------------------------------------------------------------
 # create_tables_async (lines 228-266)
 # ---------------------------------------------------------------------------
+
 
 class TestCreateTablesAsyncDetailed:
 
@@ -359,6 +382,7 @@ class TestCreateTablesAsyncDetailed:
 # create_tables_sync (lines 280-328)
 # ---------------------------------------------------------------------------
 
+
 class TestCreateTablesSyncDetailed:
 
     @pytest.fixture
@@ -382,7 +406,11 @@ class TestCreateTablesSyncDetailed:
 
         with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
             mock_base.metadata.sorted_tables = [mock_table]
-            with patch.object(service, "_create_tables_batch_sync", return_value=[("agents", True, None)]) as batch_mock:
+            with patch.object(
+                service,
+                "_create_tables_batch_sync",
+                return_value=[("agents", True, None)],
+            ) as batch_mock:
                 service.create_tables_sync(engine)
                 batch_mock.assert_called_once()
 
@@ -416,7 +444,9 @@ class TestCreateTablesSyncDetailed:
         with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
             mock_base.metadata.sorted_tables = tables
             batch_results = [(t.name, True, None) for t in tables]
-            with patch.object(service, "_create_tables_batch_sync", return_value=batch_results):
+            with patch.object(
+                service, "_create_tables_batch_sync", return_value=batch_results
+            ):
                 service.create_tables_sync(engine)
 
     def test_batch_failure_is_logged_but_does_not_raise(self, service):
@@ -434,7 +464,9 @@ class TestCreateTablesSyncDetailed:
         error_results = [(t.name, False, "some error") for t in tables]
         with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
             mock_base.metadata.sorted_tables = tables
-            with patch.object(service, "_create_tables_batch_sync", return_value=error_results):
+            with patch.object(
+                service, "_create_tables_batch_sync", return_value=error_results
+            ):
                 # Should not raise
                 service.create_tables_sync(engine)
 
@@ -443,7 +475,9 @@ class TestCreateTablesSyncDetailed:
         with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
             # Make sorted_tables raise when iterated inside _get_dependency_waves
             mock_base.metadata.sorted_tables = MagicMock()
-            with patch.object(service, "_get_dependency_waves", side_effect=RuntimeError("meta error")):
+            with patch.object(
+                service, "_get_dependency_waves", side_effect=RuntimeError("meta error")
+            ):
                 with pytest.raises(RuntimeError, match="meta error"):
                     service.create_tables_sync(MagicMock())
 
@@ -451,6 +485,7 @@ class TestCreateTablesSyncDetailed:
 # ---------------------------------------------------------------------------
 # create_tables_async_stream (lines 345-395)
 # ---------------------------------------------------------------------------
+
 
 class TestCreateTablesAsyncStream:
 
@@ -560,6 +595,7 @@ class TestCreateTablesAsyncStream:
 # _get_dependency_waves — circular deps fallback (lines 408-435)
 # ---------------------------------------------------------------------------
 
+
 class TestGetDependencyWavesCircular:
 
     def test_circular_dependencies_force_remaining_into_final_wave(self):
@@ -586,6 +622,7 @@ class TestGetDependencyWavesCircular:
 # ---------------------------------------------------------------------------
 # _create_tables_batch_sync — multiple tables (lines 448-457)
 # ---------------------------------------------------------------------------
+
 
 class TestCreateTablesBatchSyncMultiple:
 
@@ -633,6 +670,7 @@ class TestCreateTablesBatchSyncMultiple:
 # _create_doc_embeddings_sync (lines 461-474)
 # ---------------------------------------------------------------------------
 
+
 class TestCreateDocEmbeddingsSyncDetailed:
 
     @pytest.fixture
@@ -670,6 +708,7 @@ class TestCreateDocEmbeddingsSyncDetailed:
 # create_tables_sync_stream — parallel path (lines 490-558)
 # ---------------------------------------------------------------------------
 
+
 class TestCreateTablesSyncStreamDetailed:
 
     @pytest.fixture
@@ -691,7 +730,9 @@ class TestCreateTablesSyncStreamDetailed:
         batch_results = [(t.name, True, None) for t in tables]
         with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
             mock_base.metadata.sorted_tables = tables
-            with patch.object(service, "_create_tables_batch_sync", return_value=batch_results):
+            with patch.object(
+                service, "_create_tables_batch_sync", return_value=batch_results
+            ):
                 events = list(service.create_tables_sync_stream(engine))
 
         success_events = [e for e in events if e["type"] == "success"]
@@ -712,7 +753,9 @@ class TestCreateTablesSyncStreamDetailed:
         error_results = [(t.name, False, "connection lost") for t in tables]
         with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
             mock_base.metadata.sorted_tables = tables
-            with patch.object(service, "_create_tables_batch_sync", return_value=error_results):
+            with patch.object(
+                service, "_create_tables_batch_sync", return_value=error_results
+            ):
                 events = list(service.create_tables_sync_stream(engine))
 
         error_events = [e for e in events if e["type"] == "error"]
@@ -734,7 +777,11 @@ class TestCreateTablesSyncStreamDetailed:
             mock_base.metadata.sorted_tables = tables
             # _create_tables_batch_sync raises inside the ThreadPoolExecutor future
             # The exception is caught by as_completed and yields error events
-            with patch.object(service, "_create_tables_batch_sync", side_effect=RuntimeError("db crash")):
+            with patch.object(
+                service,
+                "_create_tables_batch_sync",
+                side_effect=RuntimeError("db crash"),
+            ):
                 events = []
                 try:
                     for ev in service.create_tables_sync_stream(engine):
@@ -761,10 +808,14 @@ class TestCreateTablesSyncStreamDetailed:
         emb.foreign_keys = set()
         tables.append(emb)
 
-        batch_results = [(t.name, True, None) for t in tables if t.name != "documentation_embeddings"]
+        batch_results = [
+            (t.name, True, None) for t in tables if t.name != "documentation_embeddings"
+        ]
         with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
             mock_base.metadata.sorted_tables = tables
-            with patch.object(service, "_create_tables_batch_sync", return_value=batch_results):
+            with patch.object(
+                service, "_create_tables_batch_sync", return_value=batch_results
+            ):
                 with patch.object(service, "_create_doc_embeddings_sync") as doc_mock:
                     events = list(service.create_tables_sync_stream(engine))
                 doc_mock.assert_called_once_with(engine)
@@ -780,10 +831,16 @@ class TestCreateTablesSyncStreamDetailed:
 
         with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
             mock_base.metadata.sorted_tables = [t]
-            with patch.object(service, "_create_tables_batch_sync", return_value=[("agents", True, None)]):
+            with patch.object(
+                service,
+                "_create_tables_batch_sync",
+                return_value=[("agents", True, None)],
+            ):
                 events = list(service.create_tables_sync_stream(engine))
 
-        success_events = [e for e in events if e["type"] == "success" and "agents" in e["message"]]
+        success_events = [
+            e for e in events if e["type"] == "success" and "agents" in e["message"]
+        ]
         assert len(success_events) >= 1
 
     def test_small_wave_single_table_error(self, service):
@@ -797,7 +854,11 @@ class TestCreateTablesSyncStreamDetailed:
 
         with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
             mock_base.metadata.sorted_tables = [t]
-            with patch.object(service, "_create_tables_batch_sync", return_value=[("agents", False, "pk conflict")]):
+            with patch.object(
+                service,
+                "_create_tables_batch_sync",
+                return_value=[("agents", False, "pk conflict")],
+            ):
                 events = list(service.create_tables_sync_stream(engine))
 
         error_events = [e for e in events if e["type"] == "error"]
@@ -807,7 +868,9 @@ class TestCreateTablesSyncStreamDetailed:
         """Exception at top level yields error event and re-raises."""
         with patch("src.services.databricks.lakebase.schema.Base") as mock_base:
             mock_base.metadata.sorted_tables = MagicMock()
-            with patch.object(service, "_get_dependency_waves", side_effect=RuntimeError("meta fail")):
+            with patch.object(
+                service, "_get_dependency_waves", side_effect=RuntimeError("meta fail")
+            ):
                 with pytest.raises(RuntimeError, match="meta fail"):
                     list(service.create_tables_sync_stream(MagicMock()))
 
@@ -815,6 +878,7 @@ class TestCreateTablesSyncStreamDetailed:
 # ---------------------------------------------------------------------------
 # set_search_path_async (lines 572-578)
 # ---------------------------------------------------------------------------
+
 
 class TestSetSearchPathAsyncDetailed:
 
@@ -846,6 +910,7 @@ class TestSetSearchPathAsyncDetailed:
 # ---------------------------------------------------------------------------
 # set_search_path_sync (lines 592-598)
 # ---------------------------------------------------------------------------
+
 
 class TestSetSearchPathSyncDetailed:
 

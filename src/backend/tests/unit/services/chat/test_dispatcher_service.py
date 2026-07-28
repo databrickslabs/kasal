@@ -12,9 +12,10 @@ Covers:
 - MLflow start_span integration inside detect_intent
 """
 
-import pytest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+
+import pytest
 
 from src.core.cache import intent_cache
 from src.schemas.dispatcher import DispatcherRequest, DispatcherResponse, IntentType
@@ -285,7 +286,8 @@ class TestMaybeEnableMlflowTracing:
         gc = _make_group_context()
         with patch(
             "src.services.otel_tracing.mlflow_parent_setup.configure_parent_mlflow_tracing",
-            new_callable=AsyncMock, return_value=True,
+            new_callable=AsyncMock,
+            return_value=True,
         ) as mock_cfg:
             result = await svc._maybe_enable_mlflow_tracing(gc)
         assert result is True
@@ -296,7 +298,8 @@ class TestMaybeEnableMlflowTracing:
         svc = _build_service()
         with patch(
             "src.services.otel_tracing.mlflow_parent_setup.configure_parent_mlflow_tracing",
-            new_callable=AsyncMock, return_value=False,
+            new_callable=AsyncMock,
+            return_value=False,
         ):
             assert await svc._maybe_enable_mlflow_tracing(None) is False
 
@@ -1202,9 +1205,7 @@ class TestDispatch:
         svc.crew_service.create_crew_progressive = AsyncMock(return_value=None)
 
         request = DispatcherRequest(message="build team", model="m")
-        with patch(
-            "asyncio.create_task", side_effect=RuntimeError("crew gen error")
-        ):
+        with patch("asyncio.create_task", side_effect=RuntimeError("crew gen error")):
             with pytest.raises(RuntimeError, match="crew gen error"):
                 await svc.dispatch(request)
 
@@ -1819,8 +1820,12 @@ class TestEdgeCases:
         from src.services.chat.dispatcher import DEFAULT_DISPATCHER_MODEL
 
         svc.detect_intent.assert_awaited_once_with(
-            "hello", DEFAULT_DISPATCHER_MODEL, gc, None,
-            chat_mode=False, last_resort_model="m",
+            "hello",
+            DEFAULT_DISPATCHER_MODEL,
+            gc,
+            None,
+            chat_mode=False,
+            last_resort_model="m",
         )
 
     def test_semantic_analysis_returns_all_expected_keys(self):
@@ -2095,11 +2100,16 @@ class TestDispatchWithSuggestedTools:
             return MagicMock()
 
         request = DispatcherRequest(
-            message="research AI trends", model="m",
+            message="research AI trends",
+            model="m",
             tools=["SerperDevTool", "ScrapeWebsiteTool", "GenieTool"],
         )
-        with patch("asyncio.create_task", side_effect=capture_create_task), patch(
-            "src.services.tools.tool_service.ToolService", return_value=mock_tool_svc
+        with (
+            patch("asyncio.create_task", side_effect=capture_create_task),
+            patch(
+                "src.services.tools.tool_service.ToolService",
+                return_value=mock_tool_svc,
+            ),
         ):
             await svc.dispatch(request)
 
@@ -2221,7 +2231,9 @@ class TestDispatchWithSuggestedTools:
         )
 
         request = DispatcherRequest(message="create an agent", model="m")
-        with patch("src.services.tools.tool_service.ToolService", return_value=mock_tool_svc):
+        with patch(
+            "src.services.tools.tool_service.ToolService", return_value=mock_tool_svc
+        ):
             await svc.dispatch(request)
 
         call_kwargs = svc.agent_service.generate_agent.call_args.kwargs
@@ -3118,7 +3130,9 @@ class TestDeleteSlashCommandDetection:
         assert result["extracted_info"]["args"] == "test"
 
     def test_delete_crew_multiword_name(self):
-        result = DispatcherService._detect_slash_command("/delete crew My Research Crew")
+        result = DispatcherService._detect_slash_command(
+            "/delete crew My Research Crew"
+        )
         assert result is not None
         assert result["intent"] == "catalog_delete"
         assert result["extracted_info"]["args"] == "My Research Crew"
@@ -3505,7 +3519,9 @@ class TestFlowDeleteDispatch:
 class TestDispatchStreamingCrewAndToolResolution:
     """Tests for GENERATE_CREW streaming dispatch and workspace tool resolution."""
 
-    def _make_intent_result(self, intent, confidence=0.9, suggested_prompt=None, suggested_tools=None):
+    def _make_intent_result(
+        self, intent, confidence=0.9, suggested_prompt=None, suggested_tools=None
+    ):
         return {
             "intent": intent,
             "confidence": confidence,
@@ -3529,7 +3545,9 @@ class TestDispatchStreamingCrewAndToolResolution:
             message="build a research team", model="test-model", tools=["web_search"]
         )
 
-        with patch("src.services.chat.dispatcher.asyncio.create_task") as mock_create_task:
+        with patch(
+            "src.services.chat.dispatcher.asyncio.create_task"
+        ) as mock_create_task:
             await svc.dispatch(request)
 
             mock_create_task.assert_called_once()
@@ -3585,7 +3603,9 @@ class TestDispatchStreamingCrewAndToolResolution:
         mock_tools_response = SimpleNamespace(tools=[mock_tool, mock_tool2])
 
         mock_tool_svc_instance = MagicMock()
-        mock_tool_svc_instance.get_enabled_tools = AsyncMock(return_value=mock_tools_response)
+        mock_tool_svc_instance.get_enabled_tools = AsyncMock(
+            return_value=mock_tools_response
+        )
 
         request = DispatcherRequest(message="build a team", model="m", tools=[])
 
@@ -3666,13 +3686,16 @@ class TestDispatchStreamingCrewAndToolResolution:
 
         with patch("src.services.chat.dispatcher.asyncio.create_task"):
             with patch(
-                "src.services.tools.tool_service.ToolService", return_value=mock_tool_svc
+                "src.services.tools.tool_service.ToolService",
+                return_value=mock_tool_svc,
             ):
                 await svc.dispatch(request)
 
                 progressive_call = svc.crew_service.create_crew_progressive.call_args
                 streaming_req = progressive_call[0][0]
-                assert streaming_req.tools == ["UserTool1"]  # UserTool2 dropped (not enabled)
+                assert streaming_req.tools == [
+                    "UserTool1"
+                ]  # UserTool2 dropped (not enabled)
 
 
 # ===================================================================
@@ -3701,8 +3724,10 @@ class TestMlflowImportFallback:
             # Force re-execute the try/except at module level by simulating
             # We can't easily re-import, but we can test the flags directly
             # The simplest way: patch and verify behavior when _HAS_MLFLOW=False
-            with patch.object(ds, "_HAS_MLFLOW", False), \
-                 patch.object(ds, "_mlflow", None):
+            with (
+                patch.object(ds, "_HAS_MLFLOW", False),
+                patch.object(ds, "_mlflow", None),
+            ):
                 assert ds._HAS_MLFLOW is False
                 assert ds._mlflow is None
         finally:
@@ -3726,11 +3751,14 @@ class TestCallLlmWithRetry:
         """Retryable errors trigger backoff retries, then raise after exhaustion."""
         svc = _build_service()
 
-        with patch(
-            "src.services.chat.dispatcher.LLMManager.completion",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("timeout error occurred"),
-        ), patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with (
+            patch(
+                "src.services.chat.dispatcher.LLMManager.completion",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("timeout error occurred"),
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        ):
             with pytest.raises(RuntimeError, match="timeout"):
                 await svc._call_llm_with_retry(
                     messages=[{"role": "user", "content": "test"}],
@@ -3745,11 +3773,14 @@ class TestCallLlmWithRetry:
         """Non-retryable errors raise immediately without retry."""
         svc = _build_service()
 
-        with patch(
-            "src.services.chat.dispatcher.LLMManager.completion",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("invalid api key"),
-        ), patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with (
+            patch(
+                "src.services.chat.dispatcher.LLMManager.completion",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("invalid api key"),
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        ):
             with pytest.raises(RuntimeError, match="invalid api key"):
                 await svc._call_llm_with_retry(
                     messages=[{"role": "user", "content": "test"}],
@@ -3764,11 +3795,14 @@ class TestCallLlmWithRetry:
         """Backoff doubles each retry attempt."""
         svc = _build_service()
 
-        with patch(
-            "src.services.chat.dispatcher.LLMManager.completion",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("connection reset"),
-        ), patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with (
+            patch(
+                "src.services.chat.dispatcher.LLMManager.completion",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("connection reset"),
+            ),
+            patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        ):
             with pytest.raises(RuntimeError, match="connection"):
                 await svc._call_llm_with_retry(
                     messages=[{"role": "user", "content": "test"}],
@@ -3823,7 +3857,10 @@ class TestCircuitBreaker:
 
     def test_record_success_resets_counter(self):
         """_record_success resets the failure counter for the model."""
-        DispatcherService._intent_failures["ok-model"] = {"count": 3, "last_failure": 100}
+        DispatcherService._intent_failures["ok-model"] = {
+            "count": 3,
+            "last_failure": 100,
+        }
         DispatcherService._record_success("ok-model")
 
         assert DispatcherService._intent_failures["ok-model"]["count"] == 0
@@ -3838,6 +3875,7 @@ class TestCircuitBreaker:
         """When EVERY candidate model's breaker is open, detect_intent fails fast
         without calling any LLM and returns circuit_breaker_fallback."""
         import time as time_mod
+
         from src.services.chat.dispatcher import DISPATCHER_FALLBACK_MODELS
 
         svc = _build_service()
@@ -4229,7 +4267,9 @@ class TestExecuteFlowWithRunName:
         flow1 = self._make_mock_flow(name="test", flow_id="f1")
         flow2 = self._make_mock_flow(name="test flow", flow_id="f2")
         svc.flow_service = AsyncMock()
-        svc.flow_service.get_all_flows_for_group = AsyncMock(return_value=[flow1, flow2])
+        svc.flow_service.get_all_flows_for_group = AsyncMock(
+            return_value=[flow1, flow2]
+        )
 
         gc = _make_group_context()
         request = DispatcherRequest(message="/run flow test", model="m")
@@ -4258,7 +4298,9 @@ class TestExecuteFlowWithRunName:
         flow2.updated_at = datetime(2026, 1, 10)
         flow2.created_at = datetime(2026, 1, 10)
         svc.flow_service = AsyncMock()
-        svc.flow_service.get_all_flows_for_group = AsyncMock(return_value=[flow1, flow2])
+        svc.flow_service.get_all_flows_for_group = AsyncMock(
+            return_value=[flow1, flow2]
+        )
 
         gc = _make_group_context()
         request = DispatcherRequest(message="/run flow dup flow", model="m")
@@ -4282,7 +4324,9 @@ class TestExecuteFlowWithRunName:
         flow1 = self._make_mock_flow(name="test alpha", flow_id="f1")
         flow2 = self._make_mock_flow(name="test beta", flow_id="f2")
         svc.flow_service = AsyncMock()
-        svc.flow_service.get_all_flows_for_group = AsyncMock(return_value=[flow1, flow2])
+        svc.flow_service.get_all_flows_for_group = AsyncMock(
+            return_value=[flow1, flow2]
+        )
 
         gc = _make_group_context()
         request = DispatcherRequest(message="/run flow test", model="m")
@@ -4394,9 +4438,9 @@ class TestToolCatalogDiet:
         catalog = DispatcherService._build_tool_catalog(tools)
 
         assert "GenieTool" in catalog and "SerperDevTool" in catalog
-        assert "short and sweet" in catalog          # short ones intact
-        assert "x" * 200 not in catalog              # long ones truncated
-        assert len(catalog) < 800                    # bounded total
+        assert "short and sweet" in catalog  # short ones intact
+        assert "x" * 200 not in catalog  # long ones truncated
+        assert len(catalog) < 800  # bounded total
 
     def test_missing_description_is_tolerated(self):
         from src.services.chat.dispatcher import DispatcherService
@@ -4412,8 +4456,12 @@ class TestMlflowTracingHardToggle:
 
     def test_toggle_calls_mlflow_tracing_api(self):
         from src.services.chat import dispatcher as m
+
         fake_mlflow = MagicMock()
-        with patch.object(m, "_mlflow", fake_mlflow), patch.object(m, "_HAS_MLFLOW", True):
+        with (
+            patch.object(m, "_mlflow", fake_mlflow),
+            patch.object(m, "_HAS_MLFLOW", True),
+        ):
             m._set_mlflow_tracing(False)
             fake_mlflow.tracing.disable.assert_called_once()
             m._set_mlflow_tracing(True)
@@ -4421,6 +4469,7 @@ class TestMlflowTracingHardToggle:
 
     def test_toggle_noop_without_mlflow(self):
         from src.services.chat import dispatcher as m
+
         with patch.object(m, "_HAS_MLFLOW", False):
             m._set_mlflow_tracing(False)  # must not raise
 
@@ -4438,30 +4487,55 @@ class TestExplicitCreationIntent:
     def test_create_a_task_routes_to_task(self):
         svc = _build_service()
         # The exact bug report: "create a task with gpt nano" was misrouted to a crew/plan.
-        assert svc._explicit_creation_intent("create a task with gpt nano") == "generate_task"
-        assert svc._explicit_creation_intent("add a task to check server status") == "generate_task"
+        assert (
+            svc._explicit_creation_intent("create a task with gpt nano")
+            == "generate_task"
+        )
+        assert (
+            svc._explicit_creation_intent("add a task to check server status")
+            == "generate_task"
+        )
         assert svc._explicit_creation_intent("create a new task") == "generate_task"
 
     def test_create_an_agent_routes_to_agent(self):
         svc = _build_service()
-        assert svc._explicit_creation_intent("create an agent that analyzes data") == "generate_agent"
+        assert (
+            svc._explicit_creation_intent("create an agent that analyzes data")
+            == "generate_agent"
+        )
         assert svc._explicit_creation_intent("make me a bot") == "generate_agent"
 
     def test_multi_step_messages_stay_crew_first(self):
         svc = _build_service()
         # "and <verb>" / "then" -> multi-step workflow -> crew (None = let LLM/default decide)
-        assert svc._explicit_creation_intent("create a task and then send an email") is None
-        assert svc._explicit_creation_intent("create a task, analyze it, and write a report") is None
+        assert (
+            svc._explicit_creation_intent("create a task and then send an email")
+            is None
+        )
+        assert (
+            svc._explicit_creation_intent(
+                "create a task, analyze it, and write a report"
+            )
+            is None
+        )
 
     def test_task_force_is_not_a_task(self):
         svc = _build_service()
         # "task force"/"task list" connote broader work, not a single task entity.
-        assert svc._explicit_creation_intent("create a task force to research the market") is None
+        assert (
+            svc._explicit_creation_intent("create a task force to research the market")
+            is None
+        )
 
     def test_generic_messages_defer_to_llm(self):
         svc = _build_service()
-        assert svc._explicit_creation_intent("get me the latest news from switzerland") is None
-        assert svc._explicit_creation_intent("analyze sales and build a dashboard") is None
+        assert (
+            svc._explicit_creation_intent("get me the latest news from switzerland")
+            is None
+        )
+        assert (
+            svc._explicit_creation_intent("analyze sales and build a dashboard") is None
+        )
 
 
 class TestDetectIntentLoggedModelAttribution:
@@ -4474,11 +4548,17 @@ class TestDetectIntentLoggedModelAttribution:
     @pytest.mark.asyncio
     async def test_logs_the_model_that_answered_not_the_first_candidate(self):
         svc = _build_service()
-        svc.detect_intent = AsyncMock(return_value={
-            "intent": "generate_crew", "confidence": 0.9, "extracted_info": {},
-            "suggested_prompt": "p", "suggested_tools": [],
-            "source": "llm", "model": "gpt-5-nano",
-        })
+        svc.detect_intent = AsyncMock(
+            return_value={
+                "intent": "generate_crew",
+                "confidence": 0.9,
+                "extracted_info": {},
+                "suggested_prompt": "p",
+                "suggested_tools": [],
+                "source": "llm",
+                "model": "gpt-5-nano",
+            }
+        )
         svc._log_llm_interaction = AsyncMock()
 
         await svc.detect_intent_logged("build a crew", "databricks-claude-haiku-4-5")
@@ -4491,11 +4571,17 @@ class TestDetectIntentLoggedModelAttribution:
     @pytest.mark.asyncio
     async def test_degraded_fallback_is_not_logged_as_a_model_success(self):
         svc = _build_service()
-        svc.detect_intent = AsyncMock(return_value={
-            "intent": "generate_crew", "confidence": 0.5, "extracted_info": {},
-            "suggested_prompt": "p", "suggested_tools": [],
-            "source": "semantic_fallback", "model": None,
-        })
+        svc.detect_intent = AsyncMock(
+            return_value={
+                "intent": "generate_crew",
+                "confidence": 0.5,
+                "extracted_info": {},
+                "suggested_prompt": "p",
+                "suggested_tools": [],
+                "source": "semantic_fallback",
+                "model": None,
+            }
+        )
         svc._log_llm_interaction = AsyncMock()
 
         await svc.detect_intent_logged("build a crew", "databricks-claude-haiku-4-5")
@@ -4518,7 +4604,10 @@ class TestDetectIntentLoggedModelAttribution:
             "src.services.chat.dispatcher.LLMManager.completion",
             new_callable=AsyncMock,
             # what completion(with_served_model=True) really returns
-            return_value=('{"intent": "generate_crew", "confidence": 0.9}', "gpt-5-nano"),
+            return_value=(
+                '{"intent": "generate_crew", "confidence": 0.9}',
+                "gpt-5-nano",
+            ),
         ):
             result = await svc.detect_intent_logged(
                 "build a crew to summarise a report", "databricks-claude-haiku-4-5"
@@ -4554,10 +4643,16 @@ class TestDetectIntentLoggedModelAttribution:
         svc = _build_service()
         svc._log_llm_interaction = AsyncMock()
         for source in ("chat_mode_fast_path", "slash_command"):
-            svc.detect_intent = AsyncMock(return_value={
-                "intent": "generate_crew", "confidence": 1.0, "extracted_info": {},
-                "suggested_prompt": "p", "suggested_tools": [], "source": source,
-            })
+            svc.detect_intent = AsyncMock(
+                return_value={
+                    "intent": "generate_crew",
+                    "confidence": 1.0,
+                    "extracted_info": {},
+                    "suggested_prompt": "p",
+                    "suggested_tools": [],
+                    "source": source,
+                }
+            )
             await svc.detect_intent_logged("hi", "m")
         svc._log_llm_interaction.assert_not_awaited()
 
@@ -4572,21 +4667,27 @@ class TestMultiAgentIsNotSingleAgent:
     def test_the_swiss_news_bug_report(self):
         svc = _build_service()
         # Exactly as typed by the user.
-        assert svc._explicit_creation_intent(
-            "create 4 agents one is going to give the swiss news on sports, "
-            "the other agent going to give news on politics, the other is going "
-            "to give on economy, on innovation and another on technology"
-        ) is None
+        assert (
+            svc._explicit_creation_intent(
+                "create 4 agents one is going to give the swiss news on sports, "
+                "the other agent going to give news on politics, the other is going "
+                "to give on economy, on innovation and another on technology"
+            )
+            is None
+        )
 
     def test_the_rewritten_prompt_variant(self):
         svc = _build_service()
         # What improve-prompt/suggested_prompt turns it into — spelled-out count.
-        assert svc._explicit_creation_intent(
-            "Create a CrewAI crew with four specialized agents: one agent reports "
-            "the latest Swiss sports news, one reports Swiss politics news, one "
-            "reports Swiss economy and innovation news, and one reports Swiss "
-            "technology news."
-        ) is None
+        assert (
+            svc._explicit_creation_intent(
+                "Create a CrewAI crew with four specialized agents: one agent reports "
+                "the latest Swiss sports news, one reports Swiss politics news, one "
+                "reports Swiss economy and innovation news, and one reports Swiss "
+                "technology news."
+            )
+            is None
+        )
 
     def test_plural_counted_and_collective_forms_defer_to_crew(self):
         svc = _build_service()
@@ -4632,24 +4733,42 @@ class TestResolveSurfaceIntent:
     def test_chatmode_collapses_task_and_agent_to_crew(self):
         svc = _build_service()
         # Even if the LLM (or the explicit phrasing) says task/agent, ChatMode -> crew.
-        assert svc._resolve_surface_intent("create a task", "generate_task", chat_mode=True)[0] == "generate_crew"
-        assert svc._resolve_surface_intent("create an agent", "generate_agent", chat_mode=True)[0] == "generate_crew"
+        assert (
+            svc._resolve_surface_intent(
+                "create a task", "generate_task", chat_mode=True
+            )[0]
+            == "generate_crew"
+        )
+        assert (
+            svc._resolve_surface_intent(
+                "create an agent", "generate_agent", chat_mode=True
+            )[0]
+            == "generate_crew"
+        )
 
     def test_chatmode_leaves_commands_untouched(self):
         svc = _build_service()
         # Commands (execute/configure/catalog) are not generation — left as-is in ChatMode.
-        assert svc._resolve_surface_intent("execute crew", "execute_crew", chat_mode=True) == ("execute_crew", None)
-        assert svc._resolve_surface_intent("get me the news", "generate_crew", chat_mode=True) == ("generate_crew", None)
+        assert svc._resolve_surface_intent(
+            "execute crew", "execute_crew", chat_mode=True
+        ) == ("execute_crew", None)
+        assert svc._resolve_surface_intent(
+            "get me the news", "generate_crew", chat_mode=True
+        ) == ("generate_crew", None)
 
     def test_canvas_honours_explicit_task_creation(self):
         svc = _build_service()
         # Canvas (chat_mode=False): explicit "create a task" overrides an LLM crew guess.
-        intent, reason = svc._resolve_surface_intent("create a task with gpt nano", "generate_crew", chat_mode=False)
+        intent, reason = svc._resolve_surface_intent(
+            "create a task with gpt nano", "generate_crew", chat_mode=False
+        )
         assert intent == "generate_task" and reason is not None
 
     def test_canvas_multi_step_stays_crew(self):
         svc = _build_service()
-        assert svc._resolve_surface_intent("create a task and then email it", "generate_crew", chat_mode=False) == ("generate_crew", None)
+        assert svc._resolve_surface_intent(
+            "create a task and then email it", "generate_crew", chat_mode=False
+        ) == ("generate_crew", None)
 
 
 # ===================================================================
@@ -4671,7 +4790,9 @@ class TestResolveEffectiveTools:
         assert set(out) == {"ScrapeWebsiteTool", "GenieTool"}
 
     def test_requested_all_disabled_returns_empty(self):
-        out = DispatcherService._resolve_effective_tools(["SerperDevTool"], {"GenieTool"})
+        out = DispatcherService._resolve_effective_tools(
+            ["SerperDevTool"], {"GenieTool"}
+        )
         assert out == []
 
     def test_empty_enabled_set_falls_back_to_requested(self):

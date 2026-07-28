@@ -2,9 +2,15 @@ import logging
 import os
 import time
 from typing import Dict, List, Optional
-import httpx
-from src.core.exceptions import KasalError, NotFoundError, BadRequestError, UnauthorizedError
 
+import httpx
+
+from src.core.exceptions import (
+    BadRequestError,
+    KasalError,
+    NotFoundError,
+    UnauthorizedError,
+)
 from src.repositories.powerbi_config_repository import PowerBIConfigRepository
 from src.schemas.powerbi_config import DAXQueryRequest, DAXQueryResponse
 
@@ -26,10 +32,13 @@ class PowerBIService:
         """Lazy load secrets_service to avoid circular dependency."""
         if self._secrets_service is None:
             from src.services.settings.api_keys import ApiKeysService
+
             self._secrets_service = ApiKeysService(self.session)
         return self._secrets_service
 
-    async def execute_dax_query(self, query_request: DAXQueryRequest) -> DAXQueryResponse:
+    async def execute_dax_query(
+        self, query_request: DAXQueryRequest
+    ) -> DAXQueryResponse:
         """
         Execute DAX query against Power BI semantic model.
 
@@ -45,15 +54,23 @@ class PowerBIService:
             # Get active Power BI configuration
             config = await self.repository.get_active_config(group_id=self.group_id)
             if not config:
-                raise NotFoundError(detail="No active Power BI configuration found. Please configure Power BI connection first.")
+                raise NotFoundError(
+                    detail="No active Power BI configuration found. Please configure Power BI connection first."
+                )
 
             if not config.is_enabled:
-                raise BadRequestError(detail="Power BI integration is disabled. Please enable it in settings.")
+                raise BadRequestError(
+                    detail="Power BI integration is disabled. Please enable it in settings."
+                )
 
             # Use provided semantic model ID or default from config
-            semantic_model_id = query_request.semantic_model_id or config.semantic_model_id
+            semantic_model_id = (
+                query_request.semantic_model_id or config.semantic_model_id
+            )
             if not semantic_model_id:
-                raise BadRequestError(detail="Semantic model ID is required. Provide it in the request or configure a default.")
+                raise BadRequestError(
+                    detail="Semantic model ID is required. Provide it in the request or configure a default."
+                )
 
             # Generate authentication token
             token = await self._generate_token(config)
@@ -62,7 +79,7 @@ class PowerBIService:
             results = await self._execute_query(
                 token=token,
                 semantic_model_id=semantic_model_id,
-                dax_query=query_request.dax_query
+                dax_query=query_request.dax_query,
             )
 
             # Process results
@@ -75,7 +92,7 @@ class PowerBIService:
                 data=data,
                 row_count=len(data),
                 columns=list(data[0].keys()) if data else [],
-                execution_time_ms=execution_time_ms
+                execution_time_ms=execution_time_ms,
             )
 
         except KasalError:
@@ -89,7 +106,7 @@ class PowerBIService:
                 row_count=0,
                 columns=None,
                 error=str(e),
-                execution_time_ms=execution_time_ms
+                execution_time_ms=execution_time_ms,
             )
 
     async def _generate_token(self, config) -> str:
@@ -111,20 +128,24 @@ class PowerBIService:
             client_id = config.client_id
 
             # Get authentication method from config (default to username_password for backward compatibility)
-            auth_method = getattr(config, 'auth_method', 'username_password')
+            auth_method = getattr(config, "auth_method", "username_password")
 
-            if auth_method == 'device_code':
+            if auth_method == "device_code":
                 # Device Code Flow - Interactive authentication
                 logger.info("Using Device Code Flow for authentication")
                 return await self._generate_token_device_code(tenant_id, client_id)
             else:
                 # Username/Password Flow - Requires stored credentials
                 logger.info("Using Username/Password Flow for authentication")
-                return await self._generate_token_username_password(tenant_id, client_id, config)
+                return await self._generate_token_username_password(
+                    tenant_id, client_id, config
+                )
 
         except Exception as e:
             logger.error(f"Error generating Power BI token: {e}", exc_info=True)
-            raise UnauthorizedError(detail=f"Failed to authenticate with Power BI: {str(e)}")
+            raise UnauthorizedError(
+                detail=f"Failed to authenticate with Power BI: {str(e)}"
+            )
 
     async def _generate_token_device_code(self, tenant_id: str, client_id: str) -> str:
         """
@@ -140,15 +161,20 @@ class PowerBIService:
         """
         try:
             from azure.identity import DeviceCodeCredential
+
             credential = DeviceCodeCredential(
                 client_id=client_id,
                 tenant_id=tenant_id,
             )
 
-            logger.info("Device Code authentication initiated - user should follow authentication prompt")
+            logger.info(
+                "Device Code authentication initiated - user should follow authentication prompt"
+            )
 
             # Get token for Power BI API
-            token = credential.get_token("https://analysis.windows.net/powerbi/api/.default")
+            token = credential.get_token(
+                "https://analysis.windows.net/powerbi/api/.default"
+            )
             logger.info("Device Code authentication successful")
             return token.token
 
@@ -156,7 +182,9 @@ class PowerBIService:
             logger.error(f"Device Code authentication failed: {e}")
             raise
 
-    async def _generate_token_username_password(self, tenant_id: str, client_id: str, config) -> str:
+    async def _generate_token_username_password(
+        self, tenant_id: str, client_id: str, config
+    ) -> str:
         """
         Generate token using username/password flow.
         Requires POWERBI_USERNAME and POWERBI_PASSWORD from API Keys Service or environment.
@@ -179,17 +207,29 @@ class PowerBIService:
             # Try to get from API Keys Service
             if self._secrets_service:
                 try:
-                    username = await self.secrets_service.get_api_key("POWERBI_USERNAME")
-                    password = await self.secrets_service.get_api_key("POWERBI_PASSWORD")
-                    client_secret = await self.secrets_service.get_api_key("POWERBI_CLIENT_SECRET")
+                    username = await self.secrets_service.get_api_key(
+                        "POWERBI_USERNAME"
+                    )
+                    password = await self.secrets_service.get_api_key(
+                        "POWERBI_PASSWORD"
+                    )
+                    client_secret = await self.secrets_service.get_api_key(
+                        "POWERBI_CLIENT_SECRET"
+                    )
                 except Exception as e:
-                    logger.warning(f"Could not get Power BI credentials from API Keys Service: {e}")
+                    logger.warning(
+                        f"Could not get Power BI credentials from API Keys Service: {e}"
+                    )
 
             # Fallback to environment variables
             if not username:
-                username = os.getenv("POWERBI_USERNAME") or os.getenv("SADATAMESHPOWERBIUSERNAME")
+                username = os.getenv("POWERBI_USERNAME") or os.getenv(
+                    "SADATAMESHPOWERBIUSERNAME"
+                )
             if not password:
-                password = os.getenv("POWERBI_PASSWORD") or os.getenv("SADATAMESHPOWERBIPASSWORD")
+                password = os.getenv("POWERBI_PASSWORD") or os.getenv(
+                    "SADATAMESHPOWERBIPASSWORD"
+                )
             if not client_secret:
                 client_secret = os.getenv("POWERBI_CLIENT_SECRET")
 
@@ -200,10 +240,13 @@ class PowerBIService:
                     "through API Keys Service or environment variables."
                 )
 
-            logger.info(f"Authenticating with username length: {len(username)}, password length: {len(password)}")
+            logger.info(
+                f"Authenticating with username length: {len(username)}, password length: {len(password)}"
+            )
 
             # Create credential and get token
             from azure.identity import UsernamePasswordCredential
+
             credential = UsernamePasswordCredential(
                 client_id=client_id,
                 username=username,
@@ -213,7 +256,9 @@ class PowerBIService:
             )
 
             # Token generation for Power BI API
-            token = credential.get_token("https://analysis.windows.net/powerbi/api/.default")
+            token = credential.get_token(
+                "https://analysis.windows.net/powerbi/api/.default"
+            )
             logger.info("Username/Password authentication successful")
             return token.token
 
@@ -221,7 +266,9 @@ class PowerBIService:
             logger.error(f"Username/Password authentication failed: {e}")
             raise
 
-    async def _execute_query(self, token: str, semantic_model_id: str, dax_query: str) -> List:
+    async def _execute_query(
+        self, token: str, semantic_model_id: str, dax_query: str
+    ) -> List:
         """
         Execute DAX query against Power BI API.
 
@@ -243,7 +290,9 @@ class PowerBIService:
 
             body = {"queries": [{"query": dax_query}]}
 
-            logger.info(f"Executing DAX query against semantic model: {semantic_model_id}")
+            logger.info(
+                f"Executing DAX query against semantic model: {semantic_model_id}"
+            )
             logger.debug(f"Query: {dax_query[:200]}...")  # Log first 200 chars
 
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -254,7 +303,9 @@ class PowerBIService:
                 logger.error(error_msg)
                 raise KasalError(detail=error_msg, status_code=response.status_code)
 
-            logger.info(f"Successfully fetched response with status: {response.status_code}")
+            logger.info(
+                f"Successfully fetched response with status: {response.status_code}"
+            )
 
             results = response.json().get("results", [])
             return results

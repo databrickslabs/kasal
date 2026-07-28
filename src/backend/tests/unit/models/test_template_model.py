@@ -4,9 +4,11 @@ Unit tests for template model.
 Tests the functionality of the PromptTemplate database model including
 field validation, relationships, and data integrity.
 """
-import pytest
+
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
+
+import pytest
 
 from src.models.template import PromptTemplate, Template
 
@@ -19,15 +21,15 @@ class TestPromptTemplate:
         # Arrange
         name = "generate_agent"
         description = "Template for generating AI agents"
-        template = "Create an AI agent named {agent_name} with role {role} and tools {tools}"
-        
+        template = (
+            "Create an AI agent named {agent_name} with role {role} and tools {tools}"
+        )
+
         # Act
         prompt_template = PromptTemplate(
-            name=name,
-            description=description,
-            template=template
+            name=name, description=description, template=template
         )
-        
+
         # Assert
         assert prompt_template.name == name
         assert prompt_template.description == description
@@ -47,7 +49,7 @@ class TestPromptTemplate:
         created_by_email = "admin@company.com"
         created_at = datetime.utcnow()
         updated_at = datetime.utcnow()
-        
+
         # Act
         prompt_template = PromptTemplate(
             name=name,
@@ -57,9 +59,9 @@ class TestPromptTemplate:
             group_id=group_id,
             created_by_email=created_by_email,
             created_at=created_at,
-            updated_at=updated_at
+            updated_at=updated_at,
         )
-        
+
         # Assert
         assert prompt_template.name == name
         assert prompt_template.description == description
@@ -76,14 +78,12 @@ class TestPromptTemplate:
         name = "deprecated_template"
         template = "This is a deprecated template"
         is_active = False
-        
+
         # Act
         prompt_template = PromptTemplate(
-            name=name,
-            template=template,
-            is_active=is_active
+            name=name, template=template, is_active=is_active
         )
-        
+
         # Assert
         assert prompt_template.is_active is False
         assert prompt_template.name == name
@@ -92,10 +92,9 @@ class TestPromptTemplate:
         """Test PromptTemplate model defaults set in __init__ method."""
         # Arrange & Act
         prompt_template = PromptTemplate(
-            name="test_template",
-            template="Test template content"
+            name="test_template", template="Test template content"
         )
-        
+
         # Assert
         assert prompt_template.is_active is True  # Set by __init__
         assert prompt_template.created_at is not None  # Set by __init__
@@ -104,27 +103,16 @@ class TestPromptTemplate:
     def test_prompt_template_init_method_logic(self):
         """Test the custom __init__ method logic."""
         # Test 1: When is_active is explicitly None
-        template1 = PromptTemplate(
-            name="test1",
-            template="content",
-            is_active=None
-        )
+        template1 = PromptTemplate(name="test1", template="content", is_active=None)
         assert template1.is_active is True
-        
+
         # Test 2: When is_active is explicitly False
-        template2 = PromptTemplate(
-            name="test2",
-            template="content",
-            is_active=False
-        )
+        template2 = PromptTemplate(name="test2", template="content", is_active=False)
         assert template2.is_active is False
-        
+
         # Test 3: When timestamps are None
         template3 = PromptTemplate(
-            name="test3",
-            template="content",
-            created_at=None,
-            updated_at=None
+            name="test3", template="content", created_at=None, updated_at=None
         )
         assert template3.created_at is not None
         assert template3.updated_at is not None
@@ -158,13 +146,10 @@ class TestPromptTemplate:
         
         Expected output: {expected_output}
         """
-        
+
         # Act
-        prompt_template = PromptTemplate(
-            name=name,
-            template=long_template
-        )
-        
+        prompt_template = PromptTemplate(name=name, template=long_template)
+
         # Assert
         assert prompt_template.template == long_template
         assert len(prompt_template.template) > 500
@@ -185,14 +170,14 @@ class TestPromptTemplate:
         Verbose: {verbose}
         Additional Config: {config.advanced_settings}
         """
-        
+
         # Act
         prompt_template = PromptTemplate(
             name=name,
             template=template,
-            description="Template with various placeholder types"
+            description="Template with various placeholder types",
         )
-        
+
         # Assert
         assert "{agent_name}" in prompt_template.template
         assert "{config.advanced_settings}" in prompt_template.template
@@ -203,15 +188,15 @@ class TestPromptTemplate:
         # Arrange
         group_id = "tenant-abc"
         created_by_email = "user@tenant-abc.com"
-        
+
         # Act
         prompt_template = PromptTemplate(
             name="tenant_template",
             template="Template for tenant {tenant_name}",
             group_id=group_id,
-            created_by_email=created_by_email
+            created_by_email=created_by_email,
         )
-        
+
         # Assert
         assert prompt_template.group_id == group_id
         assert prompt_template.created_by_email == created_by_email
@@ -224,7 +209,7 @@ class TestPromptTemplate:
     def test_prompt_template_unique_name_constraint(self):
         """Test that the model enforces uniqueness by (name, group_id) composite, not column-level unique."""
         # Act
-        name_column = PromptTemplate.__table__.columns['name']
+        name_column = PromptTemplate.__table__.columns["name"]
 
         # Assert
         # Column-level unique should be disabled; composite UniqueConstraint('name', 'group_id') is used instead
@@ -235,35 +220,36 @@ class TestPromptTemplate:
         """Test that the model has the expected database indexes."""
         # Act
         columns = PromptTemplate.__table__.columns
-        
+
         # Assert - Check that group_id has index
-        group_id_column = columns['group_id']
+        group_id_column = columns["group_id"]
         assert group_id_column.index is True
 
     def test_prompt_template_column_types(self):
         """Test that columns have correct data types."""
         # Act
         columns = PromptTemplate.__table__.columns
-        
+
         # Assert
-        assert str(columns['id'].type) == "INTEGER"
-        assert "VARCHAR" in str(columns['name'].type) or "STRING" in str(columns['name'].type)
-        assert "VARCHAR" in str(columns['description'].type) or "STRING" in str(columns['description'].type)
-        assert "TEXT" in str(columns['template'].type)
-        assert "BOOLEAN" in str(columns['is_active'].type)
-        assert "DATETIME" in str(columns['created_at'].type)
+        assert str(columns["id"].type) == "INTEGER"
+        assert "VARCHAR" in str(columns["name"].type) or "STRING" in str(
+            columns["name"].type
+        )
+        assert "VARCHAR" in str(columns["description"].type) or "STRING" in str(
+            columns["description"].type
+        )
+        assert "TEXT" in str(columns["template"].type)
+        assert "BOOLEAN" in str(columns["is_active"].type)
+        assert "DATETIME" in str(columns["created_at"].type)
 
     def test_prompt_template_repr(self):
         """Test string representation of PromptTemplate model."""
         # Arrange
-        prompt_template = PromptTemplate(
-            name="test_template",
-            template="Test content"
-        )
-        
+        prompt_template = PromptTemplate(name="test_template", template="Test content")
+
         # Act
         repr_str = repr(prompt_template)
-        
+
         # Assert
         assert "PromptTemplate" in repr_str
 
@@ -280,13 +266,10 @@ class TestPromptTemplate:
         - JSON-like: {"key": "value", "number": 42}
         - Code: `print("Hello, {name}!")`
         """
-        
+
         # Act
-        prompt_template = PromptTemplate(
-            name=name,
-            template=template
-        )
-        
+        prompt_template = PromptTemplate(name=name, template=template)
+
         # Assert
         assert '"Hello"' in prompt_template.template
         assert "🤖" in prompt_template.template
@@ -297,15 +280,14 @@ class TestPromptTemplate:
         """Test timestamp behavior in PromptTemplate."""
         # Arrange
         before_creation = datetime.utcnow()
-        
+
         # Act
         prompt_template = PromptTemplate(
-            name="timestamp_test",
-            template="Testing timestamps"
+            name="timestamp_test", template="Testing timestamps"
         )
-        
+
         after_creation = datetime.utcnow()
-        
+
         # Assert
         # Note: Timestamps are set by __init__ method, not SQLAlchemy defaults
         assert prompt_template.created_at is not None
@@ -317,9 +299,9 @@ class TestPromptTemplate:
         prompt_template = PromptTemplate(
             name="no_description",
             template="Template without description",
-            description=None
+            description=None,
         )
-        
+
         # Assert
         assert prompt_template.description is None
         assert prompt_template.name == "no_description"
@@ -330,23 +312,23 @@ class TestPromptTemplate:
         agent_template = PromptTemplate(
             name="generate_agent",
             description="Generate CrewAI agent configuration",
-            template="Create an agent with name: {name}, role: {role}, goal: {goal}, backstory: {backstory}"
+            template="Create an agent with name: {name}, role: {role}, goal: {goal}, backstory: {backstory}",
         )
-        
+
         # Test task generation template
         task_template = PromptTemplate(
             name="generate_task",
             description="Generate CrewAI task configuration",
-            template="Create a task: {description}. Expected output: {expected_output}. Agent: {agent}"
+            template="Create a task: {description}. Expected output: {expected_output}. Agent: {agent}",
         )
-        
+
         # Test crew generation template
         crew_template = PromptTemplate(
             name="generate_crew",
             description="Generate CrewAI crew configuration",
-            template="Create a crew with agents: {agents} and tasks: {tasks}. Process: {process}"
+            template="Create a crew with agents: {agents} and tasks: {tasks}. Process: {process}",
         )
-        
+
         # Assert
         assert agent_template.name == "generate_agent"
         assert task_template.name == "generate_task"
@@ -369,18 +351,12 @@ class TestTemplateAlias:
         # Arrange
         name = "alias_test"
         template_content = "Testing alias functionality"
-        
+
         # Act
-        template_via_alias = Template(
-            name=name,
-            template=template_content
-        )
-        
-        template_via_class = PromptTemplate(
-            name=name + "_2",
-            template=template_content
-        )
-        
+        template_via_alias = Template(name=name, template=template_content)
+
+        template_via_class = PromptTemplate(name=name + "_2", template=template_content)
+
         # Assert
         assert template_via_alias.template == template_via_class.template
         assert type(template_via_alias) == type(template_via_class)
@@ -393,11 +369,8 @@ class TestPromptTemplateEdgeCases:
     def test_prompt_template_minimum_required_fields(self):
         """Test PromptTemplate with only required fields."""
         # Act
-        prompt_template = PromptTemplate(
-            name="minimal",
-            template="Minimal template"
-        )
-        
+        prompt_template = PromptTemplate(name="minimal", template="Minimal template")
+
         # Assert
         assert prompt_template.name == "minimal"
         assert prompt_template.template == "Minimal template"
@@ -408,13 +381,12 @@ class TestPromptTemplateEdgeCases:
         """Test PromptTemplate with very long name."""
         # Arrange
         long_name = "very_long_template_name_" * 5  # 120 characters
-        
+
         # Act
         prompt_template = PromptTemplate(
-            name=long_name,
-            template="Template with long name"
+            name=long_name, template="Template with long name"
         )
-        
+
         # Assert
         assert prompt_template.name == long_name
         assert len(prompt_template.name) == 120
@@ -422,11 +394,8 @@ class TestPromptTemplateEdgeCases:
     def test_prompt_template_empty_template_content(self):
         """Test PromptTemplate with empty template content."""
         # Act
-        prompt_template = PromptTemplate(
-            name="empty_content",
-            template=""
-        )
-        
+        prompt_template = PromptTemplate(name="empty_content", template="")
+
         # Assert
         assert prompt_template.template == ""
         assert prompt_template.name == "empty_content"
@@ -435,26 +404,24 @@ class TestPromptTemplateEdgeCases:
         """Test various group isolation scenarios."""
         # Scenario 1: Global template (no group)
         global_template = PromptTemplate(
-            name="global_template",
-            template="Available to all groups",
-            group_id=None
+            name="global_template", template="Available to all groups", group_id=None
         )
-        
+
         # Scenario 2: Group-specific template
         group_template = PromptTemplate(
             name="group_specific",
             template="Only for specific group",
-            group_id="group-123"
+            group_id="group-123",
         )
-        
+
         # Scenario 3: User-created template
         user_template = PromptTemplate(
             name="user_created",
             template="Created by specific user",
             group_id="group-456",
-            created_by_email="user@company.com"
+            created_by_email="user@company.com",
         )
-        
+
         # Assert
         assert global_template.group_id is None
         assert group_template.group_id == "group-123"
