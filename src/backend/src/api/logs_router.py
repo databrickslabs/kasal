@@ -3,7 +3,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
 
-from src.core.dependencies import GroupContextDep, get_log_service
+from src.core.dependencies import GroupContextDep, SessionDep
+from src.repositories.log_repository import LLMLogRepository
 from src.schemas.log import LLMLogResponse
 from src.services.execution.logs.llm_log_service import LLMLogService
 
@@ -15,6 +16,15 @@ router = APIRouter(
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+
+def get_log_service(session: SessionDep) -> LLMLogService:
+    """Build the log service for a request.
+
+    Lives here rather than in core/dependencies because it names a concrete
+    service, and core must not import services.
+    """
+    return LLMLogService(LLMLogRepository(session))
 
 
 @router.get("", response_model=List[LLMLogResponse])

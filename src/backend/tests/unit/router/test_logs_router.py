@@ -4,12 +4,15 @@ Unit tests for LogsRouter.
 Tests the functionality of LLM log management endpoints.
 """
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 from src.dependencies.admin_auth import (
     require_authenticated_user, get_authenticated_user, get_admin_user
 )
 from src.utils.user_context import GroupContext
+from src.api.logs_router import get_log_service
+from src.repositories.log_repository import LLMLogRepository
+from src.services.execution.logs.llm_log_service import LLMLogService
 from fastapi.testclient import TestClient
 
 
@@ -53,7 +56,8 @@ def app(mock_log_service, mock_group_context, mock_current_user):
     """Create a FastAPI app with mocked dependencies."""
     from fastapi import FastAPI
     from src.api.logs_router import router
-    from src.core.dependencies import get_log_service, get_group_context
+    from src.api.logs_router import get_log_service
+    from src.core.dependencies import get_group_context
     
     app = FastAPI()
     app.include_router(router)
@@ -290,3 +294,42 @@ class TestLogsRouter:
         # Test with maximum days
         response = client.get("/llm-logs/stats?days=365")
         assert response.status_code == 200
+
+
+class TestGetLogService:
+    """Test cases for get_log_service factory."""
+    
+    def test_get_log_service_creates_singleton(self):
+        """Test that get_log_service creates a service instance with session."""
+        with patch('src.api.logs_router.LLMLogRepository') as mock_repo_class:
+            with patch('src.api.logs_router.LLMLogService') as mock_service_class:
+                mock_repo_instance = MagicMock()
+                mock_service_instance = MagicMock()
+
+                mock_repo_class.return_value = mock_repo_instance
+                mock_service_class.return_value = mock_service_instance
+
+                mock_session = MagicMock()
+                result = get_log_service(mock_session)
+
+                # Verify repository was created with session
+                mock_repo_class.assert_called_once_with(mock_session)
+
+                # Verify service was created with repository
+                mock_service_class.assert_called_once_with(mock_repo_instance)
+
+                assert result == mock_service_instance
+    
+    def test_get_log_service_returns_same_type(self):
+        """Test that get_log_service returns LLMLogService instance."""
+        # Mock the actual imports to avoid dependencies
+        mock_repo = MagicMock(spec=LLMLogRepository)
+        mock_service = MagicMock(spec=LLMLogService)
+
+        with patch('src.api.logs_router.LLMLogRepository', return_value=mock_repo):
+            with patch('src.api.logs_router.LLMLogService', return_value=mock_service):
+                mock_session = MagicMock()
+                result = get_log_service(mock_session)
+
+                # Verify it returns the service instance
+                assert result == mock_service

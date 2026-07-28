@@ -8,8 +8,6 @@ from src.core.base_service import BaseService
 from src.db.base import Base
 from src.db.session import get_db, get_local_db
 from src.db.database_router import get_smart_db_session
-from src.services.execution.logs.llm_log_service import LLMLogService
-from src.repositories.log_repository import LLMLogRepository
 from src.utils.user_context import GroupContext
 import logging
 
@@ -192,17 +190,8 @@ def get_service(
     
     return _get_service 
 
-def get_log_service(session: SessionDep) -> LLMLogService:
-    """
-    Factory function for creating the log service with its dependencies.
-
-    Args:
-        session: Database session from FastAPI DI
-
-    Returns:
-        LLMLogService: Instance of the log service with injected session
-    """
-    # Create repository with injected session
-    repository = LLMLogRepository(session)
-    # Create and return the service with the repository
-    return LLMLogService(repository) 
+# get_log_service moved to api/logs_router.py — its only caller. A provider that
+# names a concrete SERVICE cannot live here: this module is imported by core and
+# by services, so a service import at this level points core upward. The generic
+# plumbing below (session/context aliases, the BaseService factory) names no
+# service and stays. 

@@ -217,7 +217,6 @@ forbidden_modules = ["src.services"]
 #   - the three utils modules resolve credentials, group membership or a prompt
 #     template from below. A CredentialProvider port in core would clear most.
 ignore_imports = [
-    "src.core.dependencies -> src.services.execution.logs.llm_log_service",
     "src.utils.user_context -> src.services.groups.groups",
     "src.utils.user_context -> src.services.groups.users",
     "src.utils.databricks_auth -> src.services.databricks.workspace.service",
