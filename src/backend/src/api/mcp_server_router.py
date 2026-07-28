@@ -118,12 +118,19 @@ async def list_tools(caller: CallerDep, session: SessionDep):
 
 
 @router.post("/tools/call")
-async def call_tool(request: ToolCallRequest, caller: CallerDep, session: SessionDep):
+async def call_tool(
+    request: ToolCallRequest,
+    caller: CallerDep,
+    session: SessionDep,
+    accept: Annotated[Optional[str], Header()] = None,
+):
     """Invoke a tool as the resolved caller.
 
-    With ``stream: true`` the response is a chunked ``application/x-ndjson``
-    body — one JSON object per line, a frame per state change, ending with the
-    terminal frame. Without it, one JSON result as before.
+    ``stream: true`` asks for progress; the ``Accept`` header chooses the
+    framing. ``text/event-stream`` gets SSE, anything else gets NDJSON. The
+    frames are identical either way — a caller picks a wire format, not a
+    feature — because both come from the same generator in
+    ``services/external/streaming.py``.
 
     Streaming matters most for the tools that start a crew: those take minutes,
     and the alternative is a caller that either blocks blind or polls in a loop.
@@ -159,19 +166,23 @@ async def call_tool(request: ToolCallRequest, caller: CallerDep, session: Sessio
 
     run_id = result.get("run_id") if isinstance(result, dict) else None
     if not run_id:
-        # A tool that produced no run to follow (ask_kasal answers inline, and
-        # list_crews is not a run at all). Emit the single result as one NDJSON
-        # frame so a streaming caller gets the same shape either way.
+        # A tool with no run to follow (list_crews is not a run at all). Emit
+        # the single result as one frame so a streaming caller gets the same
+        # shape whichever tool it called.
         async def _single():
-            import json
+            yield result
 
-            yield (json.dumps(result, default=str) + "\n").encode("utf-8")
+        frames = _single()
+    else:
+        frames = streaming.stream_run(caller, str(run_id), session=session)
 
-        return StreamingResponse(_single(), media_type="application/x-ndjson")
+    # `stream: true` asks for progress; Accept chooses the framing. Identical
+    # frames either way — a caller picks a wire format, not a feature.
+    wants_sse = bool(accept and "text/event-stream" in accept)
 
     return StreamingResponse(
-        streaming.to_ndjson(streaming.stream_run(caller, str(run_id), session=session)),
-        media_type="application/x-ndjson",
+        streaming.to_sse(frames) if wants_sse else streaming.to_ndjson(frames),
+        media_type="text/event-stream" if wants_sse else "application/x-ndjson",
         headers={
             # Chunked and unbuffered: a proxy that buffers turns a live stream
             # into one delivery at the end, which is indistinguishable from no

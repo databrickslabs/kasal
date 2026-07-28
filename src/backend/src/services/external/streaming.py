@@ -1,8 +1,9 @@
 """Streaming a run to an external caller, as NDJSON.
 
-One JSON object per line, ``application/x-ndjson``, over an ordinary chunked
-HTTP response. No SSE framing and no JSON-RPC envelope: a caller reads a line,
-parses it, and acts — which every HTTP client can do without a protocol library.
+The run is walked ONCE, here, and encoded per caller: NDJSON for a client that
+wants plain chunked lines, SSE for one that speaks ``text/event-stream``. Both
+carry identical frames, so a caller picks a framing rather than a feature — and
+a fix to what is streamed lands in both by construction.
 
 The alternative was polling, and polling is what this exists to remove. A crew
 run takes minutes; without a stream the caller either blocks blind or hammers
@@ -130,3 +131,23 @@ async def to_ndjson(frames: AsyncIterator[Dict[str, Any]]) -> AsyncIterator[byte
 
     async for frame in frames:
         yield (json.dumps(frame, default=str) + "\n").encode("utf-8")
+
+
+async def to_sse(
+    frames: AsyncIterator[Dict[str, Any]], event_name: Optional[str] = None
+) -> AsyncIterator[bytes]:
+    """Canonical frames -> Server-Sent Events.
+
+    The same frames NDJSON carries, in SSE framing: ``event:`` when the caller
+    wants a named event, then ``data:`` and the blank line that terminates the
+    event. A2A clients and browser EventSource both expect this shape.
+
+    Multi-line JSON would break the framing — a bare newline inside ``data:``
+    ends the event — so frames are serialised compactly, on one line.
+    """
+    import json
+
+    async for frame in frames:
+        payload = json.dumps(frame, default=str, separators=(",", ":"))
+        prefix = f"event: {event_name}\n" if event_name else ""
+        yield f"{prefix}data: {payload}\n\n".encode("utf-8")
