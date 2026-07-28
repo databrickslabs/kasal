@@ -30,12 +30,25 @@ from src.services.external.permissions import AUTHOR_ROLES, require_role
 logger = logging.getLogger(__name__)
 
 
+#: How a crew runs. Kasal's own vocabulary, not something invented here.
+VALID_PROCESSES = ("sequential", "hierarchical", "parallel")
+
+#: Reasoning effort, when the target model supports a reasoning budget. Models
+#: that do not support one drop it silently — see utils/model_config — so asking
+#: for it is never an error, it simply may not apply.
+VALID_REASONING_EFFORTS = ("low", "medium", "high")
+
+
 async def create_crew(
     caller: ExternalCaller,
     prompt: str,
     name: Optional[str] = None,
     model: Optional[str] = None,
     tools: Optional[List[str]] = None,
+    process: Optional[str] = None,
+    reasoning: Optional[bool] = None,
+    reasoning_effort: Optional[str] = None,
+    manager_llm: Optional[str] = None,
     session: Any = None,
 ) -> Dict[str, Any]:
     """Generate a crew from a natural-language description.
@@ -55,6 +68,24 @@ async def create_crew(
 
     if not prompt or not prompt.strip():
         raise ValueError("prompt must not be empty")
+
+    if process and process not in VALID_PROCESSES:
+        raise ValueError(
+            f"process must be one of {', '.join(VALID_PROCESSES)} (got {process!r})"
+        )
+    if reasoning_effort and reasoning_effort not in VALID_REASONING_EFFORTS:
+        raise ValueError(
+            f"reasoning_effort must be one of "
+            f"{', '.join(VALID_REASONING_EFFORTS)} (got {reasoning_effort!r})"
+        )
+    if process == "hierarchical" and not manager_llm and not model:
+        # Hierarchical runs need a manager to delegate. Saying so here beats a
+        # crew that saves cleanly and then fails at kickoff for a reason the
+        # caller cannot see.
+        logger.info(
+            "[external] hierarchical crew created with no manager_llm; "
+            "the workspace default will be used"
+        )
 
     from src.schemas.crew import CrewGenerationRequest
     from src.services.generation.crews import CrewGenerationService
@@ -85,6 +116,10 @@ async def create_crew(
         tasks=[x for x in tasks if isinstance(x, dict)],
         agent_ids=agent_ids,
         task_ids=task_ids,
+        process=process,
+        reasoning=reasoning,
+        reasoning_effort=reasoning_effort,
+        manager_llm=manager_llm or (model if process == "hierarchical" else None),
         group_context=caller.group_context,
         session=session,
     )
@@ -189,6 +224,29 @@ def _build_canvas(agents: List[dict], tasks: List[dict]) -> tuple:
         if source:
             edges.append(Edge(id=f"{source}-{node_id}", source=source, target=node_id))
 
+    # Task -> task edges. Generation records each task's dependencies in its
+    # `context`, and WITHOUT these the canvas shows independent tasks: the
+    # agent->task assignment is drawn, but the order the crew actually runs in
+    # is invisible, so a summarise-step looks unrelated to the research step
+    # feeding it.
+    task_node_by_id = {
+        str(x.get("id") or ""): f"task-{str(x.get('id') or '')}" for x in tasks
+    }
+    task_node_by_name = {
+        str(x.get("name") or ""): f"task-{str(x.get('id') or '')}" for x in tasks
+    }
+    for task in tasks:
+        target = f"task-{str(task.get('id') or '')}"
+        for dependency in task.get("context") or []:
+            key = str(dependency)
+            # `context` holds ids in some paths and names in others; accept both
+            # rather than silently dropping the dependency in one of them.
+            source = task_node_by_id.get(key) or task_node_by_name.get(key)
+            if source and source != target:
+                edges.append(
+                    Edge(id=f"{source}-{target}", source=source, target=target)
+                )
+
     return nodes, edges
 
 
@@ -198,6 +256,10 @@ async def _save_to_catalogue(
     tasks: List[dict],
     agent_ids: List[str],
     task_ids: List[str],
+    process: Optional[str],
+    reasoning: Optional[bool],
+    reasoning_effort: Optional[str],
+    manager_llm: Optional[str],
     group_context: Any,
     session: Any,
 ) -> Optional[str]:
@@ -206,6 +268,23 @@ async def _save_to_catalogue(
     from src.services.catalog.crews import CrewService
 
     nodes, edges = _build_canvas(agents, tasks)
+
+    # Omitted options are left to the schema's defaults rather than being
+    # pinned here — a second set of defaults is a second thing to keep in step
+    # with the UI's.
+    optional: Dict[str, Any] = {}
+    if process:
+        optional["process"] = process
+    if reasoning is not None:
+        optional["reasoning"] = reasoning
+    if reasoning_effort:
+        # Effort rides in reasoning_config, which is where the agent builder
+        # reads it from; setting it implies reasoning is wanted.
+        optional["reasoning_config"] = {"reasoning_effort": reasoning_effort}
+        optional.setdefault("reasoning", True)
+    if manager_llm:
+        optional["manager_llm"] = manager_llm
+
     crew = await CrewService(session).create_with_group(
         CrewCreate(
             name=name,
@@ -213,6 +292,7 @@ async def _save_to_catalogue(
             task_ids=task_ids,
             nodes=nodes,
             edges=edges,
+            **optional,
         ),
         group_context,
     )

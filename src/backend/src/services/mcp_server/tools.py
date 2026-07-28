@@ -133,6 +133,31 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
                     "items": {"type": "string"},
                     "description": "Optional tool names the crew may use.",
                 },
+                "process": {
+                    "type": "string",
+                    "enum": ["sequential", "hierarchical", "parallel"],
+                    "description": (
+                        "How the crew runs. sequential: tasks in order (default). "
+                        "hierarchical: a manager delegates to the agents. "
+                        "parallel: independent tasks run concurrently."
+                    ),
+                },
+                "reasoning": {
+                    "type": "boolean",
+                    "description": (
+                        "Give the agents the model's native reasoning budget. "
+                        "Models without one ignore it."
+                    ),
+                },
+                "reasoning_effort": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                    "description": "How much reasoning budget. Implies reasoning.",
+                },
+                "manager_llm": {
+                    "type": "string",
+                    "description": "Manager model for a hierarchical crew.",
+                },
             },
             "required": ["prompt"],
         },
@@ -351,6 +376,10 @@ async def create_crew(
     name: Optional[str] = None,
     model: Optional[str] = None,
     tools: Optional[List[str]] = None,
+    process: Optional[str] = None,
+    reasoning: Optional[bool] = None,
+    reasoning_effort: Optional[str] = None,
+    manager_llm: Optional[str] = None,
     session: Any = None,
 ) -> Dict[str, Any]:
     """Build a new crew. Admin and editor only — the check is in the EIL."""
@@ -360,6 +389,10 @@ async def create_crew(
         name=name,
         model=model,
         tools=tools,
+        process=process,
+        reasoning=reasoning,
+        reasoning_effort=reasoning_effort,
+        manager_llm=manager_llm,
         session=session,
     )
 
