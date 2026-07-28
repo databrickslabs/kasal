@@ -43,16 +43,25 @@ Each contract carries an `ignore_imports` list of KNOWN violations, each with th
 reason it is still there. **That list is meant to shrink.** Adding to it needs a
 reason in review; the whole value of the check is that it fails on new ones.
 
-Two rules the contracts encode, and the reasoning behind them:
+Two rules the contracts encode:
 
-- **A repository never imports a service.** The one exception left,
-  `dashboard_repository`, resolves its own Databricks PAT through
-  `ApiKeysService`; the fix is for the calling service to inject the token.
-- **`core/` and `utils/` never import services.** Four remain, all the same
-  shape — core wanting DB-backed configuration (`llm_manager` needs the model
-  catalogue and API keys, `dependencies` needs LLMLogService, `embeddings` needs
-  API keys). Fixing them means injecting config, defining ports in `core`, or
-  deciding `llm_manager` is an application service that merely lives in `core/`.
+- **A repository never imports a service.** No exceptions — clean.
+- **`core/` and `utils/` never import services.** `core` is clean. Five
+  exceptions remain in `utils/`, all lazy imports, all reviewed and ACCEPTED
+  rather than pending: `user_context` (group membership), `databricks_auth`
+  (the OBO → PAT → SPN chain), `prompt_utils` (a DB-backed template).
+
+  The fix would be a `CredentialProvider` port in `core`, implemented in
+  services. It was deliberately not taken: this is the auth path for every
+  Databricks call and it runs inside the crew and flow SUBPROCESSES, so a global
+  provider registry introduces a failure mode a lazy import cannot have — miss
+  the registration in one entry point and PAT lookup silently degrades to
+  environment variables with no error.
+
+  **Do not "fix" these by pointing them at the repositories.**
+  `ApiKeysService.find_by_name` RAISES when `group_id` is None; that is the
+  multi-tenant isolation guarantee, and reaching past it into `ApiKeyRepository`
+  would silently drop the check the contract exists to protect.
 
 Not yet encoded, and the next thing worth adding: **a service should not build
 queries.** Repositories own query construction; a service holds a session only

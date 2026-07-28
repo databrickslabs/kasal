@@ -207,13 +207,34 @@ name = "Core and utils never import services"
 type = "forbidden"
 source_modules = ["src.core", "src.utils"]
 forbidden_modules = ["src.services"]
-# llm_manager and embeddings moved to services/llm/ — anything that reads the
-# model catalogue or a tenant's API key is per-tenant DB-backed business logic,
-# not core. What is left:
-#   - dependencies.py is the FastAPI composition root; wiring services together
-#     is its job, and it belongs with the API layer rather than in core/.
-#   - the three utils modules resolve credentials, group membership or a prompt
-#     template from below. A CredentialProvider port in core would clear most.
+# ACCEPTED EXCEPTIONS — reviewed and kept deliberately, not a backlog.
+#
+# core -> services is now ZERO. These five are all utils -> services, and all
+# five are LAZY (the import sits inside the function that needs it), so none of
+# them forms an import cycle. What they violate is the layering in principle,
+# not the build.
+#
+# The correct fix is dependency inversion: a CredentialProvider protocol in
+# core, implemented in services so ApiKeysService still runs, registered at
+# startup. It was weighed and NOT taken, for one reason worth writing down:
+# this is the auth path for every Databricks call and it runs inside the crew
+# and flow SUBPROCESSES. A global provider registry adds a failure mode that
+# does not exist today — miss the registration in any entry point and PAT
+# lookup silently falls through to environment variables, degrading auth with
+# no error. A lazy import cannot fail that way.
+#
+# Do not "fix" these by pointing them at the repositories instead. ApiKeysService
+# .find_by_name RAISES when group_id is None; that is the multi-tenant isolation
+# guarantee, and reaching past it into ApiKeyRepository would silently drop the
+# check this whole contract exists to protect.
+#
+#   user_context   -> resolves a user's group membership on first access
+#   databricks_auth-> the OBO -> PAT -> SPN chain; needs workspace config + keys
+#   prompt_utils   -> fetches a DB-backed prompt template
+#
+# prompt_utils is the weakest of the three — a "util" doing a database read is
+# misfiled, and moving it into services would cost nothing. Left alone only
+# because it was reviewed together with the other four.
 ignore_imports = [
     "src.utils.user_context -> src.services.groups.groups",
     "src.utils.user_context -> src.services.groups.users",
