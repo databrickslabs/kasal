@@ -11,7 +11,8 @@ import logging
 from fastapi import APIRouter
 
 from src.core.dependencies import GroupContextDep, SessionDep
-from src.core.exceptions import BadRequestError, NotFoundError
+from src.core.exceptions import BadRequestError, ForbiddenError, NotFoundError
+from src.core.permissions import check_role_in_context
 from src.schemas.prompt_optimization import (
     CrewOptimizationRequest,
     PromptOptimizationApplyResponse,
@@ -30,6 +31,18 @@ router = APIRouter(
     tags=["prompt optimization"],
     responses={404: {"description": "Not found"}},
 )
+
+
+def _require_author(group_context) -> None:
+    """Optimization rewrites the prompts a crew runs with, so it is an authoring
+    action, not an operational one — editors and admins only.
+
+    Operators may run a crew and read its results; letting them optimize would
+    let them change what every later run of that crew says, which is exactly the
+    edit right they do not have.
+    """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can optimize prompts")
 
 
 def _publish_user_context(group_context) -> None:
@@ -59,6 +72,7 @@ async def start_optimization(
     template is NOT applied automatically — review it via the status endpoint
     and apply explicitly.
     """
+    _require_author(group_context)
     _publish_user_context(group_context)
     service = PromptOptimizationService(session)
     try:
@@ -81,6 +95,7 @@ async def start_crew_optimization(
     judges the final deliverable — max_metric_calls bounds the number of crew
     executions. The proposal is NOT applied automatically.
     """
+    _require_author(group_context)
     _publish_user_context(group_context)
     service = PromptOptimizationService(session)
     try:
@@ -254,6 +269,7 @@ async def apply_run(run_id: str, group_context: GroupContextDep, session: Sessio
     Either way a BEFORE-IMAGE of every field this touches is recorded on the
     run first, so `POST /runs/{run_id}/revert` can undo it.
     """
+    _require_author(group_context)
     service = PromptOptimizationService(session)
     try:
         result = await service.apply_run(run_id, group_context)
@@ -273,6 +289,7 @@ async def revert_run(run_id: str, group_context: GroupContextDep, session: Sessi
     consumed by the revert — a second revert would restore a stale snapshot
     over any edits made since.
     """
+    _require_author(group_context)
     service = PromptOptimizationService(session)
     try:
         result = await service.revert_run(run_id, group_context)

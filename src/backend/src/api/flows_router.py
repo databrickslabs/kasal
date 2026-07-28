@@ -5,6 +5,8 @@ from typing import Annotated, Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from src.core.dependencies import GroupContextDep, SessionDep
+from src.core.exceptions import ForbiddenError
+from src.core.permissions import check_role_in_context
 from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.schemas.crew_publication import (
     CrewPublicationCreate,
@@ -130,6 +132,7 @@ async def create_flow(
 ):
     """
     Create a new flow with group isolation.
+    Only Editors and Admins can create flows.
 
     Args:
         flow_in: Flow data for creation
@@ -139,6 +142,9 @@ async def create_flow(
     Returns:
         Created flow
     """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can create flows")
+
     flow = await service.create_flow_with_group(flow_in, group_context)
     return FlowResponse(
         id=flow.id,
@@ -181,6 +187,7 @@ async def update_flow(
 ):
     """
     Update a flow with group isolation.
+    Only Editors and Admins can update flows.
 
     Args:
         flow_id: UUID of the flow to update
@@ -194,6 +201,9 @@ async def update_flow(
     Raises:
         HTTPException: If flow not found or not authorized
     """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can update flows")
+
     flow = await service.update_flow_with_group_check(flow_id, flow_in, group_context)
     return FlowResponse(
         id=flow.id,
@@ -218,6 +228,7 @@ async def delete_flow(
 ):
     """
     Delete a flow with group isolation.
+    Only Editors and Admins can delete flows.
 
     Args:
         flow_id: UUID of the flow to delete
@@ -231,6 +242,9 @@ async def delete_flow(
     Raises:
         HTTPException: If flow not found or not authorized
     """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can delete flows")
+
     logger.info(f"Force deleting flow {flow_id} with its executions")
 
     try:
@@ -256,6 +270,7 @@ async def delete_all_flows(
 ):
     """
     Delete all flows for the current group.
+    Only Admins can delete all flows (mirrors delete_all_crews).
 
     Args:
         service: Flow service injected by dependency
@@ -264,6 +279,9 @@ async def delete_all_flows(
     Returns:
         Success message
     """
+    if not check_role_in_context(group_context, ["admin"]):
+        raise ForbiddenError("Only admins can delete all flows")
+
     await service.delete_all_flows_for_group(group_context)
     return {"status": "success", "message": "All flows deleted successfully"}
 
@@ -427,7 +445,14 @@ async def publish_flow(
     """Expose a flow over the listed external protocols.
 
     Idempotent: publishing an already-published flow updates its record.
+
+    Admins and editors only, exactly as for crews: making a flow reachable from
+    outside the workspace is a higher-consequence action than editing one, and
+    the same people who may change a flow are the people who may expose it.
     """
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can publish flows")
+
     # Resolve the flow through the group-scoped service FIRST, so a caller
     # cannot publish another workspace's flow by id.
     flow = await flow_service.get_flow_with_group_check(flow_id, group_context)
@@ -465,6 +490,9 @@ async def update_flow_publication(
     group_context: GroupContextDep,
 ):
     """Adjust an existing publication. Omitted fields are left alone."""
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can change a publication")
+
     row = await service.update(
         str(flow_id), publication, group_context, entity_type="flow"
     )
@@ -480,5 +508,8 @@ async def unpublish_flow(
     group_context: GroupContextDep,
 ):
     """Withdraw a flow from every external surface."""
+    if not check_role_in_context(group_context, ["admin", "editor"]):
+        raise ForbiddenError("Only editors and admins can unpublish flows")
+
     if not await service.unpublish(str(flow_id), group_context, entity_type="flow"):
         raise HTTPException(status_code=404, detail="Flow is not published")

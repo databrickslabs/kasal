@@ -54,6 +54,7 @@ import { useCrewExecutionStore, ReasoningConfig } from '../../../store/crewExecu
 import { useTabManagerStore, TabExecutionConfig } from '../../../store/tabManager';
 import PublishButton from './PublishButton';
 import { usePublicationStore } from '../../../store/publication';
+import { usePermissions } from '../../../hooks/usePermissions';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -153,6 +154,12 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
   
   // Get flow configuration to check if CrewAI flows are enabled
   const { kasalFlowEnabled } = useFlowConfigStore();
+
+  // Operators may run what is in the catalog, not change it. The authoring
+  // actions on a card (optimize, publish, edit, delete) are editor/admin only,
+  // and the backend enforces the same rule — showing them to an operator only
+  // offers a button whose sole possible outcome is a 403.
+  const { canEdit, canDelete } = usePermissions();
   
   // Helper function to detect if a crew contains flow nodes
   const isCrewActuallyFlow = (crew: CrewResponse): boolean => {
@@ -1656,26 +1663,30 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                                 borderColor: 'divider',
                               }}
                             >
-                                <Tooltip title="Optimize Prompts">
-                                  <IconButton
-                                    size="small"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setOptimizeCrew(crew);
-                                    }}
-                                  >
-                                    <AutoFixHighIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                <PublishButton
-                                  entityType="crew"
-                                  entityId={String(crew.id)}
-                                  entityName={crew.name}
-                                  published={publishedCrewIds.has(String(crew.id))}
-                                  onChanged={(isPublished) =>
-                                    setPublished('crew', String(crew.id), isPublished)
-                                  }
-                                />
+                                {canEdit && (
+                                  <Tooltip title="Optimize Prompts">
+                                    <IconButton
+                                      size="small"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setOptimizeCrew(crew);
+                                      }}
+                                    >
+                                      <AutoFixHighIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                                {canEdit && (
+                                  <PublishButton
+                                    entityType="crew"
+                                    entityId={String(crew.id)}
+                                    entityName={crew.name}
+                                    published={publishedCrewIds.has(String(crew.id))}
+                                    onChanged={(isPublished) =>
+                                      setPublished('crew', String(crew.id), isPublished)
+                                    }
+                                  />
+                                )}
                                 <Tooltip title="Export Crew">
                                   <IconButton
                                     size="small"
@@ -1684,14 +1695,16 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                                     <DownloadIcon fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
-                                <Tooltip title="Delete Crew">
-                                  <IconButton
-                                    size="small"
-                                    onClick={(e) => handleDeleteCrew(e, crew.id)}
-                                  >
-                                    <DeleteIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
+                                {canDelete && (
+                                  <Tooltip title="Delete Crew">
+                                    <IconButton
+                                      size="small"
+                                      onClick={(e) => handleDeleteCrew(e, crew.id)}
+                                    >
+                                      <DeleteIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
                             </Box>
                           </CardContent>
                         </Card>
@@ -2009,39 +2022,45 @@ const CrewFlowSelectionDialog: React.FC<CrewFlowSelectionDialogProps> = ({
                               }}
                             >
 
-                                <Tooltip title="Edit Flow">
-                                  <IconButton 
-                                    size="small" 
-                                    onClick={(e) => handleEditFlow(e, flow.id.toString())}
-                                  >
-                                    <EditIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                <PublishButton
-                                  entityType="flow"
-                                  entityId={String(flow.id)}
-                                  entityName={flow.name}
-                                  published={publishedFlowIds.has(String(flow.id))}
-                                  onChanged={(isPublished) =>
-                                    setPublished('flow', String(flow.id), isPublished)
-                                  }
-                                />
+                                {canEdit && (
+                                  <Tooltip title="Edit Flow">
+                                    <IconButton
+                                      size="small"
+                                      onClick={(e) => handleEditFlow(e, flow.id.toString())}
+                                    >
+                                      <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                                {canEdit && (
+                                  <PublishButton
+                                    entityType="flow"
+                                    entityId={String(flow.id)}
+                                    entityName={flow.name}
+                                    published={publishedFlowIds.has(String(flow.id))}
+                                    onChanged={(isPublished) =>
+                                      setPublished('flow', String(flow.id), isPublished)
+                                    }
+                                  />
+                                )}
                                 <Tooltip title="Export Flow">
-                                  <IconButton 
-                                    size="small" 
+                                  <IconButton
+                                    size="small"
                                     onClick={(e) => handleExportFlow(e, flow)}
                                   >
                                     <DownloadIcon fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
-                                <Tooltip title="Delete Flow">
-                                  <IconButton 
-                                    size="small" 
-                                    onClick={(e) => handleDeleteFlow(e, flow.id.toString())}
-                                  >
-                                    <DeleteIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
+                                {canDelete && (
+                                  <Tooltip title="Delete Flow">
+                                    <IconButton
+                                      size="small"
+                                      onClick={(e) => handleDeleteFlow(e, flow.id.toString())}
+                                    >
+                                      <DeleteIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
                             </Box>
                           </CardContent>
                         </Card>

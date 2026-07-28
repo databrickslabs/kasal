@@ -27,8 +27,12 @@ import SearchIcon from '@mui/icons-material/Search';
 import DownloadIcon from '@mui/icons-material/Download';
 import PublishButton from '../Crew/CrewFlowDialog/PublishButton';
 import { usePublicationStore } from '../../store/publication';
+import { usePermissions } from '../../hooks/usePermissions';
 
 const FlowDialog: React.FC<FlowSelectionDialogProps> = ({ open, onClose, onFlowSelect }): JSX.Element => {
+  // Operators run flows; they do not publish or delete them. Same rule as the
+  // crew/flow catalog in CrewFlowDialog, enforced again in flows_router.
+  const { canEdit, canDelete } = usePermissions();
   const [flows, setFlows] = useState<FlowResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -253,15 +257,17 @@ const FlowDialog: React.FC<FlowSelectionDialogProps> = ({ open, onClose, onFlowS
                         borderColor: 'divider',
                       }}
                     >
-                      <PublishButton
-                        entityType="flow"
-                        entityId={String(flow.id)}
-                        entityName={flow.name}
-                        published={publishedFlowIds.has(String(flow.id))}
-                        onChanged={(isPublished) =>
-                          setPublished('flow', String(flow.id), isPublished)
-                        }
-                      />
+                      {canEdit && (
+                        <PublishButton
+                          entityType="flow"
+                          entityId={String(flow.id)}
+                          entityName={flow.name}
+                          published={publishedFlowIds.has(String(flow.id))}
+                          onChanged={(isPublished) =>
+                            setPublished('flow', String(flow.id), isPublished)
+                          }
+                        />
+                      )}
                       <Tooltip title="Export Flow">
                         <IconButton
                           size="small"
@@ -270,15 +276,17 @@ const FlowDialog: React.FC<FlowSelectionDialogProps> = ({ open, onClose, onFlowS
                           <DownloadIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
-                      <Tooltip title="Delete Flow">
-                        <IconButton
-                          size="small"
-                          onClick={(e) => handleDeleteFlow(e, flow.id.toString())}
-                          color="error"
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                      {canDelete && (
+                        <Tooltip title="Delete Flow">
+                          <IconButton
+                            size="small"
+                            onClick={(e) => handleDeleteFlow(e, flow.id.toString())}
+                            color="error"
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                     </Box>
                   </CardContent>
                 </Card>

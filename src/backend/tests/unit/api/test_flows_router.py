@@ -89,9 +89,17 @@ def mock_flow_service():
 
 @pytest.fixture
 def mock_group_context():
-    """Create a mock group context."""
+    """Create a mock group context.
+
+    Admin, because these cases exercise the happy paths of the mutating
+    endpoints; the role gate itself is covered in
+    tests/unit/api/test_flows_router_permissions.py.
+    """
     context = GroupContext(
-        group_ids=["group-123"], group_email="test@example.com", user_id="user-123"
+        group_ids=["group-123"],
+        group_email="test@example.com",
+        user_id="user-123",
+        user_role="admin",
     )
     return context
 

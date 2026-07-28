@@ -342,3 +342,55 @@ class TestRunEndpoints:
         service.revert_run = AsyncMock(side_effect=ValueError("has no before-image"))
         with pytest.raises(NotFoundError, match="before-image"):
             await revert_run("abc123", _group(), MagicMock())
+
+
+class TestRoleGate:
+    """Optimization rewrites the prompts a crew runs with, so it is an authoring
+    action: editors and admins only, matching the crew catalog's edit right."""
+
+    @staticmethod
+    def _ctx(role):
+        from src.utils.user_context import GroupContext
+
+        return GroupContext(
+            group_ids=["g1"], group_email="u@x", email_domain="x.com", user_role=role
+        )
+
+    @pytest.mark.asyncio
+    async def test_operator_cannot_start_or_apply_an_optimization(self, service):
+        from src.core.exceptions import ForbiddenError
+
+        service.start_crew_optimization = AsyncMock()
+        service.apply_run = AsyncMock()
+        service.revert_run = AsyncMock()
+
+        with pytest.raises(ForbiddenError):
+            await start_optimization(
+                PromptOptimizationRequest(template_name="detect_intent"),
+                self._ctx("operator"),
+                MagicMock(),
+            )
+        with pytest.raises(ForbiddenError):
+            await start_crew_optimization(
+                CrewOptimizationRequest(crew_id="c1"),
+                self._ctx("operator"),
+                MagicMock(),
+            )
+        with pytest.raises(ForbiddenError):
+            await apply_run("abc123", self._ctx("operator"), MagicMock())
+        with pytest.raises(ForbiddenError):
+            await revert_run("abc123", self._ctx("operator"), MagicMock())
+
+        service.start_crew_optimization.assert_not_awaited()
+        service.apply_run.assert_not_awaited()
+        service.revert_run.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_editor_may_still_optimize(self, service):
+        service.start_crew_optimization = AsyncMock(
+            return_value={"run_id": "r1", "status": "pending", "dataset_size": 1}
+        )
+        response = await start_crew_optimization(
+            CrewOptimizationRequest(crew_id="c1"), self._ctx("editor"), MagicMock()
+        )
+        assert response.run_id == "r1"
