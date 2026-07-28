@@ -581,8 +581,8 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         'src.engines.kasal.tools.custom.databricks_jobs_tool',  # Add Databricks jobs tool logger
         'src.engines.kasal.paths.crew.task_adapter',  # Task tool resolution logs
         'src.engines.kasal.paths.crew.agent_adapter',  # Agent tool resolution logs
-        'src.engines.kasal.security.tool_capability_manifest',  # Trifecta detection warnings
-        'src.engines.kasal.security.prompt_injection_detector',  # Injection detection warnings
+        'src.services.security.tool_capability_manifest',  # Trifecta detection warnings
+        'src.services.security.prompt_injection_detector',  # Injection detection warnings
         'src.utils.telemetry',  # Add telemetry logger for LogfoodTelemetry logging
         '__main__'  # For any direct logging in subprocess
     ]:

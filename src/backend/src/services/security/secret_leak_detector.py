@@ -15,7 +15,7 @@ Scans agent output for common credential / secret patterns:
 Designed to be fast and non-blocking — always returns, never raises.
 
 Usage:
-    from src.engines.kasal.security.secret_leak_detector import detect
+    from src.services.security.secret_leak_detector import detect
     result = detect(text)
     if result.detected:
         logger.warning("[SECURITY] Secret leak: %s", result.secret_types)

@@ -161,7 +161,7 @@ async def run_crew_in_process(
 
         # SECURITY: Scan user inputs for prompt injection patterns (log-only, non-blocking)
         try:
-            from src.engines.kasal.security.scanner_pipeline import security_scanner
+            from src.services.security.scanner_pipeline import security_scanner
             for _input_key, _input_val in user_inputs.items():
                 if isinstance(_input_val, str):
                     security_scanner.scan(_input_val, context=f"user_input:{_input_key}:{execution_id}")

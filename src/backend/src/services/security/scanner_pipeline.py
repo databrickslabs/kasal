@@ -10,7 +10,7 @@ detection) behind a single entry point with:
 This module is log-only — it never blocks execution.
 
 Usage:
-    from src.engines.kasal.security.scanner_pipeline import security_scanner
+    from src.services.security.scanner_pipeline import security_scanner
 
     # Scan text for all known threats
     result = security_scanner.scan(text, context="task_callback")
@@ -25,11 +25,11 @@ Usage:
 import logging
 from dataclasses import dataclass
 
-from src.engines.kasal.security.prompt_injection_detector import (
+from src.services.security.prompt_injection_detector import (
     DetectionResult,
     PromptInjectionDetector,
 )
-from src.engines.kasal.security.secret_leak_detector import (
+from src.services.security.secret_leak_detector import (
     SecretLeakResult,
     detect as _detect_secrets,
     redact as _redact_secrets,

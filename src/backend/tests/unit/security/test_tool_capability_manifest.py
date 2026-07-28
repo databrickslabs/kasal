@@ -3,7 +3,7 @@ Unit tests for tool capability manifest and lethal-trifecta detection.
 """
 import logging
 
-from src.engines.kasal.security.tool_capability_manifest import (
+from src.services.security.tool_capability_manifest import (
     TrifectaAssessment,
     ToolCapability,
     TOOL_CAPABILITIES,
@@ -112,7 +112,7 @@ class TestLogTrifectaWarning:
             untrusted_tools=["SerperDevTool"],
             external_tools=["GenieTool", "SerperDevTool"],
         )
-        with caplog.at_level(logging.WARNING, logger="src.engines.kasal.security.tool_capability_manifest"):
+        with caplog.at_level(logging.WARNING, logger="src.services.security.tool_capability_manifest"):
             log_trifecta_warning(assessment, context="test crew")
         assert any("[SECURITY] Lethal trifecta detected" in r.message for r in caplog.records)
 
@@ -123,7 +123,7 @@ class TestLogTrifectaWarning:
             ingests_untrusted=False,
             communicates_externally=False,
         )
-        with caplog.at_level(logging.INFO, logger="src.engines.kasal.security.tool_capability_manifest"):
+        with caplog.at_level(logging.INFO, logger="src.services.security.tool_capability_manifest"):
             log_trifecta_warning(assessment)
         assert any("[SECURITY] No lethal trifecta" in r.message for r in caplog.records)
 
@@ -137,7 +137,7 @@ class TestLogTrifectaWarning:
             untrusted_tools=["SerperDevTool"],
             external_tools=["GenieTool"],
         )
-        with caplog.at_level(logging.WARNING, logger="src.engines.kasal.security.tool_capability_manifest"):
+        with caplog.at_level(logging.WARNING, logger="src.services.security.tool_capability_manifest"):
             log_trifecta_warning(assessment, context="crew with 3 tasks")
         assert any("crew with 3 tasks" in r.message for r in caplog.records)
 

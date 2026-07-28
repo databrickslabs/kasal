@@ -65,7 +65,7 @@ def create_execution_callbacks(
             # live streaming on false positives.  Detection feeds into audit logs;
             # the LLM injection guardrail is the blocking layer when enabled by the user.
             try:
-                from src.engines.kasal.security.scanner_pipeline import security_scanner
+                from src.services.security.scanner_pipeline import security_scanner
                 _scan = security_scanner.scan(content, context=f"step_callback:{job_id}")
                 # SECURITY: if the output leaked credentials, mask them before the
                 # content is enqueued to logs / streamed to the UI / persisted.
@@ -113,7 +113,7 @@ def create_execution_callbacks(
             # task chaining on false positives.  Detection feeds into audit logs;
             # the LLM injection guardrail is the blocking layer when enabled by the user.
             try:
-                from src.engines.kasal.security.scanner_pipeline import security_scanner
+                from src.services.security.scanner_pipeline import security_scanner
                 _scan = security_scanner.scan(content, context=f"task_callback:{job_id}")
                 # SECURITY: mask any leaked credentials before the task output is
                 # enqueued to logs / streamed to the UI / persisted to traces.

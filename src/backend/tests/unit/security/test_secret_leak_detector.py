@@ -1,7 +1,7 @@
 """
-Unit tests for src.engines.kasal.security.secret_leak_detector.
+Unit tests for src.services.security.secret_leak_detector.
 """
-from src.engines.kasal.security.secret_leak_detector import detect, redact, SecretLeakResult
+from src.services.security.secret_leak_detector import detect, redact, SecretLeakResult
 
 
 class TestSecretLeakDetectorCleanInputs:

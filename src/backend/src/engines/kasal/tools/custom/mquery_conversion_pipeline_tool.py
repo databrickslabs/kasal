@@ -1339,7 +1339,7 @@ class MqueryConversionPipelineTool(BaseTool):
             # SEC #4: the prompt embeds PBI-sourced M-query text — scan for
             # prompt-injection before the LLM call (fail-open + log).
             try:
-                from src.engines.kasal.security.scanner_pipeline import security_scanner
+                from src.services.security.scanner_pipeline import security_scanner
                 _inj = security_scanner.scan_injection(mquery or "")
                 if getattr(_inj, "detected", False):
                     logger.warning(

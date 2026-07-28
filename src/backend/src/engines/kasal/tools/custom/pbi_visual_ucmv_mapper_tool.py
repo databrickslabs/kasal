@@ -555,7 +555,7 @@ Map ALL {len(visuals)} visuals. Return the complete JSON array.
             # metadata. Scan for prompt-injection before the LLM call (fail-open +
             # log, consistent with the engine's callback scanners).
             try:
-                from src.engines.kasal.security.scanner_pipeline import security_scanner
+                from src.services.security.scanner_pipeline import security_scanner
                 _inj = security_scanner.scan_injection(prompt)
                 if getattr(_inj, "detected", False):
                     logger.warning(

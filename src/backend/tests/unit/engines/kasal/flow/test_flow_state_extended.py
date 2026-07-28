@@ -63,7 +63,7 @@ class TestFlowStateManagerParseCrewOutput:
     def test_parse_valid_json_dict(self):
         """parse_crew_output parses valid JSON dict."""
         output = '{"key": "value", "number": 42}'
-        with patch("src.engines.kasal.security.scanner_pipeline.security_scanner"):
+        with patch("src.services.security.scanner_pipeline.security_scanner"):
             result = FlowStateManager.parse_crew_output(output)
         assert result["key"] == "value"
         assert result["number"] == 42
@@ -71,35 +71,35 @@ class TestFlowStateManagerParseCrewOutput:
     def test_parse_non_json_text(self):
         """parse_crew_output returns empty dict for plain text."""
         output = "This is just plain text output"
-        with patch("src.engines.kasal.security.scanner_pipeline.security_scanner"):
+        with patch("src.services.security.scanner_pipeline.security_scanner"):
             result = FlowStateManager.parse_crew_output(output)
         assert result == {}
 
     def test_parse_json_embedded_in_text(self):
         """parse_crew_output extracts JSON block from surrounding text."""
         output = 'Analysis complete. {"status": "done", "score": 0.9} End of report.'
-        with patch("src.engines.kasal.security.scanner_pipeline.security_scanner"):
+        with patch("src.services.security.scanner_pipeline.security_scanner"):
             result = FlowStateManager.parse_crew_output(output)
         assert result.get("status") == "done"
         assert result.get("score") == pytest.approx(0.9)
 
     def test_parse_empty_string(self):
         """parse_crew_output returns empty dict for empty string."""
-        with patch("src.engines.kasal.security.scanner_pipeline.security_scanner"):
+        with patch("src.services.security.scanner_pipeline.security_scanner"):
             result = FlowStateManager.parse_crew_output("")
         assert result == {}
 
     def test_parse_json_array_not_dict(self):
         """parse_crew_output returns empty dict when output is a JSON array (not dict)."""
         output = '[1, 2, 3]'
-        with patch("src.engines.kasal.security.scanner_pipeline.security_scanner"):
+        with patch("src.services.security.scanner_pipeline.security_scanner"):
             result = FlowStateManager.parse_crew_output(output)
         assert result == {}
 
     def test_security_scan_exception_is_suppressed(self):
         """Security scan errors do not bubble up."""
         output = '{"a": 1}'
-        with patch("src.engines.kasal.security.scanner_pipeline.security_scanner") as mock_scanner:
+        with patch("src.services.security.scanner_pipeline.security_scanner") as mock_scanner:
             mock_scanner.scan.side_effect = RuntimeError("scan failed")
             result = FlowStateManager.parse_crew_output(output)
         # Should still parse despite security scan failure
@@ -108,7 +108,7 @@ class TestFlowStateManagerParseCrewOutput:
     def test_parse_multiple_json_blocks(self):
         """parse_crew_output merges multiple JSON blocks."""
         output = 'First: {"a": 1} Second: {"b": 2}'
-        with patch("src.engines.kasal.security.scanner_pipeline.security_scanner"):
+        with patch("src.services.security.scanner_pipeline.security_scanner"):
             result = FlowStateManager.parse_crew_output(output)
         assert result.get("a") == 1
         assert result.get("b") == 2

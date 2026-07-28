@@ -1367,7 +1367,7 @@ class FlowBuilder:
 
                             # SECURITY: Same assembly-time checks as all other crew creation paths.
                             try:
-                                from src.engines.kasal.security.tool_capability_manifest import (
+                                from src.services.security.tool_capability_manifest import (
                                     run_crew_security_checks as _run_security_checks,
                                 )
                                 _run_security_checks(crew, context=f"flow router crew '{route_crew_name}'")

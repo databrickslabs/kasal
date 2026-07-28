@@ -1142,7 +1142,7 @@ class CrewPreparation:
             # The same function is called by flow_methods.py so both execution paths
             # get identical protection.
             try:
-                from src.engines.kasal.security.tool_capability_manifest import (
+                from src.services.security.tool_capability_manifest import (
                     run_crew_security_checks as _run_security_checks,
                 )
 

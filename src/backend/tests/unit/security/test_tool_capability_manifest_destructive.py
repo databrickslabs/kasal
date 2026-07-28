@@ -6,7 +6,7 @@ import logging
 import pytest
 from unittest.mock import patch
 
-from src.engines.kasal.security.tool_capability_manifest import (
+from src.services.security.tool_capability_manifest import (
     ToolCapability,
     TOOL_CAPABILITIES,
     assess_destructive_risk,

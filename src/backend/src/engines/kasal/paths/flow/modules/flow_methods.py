@@ -641,7 +641,7 @@ class FlowMethodFactory:
             # directly — they bypass CrewPreparation — so we must call the shared helper
             # explicitly to ensure identical protection on both execution paths.
             try:
-                from src.engines.kasal.security.tool_capability_manifest import (
+                from src.services.security.tool_capability_manifest import (
                     run_crew_security_checks as _run_security_checks,
                 )
 
@@ -1145,7 +1145,7 @@ class FlowMethodFactory:
 
             # SECURITY: Same assembly-time checks as starting-point crews.
             try:
-                from src.engines.kasal.security.tool_capability_manifest import (
+                from src.services.security.tool_capability_manifest import (
                     run_crew_security_checks as _run_security_checks,
                 )
 

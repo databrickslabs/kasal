@@ -2,7 +2,7 @@
 Unit tests for the heuristic prompt injection detector.
 """
 import pytest
-from src.engines.kasal.security.prompt_injection_detector import (
+from src.services.security.prompt_injection_detector import (
     DetectionResult,
     PromptInjectionDetector,
 )
