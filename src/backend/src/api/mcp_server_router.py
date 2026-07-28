@@ -28,8 +28,8 @@ from src.services.external.identity import (
     resolve_caller,
 )
 from src.services.external.permissions import ExternalPermissionError
-from src.services.mcp_server import server as mcp_server
-from src.services.mcp_server.tools import UnknownCapabilityError, UnknownRunError
+from src.services.mcp.mcp_server import server as mcp_server
+from src.services.mcp.mcp_server.tools import UnknownCapabilityError, UnknownRunError
 
 router = APIRouter(
     prefix="/mcp/v1",

@@ -16,7 +16,7 @@ import json
 import logging
 from typing import Any, AsyncIterator
 
-from src.services.a2a.render import to_stream_events
+from src.services.a2a.a2a_server.render import to_stream_events
 from src.services.external.identity import ExternalCaller
 from src.services.external.permissions import RUN_ROLES, require_role
 from src.services.external.streaming import stream_run

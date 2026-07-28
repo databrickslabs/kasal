@@ -456,7 +456,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             # Mock MCP service to return no enabled servers
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -489,7 +489,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -518,7 +518,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -545,7 +545,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -576,7 +576,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as mock_factory,
@@ -620,7 +620,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as mock_factory,
@@ -661,7 +661,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as mock_factory,
@@ -703,7 +703,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
             ) as mock_get_pydantic,
@@ -738,7 +738,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
             ) as mock_get_pydantic,
@@ -791,7 +791,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -850,7 +850,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch(
                 "src.services.tools.mcp_handler.create_kasal_tool_from_mcp"
@@ -936,7 +936,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch(
                 "src.utils.databricks_auth.get_mcp_auth_headers", new_callable=AsyncMock
@@ -1030,7 +1030,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.tools.mcp_handler.get_or_create_mcp_adapter"
             ) as mock_get_adapter,
@@ -1127,7 +1127,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch("mcp.StdioServerParameters") as mock_stdio_params,
             patch(
@@ -1187,7 +1187,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -1214,7 +1214,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.Task",
                 side_effect=Exception("Task creation failed"),
@@ -1245,7 +1245,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -1274,7 +1274,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as mock_factory,
@@ -1306,7 +1306,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             # Simulate MCP service throwing an exception
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -1346,7 +1346,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch("src.utils.databricks_auth.get_mcp_auth_headers") as mock_auth,
             patch(
@@ -1410,7 +1410,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
         ):
 
@@ -1462,7 +1462,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch("mcp.StdioServerParameters"),
         ):
@@ -1513,7 +1513,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
         ):
 
@@ -1559,7 +1559,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
@@ -1601,7 +1601,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -1642,7 +1642,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
@@ -1693,7 +1693,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             # Setup MCP service mocks
@@ -1738,7 +1738,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             # Setup MCP service mocks
@@ -1780,7 +1780,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             # Setup MCP service mocks
@@ -1821,7 +1821,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             # Setup MCP service mocks
@@ -1863,7 +1863,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -1907,7 +1907,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -1960,7 +1960,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -2009,7 +2009,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -2053,7 +2053,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -2096,7 +2096,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             # Setup MCP service mocks
@@ -2140,7 +2140,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             # Setup MCP service mocks
@@ -2187,7 +2187,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             # Setup MCP service mocks
@@ -2250,7 +2250,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch("mcp.StdioServerParameters") as mock_stdio_params,
             patch(
@@ -2316,7 +2316,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             # Setup MCP service mocks
@@ -2365,7 +2365,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
@@ -2425,7 +2425,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
@@ -2480,7 +2480,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
@@ -2537,7 +2537,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -2581,7 +2581,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
@@ -2631,7 +2631,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -2671,7 +2671,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -2723,7 +2723,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -2760,7 +2760,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
@@ -2805,7 +2805,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names"
             ) as mock_resolve,
@@ -2850,7 +2850,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -2878,7 +2878,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -2914,7 +2914,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
             ) as mock_get_pydantic,
@@ -2966,7 +2966,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
             ) as mock_get_pydantic,
@@ -3011,7 +3011,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.get_pydantic_class_from_name"
             ) as mock_get_pydantic,
@@ -3060,7 +3060,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -3101,7 +3101,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -3148,7 +3148,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             # Setup MCP service mocks
@@ -3189,7 +3189,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -3229,7 +3229,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch("src.utils.databricks_auth.get_mcp_auth_headers") as mock_auth,
             patch("src.services.tools.mcp_handler.create_kasal_tool_from_mcp"),
@@ -3289,7 +3289,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
             patch("src.services.tools.mcp_handler.create_kasal_tool_from_mcp"),
             patch("src.services.tools.mcp_handler.register_mcp_adapter"),
@@ -3348,7 +3348,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.tools.mcp_handler.get_or_create_mcp_adapter"
             ) as mock_get_adapter,
@@ -3423,7 +3423,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             # Setup MCP service mocks
@@ -3479,7 +3479,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
             mock_mcp_service.from_unit_of_work = AsyncMock(
                 return_value=Mock(
@@ -3521,7 +3521,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch("src.services.tools.mcp_adapter.MCPAdapter") as mock_adapter_class,
         ):
 
@@ -3570,7 +3570,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.UnitOfWork"
             ) as mock_task_uow,
@@ -3621,7 +3621,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.UnitOfWork"
             ) as mock_task_uow,
@@ -3658,7 +3658,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             # Setup empty servers response
@@ -3699,7 +3699,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -3740,7 +3740,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -3781,7 +3781,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -3835,7 +3835,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -3874,7 +3874,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
         ):
 
             mock_mcp_service.from_unit_of_work = AsyncMock(
@@ -3911,7 +3911,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.agent_builder.task_adapter.UnitOfWork"
             ) as mock_sync_uow,
@@ -3966,7 +3966,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.tools.mcp_handler.get_or_create_mcp_adapter"
             ) as mock_get_adapter,
@@ -4047,7 +4047,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.tools.mcp_handler.get_or_create_mcp_adapter"
             ) as mock_get_adapter,
@@ -4128,7 +4128,7 @@ class TestCreateTask:
 
         with (
             patch("src.core.unit_of_work.UnitOfWork"),
-            patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+            patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_service,
             patch(
                 "src.services.tools.mcp_handler.get_or_create_mcp_adapter"
             ) as mock_get_adapter,

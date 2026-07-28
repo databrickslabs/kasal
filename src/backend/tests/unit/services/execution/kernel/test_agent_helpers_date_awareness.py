@@ -78,7 +78,9 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.mcp.mcp_client.service.MCPService"
+                ) as mock_mcp_service,
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -129,7 +131,9 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.mcp.mcp_client.service.MCPService"
+                ) as mock_mcp_service,
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -181,7 +185,9 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.mcp.mcp_client.service.MCPService"
+                ) as mock_mcp_service,
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -232,7 +238,9 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.mcp.mcp_client.service.MCPService"
+                ) as mock_mcp_service,
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -282,7 +290,9 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.mcp.mcp_client.service.MCPService"
+                ) as mock_mcp_service,
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -332,7 +342,9 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.mcp.mcp_client.service.MCPService"
+                ) as mock_mcp_service,
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -382,7 +394,9 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.mcp.mcp_client.service.MCPService"
+                ) as mock_mcp_service,
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -437,7 +451,9 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.mcp.mcp_client.service.MCPService"
+                ) as mock_mcp_service,
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -495,7 +511,9 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.mcp.mcp_client.service.MCPService"
+                ) as mock_mcp_service,
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -579,7 +597,9 @@ class TestCreateAgentDateFormatVariations:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.mcp.mcp_client.service.MCPService"
+                ) as mock_mcp_service,
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -630,7 +650,9 @@ class TestCreateAgentDateFormatVariations:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.mcp.mcp_client.service.MCPService"
+                ) as mock_mcp_service,
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -709,7 +731,9 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.mcp.mcp_client.service.MCPService"
+                ) as mock_mcp_service,
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -770,7 +794,9 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.mcp.mcp_client.service.MCPService"
+                ) as mock_mcp_service,
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,
@@ -834,7 +860,9 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session_factory.return_value = mock_session
 
             with (
-                patch("src.services.mcp.service.MCPService") as mock_mcp_service,
+                patch(
+                    "src.services.mcp.mcp_client.service.MCPService"
+                ) as mock_mcp_service,
                 patch(
                     "src.services.tools.mcp_integration.MCPIntegration"
                 ) as mock_mcp_integration,

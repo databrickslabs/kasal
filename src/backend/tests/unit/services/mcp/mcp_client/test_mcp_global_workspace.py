@@ -13,7 +13,7 @@ import pytest
 
 from src.core.exceptions import BadRequestError, NotFoundError
 from src.schemas.mcp import MCPServerCreate
-from src.services.mcp.service import MCPService
+from src.services.mcp.mcp_client.service import MCPService
 
 
 def mk_server(id=1, name="s1", group_id=None, enabled=True, encrypted_api_key=None):
@@ -67,7 +67,7 @@ async def test_get_base_servers_masks_api_key():
 @pytest.mark.asyncio
 async def test_create_global_server_is_unscoped(monkeypatch):
     svc = _svc()
-    from src.services.mcp import service as module
+    from src.services.mcp.mcp_client import service as module
 
     monkeypatch.setattr(
         module.EncryptionUtils, "encrypt_value", lambda v: "enc", raising=True

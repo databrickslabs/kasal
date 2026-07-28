@@ -32,7 +32,7 @@ def _task(state, text=None, task_id="t-1"):
 
 def _client(send=None, get=None):
     return patch.multiple(
-        "src.services.a2a.client",
+        "src.services.a2a.a2a_client.client",
         send_message=AsyncMock(return_value=send or {}),
         get_task=AsyncMock(side_effect=get) if get else AsyncMock(return_value={}),
     )
@@ -84,7 +84,7 @@ class TestDelegation:
     @pytest.mark.asyncio
     async def test_an_answer_continues_the_existing_remote_task(self):
         send = AsyncMock(return_value=_task("TASK_STATE_COMPLETED", "done"))
-        with patch("src.services.a2a.client.send_message", new=send):
+        with patch("src.services.a2a.a2a_client.client.send_message", new=send):
             await _tool()._delegate("EMEA", None, "t-1")
         assert send.await_args.kwargs["task_id"] == "t-1"
 
@@ -93,7 +93,7 @@ class TestDelegation:
         """A raise aborts the whole task; a failed delegation is information the
         calling agent can act on — try another skill, or do it itself."""
         with patch(
-            "src.services.a2a.client.send_message",
+            "src.services.a2a.a2a_client.client.send_message",
             new=AsyncMock(side_effect=RuntimeError("remote is down")),
         ):
             result = _tool()._run(request="go")

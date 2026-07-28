@@ -20,9 +20,9 @@ from pydantic import BaseModel, Field
 from src.core.dependencies import SessionDep
 from src.core.exceptions import KasalError, NotFoundError, UnprocessableEntityError
 from src.schemas.a2a import AgentCard, SendMessageRequest, Task
-from src.services.a2a import card as a2a_card
-from src.services.a2a import push as a2a_push
-from src.services.a2a import tasks as a2a_tasks
+from src.services.a2a.a2a_server import card as a2a_card
+from src.services.a2a.a2a_server import push as a2a_push
+from src.services.a2a.a2a_server import tasks as a2a_tasks
 from src.services.external.identity import (
     ExternalAuthError,
     ExternalCaller,
@@ -163,7 +163,7 @@ async def stream_message(
     """
     from fastapi.responses import StreamingResponse
 
-    from src.services.a2a import stream as a2a_stream
+    from src.services.a2a.a2a_server import stream as a2a_stream
 
     try:
         task = await a2a_tasks.send_message(
@@ -202,7 +202,7 @@ async def subscribe_to_task(task_id: str, caller: CallerDep, session: SessionDep
     """
     from fastapi.responses import StreamingResponse
 
-    from src.services.a2a import stream as a2a_stream
+    from src.services.a2a.a2a_server import stream as a2a_stream
 
     # Resolved before streaming so an unknown or foreign task is a 404 rather
     # than a 200 whose body happens to contain nothing.

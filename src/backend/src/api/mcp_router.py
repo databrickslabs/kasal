@@ -23,7 +23,7 @@ from src.schemas.mcp import (
     MCPTestConnectionResponse,
     MCPToggleResponse,
 )
-from src.services.mcp.service import MCPService
+from src.services.mcp.mcp_client.service import MCPService
 
 # Create router instance
 router = APIRouter(

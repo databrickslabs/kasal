@@ -11,8 +11,8 @@ import pytest
 
 from src.services.external.identity import ExternalCaller
 from src.services.external.state import ExternalTaskState
-from src.services.mcp_server import server as mcp_server
-from src.services.mcp_server.tools import TOOL_DEFINITIONS, TOOL_HANDLERS
+from src.services.mcp.mcp_server import server as mcp_server
+from src.services.mcp.mcp_server.tools import TOOL_DEFINITIONS, TOOL_HANDLERS
 
 
 class _Ctx:
@@ -70,7 +70,9 @@ class TestDispatch:
         """Unknown means: not a fixed tool AND not a crew published to this
         caller. Layer-2 tool names ARE publication names, so the publication
         lookup has to miss too before a name is genuinely unknown."""
-        with patch("src.services.mcp_server.tools.PublicationService") as publications:
+        with patch(
+            "src.services.mcp.mcp_server.tools.PublicationService"
+        ) as publications:
             publications.return_value.resolve_capability = AsyncMock(return_value=None)
             with pytest.raises(mcp_server.UnknownToolError):
                 await mcp_server.call_tool(_caller(), "not_a_tool", {})
@@ -85,9 +87,11 @@ class TestDispatch:
             external_name="acme_report", entity_type="crew", entity_id="c1"
         )
         with (
-            patch("src.services.mcp_server.tools.PublicationService") as publications,
             patch(
-                "src.services.mcp_server.tools.start_run",
+                "src.services.mcp.mcp_server.tools.PublicationService"
+            ) as publications,
+            patch(
+                "src.services.mcp.mcp_server.tools.start_run",
                 new=AsyncMock(
                     return_value=InvocationResult(
                         run_id="run-9", state=ExternalTaskState.SUBMITTED
@@ -109,7 +113,9 @@ class TestDispatch:
     async def test_a_crew_published_to_another_tenant_is_simply_unknown(self):
         """resolve_capability is group-scoped, so a name from another workspace
         misses and becomes the same UnknownToolError as a typo."""
-        with patch("src.services.mcp_server.tools.PublicationService") as publications:
+        with patch(
+            "src.services.mcp.mcp_server.tools.PublicationService"
+        ) as publications:
             publications.return_value.resolve_capability = AsyncMock(return_value=None)
             with pytest.raises(mcp_server.UnknownToolError):
                 await mcp_server.call_tool(_caller(), "someone_elses_crew", {})
@@ -141,7 +147,9 @@ class TestListCrews:
                 entity_id="c1", name="acme_report", description="Quarterly report."
             )
         ]
-        with patch("src.services.mcp_server.tools.PublicationService") as service_cls:
+        with patch(
+            "src.services.mcp.mcp_server.tools.PublicationService"
+        ) as service_cls:
             service_cls.return_value.list_capabilities = AsyncMock(return_value=fake)
             result = await mcp_server.call_tool(_caller(), "list_crews", {})
 
@@ -156,7 +164,9 @@ class TestListCrews:
 
     @pytest.mark.asyncio
     async def test_the_caller_is_what_scopes_the_listing(self):
-        with patch("src.services.mcp_server.tools.PublicationService") as service_cls:
+        with patch(
+            "src.services.mcp.mcp_server.tools.PublicationService"
+        ) as service_cls:
             service_cls.return_value.list_capabilities = AsyncMock(return_value=[])
             caller = _caller(["acme_corp"])
             await mcp_server.call_tool(caller, "list_crews", {})
@@ -171,7 +181,7 @@ class TestAskKasal:
         from src.services.external.invocation import InvocationResult
 
         with patch(
-            "src.services.mcp_server.tools.ask",
+            "src.services.mcp.mcp_server.tools.ask",
             new=AsyncMock(
                 return_value=InvocationResult(
                     run_id="run-1", state=ExternalTaskState.COMPLETED, output="42"
@@ -190,7 +200,7 @@ class TestAskKasal:
         from src.services.external.invocation import InvocationResult
 
         with patch(
-            "src.services.mcp_server.tools.ask",
+            "src.services.mcp.mcp_server.tools.ask",
             new=AsyncMock(
                 return_value=InvocationResult(
                     run_id="run-2", state=ExternalTaskState.FAILED, error="boom"

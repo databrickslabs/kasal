@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.services.a2a import stream as a2a_stream
-from src.services.a2a.render import to_stream_events
+from src.services.a2a.a2a_server import stream as a2a_stream
+from src.services.a2a.a2a_server.render import to_stream_events
 from src.services.external.identity import ExternalCaller
 
 
@@ -39,7 +39,7 @@ async def _collect(frames):
         for frame in frames:
             yield frame
 
-    with patch("src.services.a2a.stream.stream_run", new=_gen):
+    with patch("src.services.a2a.a2a_server.stream.stream_run", new=_gen):
         return [
             chunk
             async for chunk in a2a_stream.stream_task(_caller(), "run-1", session=None)
@@ -193,7 +193,7 @@ class TestAuthorisation:
             called["run_id"] = run_id
             yield {"run_id": run_id, "state": "completed"}
 
-        with patch("src.services.a2a.stream.stream_run", new=_gen):
+        with patch("src.services.a2a.a2a_server.stream.stream_run", new=_gen):
             async for _ in a2a_stream.stream_task(_caller(), "run-9", session=None):
                 pass
 
@@ -211,7 +211,7 @@ class TestRouter:
         # APIRouter, not the module the handlers live on.
         a2a_router = importlib.import_module("src.api.a2a_router")
         from src.core.exceptions import NotFoundError
-        from src.services.a2a.tasks import UnknownTaskError
+        from src.services.a2a.a2a_server.tasks import UnknownTaskError
 
         with patch.object(
             a2a_router.a2a_tasks,

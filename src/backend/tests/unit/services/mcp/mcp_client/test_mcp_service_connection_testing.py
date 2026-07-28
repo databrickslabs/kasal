@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from src.schemas.mcp import MCPTestConnectionRequest
-from src.services.mcp.service import MCPService
+from src.services.mcp.mcp_client.service import MCPService
 
 
 def mk_server(
@@ -111,7 +111,7 @@ async def test_get_servers_by_names_and_group_aware(monkeypatch):
     svc.server_repository = AsyncMock()
 
     # decrypt happy path
-    from src.services.mcp import service as module
+    from src.services.mcp.mcp_client import service as module
 
     monkeypatch.setattr(
         module.EncryptionUtils, "decrypt_value", lambda v: "dec", raising=True
@@ -145,7 +145,7 @@ async def test_enable_server_for_group_paths(monkeypatch):
     base_g = mk_server(id=5, name="x", group_id="g1", encrypted_api_key="enc")
     svc.server_repository.get = AsyncMock(return_value=base_g)
     svc.server_repository.update = AsyncMock(return_value=base_g)
-    from src.services.mcp import service as module
+    from src.services.mcp.mcp_client import service as module
 
     monkeypatch.setattr(
         module.EncryptionUtils, "decrypt_value", lambda v: "decg", raising=True
@@ -232,12 +232,14 @@ async def test_streamable_connection_success():
 
     with (
         patch(
-            "src.services.mcp.service.streamablehttp_client", create=True
+            "src.services.mcp.mcp_client.service.streamablehttp_client", create=True
         ) as mock_connect,
-        patch("src.services.mcp.service.ClientSession", create=True) as mock_cs,
+        patch(
+            "src.services.mcp.mcp_client.service.ClientSession", create=True
+        ) as mock_cs,
     ):
         # Patch the inline imports used by the method
-        import src.services.mcp.service as mod
+        import src.services.mcp.mcp_client.service as mod
 
         mock_connect_cm = AsyncMock()
         mock_connect_cm.__aenter__.return_value = (Mock(), Mock(), None)
@@ -760,7 +762,7 @@ class TestDecryptSkippedForTokenAuthServers:
     every run logs 'Error decrypting value with SSH key: Decryption failed'."""
 
     def test_obo_server_never_decrypts_stale_blob(self, monkeypatch):
-        from src.services.mcp import service as module
+        from src.services.mcp.mcp_client import service as module
 
         def boom(_v):
             raise AssertionError("decrypt_value must not be called for OBO servers")
@@ -774,7 +776,7 @@ class TestDecryptSkippedForTokenAuthServers:
         assert MCPService._decrypt_server_api_key(server) is None
 
     def test_spn_server_never_decrypts_stale_blob(self, monkeypatch):
-        from src.services.mcp import service as module
+        from src.services.mcp.mcp_client import service as module
 
         def boom(_v):
             raise AssertionError("decrypt_value must not be called for SPN servers")
@@ -788,7 +790,7 @@ class TestDecryptSkippedForTokenAuthServers:
         assert MCPService._decrypt_server_api_key(server) is None
 
     def test_missing_auth_type_defaults_to_api_key(self, monkeypatch):
-        from src.services.mcp import service as module
+        from src.services.mcp.mcp_client import service as module
 
         monkeypatch.setattr(
             module.EncryptionUtils, "decrypt_value", lambda v: "plain", raising=True
@@ -797,7 +799,7 @@ class TestDecryptSkippedForTokenAuthServers:
         assert MCPService._decrypt_server_api_key(server) == "plain"
 
     def test_no_blob_returns_none_without_decrypting(self, monkeypatch):
-        from src.services.mcp import service as module
+        from src.services.mcp.mcp_client import service as module
 
         def boom(_v):
             raise AssertionError("decrypt_value must not be called without a blob")
@@ -813,7 +815,7 @@ class TestDecryptSkippedForTokenAuthServers:
         the warning must name the server and say to re-save its API key."""
         import logging
 
-        from src.services.mcp import service as module
+        from src.services.mcp.mcp_client import service as module
 
         monkeypatch.setattr(
             module.EncryptionUtils, "decrypt_value", lambda v: "", raising=True
@@ -831,7 +833,7 @@ class TestDecryptSkippedForTokenAuthServers:
     def test_decrypt_exception_warns_and_returns_empty(self, monkeypatch, caplog):
         import logging
 
-        from src.services.mcp import service as module
+        from src.services.mcp.mcp_client import service as module
 
         def raise_err(_v):
             raise ValueError("bad blob")
@@ -849,7 +851,7 @@ class TestDecryptSkippedForTokenAuthServers:
 async def test_get_servers_by_names_skips_decrypt_for_obo(monkeypatch):
     """End-to-end through the engine's lookup path: an OBO server with a stale
     encrypted_api_key returns without any decryption attempt."""
-    from src.services.mcp import service as module
+    from src.services.mcp.mcp_client import service as module
 
     def boom(_v):
         raise AssertionError("decrypt_value must not be called for OBO servers")
@@ -876,7 +878,7 @@ async def test_get_servers_by_names_skips_decrypt_for_obo(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_get_server_by_id_skips_decrypt_for_obo(monkeypatch):
-    from src.services.mcp import service as module
+    from src.services.mcp.mcp_client import service as module
 
     def boom(_v):
         raise AssertionError("decrypt_value must not be called for OBO servers")

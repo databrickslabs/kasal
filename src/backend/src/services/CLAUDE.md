@@ -9,6 +9,27 @@ coordinate one or more repositories, enforce group isolation, and
 encrypt/decrypt sensitive data. They are called by routers and by the engine,
 never the reverse.
 
+## Every service is a package
+
+`services/` is a directory of DOMAINS, never of loose modules. A new service goes
+in `services/<domain>/<module>.py` — not `services/<domain>_service.py` beside
+it. A loose file leaves the next thing that domain needs with nowhere to go, so
+it lands as `<domain>_service_helpers.py` alongside, and the boundary that was a
+directory becomes a naming convention nobody enforces.
+
+`tests/unit/architecture/test_services_are_packages.py` fails on a loose file,
+and on a package with no `__init__.py` (an implicit namespace package imports
+fine until a stale `__pycache__` shadows it — a failure that reads as "the module
+vanished"). It has NO allowlist, so an exemption has to be argued for in review.
+
+**Protocols split by direction.** `a2a/` and `mcp/` each hold `*_server/`
+(Kasal ANSWERING someone else) and `*_client/` (Kasal CALLING someone else). The
+two directions have opposite trust models — inbound, the caller is untrusted and
+Kasal decides what to expose; outbound, Kasal makes requests to an address a
+tenant supplied — and which side a file is on should be legible from its path,
+not from reading it. `services/mcp_server/` used to sit at the top level, one
+word away from `services/mcp/`; that is what this layout fixes.
+
 ## Two shapes live here
 
 Not everything in this directory is a `*_service.py` CRUD class, and that is

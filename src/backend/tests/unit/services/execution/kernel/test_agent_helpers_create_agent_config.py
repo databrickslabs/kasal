@@ -78,7 +78,7 @@ def _patch_all_deps():
             return_value=[],
         ),
         patch("src.db.session.request_scoped_session"),
-        patch("src.services.mcp.service.MCPService"),
+        patch("src.services.mcp.mcp_client.service.MCPService"),
         patch(
             "src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent",
             new_callable=AsyncMock,
@@ -189,7 +189,7 @@ class TestSecurityPreambleInjection:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -236,7 +236,7 @@ class TestSecurityPreambleInjection:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -270,7 +270,7 @@ class TestSecurityPreambleInjection:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -319,7 +319,7 @@ class TestCreateAgentLlmConfig:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -350,7 +350,7 @@ class TestCreateAgentLlmConfig:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -391,7 +391,7 @@ class TestCreateAgentLlmConfig:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -440,7 +440,7 @@ class TestKnowledgeSourcesRemoval:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -485,7 +485,7 @@ class TestToolResolution:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -524,7 +524,7 @@ class TestToolResolution:
                 new_callable=AsyncMock,
                 return_value=[mcp_tool],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -570,7 +570,7 @@ class TestToolResolution:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch(
                 "src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names",
                 new_callable=AsyncMock,
@@ -623,7 +623,7 @@ class TestToolResolution:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch(
                 "src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names",
                 new_callable=AsyncMock,
@@ -687,7 +687,7 @@ class TestAdditionalAgentParams:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -724,7 +724,7 @@ class TestAdditionalAgentParams:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -763,7 +763,7 @@ class TestAdditionalAgentParams:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -811,7 +811,7 @@ class TestPromptTemplates:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -851,7 +851,7 @@ class TestPromptTemplates:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -888,7 +888,7 @@ class TestPromptTemplates:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -930,7 +930,7 @@ class TestDefaultAgentSettings:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -965,7 +965,7 @@ class TestDefaultAgentSettings:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -995,7 +995,7 @@ class TestDefaultAgentSettings:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -1042,7 +1042,7 @@ class TestLlmFallback:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)

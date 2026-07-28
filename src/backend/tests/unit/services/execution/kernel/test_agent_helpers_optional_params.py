@@ -56,7 +56,7 @@ async def _make_agent(agent_config=None, config=None, **kwargs):
         patch("src.services.llm.manager.LLMManager") as mock_lm,
         patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
         patch("src.db.session.request_scoped_session") as mock_sess,
-        patch("src.services.mcp.service.MCPService") as mock_mcp_svc,
+        patch("src.services.mcp.mcp_client.service.MCPService") as mock_mcp_svc,
         patch("src.core.unit_of_work.UnitOfWork") as mock_uow,
         patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls,
     ):
@@ -160,7 +160,7 @@ class TestCreateAgentBasic:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -210,7 +210,7 @@ class TestCreateAgentLLMConfig:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -248,7 +248,7 @@ class TestCreateAgentLLMConfig:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -288,7 +288,7 @@ class TestCreateAgentLLMConfig:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -328,7 +328,7 @@ class TestCreateAgentLLMConfig:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -378,7 +378,7 @@ class TestCreateAgentToolResolution:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -430,7 +430,7 @@ class TestCreateAgentToolResolution:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -478,7 +478,7 @@ class TestCreateAgentToolResolution:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -523,7 +523,7 @@ class TestCreateAgentToolResolution:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -566,7 +566,7 @@ class TestCreateAgentToolResolution:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -683,7 +683,7 @@ class TestCreateAgentAdditionalParams:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -725,7 +725,7 @@ class TestCreateAgentAdditionalParams:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -760,7 +760,7 @@ class TestCreateAgentAdditionalParams:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -801,7 +801,7 @@ class TestCreateAgentLLMConfigExtended:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -842,7 +842,7 @@ class TestCreateAgentLLMConfigExtended:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -891,7 +891,7 @@ class TestCreateAgentLLMConfigExtended:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -929,7 +929,7 @@ class TestCreateAgentLLMConfigExtended:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"
@@ -966,7 +966,7 @@ class TestCreateAgentLLMConfigExtended:
             patch("src.services.llm.manager.LLMManager") as mock_lm,
             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp,
             patch("src.db.session.request_scoped_session") as mock_sess,
-            patch("src.services.mcp.service.MCPService"),
+            patch("src.services.mcp.mcp_client.service.MCPService"),
             patch("src.core.unit_of_work.UnitOfWork"),
             patch(
                 "src.services.execution.kernel.agent_builder.Agent"

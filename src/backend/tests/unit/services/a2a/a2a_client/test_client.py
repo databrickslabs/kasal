@@ -9,14 +9,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.services.a2a import client
+from src.services.a2a.a2a_client import client
 from src.services.external.state import ExternalTaskState
 
 
 def _safe_url():
     # Patched on the CLIENT, which binds the name at import — patching the utils
     # module would leave the bound reference untouched and hit real DNS.
-    return patch("src.services.a2a.client.assert_safe_outbound_url", new=AsyncMock())
+    return patch(
+        "src.services.a2a.a2a_client.client.assert_safe_outbound_url", new=AsyncMock()
+    )
 
 
 def _http(payload=None, status=200, raises=None, text=None):
@@ -75,7 +77,7 @@ class TestSsrf:
         from src.utils.url_security import UnsafeUrlError
 
         with patch(
-            "src.services.a2a.client.assert_safe_outbound_url",
+            "src.services.a2a.a2a_client.client.assert_safe_outbound_url",
             new=AsyncMock(side_effect=UnsafeUrlError("loopback")),
         ):
             with pytest.raises(client.RemoteAgentError, match="Refusing to call"):

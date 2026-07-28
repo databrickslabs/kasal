@@ -150,7 +150,7 @@ class TestCard:
 
 class TestTaskOperations:
     def test_unknown_skill_is_a_404(self, client):
-        from src.services.a2a.tasks import UnknownSkillError
+        from src.services.a2a.a2a_server.tasks import UnknownSkillError
 
         with (
             _accept(),
@@ -168,7 +168,7 @@ class TestTaskOperations:
     def test_a_task_the_caller_may_not_see_is_a_404(self, client):
         """Same status for "does not exist" and "not yours" — task ids must not
         become an oracle for other workspaces."""
-        from src.services.a2a.tasks import UnknownTaskError
+        from src.services.a2a.a2a_server.tasks import UnknownTaskError
 
         with (
             _accept(),

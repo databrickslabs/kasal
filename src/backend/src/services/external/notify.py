@@ -45,7 +45,7 @@ def notify_state_change(
 async def _notify(job_id: str, status: str, result: Any) -> None:
     try:
         from src.db.session import get_isolated_db_session
-        from src.services.a2a import push
+        from src.services.a2a.a2a_server import push
         from src.services.external.state import is_terminal, to_external_state
 
         state = to_external_state(status)

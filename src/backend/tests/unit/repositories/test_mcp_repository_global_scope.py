@@ -202,7 +202,7 @@ async def test_picker_source_excludes_globally_disabled_even_for_admins(session)
     """get_all_servers_effective backs GET /mcp/servers (the chat/builder MCP
     picker). A globally-disabled server must not appear even on the admin path
     (enabled_only=False), where workspace-disabled servers are still shown."""
-    from src.services.mcp.service import MCPService
+    from src.services.mcp.mcp_client.service import MCPService
 
     await _add(session, "shared", group_id=None, enabled=False)  # globally disabled
     await _add(session, "shared", group_id="ws1", enabled=True)  # ws1 opted in

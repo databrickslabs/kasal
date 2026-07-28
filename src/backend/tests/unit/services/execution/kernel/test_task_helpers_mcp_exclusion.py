@@ -77,7 +77,7 @@ class TestMCPServersExcludedFromAutoResolution:
                 mock_mcp_integration,
             ),
             patch(
-                "src.services.mcp.service.MCPService",
+                "src.services.mcp.mcp_client.service.MCPService",
                 mock_mcp_service_cls,
             ),
             patch(

@@ -60,16 +60,16 @@ class TestOneCapabilityList:
     async def test_mcp_tools_and_a2a_skills_show_the_same_capabilities(self):
         """Two projections of one query. If these ever differ, a second
         capability source has been introduced somewhere."""
-        from src.services.a2a.card import build_card
-        from src.services.mcp_server.tools import list_crews
+        from src.services.a2a.a2a_server.card import build_card
+        from src.services.mcp.mcp_server.tools import list_crews
 
-        with patch("src.services.mcp_server.tools.PublicationService") as mcp_svc:
+        with patch("src.services.mcp.mcp_server.tools.PublicationService") as mcp_svc:
             mcp_svc.return_value.list_capabilities = AsyncMock(
                 return_value=_CAPABILITIES
             )
             mcp_result = await list_crews(_caller("mcp"))
 
-        with patch("src.services.a2a.card.PublicationService") as a2a_svc:
+        with patch("src.services.a2a.a2a_server.card.PublicationService") as a2a_svc:
             a2a_svc.return_value.list_capabilities = AsyncMock(
                 return_value=_CAPABILITIES
             )
@@ -87,16 +87,16 @@ class TestOneCapabilityList:
     async def test_the_input_schema_is_the_same_on_both_surfaces(self):
         """MCP tool inputSchema and A2A skill inputSchema are one field. Two
         copies would drift and one would quietly become wrong."""
-        from src.services.a2a.card import build_card
-        from src.services.mcp_server.tools import list_crews
+        from src.services.a2a.a2a_server.card import build_card
+        from src.services.mcp.mcp_server.tools import list_crews
 
-        with patch("src.services.mcp_server.tools.PublicationService") as mcp_svc:
+        with patch("src.services.mcp.mcp_server.tools.PublicationService") as mcp_svc:
             mcp_svc.return_value.list_capabilities = AsyncMock(
                 return_value=_CAPABILITIES
             )
             mcp_result = await list_crews(_caller("mcp"))
 
-        with patch("src.services.a2a.card.PublicationService") as a2a_svc:
+        with patch("src.services.a2a.a2a_server.card.PublicationService") as a2a_svc:
             a2a_svc.return_value.list_capabilities = AsyncMock(
                 return_value=_CAPABILITIES
             )
@@ -109,15 +109,15 @@ class TestOneCapabilityList:
     @pytest.mark.asyncio
     async def test_both_read_through_the_same_service_method(self):
         """Not merely 'they agree today' — they call the same function."""
-        from src.services.a2a.card import build_card
-        from src.services.mcp_server.tools import list_crews
+        from src.services.a2a.a2a_server.card import build_card
+        from src.services.mcp.mcp_server.tools import list_crews
 
-        with patch("src.services.mcp_server.tools.PublicationService") as mcp_svc:
+        with patch("src.services.mcp.mcp_server.tools.PublicationService") as mcp_svc:
             mcp_svc.return_value.list_capabilities = AsyncMock(return_value=[])
             await list_crews(_caller("mcp"))
             assert mcp_svc.return_value.list_capabilities.await_count == 1
 
-        with patch("src.services.a2a.card.PublicationService") as a2a_svc:
+        with patch("src.services.a2a.a2a_server.card.PublicationService") as a2a_svc:
             a2a_svc.return_value.list_capabilities = AsyncMock(return_value=[])
             await build_card(_caller("a2a"), base_url="https://x")
             assert a2a_svc.return_value.list_capabilities.await_count == 1
@@ -130,19 +130,19 @@ class TestLayerTwoMatchesSkills:
 
     @pytest.mark.asyncio
     async def test_per_crew_tools_and_skills_name_the_same_capabilities(self):
-        from src.services.a2a.card import build_card
-        from src.services.mcp_server.server import list_tools
-        from src.services.mcp_server.tools import TOOL_DEFINITIONS
+        from src.services.a2a.a2a_server.card import build_card
+        from src.services.mcp.mcp_server.server import list_tools
+        from src.services.mcp.mcp_server.tools import TOOL_DEFINITIONS
 
         fixed = {t["name"] for t in TOOL_DEFINITIONS}
 
-        with patch("src.services.mcp_server.tools.PublicationService") as mcp_svc:
+        with patch("src.services.mcp.mcp_server.tools.PublicationService") as mcp_svc:
             mcp_svc.return_value.list_capabilities = AsyncMock(
                 return_value=_CAPABILITIES
             )
             tools = await list_tools(_caller("mcp"))
 
-        with patch("src.services.a2a.card.PublicationService") as a2a_svc:
+        with patch("src.services.a2a.a2a_server.card.PublicationService") as a2a_svc:
             a2a_svc.return_value.list_capabilities = AsyncMock(
                 return_value=_CAPABILITIES
             )
@@ -157,12 +157,12 @@ class TestLayerTwoMatchesSkills:
         """A crew published as `start_crew` would shadow a control tool. It is
         dropped with a warning rather than either silently winning (breaking
         every caller's start_crew) or silently losing."""
-        from src.services.mcp_server.server import list_tools
+        from src.services.mcp.mcp_server.server import list_tools
 
         clash = PublishedCapability(
             entity_id="c9", name="start_crew", description="A crew named like a tool."
         )
-        with patch("src.services.mcp_server.tools.PublicationService") as mcp_svc:
+        with patch("src.services.mcp.mcp_server.tools.PublicationService") as mcp_svc:
             mcp_svc.return_value.list_capabilities = AsyncMock(return_value=[clash])
             tools = await list_tools(_caller("mcp"))
 
@@ -175,7 +175,7 @@ class TestOneStateVocabulary:
     async def test_a_status_means_the_same_thing_on_both_surfaces(self):
         """The named failure: the two surfaces disagreeing about whether a run
         is RUNNING or WORKING."""
-        from src.services.a2a.render import to_wire_state
+        from src.services.a2a.a2a_server.render import to_wire_state
 
         for status in ExecutionStatus:
             canonical = to_external_state(status.value)
@@ -185,7 +185,7 @@ class TestOneStateVocabulary:
             assert wire == f"TASK_STATE_{canonical.value.upper()}"
 
     def test_the_wire_map_covers_every_canonical_state(self):
-        from src.services.a2a.render import _STATE_TO_WIRE
+        from src.services.a2a.a2a_server.render import _STATE_TO_WIRE
 
         missing = [s for s in ExternalTaskState if s not in _STATE_TO_WIRE]
         assert (

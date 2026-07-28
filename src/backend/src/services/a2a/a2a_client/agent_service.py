@@ -35,7 +35,7 @@ from src.schemas.a2a_agent import (
     A2AAgentUpdate,
     A2AConnectionTest,
 )
-from src.services.a2a import client as a2a_client
+from src.services.a2a.a2a_client import client as a2a_client
 from src.utils.encryption_utils import EncryptionUtils
 from src.utils.user_context import GroupContext
 

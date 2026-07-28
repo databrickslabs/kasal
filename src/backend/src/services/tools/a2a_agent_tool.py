@@ -138,7 +138,7 @@ class A2AAgentTool(BaseTool):
     async def _delegate(
         self, request: str, skill_id: Optional[str], task_id: Optional[str]
     ) -> str:
-        from src.services.a2a import client as a2a_client
+        from src.services.a2a.a2a_client import client as a2a_client
 
         task = await a2a_client.send_message(
             self.interface_url,

@@ -28,8 +28,8 @@ from src.schemas.a2a_agent import (
     A2AAgentUpdate,
     A2AConnectionTest,
 )
-from src.services.a2a import client as a2a_client
-from src.services.a2a.agent_service import A2AAgentService
+from src.services.a2a.a2a_client import client as a2a_client
+from src.services.a2a.a2a_client.agent_service import A2AAgentService
 
 router = APIRouter(
     prefix="/a2a-agents",

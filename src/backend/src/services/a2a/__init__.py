@@ -11,8 +11,8 @@ A2A's, adopted for both protocols. MCP is the beneficiary — it gets a task
 lifecycle, including input_required, that MCP itself does not define.
 """
 
-from src.services.a2a.card import AGENT_VERSION, PROTOCOL_VERSION, build_card
-from src.services.a2a.tasks import (
+from src.services.a2a.a2a_server.card import AGENT_VERSION, PROTOCOL_VERSION, build_card
+from src.services.a2a.a2a_server.tasks import (
     UnknownSkillError,
     UnknownTaskError,
     cancel_task,

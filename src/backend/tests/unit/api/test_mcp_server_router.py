@@ -117,7 +117,9 @@ class TestResolvedCaller:
                 "src.api.mcp_server_router.resolve_caller",
                 new=AsyncMock(return_value=_resolved()),
             ),
-            patch("src.services.mcp_server.tools.PublicationService") as publications,
+            patch(
+                "src.services.mcp.mcp_server.tools.PublicationService"
+            ) as publications,
         ):
             publications.return_value.list_capabilities = AsyncMock(return_value=[])
             response = client.get("/mcp/v1/tools")
@@ -145,7 +147,9 @@ class TestResolvedCaller:
                 "src.api.mcp_server_router.resolve_caller",
                 new=AsyncMock(return_value=_resolved()),
             ),
-            patch("src.services.mcp_server.tools.PublicationService") as publications,
+            patch(
+                "src.services.mcp.mcp_server.tools.PublicationService"
+            ) as publications,
         ):
             publications.return_value.list_capabilities = AsyncMock(
                 return_value=[
@@ -175,7 +179,9 @@ class TestResolvedCaller:
                 "src.api.mcp_server_router.resolve_caller",
                 new=AsyncMock(return_value=_resolved()),
             ),
-            patch("src.services.mcp_server.tools.PublicationService") as publications,
+            patch(
+                "src.services.mcp.mcp_server.tools.PublicationService"
+            ) as publications,
         ):
             publications.return_value.resolve_capability = AsyncMock(return_value=None)
             response = client.post(

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.schemas.a2a_agent import A2AAgentCreate, A2AAgentUpdate
-from src.services.a2a.agent_service import A2AAgentService
+from src.services.a2a.a2a_client.agent_service import A2AAgentService
 
 
 class _Ctx:
@@ -59,7 +59,7 @@ def _row(**overrides):
 
 def _card(card=None, fails=None):
     return patch(
-        "src.services.a2a.client.fetch_card",
+        "src.services.a2a.a2a_client.client.fetch_card",
         new=AsyncMock(return_value=card or {"name": "Remote"}, side_effect=fails),
     )
 

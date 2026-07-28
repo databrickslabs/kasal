@@ -11,7 +11,7 @@ import pytest
 
 from src.schemas.a2a import Message, Part
 from src.schemas.crew_publication import PublishedCapability
-from src.services.a2a import tasks as a2a_tasks
+from src.services.a2a.a2a_server import tasks as a2a_tasks
 from src.services.external.identity import ExternalCaller
 from src.services.external.interaction import PendingInteraction
 from src.services.external.invocation import InvocationResult
@@ -49,9 +49,9 @@ class TestSendMessage:
             entity_id="c1", name="acme_report", description="d"
         )
         with (
-            patch("src.services.a2a.tasks.PublicationService") as svc,
+            patch("src.services.a2a.a2a_server.tasks.PublicationService") as svc,
             patch(
-                "src.services.a2a.tasks.start_run",
+                "src.services.a2a.a2a_server.tasks.start_run",
                 new=AsyncMock(
                     return_value=InvocationResult(
                         run_id="run-1", state=ExternalTaskState.SUBMITTED
@@ -72,9 +72,9 @@ class TestSendMessage:
         """Crew runs take minutes; SendMessage must hand back a handle."""
         publication = PublishedCapability(entity_id="c1", name="x", description="d")
         with (
-            patch("src.services.a2a.tasks.PublicationService") as svc,
+            patch("src.services.a2a.a2a_server.tasks.PublicationService") as svc,
             patch(
-                "src.services.a2a.tasks.start_run",
+                "src.services.a2a.a2a_server.tasks.start_run",
                 new=AsyncMock(
                     return_value=InvocationResult(
                         run_id="run-1", state=ExternalTaskState.SUBMITTED
@@ -90,7 +90,7 @@ class TestSendMessage:
 
     @pytest.mark.asyncio
     async def test_unknown_skill_is_refused(self):
-        with patch("src.services.a2a.tasks.PublicationService") as svc:
+        with patch("src.services.a2a.a2a_server.tasks.PublicationService") as svc:
             svc.return_value.resolve_capability = AsyncMock(return_value=None)
             with pytest.raises(a2a_tasks.UnknownSkillError):
                 await a2a_tasks.send_message(_caller(), _msg(), skill_id="nope")
@@ -108,11 +108,11 @@ class TestContinuingATask:
         same round-trip MCP reaches through respond_to_run."""
         with (
             patch(
-                "src.services.a2a.tasks.interaction.respond",
+                "src.services.a2a.a2a_server.tasks.interaction.respond",
                 new=AsyncMock(return_value=True),
             ) as respond,
             patch(
-                "src.services.a2a.tasks.get_task",
+                "src.services.a2a.a2a_server.tasks.get_task",
                 new=AsyncMock(return_value="the-refreshed-task"),
             ),
         ):
@@ -126,7 +126,7 @@ class TestContinuingATask:
     @pytest.mark.asyncio
     async def test_answering_a_task_that_is_not_waiting_is_refused(self):
         with patch(
-            "src.services.a2a.tasks.interaction.respond",
+            "src.services.a2a.a2a_server.tasks.interaction.respond",
             new=AsyncMock(return_value=False),
         ):
             with pytest.raises(a2a_tasks.UnknownTaskError):
@@ -141,7 +141,7 @@ class TestGetTask:
         a second request."""
         with (
             patch(
-                "src.services.a2a.tasks.run_status",
+                "src.services.a2a.a2a_server.tasks.run_status",
                 new=AsyncMock(
                     return_value=InvocationResult(
                         run_id="run-1", state=ExternalTaskState.WORKING
@@ -149,7 +149,7 @@ class TestGetTask:
                 ),
             ),
             patch(
-                "src.services.a2a.tasks.interaction.pending_for_run",
+                "src.services.a2a.a2a_server.tasks.interaction.pending_for_run",
                 new=AsyncMock(
                     return_value=[PendingInteraction(approval_id=1, prompt="Ship it?")]
                 ),
@@ -164,7 +164,7 @@ class TestGetTask:
     async def test_a_finished_run_carries_its_output_as_an_artifact(self):
         with (
             patch(
-                "src.services.a2a.tasks.run_status",
+                "src.services.a2a.a2a_server.tasks.run_status",
                 new=AsyncMock(
                     return_value=InvocationResult(
                         run_id="run-1",
@@ -174,7 +174,7 @@ class TestGetTask:
                 ),
             ),
             patch(
-                "src.services.a2a.tasks.interaction.pending_for_run",
+                "src.services.a2a.a2a_server.tasks.interaction.pending_for_run",
                 new=AsyncMock(return_value=[]),
             ),
         ):
@@ -188,7 +188,8 @@ class TestGetTask:
         """None from the EIL covers "no such run" AND "another tenant's" — task
         ids must not become an oracle for other workspaces' activity."""
         with patch(
-            "src.services.a2a.tasks.run_status", new=AsyncMock(return_value=None)
+            "src.services.a2a.a2a_server.tasks.run_status",
+            new=AsyncMock(return_value=None),
         ):
             with pytest.raises(a2a_tasks.UnknownTaskError):
                 await a2a_tasks.get_task(_caller(), "someone-elses-run")
@@ -198,7 +199,7 @@ class TestCancel:
     @pytest.mark.asyncio
     async def test_cancelling_reports_the_canceled_state(self):
         with patch(
-            "src.services.a2a.tasks.cancel_run",
+            "src.services.a2a.a2a_server.tasks.cancel_run",
             new=AsyncMock(
                 return_value=InvocationResult(
                     run_id="run-1", state=ExternalTaskState.CANCELED
@@ -211,7 +212,8 @@ class TestCancel:
     @pytest.mark.asyncio
     async def test_cancelling_a_task_the_caller_may_not_see_is_refused(self):
         with patch(
-            "src.services.a2a.tasks.cancel_run", new=AsyncMock(return_value=None)
+            "src.services.a2a.a2a_server.tasks.cancel_run",
+            new=AsyncMock(return_value=None),
         ):
             with pytest.raises(a2a_tasks.UnknownTaskError):
                 await a2a_tasks.cancel_task(_caller(), "run-1")

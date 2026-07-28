@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from src.schemas.crew_publication import PublishedCapability
-from src.services.a2a.card import build_card
+from src.services.a2a.a2a_server.card import build_card
 from src.services.external.identity import ExternalCaller
 
 
@@ -35,7 +35,7 @@ def _caller():
 
 
 async def _build(caps, **kwargs):
-    with patch("src.services.a2a.card.PublicationService") as service_cls:
+    with patch("src.services.a2a.a2a_server.card.PublicationService") as service_cls:
         service_cls.return_value.list_capabilities = AsyncMock(return_value=caps)
         return await build_card(
             _caller(), base_url="https://kasal.example.com", **kwargs
@@ -77,7 +77,9 @@ class TestSkills:
     @pytest.mark.asyncio
     async def test_the_listing_is_scoped_to_the_a2a_protocol(self):
         """A crew published only over MCP must not appear on the card."""
-        with patch("src.services.a2a.card.PublicationService") as service_cls:
+        with patch(
+            "src.services.a2a.a2a_server.card.PublicationService"
+        ) as service_cls:
             service_cls.return_value.list_capabilities = AsyncMock(return_value=[])
             await build_card(_caller(), base_url="https://x")
 

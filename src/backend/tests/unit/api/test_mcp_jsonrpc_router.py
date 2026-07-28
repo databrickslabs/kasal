@@ -106,7 +106,7 @@ class TestToolMethods:
         with (
             _accept(),
             patch(
-                "src.services.mcp_server.server.list_tools",
+                "src.services.mcp.mcp_server.server.list_tools",
                 new=AsyncMock(return_value=[{"name": "ask_kasal"}]),
             ),
         ):
@@ -118,7 +118,7 @@ class TestToolMethods:
         with (
             _accept(),
             patch(
-                "src.services.mcp_server.server.call_tool",
+                "src.services.mcp.mcp_server.server.call_tool",
                 new=AsyncMock(return_value={"run_id": "r1", "state": "completed"}),
             ),
         ):
@@ -144,12 +144,12 @@ class TestErrors:
         assert response.json()["error"]["code"] == -32601
 
     def test_unknown_tool_is_method_not_found(self, client):
-        from src.services.mcp_server.tools import UnknownToolError
+        from src.services.mcp.mcp_server.tools import UnknownToolError
 
         with (
             _accept(),
             patch(
-                "src.services.mcp_server.server.call_tool",
+                "src.services.mcp.mcp_server.server.call_tool",
                 new=AsyncMock(side_effect=UnknownToolError("nope")),
             ),
         ):
@@ -164,7 +164,7 @@ class TestErrors:
         with (
             _accept(),
             patch(
-                "src.services.mcp_server.server.call_tool",
+                "src.services.mcp.mcp_server.server.call_tool",
                 new=AsyncMock(
                     side_effect=ExternalPermissionError(
                         "needs admin", required_roles=["admin"], actual_role="operator"

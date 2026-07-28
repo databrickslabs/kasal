@@ -311,7 +311,7 @@ class CrewExportService:
             )
             return []
         try:
-            from src.services.mcp.service import MCPService
+            from src.services.mcp.mcp_client.service import MCPService
 
             mcp_service = MCPService(self.session)
             group_id = group_context.primary_group_id if group_context else None

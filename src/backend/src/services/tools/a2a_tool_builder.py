@@ -34,7 +34,7 @@ async def build_a2a_tools(
     given, rather than with one that errors on first use.
     """
     from src.db.session import get_isolated_db_session
-    from src.services.a2a.agent_service import A2AAgentService
+    from src.services.a2a.a2a_client.agent_service import A2AAgentService
     from src.services.tools.a2a_agent_tool import A2AAgentTool
 
     config = tool_config or {}

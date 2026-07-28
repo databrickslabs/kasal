@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.services.a2a import push
+from src.services.a2a.a2a_server import push
 from src.services.external.identity import ExternalCaller
 
 

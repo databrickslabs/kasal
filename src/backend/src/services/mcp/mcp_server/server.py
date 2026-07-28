@@ -20,7 +20,7 @@ import logging
 from typing import Any, Dict, List
 
 from src.services.external.identity import ExternalCaller
-from src.services.mcp_server.tools import (
+from src.services.mcp.mcp_server.tools import (
     TOOL_DEFINITIONS,
     TOOL_HANDLERS,
     UnknownToolError,
@@ -50,7 +50,7 @@ async def list_tools(
     skills[] reads, which is what stops the two surfaces advertising different
     capabilities.
     """
-    from src.services.mcp_server.tools import build_crew_tool_definitions
+    from src.services.mcp.mcp_server.tools import build_crew_tool_definitions
 
     tools = list(TOOL_DEFINITIONS)
     tools.extend(await build_crew_tool_definitions(caller, session=session))
@@ -78,7 +78,7 @@ async def call_tool(
         # published capability — resolved against this caller's own
         # publications, so an unpublished or another tenant's name is simply
         # unknown.
-        from src.services.mcp_server.tools import call_crew_tool
+        from src.services.mcp.mcp_server.tools import call_crew_tool
 
         return await call_crew_tool(
             caller, name=name, arguments=arguments or {}, session=session

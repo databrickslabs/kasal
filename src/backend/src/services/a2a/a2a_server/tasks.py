@@ -15,7 +15,7 @@ import logging
 from typing import Any, List, Optional
 
 from src.schemas.a2a import Message, Task
-from src.services.a2a import render
+from src.services.a2a.a2a_server import render
 from src.services.external import artifacts as canonical_artifacts
 from src.services.external import interaction
 from src.services.external.identity import ExternalCaller

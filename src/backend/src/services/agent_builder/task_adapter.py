@@ -319,7 +319,7 @@ async def create_task(
             task_config.get("tool_configs", {})
         ):
             from src.db.session import request_scoped_session
-            from src.services.mcp.service import MCPService
+            from src.services.mcp.mcp_client.service import MCPService
 
             async with request_scoped_session() as session:
                 mcp_service = MCPService(session)

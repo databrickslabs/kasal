@@ -20,7 +20,7 @@ from src.schemas.mcp import (
     MCPSettingsUpdate,
     MCPTestConnectionRequest,
 )
-from src.services.mcp.service import MCPService
+from src.services.mcp.mcp_client.service import MCPService
 
 
 def mk_server(
@@ -105,7 +105,7 @@ async def test_get_server_by_id_found_with_api_key(monkeypatch):
     server = mk_server(id=1, name="test", encrypted_api_key="enc123")
     svc.server_repository.get = AsyncMock(return_value=server)
 
-    import src.services.mcp.service as module
+    import src.services.mcp.mcp_client.service as module
 
     monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "decrypted")
 
@@ -120,7 +120,7 @@ async def test_get_server_by_id_decrypt_error(monkeypatch):
     server = mk_server(id=1, name="test", encrypted_api_key="bad")
     svc.server_repository.get = AsyncMock(return_value=server)
 
-    import src.services.mcp.service as module
+    import src.services.mcp.mcp_client.service as module
 
     monkeypatch.setattr(
         module.EncryptionUtils,
@@ -164,7 +164,7 @@ async def test_create_server_success(monkeypatch):
     created = mk_server(id=2, name="new")
     svc.server_repository.create = AsyncMock(return_value=created)
 
-    import src.services.mcp.service as module
+    import src.services.mcp.mcp_client.service as module
 
     monkeypatch.setattr(module.EncryptionUtils, "encrypt_value", lambda v: "enc")
 
@@ -189,7 +189,7 @@ async def test_create_server_with_group_id(monkeypatch):
     created = mk_server(id=3, name="grouped", group_id="g1")
     svc.server_repository.create = AsyncMock(return_value=created)
 
-    import src.services.mcp.service as module
+    import src.services.mcp.mcp_client.service as module
 
     monkeypatch.setattr(module.EncryptionUtils, "encrypt_value", lambda v: "enc")
 
@@ -211,7 +211,7 @@ async def test_create_server_generic_exception(monkeypatch):
     svc.server_repository.find_by_name = AsyncMock(return_value=None)
     svc.server_repository.create = AsyncMock(side_effect=RuntimeError("DB error"))
 
-    import src.services.mcp.service as module
+    import src.services.mcp.mcp_client.service as module
 
     monkeypatch.setattr(module.EncryptionUtils, "encrypt_value", lambda v: "enc")
 
@@ -265,7 +265,7 @@ async def test_update_server_with_new_api_key(monkeypatch):
     svc.server_repository.get = AsyncMock(return_value=existing)
     svc.server_repository.update = AsyncMock(return_value=updated)
 
-    import src.services.mcp.service as module
+    import src.services.mcp.mcp_client.service as module
 
     monkeypatch.setattr(module.EncryptionUtils, "encrypt_value", lambda v: "newenc")
     monkeypatch.setattr(
@@ -286,7 +286,7 @@ async def test_update_server_decrypt_error(monkeypatch):
     svc.server_repository.get = AsyncMock(return_value=existing)
     svc.server_repository.update = AsyncMock(return_value=updated)
 
-    import src.services.mcp.service as module
+    import src.services.mcp.mcp_client.service as module
 
     monkeypatch.setattr(module.EncryptionUtils, "encrypt_value", lambda v: "broken")
     monkeypatch.setattr(
@@ -464,7 +464,7 @@ async def test_get_effective_servers(monkeypatch):
     svc = MCPService(session=SimpleNamespace())
     svc.server_repository = AsyncMock()
 
-    import src.services.mcp.service as module
+    import src.services.mcp.mcp_client.service as module
 
     monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "dec")
 
@@ -487,7 +487,7 @@ async def test_get_effective_servers_empty_explicit(monkeypatch):
     svc = MCPService(session=SimpleNamespace())
     svc.server_repository = AsyncMock()
 
-    import src.services.mcp.service as module
+    import src.services.mcp.mcp_client.service as module
 
     monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "dec")
 
@@ -525,7 +525,7 @@ async def test_get_servers_by_names_decrypt_error(monkeypatch):
     server = mk_server(id=1, name="s1", encrypted_api_key="broken_enc")
     svc.server_repository.find_by_names = AsyncMock(return_value=[server])
 
-    import src.services.mcp.service as module
+    import src.services.mcp.mcp_client.service as module
 
     monkeypatch.setattr(
         module.EncryptionUtils,
@@ -544,7 +544,7 @@ async def test_get_servers_by_names_group_aware_decrypt_error(monkeypatch):
     server = mk_server(id=1, name="s1", group_id="g1", encrypted_api_key="broken")
     svc.server_repository.find_by_names_group_scope = AsyncMock(return_value=[server])
 
-    import src.services.mcp.service as module
+    import src.services.mcp.mcp_client.service as module
 
     monkeypatch.setattr(
         module.EncryptionUtils,
