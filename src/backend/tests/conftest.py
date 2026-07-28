@@ -30,6 +30,22 @@ import pytest
 # autouse fixture below still sets both for the code that reads them at runtime.
 os.environ.setdefault("SQLITE_DB_PATH", ":memory:")
 
+# Everything a test run writes goes in ONE place: tests/.artifacts/. It is
+# git-ignored, safe to delete, and the pollution guard at the bottom of this
+# file asserts nothing lands outside it.
+#
+# LOG_DIR must be set here for the same import-time reason as the DB path:
+# services/llm/manager.py resolves its log file at module import, so a fixture
+# would be too late. Without this the suite writes 35 log files into
+# backend/logs/, the same directory the dev server uses.
+_ARTIFACTS = os.path.join(os.path.dirname(__file__), ".artifacts")
+os.environ.setdefault("LOG_DIR", os.path.join(_ARTIFACTS, "logs"))
+os.environ.setdefault("KASAL_MEMORY_DIR", os.path.join(_ARTIFACTS, "memory"))
+# LITELLM_CACHE_TYPE is deliberately NOT overridden: the disk cache derives its
+# directory from LOG_DIR, so it already lands inside .artifacts/. Forcing
+# "local" here would also contradict the test asserting "disk" is the product
+# default.
+
 # Import numpy (and its lazy submodules) to completion BEFORE pytest collection
 # imports any test module. During collection, a half-finished numpy import
 # (KeyError('numpy.exceptions') / "partially initialized module 'numpy'")
@@ -407,3 +423,66 @@ def pytest_runtest_setup(item):
     except Exception:
         # Never block test collection on setup utilities
         pass
+
+
+# ---------------------------------------------------------------------------
+# Source-tree pollution guard
+# ---------------------------------------------------------------------------
+# A test run must not leave files in the source tree. This kept regressing
+# because nothing detected it — the artifacts were all git-ignored, so they
+# never showed up in a diff, and "ignored" is not the same as "not created".
+#
+# Two real bugs hid behind that: a CWD-relative "./app.db" default that created
+# empty databases wherever a process happened to start (repo root, src/,
+# src/frontend/), and a depth-counting log path that redirected LLM logs and the
+# litellm cache into backend/src/logs the moment its module moved.
+
+_POLLUTION_IGNORED = (
+    ".artifacts",
+    "__pycache__",
+    ".pytest_cache",
+    ".import_linter_cache",
+    ".coverage",
+    ".venv",
+    "node_modules",
+    ".git",
+)
+
+
+def _tree_snapshot(root):
+    """Every file under root, minus the directories tests are allowed to write."""
+    import pathlib
+
+    found = set()
+    for path in pathlib.Path(root).rglob("*"):
+        rel = path.relative_to(root).as_posix()
+        if any(part in rel for part in _POLLUTION_IGNORED):
+            continue
+        if path.is_file():
+            found.add(rel)
+    return found
+
+
+@pytest.fixture(scope="session", autouse=True)
+def no_source_tree_pollution():
+    """Fail the run if it wrote anything outside tests/.artifacts/.
+
+    Opt out with KASAL_ALLOW_TEST_ARTIFACTS=1 when you are deliberately
+    generating fixtures.
+    """
+    import pathlib
+
+    if os.environ.get("KASAL_ALLOW_TEST_ARTIFACTS") == "1":
+        yield
+        return
+
+    root = pathlib.Path(__file__).resolve().parent.parent  # src/backend
+    before = _tree_snapshot(root)
+    yield
+    created = sorted(_tree_snapshot(root) - before)
+    assert not created, (
+        "the test run created files outside tests/.artifacts/:\n  "
+        + "\n  ".join(created)
+        + "\n\nPoint whatever wrote them at tests/.artifacts (see the env vars at "
+          "the top of tests/conftest.py), or use tmp_path."
+    )

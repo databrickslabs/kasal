@@ -70,3 +70,7 @@ kasal_lakebase_*/
 
 # import-linter graph cache
 .import_linter_cache/
+
+# Everything a test run writes — logs, memory, scratch DBs.
+# The pollution guard in tests/conftest.py asserts nothing lands outside this.
+tests/.artifacts/
