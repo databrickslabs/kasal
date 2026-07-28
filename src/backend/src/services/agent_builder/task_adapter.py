@@ -168,7 +168,7 @@ def create_callback_from_string(callback_name: str, task_key: str, callback_conf
     
     if callback_name == 'DatabricksVolumeCallback':
         try:
-            from src.services.task_output.databricks_volume import DatabricksVolumeCallback
+            from src.services.databricks.volumes.volume_callback import DatabricksVolumeCallback
             
             # Create the callback instance with configuration
             databricks_callback = DatabricksVolumeCallback(
@@ -272,7 +272,7 @@ async def create_task(
         # session + MCPService per task was pure waste (the 100% case when
         # MCP is unused).
         if MCPIntegration._extract_mcp_servers_from_config(task_config.get('tool_configs', {})):
-            from src.services.mcp_service import MCPService
+            from src.services.mcp.service import MCPService
             from src.db.session import request_scoped_session
             async with request_scoped_session() as session:
                 mcp_service = MCPService(session)
@@ -449,7 +449,7 @@ async def create_task(
     # Check for global Databricks volume configuration if no callback is set
     if not existing_callback:
         try:
-            from src.services.databricks.service import DatabricksService
+            from src.services.databricks.workspace.service import DatabricksService
             from src.services.memory.backend_service import MemoryBackendService
             from src.db.session import request_scoped_session
 

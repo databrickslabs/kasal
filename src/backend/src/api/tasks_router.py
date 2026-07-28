@@ -8,7 +8,7 @@ from src.core.permissions import check_role_in_context
 from src.models.task import Task
 from src.schemas.task import Task as TaskSchema
 from src.schemas.task import TaskCreate, TaskUpdate
-from src.services.task_service import TaskService
+from src.services.catalog.tasks import TaskService
 from src.utils.sensitive_data_utils import safe_log_tool_configs
 
 router = APIRouter(

@@ -34,7 +34,7 @@ from pydantic import BaseModel
 from src.core.exceptions import NotFoundError
 from src.core.dependencies import GroupContextDep
 from src.schemas.analytics_export import DashboardSummary
-from src.services.analytics_export_service import AnalyticsExportService
+from src.services.databricks.analytics.export import AnalyticsExportService
 from src.utils.databricks_auth import extract_user_token_from_request
 from src.utils.user_context import UserContext
 

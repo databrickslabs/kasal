@@ -19,7 +19,7 @@ from src.schemas.documentation_embedding import (
     DocumentationEmbeddingCreate,
     DocumentationEmbeddingSearch,
 )
-from src.services.documentation_embedding_service import DocumentationEmbeddingService
+from src.services.knowledge.documentation_embedding import DocumentationEmbeddingService
 
 logger = LoggerManager.get_instance().api
 

@@ -125,7 +125,7 @@ async def get_current_user_from_email(
         return None
 
     # Use UserService instead of UserRepository to trigger first user setup logic
-    from src.services.user_service import UserService
+    from src.services.groups.users import UserService
     logger.debug(f"[AUTH DEBUG] Creating UserService and calling get_or_create_user_by_email for {group_context.group_email}")
     user_service = UserService(session)
     user = await user_service.get_or_create_user_by_email(group_context.group_email)

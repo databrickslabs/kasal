@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 from src.core.exceptions import BadRequestError
 from src.repositories.log_repository import LLMLogRepository
 from src.repositories.model_config_repository import ModelConfigRepository
-from src.services.gepa.grading import (  # noqa: E402
+from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
     _judge_value_to_grade,
     _checklist_grade,
     _grade_judge_verdict,
@@ -31,7 +31,7 @@ from src.services.gepa.grading import (  # noqa: E402
     JUDGE_SPREAD_WARN,
     VALID_INTENTS,
 )
-from src.services.gepa.crew_doc import (  # noqa: E402
+from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
     _serialize_crew_doc,
     _parse_crew_doc,
     _parse_requirement_lines,

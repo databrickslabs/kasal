@@ -513,7 +513,7 @@ class TestDatabricksJobsTool(unittest.TestCase):
 
 
     @patch('src.services.tools.databricks_jobs_tool.aiohttp.ClientSession')
-    @patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock)
+    @patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', new_callable=AsyncMock)
     @patch('src.core.unit_of_work.UnitOfWork')
     def test_get_auth_headers_no_token_error(self, mock_uow, mock_get_api_key, mock_session):
         """Test _get_auth_headers with no token raises error"""

@@ -229,7 +229,7 @@ async def _resolve_config(
         return enabled, catalog, guidance
     try:
         from src.db.session import request_scoped_session
-        from src.services.ui_config_service import UIConfigService
+        from src.services.settings.ui import UIConfigService
 
         async with request_scoped_session() as session:
             cfg = await UIConfigService(session, group_id=group_id).get_config()

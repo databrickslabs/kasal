@@ -14,7 +14,7 @@ from src.schemas.prompt_improvement import (
     PromptImprovementRequest,
     PromptImprovementResponse,
 )
-from src.services.prompt_improvement_service import PromptImprovementService
+from src.services.generation.prompt_improvement import PromptImprovementService
 
 logger = logging.getLogger(__name__)
 

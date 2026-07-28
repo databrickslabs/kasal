@@ -22,7 +22,7 @@ from src.schemas.chat_history import (
     SetRunningJobRequest,
     UpdateMessageRequest,
 )
-from src.services.chat_history_service import ChatHistoryService
+from src.services.chat.history import ChatHistoryService
 
 router = APIRouter(
     prefix="/chat-history",

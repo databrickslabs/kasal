@@ -77,7 +77,7 @@ class DashboardRepository:
 
         # PAT from DB — same as get_auth_context() Priority 2
         try:
-            from src.services.api_keys_service import ApiKeysService
+            from src.services.settings.api_keys import ApiKeysService
             from src.db.session import async_session_factory
             from src.utils.user_context import UserContext
 

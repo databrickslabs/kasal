@@ -18,7 +18,7 @@ from src.schemas.engine_config import (
     EngineConfigValueUpdate,
     OtelAppTelemetryConfigUpdate,
 )
-from src.services.engine_config_service import EngineConfigService
+from src.services.settings.engine import EngineConfigService
 
 router = APIRouter(
     prefix="/engine-config",

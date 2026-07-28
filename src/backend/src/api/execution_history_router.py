@@ -29,8 +29,8 @@ from src.services.execution.history import (
     ExecutionHistoryService,
     get_execution_history_service,
 )
-from src.services.group_service import GroupService
-from src.services.user_service import UserService
+from src.services.groups.groups import GroupService
+from src.services.groups.users import UserService
 
 # Get logger from the centralized logging system
 logger = LoggerManager.get_instance().system

@@ -43,7 +43,7 @@ class Ctx:
 @pytest.mark.asyncio
 async def test_get_lakebase_service_creates_service():
     """get_lakebase_service extracts user_token and user_email."""
-    from src.services.lakebase.service import LakebaseService
+    from src.services.databricks.lakebase.service import LakebaseService
 
     raw_request = MagicMock()
     ctx = Ctx(group_email="admin@x", access_token="mytoken")
@@ -52,7 +52,7 @@ async def test_get_lakebase_service_creates_service():
         "src.utils.databricks_auth.extract_user_token_from_request",
         return_value="extracted_token",
     ), patch(
-        "src.services.lakebase.service.LakebaseService"
+        "src.services.databricks.lakebase.service.LakebaseService"
     ) as MockSvc:
         MockSvc.return_value = MagicMock(spec=LakebaseService)
         svc = get_lakebase_service(

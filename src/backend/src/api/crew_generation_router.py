@@ -21,7 +21,7 @@ from src.schemas.crew import (
     CrewStreamingRequest,
     CrewStreamingResponse,
 )
-from src.services.crew_generation_service import CrewGenerationService
+from src.services.generation.crews import CrewGenerationService
 
 # Configure logging
 logger = logging.getLogger(__name__)

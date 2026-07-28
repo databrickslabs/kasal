@@ -61,7 +61,7 @@ class KnowledgeSearchService:
 
         try:
             from src.core.llm_manager import LLMManager
-            from src.services.documentation_embedding_service import DocumentationEmbeddingService
+            from src.services.knowledge.documentation_embedding import DocumentationEmbeddingService
 
             # Generate the query embedding with the SAME embedder used at ingest
             # time (resolved through the shared resolver: Databricks in prod, local

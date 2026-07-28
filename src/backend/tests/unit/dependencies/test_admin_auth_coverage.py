@@ -162,7 +162,7 @@ async def test_get_current_user_with_email():
     mock_svc_instance.get_or_create_user_by_email = AsyncMock(return_value=user)
     # UserService is imported locally inside the function
     with patch.dict('sys.modules', {
-        'src.services.user_service': MagicMock(UserService=MagicMock(return_value=mock_svc_instance))
+        'src.services.groups.users': MagicMock(UserService=MagicMock(return_value=mock_svc_instance))
     }):
         result = await get_current_user_from_email(session, ctx)
     assert result is user

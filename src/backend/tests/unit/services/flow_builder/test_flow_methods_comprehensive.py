@@ -118,7 +118,7 @@ class TestGetModelContextLimits:
 
         # Patch at the source modules since imports happen inside the function
         with patch('src.db.session.request_scoped_session') as mock_session, \
-             patch('src.services.model_config_service.ModelConfigService') as mock_service:
+             patch('src.services.settings.models.ModelConfigService') as mock_service:
             mock_session.return_value.__aenter__ = AsyncMock()
             mock_session.return_value.__aexit__ = AsyncMock()
 
@@ -150,7 +150,7 @@ class TestGetModelContextLimits:
 
         # Patch at the source modules since imports happen inside the function
         with patch('src.db.session.request_scoped_session') as mock_session, \
-             patch('src.services.model_config_service.ModelConfigService') as mock_service:
+             patch('src.services.settings.models.ModelConfigService') as mock_service:
             mock_session.return_value.__aenter__ = AsyncMock()
             mock_session.return_value.__aexit__ = AsyncMock()
 
@@ -223,7 +223,7 @@ class TestGetModelContextLimits:
 
         # Patch at the source modules since imports happen inside the function
         with patch('src.db.session.request_scoped_session') as mock_session, \
-             patch('src.services.model_config_service.ModelConfigService') as mock_service:
+             patch('src.services.settings.models.ModelConfigService') as mock_service:
             mock_session.return_value.__aenter__ = AsyncMock()
             mock_session.return_value.__aexit__ = AsyncMock()
 

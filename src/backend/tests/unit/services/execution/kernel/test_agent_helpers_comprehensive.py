@@ -67,7 +67,7 @@ def _patch_all_deps():
         patch("src.services.execution.kernel.agent_builder.Agent"),
         patch("src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names", new_callable=AsyncMock, return_value=[]),
         patch("src.db.session.request_scoped_session"),
-        patch("src.services.mcp_service.MCPService"),
+        patch("src.services.mcp.service.MCPService"),
         patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
         patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
     )
@@ -142,7 +142,7 @@ class TestSecurityPreambleInjection:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -175,7 +175,7 @@ class TestSecurityPreambleInjection:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -198,7 +198,7 @@ class TestSecurityPreambleInjection:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -234,7 +234,7 @@ class TestCreateAgentLlmConfig:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm) as mock_configure,
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -253,7 +253,7 @@ class TestCreateAgentLlmConfig:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()) as mock_configure,
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -282,7 +282,7 @@ class TestCreateAgentLlmConfig:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm) as mock_configure,
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -318,7 +318,7 @@ class TestKnowledgeSourcesRemoval:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -350,7 +350,7 @@ class TestToolResolution:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -379,7 +379,7 @@ class TestToolResolution:
                 new_callable=AsyncMock,
                 return_value=[mcp_tool],
             ),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -417,7 +417,7 @@ class TestToolResolution:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
             patch("src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names", new_callable=AsyncMock, return_value=["ResolvedTool"]),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
@@ -458,7 +458,7 @@ class TestToolResolution:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
             patch("src.services.agent_builder.agent_adapter.resolve_tool_ids_to_names", new_callable=AsyncMock, return_value=["SomeTool"]),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
@@ -501,7 +501,7 @@ class TestAdditionalAgentParams:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -526,7 +526,7 @@ class TestAdditionalAgentParams:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -551,7 +551,7 @@ class TestAdditionalAgentParams:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -586,7 +586,7 @@ class TestPromptTemplates:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -614,7 +614,7 @@ class TestPromptTemplates:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -639,7 +639,7 @@ class TestPromptTemplates:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -668,7 +668,7 @@ class TestDefaultAgentSettings:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -691,7 +691,7 @@ class TestDefaultAgentSettings:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -709,7 +709,7 @@ class TestDefaultAgentSettings:
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -745,7 +745,7 @@ class TestLlmFallback:
             ),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
-            patch("src.services.mcp_service.MCPService"),
+            patch("src.services.mcp.service.MCPService"),
         ):
             mock_sess.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess.return_value.__aexit__ = AsyncMock(return_value=False)

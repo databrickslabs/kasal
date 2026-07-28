@@ -431,7 +431,7 @@ class DatabricksAuth:
 
             # Try to load workspace host from database configuration
             try:
-                from src.services.databricks.service import DatabricksService
+                from src.services.databricks.workspace.service import DatabricksService
                 from src.db.session import async_session_factory
 
                 async with async_session_factory() as session:
@@ -1121,7 +1121,7 @@ async def get_auth_context(
         else:
             logger.debug("[AUTH] Priority 2: Attempting PAT authentication from API Keys Service")
             try:
-                from src.services.api_keys_service import ApiKeysService
+                from src.services.settings.api_keys import ApiKeysService
                 from src.db.session import async_session_factory
                 from src.utils.user_context import UserContext
 

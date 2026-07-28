@@ -48,7 +48,7 @@ class AgentConfig:
             tool_factory = None
             try:
                 from src.db.session import request_scoped_session
-                from src.services.api_keys_service import ApiKeysService
+                from src.services.settings.api_keys import ApiKeysService
                 async with request_scoped_session() as session:
                     api_keys_service = ApiKeysService(session, group_id=factory_config.get('group_id'))
                     tool_factory = await ToolFactory.create(

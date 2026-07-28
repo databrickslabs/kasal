@@ -20,7 +20,7 @@ from src.repositories.log_repository import LLMLogRepository
 from src.repositories.model_config_repository import ModelConfigRepository
 from src.utils.prompt_utils import robust_json_parser
 from src.utils.user_context import GroupContext
-from src.services.gepa.grading import (  # noqa: E402
+from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
     _judge_value_to_grade,
     _checklist_grade,
     _grade_judge_verdict,
@@ -34,10 +34,10 @@ from src.services.gepa.grading import (  # noqa: E402
     JUDGE_SPREAD_WARN,
     VALID_INTENTS,
 )
-from src.services.gepa.reflection import _GEPA_REFLECTION_STATE, _JUDGE_SYSTEM, _install_gepa_reflection_bridge, _make_reflection_fn, _sync_llm_completion
+from src.services.prompt_optimization.gepa.reflection import _GEPA_REFLECTION_STATE, _JUDGE_SYSTEM, _install_gepa_reflection_bridge, _make_reflection_fn, _sync_llm_completion
 from src.services.prompt_optimization.config import TEMPLATE_TASKS
 
-from src.services.gepa import reflection
+from src.services.prompt_optimization.gepa import reflection
 
 logger = logging.getLogger(__name__)
 

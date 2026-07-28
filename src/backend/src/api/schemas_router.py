@@ -10,7 +10,7 @@ from src.schemas.schema import (
     SchemaResponse,
     SchemaUpdate,
 )
-from src.services.schema_service import SchemaService
+from src.services.catalog.schemas import SchemaService
 
 # Create router instance
 router = APIRouter(

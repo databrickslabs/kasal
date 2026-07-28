@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.session import get_db
-from src.services.converter_service import ConverterService
+from src.services.powerbi.conversions import ConverterService
 from src.schemas.conversion import (
     # History
     ConversionHistoryCreate,

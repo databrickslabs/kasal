@@ -22,7 +22,7 @@ from src.schemas.genie import (
     GenieSpacesRequest,
     GenieSpacesResponse,
 )
-from src.services.databricks.genie import GenieService
+from src.services.databricks.genie.service import GenieService
 from src.utils.databricks_auth import extract_user_token_from_request
 from src.utils.user_context import UserContext
 

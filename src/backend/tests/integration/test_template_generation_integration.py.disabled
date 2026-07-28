@@ -39,12 +39,12 @@ class TestTemplateGenerationIntegration:
     @pytest.mark.asyncio
     async def test_template_generation_api_endpoint_success(self, sample_request_data, sample_generated_templates):
         """Test successful template generation through API endpoint."""
-        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
-             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
-             patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
-             patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
-             patch('src.services.template_generation_service.litellm') as mock_litellm, \
-             patch('src.services.template_generation_service.robust_json_parser') as mock_parser:
+        with patch('src.services.generation.templates.UnitOfWork') as mock_uow, \
+             patch('src.services.generation.templates.ModelConfigService') as mock_model_service, \
+             patch('src.services.generation.templates.TemplateService') as mock_template_service, \
+             patch('src.services.generation.templates.LLMManager') as mock_llm_manager, \
+             patch('src.services.generation.templates.litellm') as mock_litellm, \
+             patch('src.services.generation.templates.robust_json_parser') as mock_parser:
             
             # Setup mocks
             mock_uow_instance = AsyncMock()
@@ -95,8 +95,8 @@ class TestTemplateGenerationIntegration:
     @pytest.mark.asyncio
     async def test_template_generation_model_not_found(self, sample_request_data):
         """Test template generation when model is not found."""
-        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
-             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service:
+        with patch('src.services.generation.templates.UnitOfWork') as mock_uow, \
+             patch('src.services.generation.templates.ModelConfigService') as mock_model_service:
             
             # Setup mocks for model not found
             mock_uow_instance = AsyncMock()
@@ -135,9 +135,9 @@ class TestTemplateGenerationIntegration:
     @pytest.mark.asyncio
     async def test_template_generation_missing_prompt_template(self, sample_request_data):
         """Test template generation when prompt template is not found in database."""
-        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
-             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
-             patch('src.services.template_generation_service.TemplateService') as mock_template_service:
+        with patch('src.services.generation.templates.UnitOfWork') as mock_uow, \
+             patch('src.services.generation.templates.ModelConfigService') as mock_model_service, \
+             patch('src.services.generation.templates.TemplateService') as mock_template_service:
             
             # Setup mocks
             mock_uow_instance = AsyncMock()
@@ -161,11 +161,11 @@ class TestTemplateGenerationIntegration:
     @pytest.mark.asyncio
     async def test_template_generation_llm_error(self, sample_request_data):
         """Test template generation when LLM fails."""
-        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
-             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
-             patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
-             patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
-             patch('src.services.template_generation_service.litellm') as mock_litellm:
+        with patch('src.services.generation.templates.UnitOfWork') as mock_uow, \
+             patch('src.services.generation.templates.ModelConfigService') as mock_model_service, \
+             patch('src.services.generation.templates.TemplateService') as mock_template_service, \
+             patch('src.services.generation.templates.LLMManager') as mock_llm_manager, \
+             patch('src.services.generation.templates.litellm') as mock_litellm:
             
             # Setup mocks
             mock_uow_instance = AsyncMock()
@@ -192,12 +192,12 @@ class TestTemplateGenerationIntegration:
     @pytest.mark.asyncio
     async def test_template_generation_json_parse_error(self, sample_request_data):
         """Test template generation when LLM returns invalid JSON."""
-        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
-             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
-             patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
-             patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
-             patch('src.services.template_generation_service.litellm') as mock_litellm, \
-             patch('src.services.template_generation_service.robust_json_parser') as mock_parser:
+        with patch('src.services.generation.templates.UnitOfWork') as mock_uow, \
+             patch('src.services.generation.templates.ModelConfigService') as mock_model_service, \
+             patch('src.services.generation.templates.TemplateService') as mock_template_service, \
+             patch('src.services.generation.templates.LLMManager') as mock_llm_manager, \
+             patch('src.services.generation.templates.litellm') as mock_litellm, \
+             patch('src.services.generation.templates.robust_json_parser') as mock_parser:
             
             # Setup mocks
             mock_uow_instance = AsyncMock()
@@ -232,12 +232,12 @@ class TestTemplateGenerationIntegration:
     @pytest.mark.asyncio
     async def test_template_generation_missing_required_fields(self, sample_request_data):
         """Test template generation when response is missing required fields."""
-        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
-             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
-             patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
-             patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
-             patch('src.services.template_generation_service.litellm') as mock_litellm, \
-             patch('src.services.template_generation_service.robust_json_parser') as mock_parser:
+        with patch('src.services.generation.templates.UnitOfWork') as mock_uow, \
+             patch('src.services.generation.templates.ModelConfigService') as mock_model_service, \
+             patch('src.services.generation.templates.TemplateService') as mock_template_service, \
+             patch('src.services.generation.templates.LLMManager') as mock_llm_manager, \
+             patch('src.services.generation.templates.litellm') as mock_litellm, \
+             patch('src.services.generation.templates.robust_json_parser') as mock_parser:
             
             # Setup mocks
             mock_uow_instance = AsyncMock()
@@ -278,12 +278,12 @@ class TestTemplateGenerationIntegration:
     @pytest.mark.asyncio
     async def test_template_generation_field_normalization(self, sample_request_data):
         """Test template generation with different field name formats."""
-        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
-             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
-             patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
-             patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
-             patch('src.services.template_generation_service.litellm') as mock_litellm, \
-             patch('src.services.template_generation_service.robust_json_parser') as mock_parser:
+        with patch('src.services.generation.templates.UnitOfWork') as mock_uow, \
+             patch('src.services.generation.templates.ModelConfigService') as mock_model_service, \
+             patch('src.services.generation.templates.TemplateService') as mock_template_service, \
+             patch('src.services.generation.templates.LLMManager') as mock_llm_manager, \
+             patch('src.services.generation.templates.litellm') as mock_litellm, \
+             patch('src.services.generation.templates.robust_json_parser') as mock_parser:
             
             # Setup mocks
             mock_uow_instance = AsyncMock()
@@ -328,12 +328,12 @@ class TestTemplateGenerationIntegration:
     @pytest.mark.asyncio
     async def test_template_generation_prompt_construction(self, sample_request_data):
         """Test that the prompt is constructed with proper role, goal, and backstory."""
-        with patch('src.services.template_generation_service.UnitOfWork') as mock_uow, \
-             patch('src.services.template_generation_service.ModelConfigService') as mock_model_service, \
-             patch('src.services.template_generation_service.TemplateService') as mock_template_service, \
-             patch('src.services.template_generation_service.LLMManager') as mock_llm_manager, \
-             patch('src.services.template_generation_service.litellm') as mock_litellm, \
-             patch('src.services.template_generation_service.robust_json_parser') as mock_parser:
+        with patch('src.services.generation.templates.UnitOfWork') as mock_uow, \
+             patch('src.services.generation.templates.ModelConfigService') as mock_model_service, \
+             patch('src.services.generation.templates.TemplateService') as mock_template_service, \
+             patch('src.services.generation.templates.LLMManager') as mock_llm_manager, \
+             patch('src.services.generation.templates.litellm') as mock_litellm, \
+             patch('src.services.generation.templates.robust_json_parser') as mock_parser:
             
             # Setup mocks
             mock_uow_instance = AsyncMock()

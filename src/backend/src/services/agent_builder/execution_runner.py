@@ -310,7 +310,7 @@ async def run_crew_in_process(
             # triggered it and pick it up only when the NEXT run finished, which
             # leaves the newest run permanently unmined. Fire-and-forget.
             if update_success and final_status == ExecutionStatus.COMPLETED.value:
-                from src.services.workflow_recipe_mining import schedule_mining_after_run
+                from src.services.recipes.mining import schedule_mining_after_run
 
                 schedule_mining_after_run(execution_id)
 

@@ -52,7 +52,7 @@ async def add_mcp_tools(mcp_config: Dict[str, Any], label: str, call_config: Any
         from src.services.tools.mcp_integration import MCPIntegration
 
         if MCPIntegration._extract_mcp_servers_from_config((mcp_config or {}).get('tool_configs', {})):
-            from src.services.mcp_service import MCPService
+            from src.services.mcp.service import MCPService
             from src.db.session import request_scoped_session
             async with request_scoped_session() as session:
                 mcp_service = MCPService(session)

@@ -446,8 +446,8 @@ class TestGetUserGroupMembershipsWithRoles:
 
         with patch("src.utils.user_context.execute_db_operation_smart", smart_mock, create=True), \
              patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.user_service.UserService", return_value=mock_user_service), \
-             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
+             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
             user, groups = await GroupContext._get_user_group_memberships_with_roles("test@example.com")
 
         assert user is mock_user
@@ -473,8 +473,8 @@ class TestGetUserGroupMembershipsWithRoles:
         smart_mock = _make_smart_mock(mock_session)
 
         with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.user_service.UserService", return_value=mock_user_service), \
-             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
+             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
             user, result = await GroupContext._get_user_group_memberships_with_roles("alice@corp.com")
 
         assert user is mock_user
@@ -493,8 +493,8 @@ class TestGetUserGroupMembershipsWithRoles:
         smart_mock = _make_smart_mock(mock_session)
 
         with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.user_service.UserService", return_value=mock_user_service), \
-             patch("src.services.group_service.GroupService"):
+             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
+             patch("src.services.groups.groups.GroupService"):
             user, groups = await GroupContext._get_user_group_memberships_with_roles("ghost@example.com")
 
         assert user is None
@@ -515,8 +515,8 @@ class TestGetUserGroupMembershipsWithRoles:
         smart_mock = _make_smart_mock(mock_session)
 
         with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.user_service.UserService", return_value=mock_user_service), \
-             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
+             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
             await GroupContext._get_user_group_memberships_with_roles("test@example.com")
 
         mock_session.commit.assert_awaited_once()
@@ -550,8 +550,8 @@ class TestGetUserGroupMembershipsWithRoles:
         smart_mock = _make_smart_mock(mock_session)
 
         with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.user_service.UserService", return_value=mock_user_service), \
-             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
+             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
             await GroupContext._get_user_group_memberships_with_roles("test@example.com")
 
         mock_user_service.get_or_create_user_by_email.assert_awaited_once_with(
@@ -573,8 +573,8 @@ class TestGetUserGroupMembershipsWithRoles:
         smart_mock = _make_smart_mock(mock_session)
 
         with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.user_service.UserService", return_value=mock_user_service), \
-             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
+             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
             await GroupContext._get_user_group_memberships_with_roles("test@example.com")
 
         mock_group_service.get_user_groups_with_roles.assert_awaited_once_with("user-42")
@@ -599,8 +599,8 @@ class TestGetUserGroupMemberships:
         smart_mock = _make_smart_mock(mock_session)
 
         with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.user_service.UserService", return_value=mock_user_service), \
-             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
+             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
             result = await GroupContext._get_user_group_memberships("test@example.com")
 
         assert result == ["group-1"]
@@ -622,8 +622,8 @@ class TestGetUserGroupMemberships:
         smart_mock = _make_smart_mock(mock_session)
 
         with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.user_service.UserService", return_value=mock_user_service), \
-             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
+             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
             result = await GroupContext._get_user_group_memberships("test@example.com")
 
         assert result == ["alpha", "beta", "gamma"]
@@ -639,8 +639,8 @@ class TestGetUserGroupMemberships:
         smart_mock = _make_smart_mock(mock_session)
 
         with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.user_service.UserService", return_value=mock_user_service), \
-             patch("src.services.group_service.GroupService"):
+             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
+             patch("src.services.groups.groups.GroupService"):
             result = await GroupContext._get_user_group_memberships("ghost@example.com")
 
         assert result == []
@@ -660,8 +660,8 @@ class TestGetUserGroupMemberships:
         smart_mock = _make_smart_mock(mock_session)
 
         with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.user_service.UserService", return_value=mock_user_service), \
-             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
+             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
             result = await GroupContext._get_user_group_memberships("loner@example.com")
 
         assert result == []
@@ -681,8 +681,8 @@ class TestGetUserGroupMemberships:
         smart_mock = _make_smart_mock(mock_session)
 
         with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.user_service.UserService", return_value=mock_user_service), \
-             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
+             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
             await GroupContext._get_user_group_memberships("test@example.com")
 
         assert mock_session.commit.await_count == 2
@@ -715,8 +715,8 @@ class TestGetUserGroupMemberships:
         smart_mock = _make_smart_mock(mock_session)
 
         with patch("src.utils.asyncio_utils.execute_db_operation_smart", smart_mock), \
-             patch("src.services.user_service.UserService", return_value=mock_user_service), \
-             patch("src.services.group_service.GroupService", return_value=mock_group_service):
+             patch("src.services.groups.users.UserService", return_value=mock_user_service), \
+             patch("src.services.groups.groups.GroupService", return_value=mock_group_service):
             await GroupContext._get_user_group_memberships("alice@corp.com")
 
         mock_group_service.get_user_group_memberships.assert_awaited_once_with("alice@corp.com")

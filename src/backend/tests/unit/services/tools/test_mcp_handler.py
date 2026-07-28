@@ -367,7 +367,7 @@ class TestGetDatabricksWorkspaceHost:
         mock_session.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "src.services.databricks.service.DatabricksService",
+            "src.services.databricks.workspace.service.DatabricksService",
             return_value=mock_service,
         ), patch(
             "src.db.session.request_scoped_session",
@@ -390,7 +390,7 @@ class TestGetDatabricksWorkspaceHost:
         mock_session.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "src.services.databricks.service.DatabricksService",
+            "src.services.databricks.workspace.service.DatabricksService",
             return_value=mock_service,
         ), patch(
             "src.db.session.request_scoped_session",
@@ -409,7 +409,7 @@ class TestGetDatabricksWorkspaceHost:
         mock_session.__aexit__ = AsyncMock(return_value=False)
 
         with patch(
-            "src.services.databricks.service.DatabricksService",
+            "src.services.databricks.workspace.service.DatabricksService",
             return_value=mock_service,
         ), patch(
             "src.db.session.request_scoped_session",
@@ -422,7 +422,7 @@ class TestGetDatabricksWorkspaceHost:
     @pytest.mark.asyncio
     async def test_returns_error_on_exception(self):
         with patch(
-            "src.services.databricks.service.DatabricksService",
+            "src.services.databricks.workspace.service.DatabricksService",
             side_effect=Exception("db error"),
         ), patch(
             "src.db.session.request_scoped_session",

@@ -64,7 +64,7 @@ class TestRunFlowExecutionAdditional:
              patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
              patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
              patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_smart_ctx), \
-             patch("src.services.model_config_service.ModelConfigService") as MockModelSvc, \
+             patch("src.services.settings.models.ModelConfigService") as MockModelSvc, \
              patch.object(svc, "_emit_error_span", new=AsyncMock()):
 
             flow_svc = MagicMock()
@@ -123,7 +123,7 @@ class TestRunFlowExecutionAdditional:
              patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
              patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
              patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_smart_ctx), \
-             patch("src.services.model_config_service.ModelConfigService") as MockModelSvc, \
+             patch("src.services.settings.models.ModelConfigService") as MockModelSvc, \
              patch.object(svc, "_emit_error_span", new=AsyncMock()):
 
             flow_svc = MagicMock()
@@ -168,7 +168,7 @@ class TestRunFlowExecutionAdditional:
              patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
              patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
              patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_smart_ctx), \
-             patch("src.services.model_config_service.ModelConfigService") as MockModelSvc, \
+             patch("src.services.settings.models.ModelConfigService") as MockModelSvc, \
              patch.object(svc, "_emit_error_span", new=AsyncMock()):
 
             # Make update_execution_status raise to trigger outer handler
@@ -213,7 +213,7 @@ class TestRunFlowExecutionAdditional:
              patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
              patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
              patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_smart_ctx), \
-             patch("src.services.model_config_service.ModelConfigService") as MockModelSvc, \
+             patch("src.services.settings.models.ModelConfigService") as MockModelSvc, \
              patch.object(svc, "_emit_error_span", new=AsyncMock()):
 
             flow_svc = MagicMock()
@@ -260,7 +260,7 @@ class TestRunFlowExecutionAdditional:
              patch("src.services.flow_builder.flow_runner_service.ExecutionTraceRepository"), \
              patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
              patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_smart_ctx), \
-             patch("src.services.model_config_service.ModelConfigService") as MockModelSvc, \
+             patch("src.services.settings.models.ModelConfigService") as MockModelSvc, \
              patch("src.services.execution.history.ExecutionHistoryService") as MockHist, \
              patch.object(svc, "_emit_error_span", new=AsyncMock()):
 
@@ -710,7 +710,7 @@ class TestTaskConfigSupplemental:
             yield AsyncMock()
 
         with patch("src.db.session.request_scoped_session", return_value=mock_session_ctx()), \
-             patch("src.services.api_keys_service.ApiKeysService"), \
+             patch("src.services.settings.api_keys.ApiKeysService"), \
              patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=mock_factory)
 

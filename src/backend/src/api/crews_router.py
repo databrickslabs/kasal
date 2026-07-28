@@ -16,8 +16,8 @@ from src.schemas.crew_feedback import (
     CrewFeedbackResponse,
     CrewFeedbackSummaryEntry,
 )
-from src.services.crew_feedback_service import CrewFeedbackService
-from src.services.crew_service import CrewService
+from src.services.catalog.crew_feedback import CrewFeedbackService
+from src.services.catalog.crews import CrewService
 
 router = APIRouter(
     prefix="/crews",

@@ -19,7 +19,7 @@ from src.schemas.task_generation import (
     GuardrailSuggestionRequest,
     GuardrailSuggestionResponse,
 )
-from src.services.task_generation_service import TaskGenerationService
+from src.services.generation.tasks import TaskGenerationService
 
 # Configure logging
 logger = logging.getLogger(__name__)

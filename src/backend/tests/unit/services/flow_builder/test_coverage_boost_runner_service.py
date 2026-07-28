@@ -377,7 +377,7 @@ class TestGetRequiredProviders:
     @pytest.mark.asyncio
     async def test_single_model_with_provider(self):
         svc = _make_service()
-        with patch("src.services.model_config_service.ModelConfigService") as MockSvc:
+        with patch("src.services.settings.models.ModelConfigService") as MockSvc:
             instance = MagicMock()
             instance.get_model_config = AsyncMock(return_value={"provider": "openai"})
             MockSvc.return_value = instance
@@ -389,7 +389,7 @@ class TestGetRequiredProviders:
     @pytest.mark.asyncio
     async def test_crew_config_models_extracted(self):
         svc = _make_service()
-        with patch("src.services.model_config_service.ModelConfigService") as MockSvc:
+        with patch("src.services.settings.models.ModelConfigService") as MockSvc:
             instance = MagicMock()
             instance.get_model_config = AsyncMock(return_value={"provider": "anthropic"})
             MockSvc.return_value = instance
@@ -407,7 +407,7 @@ class TestGetRequiredProviders:
     @pytest.mark.asyncio
     async def test_top_level_llm_keys(self):
         svc = _make_service()
-        with patch("src.services.model_config_service.ModelConfigService") as MockSvc:
+        with patch("src.services.settings.models.ModelConfigService") as MockSvc:
             instance = MagicMock()
             instance.get_model_config = AsyncMock(return_value={"provider": "perplexity"})
             MockSvc.return_value = instance
@@ -422,7 +422,7 @@ class TestGetRequiredProviders:
     @pytest.mark.asyncio
     async def test_model_config_not_found(self):
         svc = _make_service()
-        with patch("src.services.model_config_service.ModelConfigService") as MockSvc:
+        with patch("src.services.settings.models.ModelConfigService") as MockSvc:
             instance = MagicMock()
             instance.get_model_config = AsyncMock(return_value=None)
             MockSvc.return_value = instance
@@ -432,7 +432,7 @@ class TestGetRequiredProviders:
     @pytest.mark.asyncio
     async def test_model_without_provider_key(self):
         svc = _make_service()
-        with patch("src.services.model_config_service.ModelConfigService") as MockSvc:
+        with patch("src.services.settings.models.ModelConfigService") as MockSvc:
             instance = MagicMock()
             instance.get_model_config = AsyncMock(return_value={})
             MockSvc.return_value = instance
@@ -442,7 +442,7 @@ class TestGetRequiredProviders:
     @pytest.mark.asyncio
     async def test_model_config_service_raises(self):
         svc = _make_service()
-        with patch("src.services.model_config_service.ModelConfigService") as MockSvc:
+        with patch("src.services.settings.models.ModelConfigService") as MockSvc:
             instance = MagicMock()
             instance.get_model_config = AsyncMock(side_effect=Exception("service down"))
             MockSvc.return_value = instance
@@ -453,7 +453,7 @@ class TestGetRequiredProviders:
     @pytest.mark.asyncio
     async def test_empty_model_name_skipped(self):
         svc = _make_service()
-        with patch("src.services.model_config_service.ModelConfigService") as MockSvc:
+        with patch("src.services.settings.models.ModelConfigService") as MockSvc:
             instance = MagicMock()
             instance.get_model_config = AsyncMock()
             MockSvc.return_value = instance
@@ -856,7 +856,7 @@ class TestRunFlowExecutionResultConversion:
              patch("src.services.flow_builder.flow_runner_service.ApiKeysService") as MockApiSvc, \
              patch("src.services.flow_builder.flow_runner_service._smart_db_session", new=_make_smart_session_patch(mock_session)), \
              patch.object(svc, "_emit_error_span", new=AsyncMock()), \
-             patch("src.services.model_config_service.ModelConfigService") as MockModelSvc:
+             patch("src.services.settings.models.ModelConfigService") as MockModelSvc:
 
             flow_svc_instance = MagicMock()
             flow_svc_instance.update_execution_status = AsyncMock()

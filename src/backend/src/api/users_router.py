@@ -8,7 +8,7 @@ from src.core.dependencies import GroupContextDep, SessionDep
 from src.dependencies.admin_auth import AdminUserDep, AuthenticatedUserDep
 from src.models.user import User
 from src.schemas.user import UserInDB, UserPermissionUpdate, UserUpdate
-from src.services.user_service import UserService
+from src.services.groups.users import UserService
 
 router = APIRouter(
     prefix="/users",

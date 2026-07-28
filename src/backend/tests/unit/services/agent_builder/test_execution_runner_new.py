@@ -134,7 +134,7 @@ class TestRunCrewInProcess:
         with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.workflow_recipe_mining.schedule_mining_after_run") as mock_mine, \
+             patch("src.services.recipes.mining.schedule_mining_after_run") as mock_mine, \
              patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry",
                    side_effect=_update):
 
@@ -161,7 +161,7 @@ class TestRunCrewInProcess:
         with patch("src.services.execution.status.ExecutionStatusService") as mock_svc, \
              patch("src.services.agent_builder.execution_runner.process_crew_executor") as mock_pce, \
              patch("src.services.security.scanner_pipeline.security_scanner") as mock_ss, \
-             patch("src.services.workflow_recipe_mining.schedule_mining_after_run") as mock_mine, \
+             patch("src.services.recipes.mining.schedule_mining_after_run") as mock_mine, \
              patch("src.services.agent_builder.execution_runner.update_execution_status_with_retry",
                    new_callable=AsyncMock) as mock_update:
 

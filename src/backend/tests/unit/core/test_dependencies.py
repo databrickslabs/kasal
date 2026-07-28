@@ -23,7 +23,7 @@ from src.core.base_repository import BaseRepository
 from src.core.base_service import BaseService
 from src.db.base import Base
 from src.utils.user_context import GroupContext
-from src.services.log_service import LLMLogService
+from src.services.execution.logs.llm_log_service import LLMLogService
 from src.repositories.log_repository import LLMLogRepository
 
 

@@ -502,8 +502,8 @@ def run_crew_in_process(
             from src.services.agent_builder.crew_preparation import CrewPreparation
             from src.services.tools.mcp_integration import MCPIntegration
             from src.services.tools.tool_factory import ToolFactory
-            from src.services.api_keys_service import ApiKeysService
-            from src.services.tool_service import ToolService
+            from src.services.settings.api_keys import ApiKeysService
+            from src.services.tools.tool_service import ToolService
 
             # Reset MCP warnings at the start of each execution
             MCPIntegration.reset_warnings()
@@ -575,7 +575,7 @@ def run_crew_in_process(
             db_config = None
             try:
                 from src.db.database_router import get_smart_db_session
-                from src.services.databricks.service import DatabricksService
+                from src.services.databricks.workspace.service import DatabricksService
 
                 async for session in get_smart_db_session():
                     current_group_id = (
@@ -667,8 +667,8 @@ def run_crew_in_process(
                     )
 
                 # Create services with the session and group_id
-                from src.services.api_keys_service import ApiKeysService
-                from src.services.tool_service import ToolService
+                from src.services.settings.api_keys import ApiKeysService
+                from src.services.tools.tool_service import ToolService
 
                 tool_service = ToolService(session)
                 api_keys_service = ApiKeysService(session, group_id=group_id)

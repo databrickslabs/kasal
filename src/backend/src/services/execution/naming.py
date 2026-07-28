@@ -10,7 +10,7 @@ import traceback
 
 
 from src.schemas.execution import ExecutionNameGenerationRequest, ExecutionNameGenerationResponse
-from src.services.log_service import LLMLogService
+from src.services.execution.logs.llm_log_service import LLMLogService
 from src.core.llm_manager import LLMManager
 
 # Configure logging
@@ -54,7 +54,7 @@ class ExecutionNameService:
         Returns:
             An instance of ExecutionNameService with all required dependencies
         """
-        from src.services.template_service import TemplateService
+        from src.services.catalog.templates import TemplateService
 
         if session is None:
             return cls(log_service=None, template_service=None, session=None)
@@ -68,7 +68,7 @@ class ExecutionNameService:
         if self.template_service is not None:
             return await self.template_service.get_template_content("generate_job_name")
         from src.db.session import request_scoped_session
-        from src.services.template_service import TemplateService
+        from src.services.catalog.templates import TemplateService
         async with request_scoped_session() as session:
             return await TemplateService(session).get_template_content("generate_job_name")
 

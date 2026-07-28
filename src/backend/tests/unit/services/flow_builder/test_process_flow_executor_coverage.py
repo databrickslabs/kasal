@@ -122,7 +122,7 @@ def _deep_run_extended(
     all_patches.append(patch("src.db.session.safe_async_session", return_value=mock_session_cm))
     all_patches.append(patch("src.db.session.async_session_factory", return_value=mock_session_cm))
     all_patches.append(patch("src.services.flow_builder.flow_runner_service.FlowRunnerService", return_value=mock_frs))
-    all_patches.append(patch("src.services.databricks.service.DatabricksService", mock_ds_cls))
+    all_patches.append(patch("src.services.databricks.workspace.service.DatabricksService", mock_ds_cls))
     all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
     all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
     all_patches.append(patch("src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess", configure_mlflow_fn))

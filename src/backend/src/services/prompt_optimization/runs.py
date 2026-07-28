@@ -20,7 +20,7 @@ from src.core.exceptions import BadRequestError
 from src.repositories.log_repository import LLMLogRepository
 from src.repositories.model_config_repository import ModelConfigRepository
 from src.schemas.template import PromptTemplateUpdate
-from src.services.template_service import TemplateService
+from src.services.catalog.templates import TemplateService
 from src.utils.user_context import GroupContext
 from src.services.prompt_optimization.run_state import RUN_STALE_SECONDS, _LIVE_COUNTERS, _MAX_KEPT_RUNS, _PUBLIC_FIELDS, _RUNS, _persist_run_changes, _row_to_public
 

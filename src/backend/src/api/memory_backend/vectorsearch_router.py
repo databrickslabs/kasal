@@ -635,7 +635,7 @@ async def get_entity_data(
     )
 
     # Get the index service
-    from src.services.databricks.index import DatabricksIndexService
+    from src.services.databricks.vector_search.index import DatabricksIndexService
 
     index_service = DatabricksIndexService()
 

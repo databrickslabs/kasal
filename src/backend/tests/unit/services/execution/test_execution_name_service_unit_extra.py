@@ -190,7 +190,7 @@ async def test_get_name_template_opens_standalone_session_when_none():
     fake_template.get_template_content = AsyncMock(return_value="TEMPLATE BODY")
 
     with patch("src.db.session.request_scoped_session", return_value=_fake_session_cm()), \
-         patch("src.services.template_service.TemplateService", return_value=fake_template):
+         patch("src.services.catalog.templates.TemplateService", return_value=fake_template):
         out = await svc._get_name_template()
 
     assert out == "TEMPLATE BODY"
@@ -208,7 +208,7 @@ async def test_log_llm_interaction_standalone_commits_when_no_session():
 
     with patch("src.db.session.request_scoped_session", return_value=session), \
          patch.object(Svc, "_log_llm_interaction", Svc._log_llm_interaction), \
-         patch("src.services.log_service.LLMLogService.create", return_value=fake_log):
+         patch("src.services.execution.logs.llm_log_service.LLMLogService.create", return_value=fake_log):
         await svc._log_llm_interaction(
             endpoint="generate-execution-name", prompt="p", response="Name", model="m",
         )
@@ -226,7 +226,7 @@ async def test_log_llm_interaction_standalone_swallows_errors():
     fake_log.create_log = AsyncMock(side_effect=RuntimeError("db down"))
 
     with patch("src.db.session.request_scoped_session", return_value=session), \
-         patch("src.services.log_service.LLMLogService.create", return_value=fake_log):
+         patch("src.services.execution.logs.llm_log_service.LLMLogService.create", return_value=fake_log):
         # Must not raise.
         await svc._log_llm_interaction(
             endpoint="generate-execution-name", prompt="p", response="Name", model="m",
@@ -257,8 +257,8 @@ async def test_generate_execution_name_none_session_end_to_end(monkeypatch):
     req = ExecutionNameGenerationRequest(model="m", agents_yaml={"a": {"role": "R"}}, tasks_yaml={"t": {"name": "T"}})
 
     with patch("src.db.session.request_scoped_session", return_value=_fake_session_cm()), \
-         patch("src.services.template_service.TemplateService", return_value=fake_template), \
-         patch("src.services.log_service.LLMLogService.create", return_value=fake_log):
+         patch("src.services.catalog.templates.TemplateService", return_value=fake_template), \
+         patch("src.services.execution.logs.llm_log_service.LLMLogService.create", return_value=fake_log):
         out = await svc.generate_execution_name(req)
 
     assert out.name == "Cool Run"

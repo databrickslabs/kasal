@@ -120,7 +120,7 @@ class TestGetDatabricksEndpointEnvFallback:
             with patch('src.db.session.request_scoped_session') as mock_rss:
                 mock_rss.return_value.__aenter__ = AsyncMock(return_value=mock_session)
                 mock_rss.return_value.__aexit__ = AsyncMock(return_value=None)
-                with patch('src.services.databricks.service.DatabricksService', return_value=mock_service):
+                with patch('src.services.databricks.workspace.service.DatabricksService', return_value=mock_service):
                     with patch.object(
                         EmbedderConfigBuilder, '_get_databricks_endpoint',
                         wraps=builder._get_databricks_endpoint

@@ -31,7 +31,7 @@ def _patch_session_and_service(agents):
 
     return (
         patch("src.db.session.request_scoped_session", return_value=session_cm),
-        patch("src.services.agent_service.AgentService", return_value=service),
+        patch("src.services.catalog.agents.AgentService", return_value=service),
         service,
     )
 

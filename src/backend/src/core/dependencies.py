@@ -8,7 +8,7 @@ from src.core.base_service import BaseService
 from src.db.base import Base
 from src.db.session import get_db, get_local_db
 from src.db.database_router import get_smart_db_session
-from src.services.log_service import LLMLogService
+from src.services.execution.logs.llm_log_service import LLMLogService
 from src.repositories.log_repository import LLMLogRepository
 from src.utils.user_context import GroupContext
 import logging

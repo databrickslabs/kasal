@@ -249,7 +249,7 @@ class DatabricksKnowledgeService:
         if not group_id:
             return
         try:
-            from src.services.group_tool_service import GroupToolService
+            from src.services.groups.group_tools import GroupToolService
             from src.utils.user_context import GroupContext
 
             group_context = GroupContext(group_ids=[group_id])

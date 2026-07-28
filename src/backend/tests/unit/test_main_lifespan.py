@@ -256,7 +256,7 @@ class TestLifespanStartup:
             "src.services.trace.trace_broadcast_service": MagicMock(),
             "src.services.execution.broadcast.execution_broadcast_service": MagicMock(),
             # embedding queue service imported lazily (SQLite path creates a task)
-            "src.services.embedding_queue_service.embedding_queue": mock_embedding_queue,
+            "src.services.knowledge.embedding_queue.embedding_queue": mock_embedding_queue,
         }
 
     def _apply_patches(self, stack: ExitStack, patches: dict):

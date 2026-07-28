@@ -285,7 +285,7 @@ class TestHandleOpenAIApiKey:
         config = {"agents": [], "tasks": [], "group_id": "grp-1"}
         cp = CrewPreparation(config=config)
 
-        with patch("src.services.api_keys_service.ApiKeysService") as mock_aks:
+        with patch("src.services.settings.api_keys.ApiKeysService") as mock_aks:
             mock_aks.get_provider_api_key = AsyncMock(return_value="sk-real-key")
             await cp._handle_openai_api_key()
 
@@ -296,7 +296,7 @@ class TestHandleOpenAIApiKey:
         config = {"agents": [], "tasks": [], "group_id": "grp-1"}
         cp = CrewPreparation(config=config)
 
-        with patch("src.services.api_keys_service.ApiKeysService") as mock_aks:
+        with patch("src.services.settings.api_keys.ApiKeysService") as mock_aks:
             mock_aks.get_provider_api_key = AsyncMock(return_value=None)
             await cp._handle_openai_api_key()
 
@@ -307,7 +307,7 @@ class TestHandleOpenAIApiKey:
         config = {"agents": [], "tasks": []}
         cp = CrewPreparation(config=config)
 
-        with patch("src.services.api_keys_service.ApiKeysService") as mock_aks:
+        with patch("src.services.settings.api_keys.ApiKeysService") as mock_aks:
             mock_aks.get_provider_api_key = AsyncMock(side_effect=Exception("api err"))
             await cp._handle_openai_api_key()  # Should not raise
 
@@ -328,7 +328,7 @@ class TestLookupKasalAgentUUID:
         db_agent.name = "agent-1"
 
         with patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_service.AgentService") as mock_svc_cls, \
+             patch("src.services.catalog.agents.AgentService") as mock_svc_cls, \
              patch("src.utils.user_context.GroupContext") as mock_gc:
 
             mock_session = AsyncMock()
@@ -357,7 +357,7 @@ class TestLookupKasalAgentUUID:
         db_agent.name = "target-agent"
 
         with patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_service.AgentService") as mock_svc_cls, \
+             patch("src.services.catalog.agents.AgentService") as mock_svc_cls, \
              patch("src.utils.user_context.GroupContext"):
 
             mock_session = AsyncMock()
@@ -385,7 +385,7 @@ class TestLookupKasalAgentUUID:
         db_agent.name = "AgentName"
 
         with patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_service.AgentService") as mock_svc_cls, \
+             patch("src.services.catalog.agents.AgentService") as mock_svc_cls, \
              patch("src.utils.user_context.GroupContext"):
 
             mock_session = AsyncMock()
@@ -414,7 +414,7 @@ class TestLookupKasalAgentUUID:
         db_agent.name = "OtherAgent"
 
         with patch("src.db.session.request_scoped_session") as mock_sess, \
-             patch("src.services.agent_service.AgentService") as mock_svc_cls, \
+             patch("src.services.catalog.agents.AgentService") as mock_svc_cls, \
              patch("src.utils.user_context.GroupContext"):
 
             mock_session = AsyncMock()

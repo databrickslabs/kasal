@@ -14,7 +14,7 @@ from src.schemas.model_config import (
     ModelListResponse,
     ModelToggleUpdate,
 )
-from src.services.model_config_service import ModelConfigService
+from src.services.settings.models import ModelConfigService
 
 router = APIRouter(
     prefix="/models",

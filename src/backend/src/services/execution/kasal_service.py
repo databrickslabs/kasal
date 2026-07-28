@@ -24,8 +24,8 @@ from src.services.execution.status import ExecutionStatusService
 from src.services.flow_builder.kasal_flow_service import KasalFlowService
 from src.utils.user_context import GroupContext
 from src.db.session import request_scoped_session
-from src.services.agent_service import AgentService
-from src.services.task_service import TaskService
+from src.services.catalog.agents import AgentService
+from src.services.catalog.tasks import TaskService
 
 
 # Initialize logger

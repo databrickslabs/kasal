@@ -63,7 +63,7 @@ class TestEmbedderConfigBuilder:
 
         # Mock the auth and database calls
         with patch('src.utils.databricks_auth.get_databricks_auth_headers', new_callable=AsyncMock) as mock_auth:
-            with patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
+            with patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
                 with patch.object(builder, '_get_databricks_endpoint', new_callable=AsyncMock, return_value='https://example.databricks.com'):
                     # Setup mocks
                     mock_auth.return_value = ({'Authorization': 'Bearer token'}, None)
@@ -122,7 +122,7 @@ class TestEmbedderConfigBuilder:
 
         # Mock auth to fail (no token, no API key)
         with patch('src.utils.databricks_auth.get_databricks_auth_headers', new_callable=AsyncMock) as mock_auth:
-            with patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
+            with patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
                 mock_auth.return_value = (None, "Auth failed")
                 mock_api_key.return_value = None
 
@@ -171,7 +171,7 @@ class TestEmbedderConfigBuilder:
         }
 
         with patch('src.utils.databricks_auth.get_databricks_auth_headers', new_callable=AsyncMock) as mock_auth:
-            with patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
+            with patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
                 with patch.object(builder, '_get_databricks_endpoint', new_callable=AsyncMock, return_value='https://example.databricks.com'):
                     mock_auth.return_value = ({'Authorization': 'Bearer token'}, None)
                     mock_api_key.return_value = 'test_key'
@@ -213,7 +213,7 @@ class TestEmbedderConfigBuilder:
             'memory': True
         }
 
-        with patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
+        with patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
             mock_api_key.return_value = 'test_openai_key'
 
             result_kwargs, custom_embedder, embedder_config = await builder.configure_embedder(initial_crew_kwargs)
@@ -259,7 +259,7 @@ class TestEmbedderConfigBuilder:
             'memory': True
         }
 
-        with patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
+        with patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
             mock_api_key.return_value = 'test_openai_key'
 
             result_kwargs, custom_embedder, embedder_config = await builder.configure_embedder(initial_crew_kwargs)
@@ -296,7 +296,7 @@ class TestEmbedderConfigBuilder:
             'memory': True
         }
 
-        with patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
+        with patch('src.services.settings.api_keys.ApiKeysService.get_provider_api_key', new_callable=AsyncMock) as mock_api_key:
             mock_api_key.return_value = 'test_openai_key'
 
             result_kwargs, custom_embedder, embedder_config = await builder.configure_embedder(initial_crew_kwargs)

@@ -74,7 +74,7 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
                  patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
@@ -115,7 +115,7 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
                  patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
@@ -157,7 +157,7 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
                  patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
@@ -198,7 +198,7 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
                  patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
@@ -238,7 +238,7 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
                  patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
@@ -278,7 +278,7 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
                  patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
@@ -318,7 +318,7 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
                  patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
@@ -363,7 +363,7 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
                  patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
@@ -411,7 +411,7 @@ class TestCreateAgentDateAwareness:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
                  patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
@@ -482,7 +482,7 @@ class TestCreateAgentDateFormatVariations:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
                  patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
@@ -522,7 +522,7 @@ class TestCreateAgentDateFormatVariations:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
                  patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
@@ -591,7 +591,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
                  patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
@@ -642,7 +642,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
                  patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
@@ -698,7 +698,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session.__aexit__ = AsyncMock(return_value=None)
             mock_session_factory.return_value = mock_session
 
-            with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
+            with patch('src.services.mcp.service.MCPService') as mock_mcp_service, \
                  patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 

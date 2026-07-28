@@ -14,7 +14,7 @@ from src.schemas.template import (
     ResetResponse,
     TemplateListResponse,
 )
-from src.services.template_service import TemplateService
+from src.services.catalog.templates import TemplateService
 
 router = APIRouter(
     prefix="/templates",

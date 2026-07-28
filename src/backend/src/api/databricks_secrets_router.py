@@ -20,7 +20,7 @@ from src.schemas.databricks_secret import (
     SecretResponse,
     SecretUpdate,
 )
-from src.services.databricks.secrets import DatabricksSecretsService
+from src.services.databricks.secrets.service import DatabricksSecretsService
 
 router = APIRouter(
     prefix="/databricks-secrets",

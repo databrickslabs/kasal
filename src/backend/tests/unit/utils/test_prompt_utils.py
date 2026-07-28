@@ -23,7 +23,7 @@ class TestGetPromptTemplate:
         template_name = "test_template"
         expected_template = "This is a test template with {{variable}}"
         
-        with patch('src.services.template_service.TemplateService.get_template_content') as mock_get_template:
+        with patch('src.services.catalog.templates.TemplateService.get_template_content') as mock_get_template:
             mock_get_template.return_value = expected_template
             
             result = await get_prompt_template(mock_db, template_name)
@@ -38,7 +38,7 @@ class TestGetPromptTemplate:
         template_name = "non_existent_template"
         default_template = "Default template content"
         
-        with patch('src.services.template_service.TemplateService.get_template_content') as mock_get_template:
+        with patch('src.services.catalog.templates.TemplateService.get_template_content') as mock_get_template:
             mock_get_template.return_value = default_template
             
             result = await get_prompt_template(mock_db, template_name, default_template)
@@ -52,7 +52,7 @@ class TestGetPromptTemplate:
         mock_db = Mock(spec=Session)
         template_name = "non_existent_template"
         
-        with patch('src.services.template_service.TemplateService.get_template_content') as mock_get_template:
+        with patch('src.services.catalog.templates.TemplateService.get_template_content') as mock_get_template:
             mock_get_template.return_value = None
             
             result = await get_prompt_template(mock_db, template_name)
@@ -409,7 +409,7 @@ class TestPromptUtilsIntegration:
         ```
         '''
         
-        with patch('src.services.template_service.TemplateService.get_template_content') as mock_get_template:
+        with patch('src.services.catalog.templates.TemplateService.get_template_content') as mock_get_template:
             mock_get_template.return_value = template_content
             
             # Get template

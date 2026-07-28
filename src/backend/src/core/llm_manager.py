@@ -60,8 +60,8 @@ async def _run_llm_blocking(func, /, *args, **kwargs):
 
 
 from src.utils.databricks_url_utils import DatabricksURLUtils
-from src.services.model_config_service import ModelConfigService
-from src.services.api_keys_service import ApiKeysService
+from src.services.settings.models import ModelConfigService
+from src.services.settings.api_keys import ApiKeysService
 import pathlib
 
 # Endpoint-specific LLM subclasses. This import no longer carries side effects:
@@ -949,7 +949,7 @@ class LLMManager:
         """
         from src.core.llm.handlers.model_fallback import candidates_from_model_configs
         from src.db.session import request_scoped_session
-        from src.services.model_config_service import ModelConfigService
+        from src.services.settings.models import ModelConfigService
 
         try:
             async with request_scoped_session() as session:

@@ -135,7 +135,7 @@ class TestGetModelContextLimits:
         mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
 
         with patch("src.db.session.request_scoped_session", return_value=mock_session_ctx), \
-             patch("src.services.model_config_service.ModelConfigService") as MockMCS:
+             patch("src.services.settings.models.ModelConfigService") as MockMCS:
             mcs_instance = MagicMock()
             mcs_instance.find_by_key = AsyncMock(return_value=mock_config)
             MockMCS.return_value = mcs_instance
@@ -159,7 +159,7 @@ class TestGetModelContextLimits:
         mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
 
         with patch("src.db.session.request_scoped_session", return_value=mock_session_ctx), \
-             patch("src.services.model_config_service.ModelConfigService") as MockMCS:
+             patch("src.services.settings.models.ModelConfigService") as MockMCS:
             mcs_instance = MagicMock()
             mcs_instance.find_by_key = AsyncMock(return_value=None)
             MockMCS.return_value = mcs_instance

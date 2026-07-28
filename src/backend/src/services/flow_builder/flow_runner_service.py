@@ -32,7 +32,7 @@ from src.repositories.execution_history_repository import ExecutionHistoryReposi
 from src.repositories.execution_trace_repository import ExecutionTraceRepository
 from src.core.logger import LoggerManager
 from src.db.database_router import get_smart_db_session
-from src.services.api_keys_service import ApiKeysService
+from src.services.settings.api_keys import ApiKeysService
 from src.services.flow_builder.backend_flow import BackendFlow
 from src.services.flow_builder.exceptions import FlowPausedForApprovalException
 
@@ -704,7 +704,7 @@ class FlowRunnerService:
         logger.info(f"Extracted {len(model_names)} model references from config: {model_names}")
 
         # Get provider for each model using the provided session
-        from src.services.model_config_service import ModelConfigService
+        from src.services.settings.models import ModelConfigService
 
         for model_name in model_names:
             if not model_name:

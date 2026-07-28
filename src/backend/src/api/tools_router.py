@@ -19,7 +19,7 @@ from src.schemas.tool import (
     ToolResponse,
     ToolUpdate,
 )
-from src.services.tool_service import ToolService
+from src.services.tools.tool_service import ToolService
 
 # Create router instance
 router = APIRouter(
@@ -100,7 +100,7 @@ async def list_global_tools(
     group_context: GroupContextDep = None,
 ) -> ToolListResponse:
     """List globally cataloged tools (base tools with no group_id)."""
-    from src.services.tool_service import _filter_personal_workspace_tools
+    from src.services.tools.tool_service import _filter_personal_workspace_tools
     all_tools = await service.get_all_tools()
     base_tools = [t for t in all_tools.tools if getattr(t, "group_id", None) is None]
     # Hide personal-workspace-only tools (Gmail) outside the personal workspace.

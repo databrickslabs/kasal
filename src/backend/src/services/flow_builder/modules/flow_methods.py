@@ -140,7 +140,7 @@ async def get_model_context_limits(agent, group_context) -> tuple[int, int]:
 
         # Use ModelConfigService to get model configuration
         from src.db.session import request_scoped_session
-        from src.services.model_config_service import ModelConfigService
+        from src.services.settings.models import ModelConfigService
 
         async with request_scoped_session() as session:
             model_config_service = ModelConfigService(session, group_id)

@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
 from src.schemas.model_provider import ModelProvider
-from src.services.api_keys_service import ApiKeysService
+from src.services.settings.api_keys import ApiKeysService
 from src.utils.databricks_url_utils import DatabricksURLUtils
 
 logger = logging.getLogger(__name__)

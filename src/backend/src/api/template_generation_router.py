@@ -18,7 +18,7 @@ from src.schemas.template_generation import (
     TemplateGenerationRequest,
     TemplateGenerationResponse,
 )
-from src.services.template_generation_service import TemplateGenerationService
+from src.services.generation.templates import TemplateGenerationService
 
 # Configure logging
 logger = logging.getLogger(__name__)

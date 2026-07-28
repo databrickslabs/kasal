@@ -125,7 +125,7 @@ class EmbedderConfigBuilder:
         """Configure Databricks embedder with custom authentication"""
         try:
             from src.utils.databricks_auth import get_databricks_auth_headers
-            from src.services.api_keys_service import ApiKeysService
+            from src.services.settings.api_keys import ApiKeysService
             from typing import cast
 
             # The embedder interface, defined locally rather than imported from
@@ -297,7 +297,7 @@ class EmbedderConfigBuilder:
         # If no endpoint, get from database
         if not databricks_endpoint:
             try:
-                from src.services.databricks.service import DatabricksService
+                from src.services.databricks.workspace.service import DatabricksService
                 from src.db.session import request_scoped_session
 
                 async with request_scoped_session() as session:
@@ -326,7 +326,7 @@ class EmbedderConfigBuilder:
     async def _configure_openai_embedder(self, crew_kwargs: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
         """Configure OpenAI embedder"""
         try:
-            from src.services.api_keys_service import ApiKeysService
+            from src.services.settings.api_keys import ApiKeysService
 
             # SECURITY: Pass group_id for multi-tenant isolation
             openai_key = await ApiKeysService.get_provider_api_key("OPENAI", group_id=self.group_id)
@@ -363,7 +363,7 @@ class EmbedderConfigBuilder:
     async def _configure_google_embedder(self, crew_kwargs: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
         """Configure Google (Gemini) embedder"""
         try:
-            from src.services.api_keys_service import ApiKeysService
+            from src.services.settings.api_keys import ApiKeysService
             from src.schemas.model_provider import ModelProvider
 
             # SECURITY: Pass group_id for multi-tenant isolation

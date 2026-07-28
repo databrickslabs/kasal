@@ -11,8 +11,8 @@ from src.schemas.databricks_config import (
     DatabricksConfigCreate,
     DatabricksConfigResponse,
 )
-from src.services.api_keys_service import ApiKeysService
-from src.services.databricks.service import DatabricksService
+from src.services.settings.api_keys import ApiKeysService
+from src.services.databricks.workspace.service import DatabricksService
 
 router = APIRouter(
     prefix="/databricks",

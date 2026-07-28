@@ -1,0 +1,739 @@
+import pytest
+from types import SimpleNamespace
+from datetime import datetime
+from unittest.mock import AsyncMock, patch, Mock
+
+from src.services.mcp.service import MCPService
+from src.schemas.mcp import MCPTestConnectionRequest
+
+
+def mk_server(id=1, name="s1", group_id=None, encrypted_api_key=None,
+              server_url="https://example.com", server_type="sse", auth_type="api_key",
+              enabled=True, global_enabled=False, timeout_seconds=30, max_retries=3,
+              model_mapping_enabled=False, rate_limit=60, additional_config=None):
+    now = datetime.utcnow()
+    return SimpleNamespace(
+        id=id, name=name, group_id=group_id, encrypted_api_key=encrypted_api_key,
+        server_url=server_url, server_type=server_type, auth_type=auth_type,
+        enabled=enabled, global_enabled=global_enabled, timeout_seconds=timeout_seconds,
+        max_retries=max_retries, model_mapping_enabled=model_mapping_enabled, rate_limit=rate_limit,
+        additional_config=additional_config or {}, created_at=now, updated_at=now
+    )
+
+
+def mk_settings(id=1, global_enabled=True, individual_enabled=True):
+    now = datetime.utcnow()
+    return SimpleNamespace(id=id, global_enabled=global_enabled, individual_enabled=individual_enabled,
+                           created_at=now, updated_at=now)
+
+
+@pytest.mark.asyncio
+async def test_get_all_and_effective_and_enabled_and_global_lists(monkeypatch):
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+
+    # get_all_servers masks api_key
+    s1 = mk_server(id=1, name="a", group_id=None)
+    s2 = mk_server(id=2, name="a", group_id="g1")
+    svc.server_repository.list = AsyncMock(return_value=[s1, s2])
+    out = await svc.get_all_servers()
+    assert out.count == 2 and out.servers[0].api_key == ""
+
+    # get_all_servers_effective dedups by name preferring group-specific
+    svc.server_repository.list_for_group_scope = AsyncMock(return_value=[s1, s2])
+    eff = await svc.get_all_servers_effective(group_id="g1")
+    assert eff.count == 1 and eff.servers[0].group_id == "g1"
+
+    # get_enabled_servers and get_global_servers
+    svc.server_repository.find_enabled = AsyncMock(return_value=[s1])
+    en = await svc.get_enabled_servers()
+    assert en.count == 1 and en.servers[0].name == "a"
+    svc.server_repository.find_global_enabled = AsyncMock(return_value=[s1])
+    gl = await svc.get_global_servers()
+    assert gl.count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_all_servers_effective_enabled_only_filter():
+    """Regression: enabled_only=True excludes disabled servers; default keeps them."""
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+
+    enabled = mk_server(id=1, name="on", group_id=None, enabled=True)
+    disabled = mk_server(id=2, name="off", group_id=None, enabled=False)
+    svc.server_repository.list_for_group_scope = AsyncMock(return_value=[enabled, disabled])
+
+    # Default (enabled_only=False): both enabled and disabled are returned
+    out_all = await svc.get_all_servers_effective(group_id=None)
+    assert out_all.count == 2
+    assert {s.name for s in out_all.servers} == {"on", "off"}
+
+    # enabled_only=True: disabled server is filtered out
+    out_enabled = await svc.get_all_servers_effective(group_id=None, enabled_only=True)
+    assert out_enabled.count == 1
+    assert [s.name for s in out_enabled.servers] == ["on"]
+
+
+@pytest.mark.asyncio
+async def test_get_servers_by_names_and_group_aware(monkeypatch):
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+
+    # decrypt happy path
+    from src.services.mcp import service as module
+    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "dec", raising=True)
+
+    s1 = mk_server(id=1, name="a", group_id=None, encrypted_api_key="enc")
+    s2 = mk_server(id=2, name="b", group_id=None, encrypted_api_key=None)
+    svc.server_repository.find_by_names = AsyncMock(return_value=[s1, s2])
+    out = await svc.get_servers_by_names(["a", "b"])
+    assert [o.api_key for o in out] == ["dec", ""]
+
+    # group aware dedup + decrypt
+    s1g = mk_server(id=3, name="a", group_id="g1", encrypted_api_key="encg")
+    svc.server_repository.find_by_names_group_scope = AsyncMock(return_value=[s1, s1g])
+    out2 = await svc.get_servers_by_names_group_aware(["a"], group_id="g1")
+    assert len(out2) == 1 and out2[0].group_id == "g1" and out2[0].api_key == "dec"
+
+
+@pytest.mark.asyncio
+async def test_enable_server_for_group_paths(monkeypatch):
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+
+    # not found
+    svc.server_repository.get = AsyncMock(return_value=None)
+    with pytest.raises(Exception) as ei:
+        await svc.enable_server_for_group(99, "g1")
+    assert getattr(ei.value, "status_code", None) == 404
+
+    # already group-scoped: update and decrypt
+    base_g = mk_server(id=5, name="x", group_id="g1", encrypted_api_key="enc")
+    svc.server_repository.get = AsyncMock(return_value=base_g)
+    svc.server_repository.update = AsyncMock(return_value=base_g)
+    from src.services.mcp import service as module
+    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "decg", raising=True)
+    out = await svc.enable_server_for_group(5, "g1")
+    assert out.api_key == "decg" and out.enabled is True
+
+    # existing group override by name -> update existing, disable base
+    base = mk_server(id=6, name="x", group_id=None, encrypted_api_key="enc")
+    svc.server_repository.get = AsyncMock(return_value=base)
+    existing = mk_server(id=7, name="x", group_id="g1", encrypted_api_key="enc2")
+    svc.server_repository.find_by_name_and_group = AsyncMock(return_value=existing)
+    svc.server_repository.update = AsyncMock(side_effect=[existing, base])
+    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "dec2", raising=True)
+    out2 = await svc.enable_server_for_group(6, "g1")
+    assert out2.id == 7 and out2.api_key == "dec2"
+
+    # no existing -> create and disable base
+    svc.server_repository.get = AsyncMock(return_value=base)
+    svc.server_repository.find_by_name_and_group = AsyncMock(return_value=None)
+    created = mk_server(id=8, name="x", group_id="g1", encrypted_api_key="enc3")
+    svc.server_repository.create = AsyncMock(return_value=created)
+    svc.server_repository.update = AsyncMock(return_value=base)
+    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "dec3", raising=True)
+    out3 = await svc.enable_server_for_group(6, "g1")
+    assert out3.id == 8 and out3.api_key == "dec3"
+
+
+@pytest.mark.asyncio
+async def test_settings_and_test_connection_shim():
+    svc = MCPService(session=SimpleNamespace())
+    svc.settings_repository = AsyncMock()
+
+    # get settings
+    s = mk_settings(id=1, global_enabled=True)
+    svc.settings_repository.get_settings = AsyncMock(return_value=s)
+    out = await svc.get_settings()
+    assert out.global_enabled is True
+
+    # update settings
+    svc.settings_repository.update = AsyncMock(return_value=s)
+    out2 = await svc.update_settings(SimpleNamespace(model_dump=lambda: {"global_enabled": False}))
+    assert out2.global_enabled is True
+
+    # test_connection for unsupported type (no network)
+    req = MCPTestConnectionRequest(server_url="https://example.com", api_key="k", server_type="unknown")
+    res = await svc.test_connection(req)
+    assert res.success is False and "Unsupported" in res.message
+
+
+# --- Streamable HTTP connection tests ---
+
+def _mock_mcp_session(tool_count=2):
+    """Helper to create a mock MCP ClientSession with list_tools."""
+    mock_tool = Mock()
+    mock_tool.name = "test_tool"
+    mock_tool.description = "A test tool"
+    mock_tools_result = Mock()
+    mock_tools_result.tools = [mock_tool] * tool_count
+
+    mock_session = AsyncMock()
+    mock_session.initialize = AsyncMock()
+    mock_session.list_tools = AsyncMock(return_value=mock_tools_result)
+    return mock_session
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_success():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="tok", server_type="streamable"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=3)
+
+    with patch("src.services.mcp.service.streamablehttp_client", create=True) as mock_connect, \
+         patch("src.services.mcp.service.ClientSession", create=True) as mock_cs:
+        # Patch the inline imports used by the method
+        import src.services.mcp.service as mod
+
+        mock_connect_cm = AsyncMock()
+        mock_connect_cm.__aenter__.return_value = (Mock(), Mock(), None)
+        mock_cs_cm = AsyncMock()
+        mock_cs_cm.__aenter__.return_value = mock_session
+
+        with patch.dict("sys.modules", {}):
+            with patch("mcp.client.streamable_http.streamablehttp_client") as real_mock:
+                with patch("mcp.ClientSession") as real_cs:
+                    real_mock.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                    real_cs.return_value.__aenter__.return_value = mock_session
+
+                    res = await svc._test_streamable_connection(req)
+
+    assert res.success is True
+    assert "3 tools" in res.message
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_failure():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="tok", server_type="streamable"
+    )
+
+    with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+        mock_connect.side_effect = ConnectionError("Connection refused")
+        res = await svc._test_streamable_connection(req)
+
+    assert res.success is False
+    assert "refused" in res.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_auth_failure():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="bad", server_type="streamable"
+    )
+
+    with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+        mock_connect.side_effect = Exception("HTTP 401 Unauthorized")
+        res = await svc._test_streamable_connection(req)
+
+    assert res.success is False
+    assert "Authentication failed" in res.message
+
+
+# --- SSE connection tests ---
+
+@pytest.mark.asyncio
+async def test_sse_connection_success():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="tok", server_type="sse"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=5)
+
+    with patch("mcp.client.sse.sse_client") as mock_connect:
+        with patch("mcp.ClientSession") as mock_cs:
+            mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
+            mock_cs.return_value.__aenter__.return_value = mock_session
+
+            res = await svc._test_sse_connection(req)
+
+    assert res.success is True
+    assert "5 tools" in res.message
+
+
+@pytest.mark.asyncio
+async def test_sse_connection_failure():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="tok", server_type="sse"
+    )
+
+    with patch("mcp.client.sse.sse_client") as mock_connect:
+        mock_connect.side_effect = OSError("Connection refused")
+        res = await svc._test_sse_connection(req)
+
+    assert res.success is False
+    assert "refused" in res.message.lower()
+
+
+# --- Streamable: SPN auth branch ---
+
+def _mock_auth_context(token="spn-token", auth_method="service_principal"):
+    """Create a mock AuthContext for SPN/PAT tests."""
+    return SimpleNamespace(token=token, auth_method=auth_method)
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_spn_auth_success():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="", server_type="streamable",
+        auth_type="databricks_spn"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=2)
+
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = _mock_auth_context()
+        with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_streamable_connection(req)
+
+    assert res.success is True
+    assert "2 tools" in res.message
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_spn_auth_fails():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="", server_type="streamable",
+        auth_type="databricks_spn"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=0)
+
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = None
+        with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_streamable_connection(req)
+
+    assert res.success is True  # Still connects, just no auth headers
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_spn_auth_exception():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="", server_type="streamable",
+        auth_type="databricks_spn"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=1)
+
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.side_effect = RuntimeError("import error")
+        with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_streamable_connection(req)
+
+    assert res.success is True
+
+
+# --- Streamable: timeout and generic error branches ---
+
+@pytest.mark.asyncio
+async def test_streamable_connection_timeout():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="tok", server_type="streamable",
+        timeout_seconds=5
+    )
+
+    with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+        mock_connect.side_effect = Exception("connection timeout exceeded")
+        res = await svc._test_streamable_connection(req)
+
+    assert res.success is False
+    assert "timed out" in res.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_generic_error():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="tok", server_type="streamable"
+    )
+
+    with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+        mock_connect.side_effect = Exception("some weird MCP error")
+        res = await svc._test_streamable_connection(req)
+
+    assert res.success is False
+    assert "some weird MCP error" in res.message
+
+
+# --- SSE: SPN auth branch ---
+
+@pytest.mark.asyncio
+async def test_sse_connection_spn_auth_success():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="", server_type="sse",
+        auth_type="databricks_spn"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=4)
+
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = _mock_auth_context()
+        with patch("mcp.client.sse.sse_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_sse_connection(req)
+
+    assert res.success is True
+    assert "4 tools" in res.message
+
+
+@pytest.mark.asyncio
+async def test_sse_connection_spn_auth_fails():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="", server_type="sse",
+        auth_type="databricks_spn"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=0)
+
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = None
+        with patch("mcp.client.sse.sse_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_sse_connection(req)
+
+    assert res.success is True
+
+
+@pytest.mark.asyncio
+async def test_sse_connection_spn_auth_exception():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="", server_type="sse",
+        auth_type="databricks_spn"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=1)
+
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.side_effect = RuntimeError("import error")
+        with patch("mcp.client.sse.sse_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_sse_connection(req)
+
+    assert res.success is True
+
+
+# --- SSE: auth failure, timeout, generic error branches ---
+
+@pytest.mark.asyncio
+async def test_sse_connection_auth_failure():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="bad", server_type="sse"
+    )
+
+    with patch("mcp.client.sse.sse_client") as mock_connect:
+        mock_connect.side_effect = Exception("HTTP 401 Unauthorized")
+        res = await svc._test_sse_connection(req)
+
+    assert res.success is False
+    assert "Authentication failed" in res.message
+
+
+@pytest.mark.asyncio
+async def test_sse_connection_timeout():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="tok", server_type="sse",
+        timeout_seconds=5
+    )
+
+    with patch("mcp.client.sse.sse_client") as mock_connect:
+        mock_connect.side_effect = Exception("connection timeout exceeded")
+        res = await svc._test_sse_connection(req)
+
+    assert res.success is False
+    assert "timed out" in res.message.lower()
+
+
+@pytest.mark.asyncio
+async def test_sse_connection_generic_error():
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="tok", server_type="sse"
+    )
+
+    with patch("mcp.client.sse.sse_client") as mock_connect:
+        mock_connect.side_effect = Exception("unexpected MCP error")
+        res = await svc._test_sse_connection(req)
+
+    assert res.success is False
+    assert "unexpected MCP error" in res.message
+
+
+# --- SSE: databricks_obo auth type (tuple check coverage) ---
+
+@pytest.mark.asyncio
+async def test_sse_connection_obo_auth_success():
+    """Test that auth_type 'databricks_obo' triggers get_auth_context (tuple check)."""
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="", server_type="sse",
+        auth_type="databricks_obo"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=3)
+
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = _mock_auth_context(token="obo-token", auth_method="on_behalf_of")
+        with patch("mcp.client.sse.sse_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_sse_connection(req)
+
+    assert res.success is True
+    assert "3 tools" in res.message
+    mock_auth.assert_awaited_once_with(user_token=None)
+
+
+@pytest.mark.asyncio
+async def test_sse_connection_auth_context_returns_none():
+    """Test the else branch where get_auth_context returns None (no auth available)."""
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/sse", api_key="", server_type="sse",
+        auth_type="databricks_obo"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=1)
+
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = None
+        with patch("mcp.client.sse.sse_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock())
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_sse_connection(req)
+
+    assert res.success is True
+    mock_auth.assert_awaited_once_with(user_token=None)
+
+
+# --- Streamable: databricks_obo auth type (tuple check coverage) ---
+
+@pytest.mark.asyncio
+async def test_streamable_connection_obo_auth_success():
+    """Test that auth_type 'databricks_obo' triggers get_auth_context (tuple check)."""
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="", server_type="streamable",
+        auth_type="databricks_obo"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=4)
+
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = _mock_auth_context(token="obo-token", auth_method="on_behalf_of")
+        with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_streamable_connection(req)
+
+    assert res.success is True
+    assert "4 tools" in res.message
+    mock_auth.assert_awaited_once_with(user_token=None)
+
+
+@pytest.mark.asyncio
+async def test_streamable_connection_auth_context_returns_none():
+    """Test the else branch where get_auth_context returns None (no auth available)."""
+    svc = MCPService(session=SimpleNamespace())
+    req = MCPTestConnectionRequest(
+        server_url="https://example.com/mcp", api_key="", server_type="streamable",
+        auth_type="databricks_obo"
+    )
+
+    mock_session = _mock_mcp_session(tool_count=1)
+
+    with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock) as mock_auth:
+        mock_auth.return_value = None
+        with patch("mcp.client.streamable_http.streamablehttp_client") as mock_connect:
+            with patch("mcp.ClientSession") as mock_cs:
+                mock_connect.return_value.__aenter__.return_value = (Mock(), Mock(), None)
+                mock_cs.return_value.__aenter__.return_value = mock_session
+                res = await svc._test_streamable_connection(req)
+
+    assert res.success is True
+    mock_auth.assert_awaited_once_with(user_token=None)
+
+
+
+@pytest.mark.asyncio
+async def test_delete_server_cascades_overrides_for_global_base():
+    """Deleting a GLOBAL (base, group_id=None) server hard-deletes the per-workspace
+    override rows for that name so the deletion propagates to every workspace."""
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+    base = mk_server(id=5, name="shared", group_id=None)
+    svc.server_repository.get = AsyncMock(return_value=base)
+    svc.server_repository.delete = AsyncMock()
+    svc.server_repository.delete_overrides_by_name = AsyncMock(return_value=2)
+
+    ok = await svc.delete_server(5)
+
+    assert ok is True
+    svc.server_repository.delete.assert_awaited_once_with(5)
+    svc.server_repository.delete_overrides_by_name.assert_awaited_once_with("shared")
+
+
+@pytest.mark.asyncio
+async def test_delete_server_workspace_row_does_not_cascade():
+    """Deleting a WORKSPACE-scoped row (group_id set) deletes only itself."""
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+    ws = mk_server(id=7, name="shared", group_id="ws1")
+    svc.server_repository.get = AsyncMock(return_value=ws)
+    svc.server_repository.delete = AsyncMock()
+    svc.server_repository.delete_overrides_by_name = AsyncMock()
+
+    ok = await svc.delete_server(7)
+
+    assert ok is True
+    svc.server_repository.delete.assert_awaited_once_with(7)
+    svc.server_repository.delete_overrides_by_name.assert_not_awaited()
+
+
+class TestDecryptSkippedForTokenAuthServers:
+    """Regression: servers with auth_type databricks_obo/databricks_spn authenticate
+    with tokens — a leftover encrypted_api_key blob (saved before the auth type
+    changed, possibly under an older encryption key) must never be decrypted, or
+    every run logs 'Error decrypting value with SSH key: Decryption failed'."""
+
+    def test_obo_server_never_decrypts_stale_blob(self, monkeypatch):
+        from src.services.mcp import service as module
+
+        def boom(_v):
+            raise AssertionError("decrypt_value must not be called for OBO servers")
+
+        monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", boom, raising=True)
+        server = mk_server(name="ontos_obo", auth_type="databricks_obo",
+                           encrypted_api_key="stale-ciphertext-from-old-key")
+        assert MCPService._decrypt_server_api_key(server) is None
+
+    def test_spn_server_never_decrypts_stale_blob(self, monkeypatch):
+        from src.services.mcp import service as module
+
+        def boom(_v):
+            raise AssertionError("decrypt_value must not be called for SPN servers")
+
+        monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", boom, raising=True)
+        server = mk_server(name="spn_srv", auth_type="databricks_spn",
+                           encrypted_api_key="stale-ciphertext")
+        assert MCPService._decrypt_server_api_key(server) is None
+
+    def test_missing_auth_type_defaults_to_api_key(self, monkeypatch):
+        from src.services.mcp import service as module
+        monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "plain", raising=True)
+        server = mk_server(name="legacy", auth_type=None, encrypted_api_key="enc")
+        assert MCPService._decrypt_server_api_key(server) == "plain"
+
+    def test_no_blob_returns_none_without_decrypting(self, monkeypatch):
+        from src.services.mcp import service as module
+
+        def boom(_v):
+            raise AssertionError("decrypt_value must not be called without a blob")
+
+        monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", boom, raising=True)
+        server = mk_server(name="keyless", auth_type="api_key", encrypted_api_key=None)
+        assert MCPService._decrypt_server_api_key(server) is None
+
+    def test_undecryptable_api_key_blob_warns_with_server_name(self, monkeypatch, caplog):
+        """decrypt_value returns '' when the ciphertext predates the current key —
+        the warning must name the server and say to re-save its API key."""
+        import logging
+        from src.services.mcp import service as module
+        monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", lambda v: "", raising=True)
+        server = mk_server(name="old_key_srv", auth_type="api_key", encrypted_api_key="orphaned")
+        with caplog.at_level(logging.WARNING, logger=module.logger.name):
+            assert MCPService._decrypt_server_api_key(server) == ""
+        assert any("old_key_srv" in r.message and "re-save" in r.message
+                   for r in caplog.records)
+
+    def test_decrypt_exception_warns_and_returns_empty(self, monkeypatch, caplog):
+        import logging
+        from src.services.mcp import service as module
+
+        def raise_err(_v):
+            raise ValueError("bad blob")
+
+        monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", raise_err, raising=True)
+        server = mk_server(name="err_srv", auth_type="api_key", encrypted_api_key="enc")
+        with caplog.at_level(logging.WARNING, logger=module.logger.name):
+            assert MCPService._decrypt_server_api_key(server) == ""
+        assert any("err_srv" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_get_servers_by_names_skips_decrypt_for_obo(monkeypatch):
+    """End-to-end through the engine's lookup path: an OBO server with a stale
+    encrypted_api_key returns without any decryption attempt."""
+    from src.services.mcp import service as module
+
+    def boom(_v):
+        raise AssertionError("decrypt_value must not be called for OBO servers")
+
+    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", boom, raising=True)
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+    obo = mk_server(id=1, name="ontos_obo", auth_type="databricks_obo",
+                    encrypted_api_key="stale-ciphertext")
+    svc.server_repository.find_by_names = AsyncMock(return_value=[obo])
+
+    out = await svc.get_servers_by_names(["ontos_obo"])
+
+    assert len(out) == 1 and out[0].api_key == ""
+
+    svc.server_repository.find_by_names_group_scope = AsyncMock(return_value=[obo])
+    out2 = await svc.get_servers_by_names_group_aware(["ontos_obo"], group_id="g1")
+    assert len(out2) == 1 and out2[0].api_key == ""
+
+
+@pytest.mark.asyncio
+async def test_get_server_by_id_skips_decrypt_for_obo(monkeypatch):
+    from src.services.mcp import service as module
+
+    def boom(_v):
+        raise AssertionError("decrypt_value must not be called for OBO servers")
+
+    monkeypatch.setattr(module.EncryptionUtils, "decrypt_value", boom, raising=True)
+    svc = MCPService(session=SimpleNamespace())
+    svc.server_repository = AsyncMock()
+    obo = mk_server(id=9, name="ontos_obo", auth_type="databricks_obo",
+                    encrypted_api_key="stale-ciphertext")
+    svc.server_repository.get = AsyncMock(return_value=obo)
+
+    resp = await svc.get_server_by_id(9)
+
+    assert resp is not None and resp.api_key == ""

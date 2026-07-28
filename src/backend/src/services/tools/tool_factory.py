@@ -230,8 +230,8 @@ logger = logging.getLogger(__name__)
 
 # Import request-scoped session helper
 from src.db.session import request_scoped_session
-from src.services.tool_service import ToolService
-from src.services.api_keys_service import ApiKeysService
+from src.services.tools.tool_service import ToolService
+from src.services.settings.api_keys import ApiKeysService
 from src.schemas.tool import ToolUpdate
 from src.utils.encryption_utils import EncryptionUtils
 
@@ -349,7 +349,7 @@ class ToolFactory:
             
             # Check for Databricks config in database
             try:
-                from src.services.databricks.service import DatabricksService
+                from src.services.databricks.workspace.service import DatabricksService
                 from src.db.session import request_scoped_session
                 
                 group_id = self.config.get('group_id', 'default') if isinstance(self.config, dict) else 'default'
@@ -435,7 +435,7 @@ class ToolFactory:
 
                             async def _get_key_operation(session):
                                 # SECURITY: Re-use the api_keys_service with group_id for multi-tenant isolation
-                                from src.services.api_keys_service import ApiKeysService
+                                from src.services.settings.api_keys import ApiKeysService
                                 api_keys_service = ApiKeysService(session, group_id=group_id)
                                 return await api_keys_service.find_by_name(key_name)
 
@@ -502,7 +502,7 @@ class ToolFactory:
         """Load all available tools from the service asynchronously"""
         try:
             # Get services using session factory
-            from src.services.tool_service import ToolService
+            from src.services.tools.tool_service import ToolService
             from src.db.session import request_scoped_session
             from src.utils.user_context import GroupContext
 
@@ -598,7 +598,7 @@ class ToolFactory:
                 group_id = getattr(self.api_keys_service, 'group_id', None)
 
             async def _get_key_with_fresh_engine(session):
-                from src.services.api_keys_service import ApiKeysService
+                from src.services.settings.api_keys import ApiKeysService
                 # SECURITY: Create service with group_id for multi-tenant isolation
                 api_keys_service = ApiKeysService(session, group_id=group_id)
                 api_key = await api_keys_service.find_by_name(key_name)
@@ -715,7 +715,7 @@ class ToolFactory:
         """Async implementation of tool config update"""
         # Get services using session factory
         from src.db.session import request_scoped_session
-        from src.services.tool_service import ToolService
+        from src.services.tools.tool_service import ToolService
 
         async with request_scoped_session() as session:
             # Create tool service with session
@@ -1241,7 +1241,7 @@ class ToolFactory:
                     if not databricks_host:
                         try:
                             # Try to get from DatabricksService configuration
-                            from src.services.databricks.service import DatabricksService
+                            from src.services.databricks.workspace.service import DatabricksService
                             from src.db.session import request_scoped_session
 
                             async def get_databricks_config():

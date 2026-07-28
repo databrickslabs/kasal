@@ -25,7 +25,7 @@ from src.schemas.workflow_recipe import (
     RecipeSuggestRequest,
     RecipeSummary,
 )
-from src.services.workflow_recipe_service import WorkflowRecipeService
+from src.services.recipes.recipes import WorkflowRecipeService
 
 router = APIRouter(
     prefix="/workflow-recipes",

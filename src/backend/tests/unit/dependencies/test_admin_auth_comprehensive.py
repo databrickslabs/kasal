@@ -99,7 +99,7 @@ class TestGetCurrentUserFromEmail:
         mock_service = AsyncMock()
         mock_service.get_or_create_user_by_email = AsyncMock(return_value=expected_user)
 
-        with patch("src.services.user_service.UserService", return_value=mock_service):
+        with patch("src.services.groups.users.UserService", return_value=mock_service):
             result = await get_current_user_from_email(session, ctx)
 
         assert result is expected_user

@@ -145,7 +145,7 @@ class TestGetModelContextLimitsExtended:
         mock_model_config.max_output_tokens = 8000
 
         with patch('src.db.session.request_scoped_session') as mock_session, \
-             patch('src.services.model_config_service.ModelConfigService') as mock_svc_cls:
+             patch('src.services.settings.models.ModelConfigService') as mock_svc_cls:
             mock_session_instance = AsyncMock()
             mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_session_instance)
             mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -174,7 +174,7 @@ class TestGetModelContextLimitsExtended:
         mock_model_config.max_output_tokens = None  # Falsy
 
         with patch('src.db.session.request_scoped_session') as mock_session, \
-             patch('src.services.model_config_service.ModelConfigService') as mock_svc_cls:
+             patch('src.services.settings.models.ModelConfigService') as mock_svc_cls:
             mock_session.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_session.return_value.__aexit__ = AsyncMock(return_value=False)
 

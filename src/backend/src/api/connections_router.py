@@ -16,7 +16,7 @@ from src.schemas.connection import (
     ConnectionRequest,
     ConnectionResponse,
 )
-from src.services.connection_service import ConnectionService
+from src.services.generation.connections import ConnectionService
 
 # Configure logging
 # Create router

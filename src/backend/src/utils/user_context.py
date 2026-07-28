@@ -320,8 +320,8 @@ class GroupContext:
         """
         try:
             # Import here to avoid circular imports
-            from src.services.group_service import GroupService
-            from src.services.user_service import UserService
+            from src.services.groups.groups import GroupService
+            from src.services.groups.users import UserService
             from src.utils.asyncio_utils import execute_db_operation_smart
 
             async def _lookup(session):
@@ -378,8 +378,8 @@ class GroupContext:
 
         try:
             # Import here to avoid circular imports
-            from src.services.group_service import GroupService
-            from src.services.user_service import UserService
+            from src.services.groups.groups import GroupService
+            from src.services.groups.users import UserService
             from src.utils.asyncio_utils import execute_db_operation_smart
 
             async def _lookup(session):

@@ -32,7 +32,7 @@ async def get_prompt_template(db: Session, name: str, default_template: str = No
         or None if no template was found and no default was provided
     """
     # Import inside function to avoid circular imports
-    from src.services.template_service import TemplateService
+    from src.services.catalog.templates import TemplateService
     return await TemplateService.get_template_content(name, default_template)
 
 

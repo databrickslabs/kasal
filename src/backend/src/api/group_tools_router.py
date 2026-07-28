@@ -17,7 +17,7 @@ from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.permissions import require_admin
 from src.schemas.group_tool import GroupToolListResponse, GroupToolResponse
 from src.schemas.tool import ToolListResponse
-from src.services.group_tool_service import GroupToolService
+from src.services.groups.group_tools import GroupToolService
 
 router = APIRouter(
     prefix="/group-tools",

@@ -658,7 +658,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.api_keys_service.ApiKeysService"), \
+             patch("src.services.settings.api_keys.ApiKeysService"), \
              patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=MagicMock())
 
@@ -681,7 +681,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.api_keys_service.ApiKeysService"), \
+             patch("src.services.settings.api_keys.ApiKeysService"), \
              patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
@@ -702,7 +702,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.api_keys_service.ApiKeysService"), \
+             patch("src.services.settings.api_keys.ApiKeysService"), \
              patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
@@ -719,7 +719,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.api_keys_service.ApiKeysService"), \
+             patch("src.services.settings.api_keys.ApiKeysService"), \
              patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=MagicMock())
 
@@ -735,7 +735,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.api_keys_service.ApiKeysService"), \
+             patch("src.services.settings.api_keys.ApiKeysService"), \
              patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=MagicMock())
 
@@ -757,7 +757,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.api_keys_service.ApiKeysService"), \
+             patch("src.services.settings.api_keys.ApiKeysService"), \
              patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
@@ -779,7 +779,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.api_keys_service.ApiKeysService"), \
+             patch("src.services.settings.api_keys.ApiKeysService"), \
              patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
@@ -798,7 +798,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.api_keys_service.ApiKeysService"), \
+             patch("src.services.settings.api_keys.ApiKeysService"), \
              patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             mock_tf = AsyncMock()
             MockTF.create = AsyncMock(return_value=mock_tf)
@@ -829,7 +829,7 @@ class TestConfigureTaskTools:
         mock_factory.get_tool_info.return_value = None
 
         with patch("src.db.session.request_scoped_session", return_value=fail_ctx), \
-             patch("src.services.api_keys_service.ApiKeysService"), \
+             patch("src.services.settings.api_keys.ApiKeysService"), \
              patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.return_value = mock_factory
 
@@ -864,7 +864,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.api_keys_service.ApiKeysService"), \
+             patch("src.services.settings.api_keys.ApiKeysService"), \
              patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=mock_factory)
 
@@ -882,7 +882,7 @@ class TestConfigureTaskTools:
         session_ctx, _ = _make_mock_session_ctx()
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
-             patch("src.services.api_keys_service.ApiKeysService"), \
+             patch("src.services.settings.api_keys.ApiKeysService"), \
              patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=MagicMock())
 

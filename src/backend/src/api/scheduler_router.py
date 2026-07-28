@@ -19,7 +19,7 @@ from src.schemas.scheduler import (
     SchedulerJobSchema,
     SchedulerJobUpdate,
 )
-from src.services.scheduler_service import SchedulerService
+from src.services.scheduling.scheduler import SchedulerService
 from src.utils.user_context import GroupContext
 
 # Create router instance

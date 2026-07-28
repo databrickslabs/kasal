@@ -11,7 +11,7 @@ import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.services.user_service import UserService
+from src.services.groups.users import UserService
 from src.models.user import User, UserProfile, ExternalIdentity
 from src.schemas.user import UserUpdate, UserProfileUpdate, UserRole
 
@@ -264,7 +264,7 @@ class TestUserService:
         user_service.user_repo.get = AsyncMock(return_value=mock_user)
         user_service.user_repo.update = AsyncMock()
         
-        with patch('src.services.user_service.get_password_hash', return_value="hashed_password"):
+        with patch('src.services.groups.users.get_password_hash', return_value="hashed_password"):
             result = await user_service.update_password("user-123", new_password)
             
             assert result is True

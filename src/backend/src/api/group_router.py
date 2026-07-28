@@ -33,8 +33,8 @@ from src.schemas.group import (
     GroupUserUpdateRequest,
     GroupWithRoleResponse,
 )
-from src.services.group_service import GroupService
-from src.services.user_service import UserService
+from src.services.groups.groups import GroupService
+from src.services.groups.users import UserService
 
 
 class GroupContextResponse(BaseModel):

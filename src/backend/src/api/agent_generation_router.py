@@ -12,7 +12,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from src.core.dependencies import GroupContextDep, SessionDep
-from src.services.agent_generation_service import AgentGenerationService
+from src.services.generation.agents import AgentGenerationService
 
 # Configure logging
 # Create router

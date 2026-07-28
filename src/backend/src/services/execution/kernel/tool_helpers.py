@@ -8,7 +8,7 @@ import logging
 from typing import List, Union
 
 # Import services
-from src.services.tool_service import ToolService
+from src.services.tools.tool_service import ToolService
 
 logger = logging.getLogger(__name__)
 

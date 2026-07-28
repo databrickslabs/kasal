@@ -19,7 +19,7 @@ from src.core.exceptions import BadRequestError
 from src.repositories.log_repository import LLMLogRepository
 from src.repositories.model_config_repository import ModelConfigRepository
 from src.utils.user_context import GroupContext
-from src.services.gepa.grading import (  # noqa: E402
+from src.services.prompt_optimization.gepa.grading import (  # noqa: E402
     _judge_value_to_grade,
     _checklist_grade,
     _grade_judge_verdict,
@@ -33,7 +33,7 @@ from src.services.gepa.grading import (  # noqa: E402
     JUDGE_SPREAD_WARN,
     VALID_INTENTS,
 )
-from src.services.gepa.crew_doc import (  # noqa: E402
+from src.services.prompt_optimization.gepa.crew_doc import (  # noqa: E402
     _serialize_crew_doc,
     _parse_crew_doc,
     _parse_requirement_lines,
@@ -41,15 +41,15 @@ from src.services.gepa.crew_doc import (  # noqa: E402
     _extract_user_from_log,
     _CREW_DOC_FIELD_LABELS,
 )
-from src.services.gepa.judge_model import (  # noqa: E402
+from src.services.prompt_optimization.gepa.judge_model import (  # noqa: E402
     _stored_judge_model_to_key,
     _crew_target_model,
     _resolve_judge_model,
 )
-from src.services.gepa.reflection import _GEPA_REFLECTION_STATE, _install_gepa_reflection_bridge, _judge_sample_count, _make_reflection_fn, _preflight_reflection, _sync_llm_completion, _sync_run_crew
+from src.services.prompt_optimization.gepa.reflection import _GEPA_REFLECTION_STATE, _install_gepa_reflection_bridge, _judge_sample_count, _make_reflection_fn, _preflight_reflection, _sync_llm_completion, _sync_run_crew
 from src.services.prompt_optimization.run_state import _RUNS
 
-from src.services.gepa import reflection
+from src.services.prompt_optimization.gepa import reflection
 
 logger = logging.getLogger(__name__)
 

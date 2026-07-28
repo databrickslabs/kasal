@@ -814,7 +814,7 @@ class TestGetSchedulerServiceDependency:
             service = await get_scheduler_service(mock_db)
             assert service is not None
             # The service should be a SchedulerService instance
-            from src.services.scheduler_service import SchedulerService
+            from src.services.scheduling.scheduler import SchedulerService
             assert isinstance(service, SchedulerService)
             assert service.session == mock_db
         

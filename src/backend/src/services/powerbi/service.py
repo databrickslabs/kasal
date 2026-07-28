@@ -25,7 +25,7 @@ class PowerBIService:
     def secrets_service(self):
         """Lazy load secrets_service to avoid circular dependency."""
         if self._secrets_service is None:
-            from src.services.api_keys_service import ApiKeysService
+            from src.services.settings.api_keys import ApiKeysService
             self._secrets_service = ApiKeysService(self.session)
         return self._secrets_service
 

@@ -529,7 +529,7 @@ class TestDeleteAllExecutions:
 
         with patch('src.services.trace.ExecutionTraceService') as mock_trace_service, \
              patch('src.services.execution.logs.writer.ExecutionLogsService') as mock_logs_service, \
-             patch('src.services.workflow_recipe_service.WorkflowRecipeService') as mock_recipes, \
+             patch('src.services.recipes.recipes.WorkflowRecipeService') as mock_recipes, \
              patch('src.services.execution.service.ExecutionService') as mock_exec_service:
             trace_instance = MagicMock()
             trace_instance.repository = MagicMock()
@@ -564,7 +564,7 @@ class TestDeleteAllExecutions:
         mock_result.fetchall.return_value = []
         mock_session.execute = AsyncMock(return_value=mock_result)
 
-        with patch('src.services.workflow_recipe_service.WorkflowRecipeService') as mock_recipes:
+        with patch('src.services.recipes.recipes.WorkflowRecipeService') as mock_recipes:
             recipe_instance = MagicMock()
             recipe_instance.delete_for_groups = AsyncMock(
                 return_value={'recipe_count': 2, 'trial_count': 0}

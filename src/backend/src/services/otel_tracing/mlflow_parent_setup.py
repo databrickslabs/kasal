@@ -302,7 +302,7 @@ async def configure_parent_mlflow_tracing(
             exp_name = "/Shared/kasal-crew-execution-traces"
             uc_catalog = uc_schema = warehouse_id = None
             try:
-                from src.services.databricks.service import DatabricksService
+                from src.services.databricks.workspace.service import DatabricksService
 
                 db_config = await DatabricksService(
                     session, group_id=group_id

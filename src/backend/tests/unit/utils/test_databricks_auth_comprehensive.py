@@ -154,7 +154,7 @@ class TestLoadConfig:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         with patch.object(auth, "_check_oauth_environment"), \
-             patch("src.services.databricks.service.DatabricksService", return_value=mock_service), \
+             patch("src.services.databricks.workspace.service.DatabricksService", return_value=mock_service), \
              patch("src.db.session.request_scoped_session", return_value=mock_session):
             result = await auth._load_config()
         assert result is True
@@ -169,7 +169,7 @@ class TestLoadConfig:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         with patch.object(auth, "_check_oauth_environment"), \
-             patch("src.services.databricks.service.DatabricksService", return_value=mock_service), \
+             patch("src.services.databricks.workspace.service.DatabricksService", return_value=mock_service), \
              patch("src.db.session.request_scoped_session", return_value=mock_session):
             result = await auth._load_config()
         assert result is True
@@ -180,7 +180,7 @@ class TestLoadConfig:
         with patch.object(auth, "_check_oauth_environment"):
             original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
             def fail_import(name, *args, **kwargs):
-                if name == "src.services.databricks.service":
+                if name == "src.services.databricks.workspace.service":
                     raise ImportError("no module")
                 return original_import(name, *args, **kwargs)
             with patch("builtins.__import__", side_effect=fail_import):
@@ -736,7 +736,7 @@ class TestGetAuthContext:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
                  patch("src.utils.databricks_auth._clean_environment") as mc, \
                  patch("src.utils.databricks_auth.WorkspaceClient", side_effect=Exception("obo fail")), \
-                 patch("src.services.api_keys_service.ApiKeysService"), \
+                 patch("src.services.settings.api_keys.ApiKeysService"), \
                  patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext") as mock_uc:
                 mc.return_value.__enter__ = Mock(return_value=None)
@@ -763,7 +763,7 @@ class TestGetAuthContext:
         mock_session.__aexit__ = AsyncMock(return_value=False)
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.api_keys_service.ApiKeysService", return_value=mock_service), \
+                 patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_service), \
                  patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext"), \
                  patch("src.utils.encryption_utils.EncryptionUtils") as enc:
@@ -791,7 +791,7 @@ class TestGetAuthContext:
         mock_group_ctx.primary_group_id = "ctx_grp"
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.api_keys_service.ApiKeysService", return_value=mock_service), \
+                 patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_service), \
                  patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext") as mock_uc, \
                  patch("src.utils.encryption_utils.EncryptionUtils") as enc:
@@ -834,7 +834,7 @@ class TestGetAuthContext:
         mock_group_ctx.primary_group_id = "g1"
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.api_keys_service.ApiKeysService", side_effect=make_service), \
+                 patch("src.services.settings.api_keys.ApiKeysService", side_effect=make_service), \
                  patch("src.db.session.async_session_factory", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext") as mock_uc, \
                  patch("src.utils.encryption_utils.EncryptionUtils") as enc:
@@ -858,7 +858,7 @@ class TestGetAuthContext:
         mock_session.__aexit__ = AsyncMock(return_value=False)
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.api_keys_service.ApiKeysService"), \
+                 patch("src.services.settings.api_keys.ApiKeysService"), \
                  patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext") as mock_uc:
                 mock_uc.get_group_context.side_effect = Exception("no context")
@@ -880,7 +880,7 @@ class TestGetAuthContext:
         mock_session.__aexit__ = AsyncMock(return_value=False)
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.api_keys_service.ApiKeysService", return_value=mock_service), \
+                 patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_service), \
                  patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext"):
                 assert await get_auth_context(group_id="grp") is None
@@ -903,7 +903,7 @@ class TestGetAuthContext:
         mock_session.__aexit__ = AsyncMock(return_value=False)
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.api_keys_service.ApiKeysService", return_value=mock_service), \
+                 patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_service), \
                  patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext"):
                 assert await get_auth_context(group_id="grp") is None
@@ -919,7 +919,7 @@ class TestGetAuthContext:
         try:
             original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
             def fail_import(name, *args, **kwargs):
-                if name == "src.services.api_keys_service":
+                if name == "src.services.settings.api_keys":
                     raise ImportError("no module")
                 return original_import(name, *args, **kwargs)
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
@@ -941,7 +941,7 @@ class TestGetAuthContext:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
                  patch.object(_databricks_auth, "_is_service_token_expired", return_value=True), \
                  patch.object(_databricks_auth, "_refresh_service_token", new_callable=AsyncMock, return_value="spn"), \
-                 patch("src.services.api_keys_service.ApiKeysService"), \
+                 patch("src.services.settings.api_keys.ApiKeysService"), \
                  patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext") as uc:
                 uc.get_group_context.return_value = None
@@ -963,7 +963,7 @@ class TestGetAuthContext:
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
                  patch.object(_databricks_auth, "_is_service_token_expired", return_value=False), \
-                 patch("src.services.api_keys_service.ApiKeysService"), \
+                 patch("src.services.settings.api_keys.ApiKeysService"), \
                  patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext") as uc:
                 uc.get_group_context.return_value = None
@@ -985,7 +985,7 @@ class TestGetAuthContext:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
                  patch.object(_databricks_auth, "_is_service_token_expired", return_value=True), \
                  patch.object(_databricks_auth, "_refresh_service_token", new_callable=AsyncMock, return_value=None), \
-                 patch("src.services.api_keys_service.ApiKeysService"), \
+                 patch("src.services.settings.api_keys.ApiKeysService"), \
                  patch("src.db.session.request_scoped_session", return_value=mock_session), \
                  patch("src.utils.user_context.UserContext") as uc:
                 uc.get_group_context.return_value = None
@@ -1015,7 +1015,7 @@ class TestGetAuthContext:
                 mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
                 mock_svc = AsyncMock()
                 mock_svc.find_by_name = AsyncMock(return_value=None)
-                with patch("src.services.api_keys_service.ApiKeysService", return_value=mock_svc):
+                with patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_svc):
                     mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
                     result = await get_auth_context()
             assert result is not None
@@ -1045,7 +1045,7 @@ class TestGetAuthContext:
                 mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
                 mock_svc = AsyncMock()
                 mock_svc.find_by_name = AsyncMock(return_value=None)
-                with patch("src.services.api_keys_service.ApiKeysService", return_value=mock_svc):
+                with patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_svc):
                     mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
                     result = await get_auth_context()
             assert result is not None
@@ -1071,7 +1071,7 @@ class TestGetAuthContext:
                 mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
                 mock_svc = AsyncMock()
                 mock_svc.find_by_name = AsyncMock(return_value=None)
-                with patch("src.services.api_keys_service.ApiKeysService", return_value=mock_svc):
+                with patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_svc):
                     mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
                     result = await get_auth_context()
             assert result.token == "tok_val"
@@ -1100,7 +1100,7 @@ class TestGetAuthContext:
                 mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
                 mock_svc = AsyncMock()
                 mock_svc.find_by_name = AsyncMock(return_value=None)
-                with patch("src.services.api_keys_service.ApiKeysService", return_value=mock_svc):
+                with patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_svc):
                     mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
                     result = await get_auth_context()
             assert result is not None
@@ -1126,7 +1126,7 @@ class TestGetAuthContext:
                 mock_sf.return_value.__aexit__ = AsyncMock(return_value=False)
                 mock_svc = AsyncMock()
                 mock_svc.find_by_name = AsyncMock(return_value=None)
-                with patch("src.services.api_keys_service.ApiKeysService", return_value=mock_svc):
+                with patch("src.services.settings.api_keys.ApiKeysService", return_value=mock_svc):
                     mock_uc.get_group_context.return_value = MagicMock(group_id="g1")
                     result = await get_auth_context()
             # Empty strings are falsy, so no PAT -> no SPN creds -> None
@@ -1663,7 +1663,7 @@ class TestPatLookupCache:
         mock_session, svc = self._make_session_and_service(encrypted="enc")
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.api_keys_service.ApiKeysService", return_value=svc), \
+                 patch("src.services.settings.api_keys.ApiKeysService", return_value=svc), \
                  patch("src.db.session.async_session_factory", return_value=mock_session), \
                  patch("src.utils.encryption_utils.EncryptionUtils") as mock_enc:
                 mock_enc.decrypt_value.return_value = "decrypted-pat"
@@ -1686,7 +1686,7 @@ class TestPatLookupCache:
         mock_session, svc = self._make_session_and_service(encrypted=None)
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.api_keys_service.ApiKeysService", return_value=svc), \
+                 patch("src.services.settings.api_keys.ApiKeysService", return_value=svc), \
                  patch("src.db.session.async_session_factory", return_value=mock_session):
                 r1 = await get_auth_context(group_id="grp-none")
                 r2 = await get_auth_context(group_id="grp-none")
@@ -1704,7 +1704,7 @@ class TestPatLookupCache:
         mock_session, svc = self._make_session_and_service(encrypted="enc")
         try:
             with patch.object(_databricks_auth, "_load_config", new_callable=AsyncMock, return_value=True), \
-                 patch("src.services.api_keys_service.ApiKeysService", return_value=svc), \
+                 patch("src.services.settings.api_keys.ApiKeysService", return_value=svc), \
                  patch("src.db.session.async_session_factory", return_value=mock_session), \
                  patch("src.utils.encryption_utils.EncryptionUtils") as mock_enc:
                 mock_enc.decrypt_value.return_value = "decrypted-pat"

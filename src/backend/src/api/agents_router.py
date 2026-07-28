@@ -10,7 +10,7 @@ from src.core.permissions import check_role_in_context
 from src.models.agent import Agent
 from src.schemas.agent import Agent as AgentSchema
 from src.schemas.agent import AgentCreate, AgentLimitedUpdate, AgentUpdate
-from src.services.agent_service import AgentService
+from src.services.catalog.agents import AgentService
 
 router = APIRouter(
     prefix="/agents",

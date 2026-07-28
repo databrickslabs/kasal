@@ -67,7 +67,7 @@ def make_config_obj(engine_name="kasal", engine_type="crew", enabled=True):
 
 def test_get_engine_config_service_creates_instance():
     """get_engine_config_service creates EngineConfigService with session."""
-    from src.services.engine_config_service import EngineConfigService
+    from src.services.settings.engine import EngineConfigService
 
     fake_session = MagicMock()
     with patch("src.api.engine_config_router.EngineConfigService") as MockSvc:

@@ -26,7 +26,7 @@ from src.config.settings import settings
 from src.core.logger import LoggerManager
 from src.db.session import async_session_factory, get_db
 from src.services.execution.cleanup import ExecutionCleanupService
-from src.services.scheduler_service import SchedulerService
+from src.services.scheduling.scheduler import SchedulerService
 from src.utils.databricks_url_utils import DatabricksURLUtils
 
 # Get logger after configuration
@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI):
 
         _logging.getLogger("src.utils.user_context").setLevel(_logging.WARNING)
         _logging.getLogger("src.core.dependencies").setLevel(_logging.WARNING)
-        _logging.getLogger("src.services.user_service").setLevel(_logging.WARNING)
+        _logging.getLogger("src.services.groups.users").setLevel(_logging.WARNING)
     except Exception as _e:
         system_logger.warning(f"Failed to adjust module log levels: {_e}")
 
@@ -122,7 +122,7 @@ async def lifespan(app: FastAPI):
             # Start the queue service in the background without blocking
             import asyncio
 
-            from src.services.embedding_queue_service import embedding_queue
+            from src.services.knowledge.embedding_queue import embedding_queue
 
             asyncio.create_task(embedding_queue.start())
             embedding_queue_started = True
@@ -224,7 +224,7 @@ async def lifespan(app: FastAPI):
     # predates the feature.
     if db_initialized:
         async def _workflow_recipe_backfill():
-            from src.services.workflow_recipe_mining import mine_now
+            from src.services.recipes.mining import mine_now
             try:
                 n = await mine_now()
                 if n:
@@ -460,7 +460,7 @@ async def lifespan(app: FastAPI):
         if "embedding_queue_started" in locals() and embedding_queue_started:
             system_logger.info("Stopping embedding queue service...")
             try:
-                from src.services.embedding_queue_service import embedding_queue
+                from src.services.knowledge.embedding_queue import embedding_queue
 
                 # Flush any remaining items before stopping
                 await embedding_queue._flush_queue()

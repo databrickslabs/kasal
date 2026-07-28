@@ -5,7 +5,7 @@ from databricks.sdk.useragent import with_product
 
 from src.repositories.mlflow_repository import MLflowRepository
 from src.repositories.execution_history_repository import ExecutionHistoryRepository
-from src.services.model_config_service import ModelConfigService
+from src.services.settings.models import ModelConfigService
 from src.core.logger import LoggerManager
 from src.utils.telemetry import KASAL_BASE, VERSION, KasalProduct
 
@@ -249,7 +249,7 @@ class MLflowService:
         # Fallback: try to read workspace URL from stored Databricks configuration
         if not workspace_url:
             try:
-                from src.services.databricks.service import DatabricksService
+                from src.services.databricks.workspace.service import DatabricksService
                 svc = DatabricksService(self.session)
                 cfg = await svc.get_databricks_config()
                 if cfg and getattr(cfg, "workspace_url", None):

@@ -22,7 +22,7 @@ from src.schemas.agentbricks import (
     AgentBricksQueryRequest,
     AgentBricksQueryResponse,
 )
-from src.services.databricks.agentbricks import AgentBricksService
+from src.services.databricks.agentbricks.service import AgentBricksService
 from src.utils.databricks_auth import extract_user_token_from_request
 from src.utils.user_context import UserContext
 

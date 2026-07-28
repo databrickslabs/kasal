@@ -242,7 +242,7 @@ async def test_get_databricks_workspace_host_success():
 
     # Patch the imports used inside the function
     with patch.dict(sys.modules, {
-        "src.services.databricks.service": MagicMock(DatabricksService=MagicMock(return_value=mock_service)),
+        "src.services.databricks.workspace.service": MagicMock(DatabricksService=MagicMock(return_value=mock_service)),
         "src.db.session": MagicMock(request_scoped_session=MagicMock(return_value=mock_session))
     }):
         host, error = await mcp_handler.get_databricks_workspace_host()
@@ -263,7 +263,7 @@ async def test_get_databricks_workspace_host_http_prefix():
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
     with patch.dict(sys.modules, {
-        "src.services.databricks.service": MagicMock(DatabricksService=MagicMock(return_value=mock_service)),
+        "src.services.databricks.workspace.service": MagicMock(DatabricksService=MagicMock(return_value=mock_service)),
         "src.db.session": MagicMock(request_scoped_session=MagicMock(return_value=mock_session))
     }):
         host, error = await mcp_handler.get_databricks_workspace_host()
@@ -284,7 +284,7 @@ async def test_get_databricks_workspace_host_no_url():
     mock_session.__aexit__ = AsyncMock(return_value=None)
 
     with patch.dict(sys.modules, {
-        "src.services.databricks.service": MagicMock(DatabricksService=MagicMock(return_value=mock_service)),
+        "src.services.databricks.workspace.service": MagicMock(DatabricksService=MagicMock(return_value=mock_service)),
         "src.db.session": MagicMock(request_scoped_session=MagicMock(return_value=mock_session))
     }):
         host, error = await mcp_handler.get_databricks_workspace_host()

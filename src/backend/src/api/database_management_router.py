@@ -25,8 +25,8 @@ from src.schemas.database_management import (
     ListBackupsRequest,
     ListBackupsResponse,
 )
-from src.services.lakebase.management import DatabaseManagementService
-from src.services.lakebase.service import LakebaseService
+from src.services.databricks.lakebase.management import DatabaseManagementService
+from src.services.databricks.lakebase.service import LakebaseService
 
 router = APIRouter(prefix="/database-management", tags=["database-management"])
 logger = LoggerManager.get_instance().api

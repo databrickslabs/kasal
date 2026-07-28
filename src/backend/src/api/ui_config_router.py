@@ -7,7 +7,7 @@ from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.exceptions import ForbiddenError
 from src.core.permissions import is_workspace_admin
 from src.schemas.ui_config import UIConfigResponse, UIConfigUpdate
-from src.services.ui_config_service import UIConfigService
+from src.services.settings.ui import UIConfigService
 
 logger = logging.getLogger(__name__)
 

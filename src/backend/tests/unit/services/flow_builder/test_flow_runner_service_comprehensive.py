@@ -511,7 +511,7 @@ class TestGetRequiredProviders:
         """Test extracting providers from model config."""
         config = {'model': 'gpt-4'}
 
-        with patch('src.services.model_config_service.ModelConfigService') as mock_model_svc:
+        with patch('src.services.settings.models.ModelConfigService') as mock_model_svc:
             mock_model_svc_instance = MagicMock()
             mock_model_svc_instance.get_model_config = AsyncMock(return_value={'provider': 'openai'})
             mock_model_svc.return_value = mock_model_svc_instance
@@ -531,7 +531,7 @@ class TestGetRequiredProviders:
             }
         }
 
-        with patch('src.services.model_config_service.ModelConfigService') as mock_model_svc:
+        with patch('src.services.settings.models.ModelConfigService') as mock_model_svc:
             mock_model_svc_instance = MagicMock()
 
             async def get_config(model_name):
@@ -563,7 +563,7 @@ class TestGetRequiredProviders:
         """Test that errors are handled gracefully."""
         config = {'model': 'unknown-model'}
 
-        with patch('src.services.model_config_service.ModelConfigService') as mock_model_svc:
+        with patch('src.services.settings.models.ModelConfigService') as mock_model_svc:
             mock_model_svc_instance = MagicMock()
             mock_model_svc_instance.get_model_config = AsyncMock(side_effect=Exception("Not found"))
             mock_model_svc.return_value = mock_model_svc_instance
@@ -581,7 +581,7 @@ class TestGetRequiredProviders:
             'reasoning_llm': 'claude-3'
         }
 
-        with patch('src.services.model_config_service.ModelConfigService') as mock_model_svc:
+        with patch('src.services.settings.models.ModelConfigService') as mock_model_svc:
             mock_model_svc_instance = MagicMock()
 
             async def get_config(model_name):
@@ -611,7 +611,7 @@ class TestGetRequiredProviders:
             'crew': {'planning_llm': 'gpt-4'},
         }
 
-        with patch('src.services.model_config_service.ModelConfigService') as mock_model_svc:
+        with patch('src.services.settings.models.ModelConfigService') as mock_model_svc:
             mock_model_svc_instance = MagicMock()
             mock_model_svc_instance.get_model_config = AsyncMock(
                 return_value={'provider': 'openai'}

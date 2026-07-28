@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Query
 
 from src.core.dependencies import GroupContextDep, get_log_service
 from src.schemas.log import LLMLogResponse
-from src.services.log_service import LLMLogService
+from src.services.execution.logs.llm_log_service import LLMLogService
 
 router = APIRouter(
     prefix="/llm-logs",

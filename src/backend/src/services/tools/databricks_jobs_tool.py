@@ -353,7 +353,7 @@ class DatabricksJobsTool(BaseTool):
                     logger.info("Attempting to get Databricks API key from API Keys Service...")
                     try:
                         from src.core.unit_of_work import UnitOfWork
-                        from src.services.api_keys_service import ApiKeysService
+                        from src.services.settings.api_keys import ApiKeysService
 
                         async def get_databricks_token():
                             async with UnitOfWork() as uow:
@@ -379,7 +379,7 @@ class DatabricksJobsTool(BaseTool):
                     logger.info("Trying API Keys Service without enhanced auth...")
                     try:
                         from src.core.unit_of_work import UnitOfWork
-                        from src.services.api_keys_service import ApiKeysService
+                        from src.services.settings.api_keys import ApiKeysService
 
                         async def get_databricks_token_fallback():
                             async with UnitOfWork() as uow:
@@ -484,7 +484,7 @@ class DatabricksJobsTool(BaseTool):
             logger.warning("🚨 No authentication token available, attempting runtime API key retrieval")
             try:
                 from src.core.unit_of_work import UnitOfWork
-                from src.services.api_keys_service import ApiKeysService
+                from src.services.settings.api_keys import ApiKeysService
 
                 async with UnitOfWork() as uow:
                     # SECURITY: Runtime retrieval with group_id for multi-tenant isolation

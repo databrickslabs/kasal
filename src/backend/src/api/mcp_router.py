@@ -23,7 +23,7 @@ from src.schemas.mcp import (
     MCPTestConnectionResponse,
     MCPToggleResponse,
 )
-from src.services.mcp_service import MCPService
+from src.services.mcp.service import MCPService
 
 # Create router instance
 router = APIRouter(
@@ -337,7 +337,7 @@ async def list_genie_mcp_spaces(
         raise ForbiddenError("Only admins can browse Databricks MCP servers")
 
     from src.schemas.genie import GenieAuthConfig, GenieSpacesRequest
-    from src.services.databricks.genie import GenieService
+    from src.services.databricks.genie.service import GenieService
     from src.utils.databricks_auth import (
         extract_user_token_from_request,
         get_auth_context,

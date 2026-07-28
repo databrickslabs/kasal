@@ -152,7 +152,7 @@ class LightAgentService:
         from src.services.execution.kernel.agent_tools import build_agent_with_tools
         from src.services.execution.status import ExecutionStatusService
         from src.db.session import request_scoped_session
-        from src.services.agent_service import AgentService
+        from src.services.catalog.agents import AgentService
         from src.services.execution.logs.queue import enqueue_log
 
         def _log(msg: str) -> None:
@@ -341,7 +341,7 @@ class LightAgentService:
             # ── Build the ToolFactory (DB-backed API keys), then the agent, then
             # kickoff — all within one DB session so MCP/tool resources stay live.
             from src.services.tools.tool_factory import ToolFactory
-            from src.services.api_keys_service import ApiKeysService
+            from src.services.settings.api_keys import ApiKeysService
 
             _factory_group = group_id if group_id != "default" else None
             async with request_scoped_session() as db_session:
@@ -1227,7 +1227,7 @@ class LightAgentService:
                 extract_trace_outputs,
             )
             from src.db.session import async_session_factory
-            from src.services.databricks.service import DatabricksService
+            from src.services.databricks.workspace.service import DatabricksService
 
             # Load the workspace's Databricks config (same source crew/flow use).
             async with async_session_factory() as _session:

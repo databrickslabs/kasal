@@ -1177,7 +1177,7 @@ class CrewPreparation:
     async def _handle_openai_api_key(self) -> None:
         """Handle OpenAI API key configuration"""
         try:
-            from src.services.api_keys_service import ApiKeysService
+            from src.services.settings.api_keys import ApiKeysService
 
             # SECURITY: Get group_id from config for multi-tenant isolation
             group_id = self.config.get("group_id")
@@ -1279,7 +1279,7 @@ class CrewPreparation:
             # agent in the crew (previously each agent re-fetched the whole
             # group table, including tool_config decryption per row).
             if self._group_agents_cache is None:
-                from src.services.agent_service import AgentService
+                from src.services.catalog.agents import AgentService
                 from src.utils.user_context import GroupContext
                 from src.db.session import request_scoped_session
 

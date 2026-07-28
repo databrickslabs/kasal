@@ -87,9 +87,9 @@ def _run_with_prepare_false(crew_config):
                 new=_fake_smart_db_session,
             )
         )
-        stack.enter_context(patch("src.services.tool_service.ToolService", MagicMock()))
+        stack.enter_context(patch("src.services.tools.tool_service.ToolService", MagicMock()))
         stack.enter_context(
-            patch("src.services.api_keys_service.ApiKeysService", MagicMock())
+            patch("src.services.settings.api_keys.ApiKeysService", MagicMock())
         )
         stack.enter_context(
             patch(

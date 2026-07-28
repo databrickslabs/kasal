@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 from src.schemas.chat_history import ChatHistoryCreate, ChatHistoryResponse
-from src.services.chat_history_service import ChatHistoryService
+from src.services.chat.history import ChatHistoryService
 from src.repositories.chat_history_repository import ChatHistoryRepository
 from src.utils.user_context import GroupContext
 

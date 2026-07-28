@@ -21,7 +21,7 @@ from src.schemas.prompt_optimization import (
     PromptOptimizationRunStatus,
     PromptOptimizationStartResponse,
 )
-from src.services.prompt_optimization_service import PromptOptimizationService
+from src.services.prompt_optimization.service import PromptOptimizationService
 
 logger = logging.getLogger(__name__)
 

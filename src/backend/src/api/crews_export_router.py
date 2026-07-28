@@ -24,9 +24,9 @@ from src.schemas.crew_export import (
     ExportFormat,
     LakebaseInstancesResponse,
 )
-from src.services.crew_app_deployment_service import CrewAppDeploymentService
-from src.services.crew_deployment_service import CrewDeploymentService
-from src.services.crew_export_service import CrewExportService
+from src.services.deployment.app import CrewAppDeploymentService
+from src.services.deployment.crew import CrewDeploymentService
+from src.services.deployment.crew_export import CrewExportService
 
 router = APIRouter(
     prefix="/crews",
