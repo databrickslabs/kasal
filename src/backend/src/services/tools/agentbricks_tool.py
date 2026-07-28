@@ -416,7 +416,7 @@ class AgentBricksTool(BaseTool):
                     "The Agent Bricks endpoint returned an unrecognized response."
                 )
 
-            logger.info(f"AgentBricks query completed successfully")
+            logger.info("AgentBricks query completed successfully")
             return response_text
 
         except asyncio.TimeoutError:
@@ -427,7 +427,7 @@ class AgentBricksTool(BaseTool):
         except aiohttp.ClientConnectionError as e:
             error_msg = f"Connection error: {str(e)}"
             logger.error(error_msg)
-            return f"Error connecting to AgentBricks endpoint. Please check your network connection and authentication configuration."
+            return "Error connecting to AgentBricks endpoint. Please check your network connection and authentication configuration."
 
         except aiohttp.ClientResponseError as e:
             error_msg = f"HTTP {e.status} error: {str(e)}"

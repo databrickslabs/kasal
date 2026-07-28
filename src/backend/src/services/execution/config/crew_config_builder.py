@@ -335,6 +335,6 @@ class CrewConfigBuilder:
                 logger.info("Embedder provider: custom Databricks embedder")
                 if hasattr(embedder_info, "model"):
                     logger.info(f"Custom embedder model: {embedder_info.model}")
-                    logger.info(f"Expected embedding dimension: 1024")
+                    logger.info("Expected embedding dimension: 1024")
 
         logger.info("================================================")

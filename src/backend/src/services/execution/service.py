@@ -209,7 +209,7 @@ class ExecutionService:
             execution_config = config or {}
 
             # Delegate to KasalExecutionService for flow execution
-            logger.info(f"Delegating flow execution to KasalExecutionService")
+            logger.info("Delegating flow execution to KasalExecutionService")
             result = await self.kasal_execution_service.run_flow_execution(
                 flow_id=str(flow_id) if flow_id else None,
                 nodes=nodes,
@@ -476,7 +476,7 @@ class ExecutionService:
             # Process different execution types
             if execution_type.lower() == "flow":
                 exec_logger.info(
-                    f"[run_crew_execution] This is a FLOW execution - delegating to KasalExecutionService"
+                    "[run_crew_execution] This is a FLOW execution - delegating to KasalExecutionService"
                 )
 
                 # Convert config to dictionary
@@ -558,7 +558,7 @@ class ExecutionService:
             # For crew executions, use the proper method from KasalExecutionService
             elif execution_type.lower() == "crew":
                 exec_logger.debug(
-                    f"[run_crew_execution] This is a CREW execution - delegating to KasalExecutionService"
+                    "[run_crew_execution] This is a CREW execution - delegating to KasalExecutionService"
                 )
 
                 # NOTE: Databricks authentication is now handled via get_auth_context() in databricks_auth.py
@@ -758,7 +758,7 @@ class ExecutionService:
 
                     db_executions.append(exec_dict)
             else:
-                logger.error(f"[list_executions] No database session available")
+                logger.error("[list_executions] No database session available")
                 db_executions = []
 
             # Get in-memory executions that might not be in the database yet
@@ -963,7 +963,7 @@ class ExecutionService:
             else:
                 # Log error if no session available
                 exec_logger.error(
-                    f"No database session available for getting execution status"
+                    "No database session available for getting execution status"
                 )
                 return None
 
@@ -1228,7 +1228,7 @@ class ExecutionService:
                 config.inputs = {}
             config.inputs["run_name"] = run_name
             logger.info(
-                f"[ExecutionService.create_execution] Added run_name to config.inputs for consistent crew_id generation"
+                "[ExecutionService.create_execution] Added run_name to config.inputs for consistent crew_id generation"
             )
 
             # Extract execution type and flow_id
@@ -1347,7 +1347,7 @@ class ExecutionService:
                 if hasattr(config, "flow_config") and config.flow_config:
                     inputs["flow_config"] = config.flow_config
                     logger.info(
-                        f"[ExecutionService.create_execution] Added flow_config to flow execution"
+                        "[ExecutionService.create_execution] Added flow_config to flow execution"
                     )
 
             # Add flow_id to inputs if it exists
@@ -1365,7 +1365,7 @@ class ExecutionService:
             # This ensures secrets are never persisted in plaintext
             masked_inputs = self._mask_inputs_sensitive_data(inputs)
             logger.info(
-                f"[ExecutionService.create_execution] Masked sensitive fields in inputs before database storage"
+                "[ExecutionService.create_execution] Masked sensitive fields in inputs before database storage"
             )
 
             # Sanitize inputs to ensure all values are JSON serializable
@@ -2037,7 +2037,7 @@ class ExecutionService:
         )
         from src.schemas.execution import StopExecutionResponse
 
-        crew_logger.info(f"[STOP] ========== STOP EXECUTION CALLED ==========")
+        crew_logger.info("[STOP] ========== STOP EXECUTION CALLED ==========")
         crew_logger.info(
             f"[STOP] execution_id: {execution_id}, stop_type: {stop_type}, reason: {reason}"
         )

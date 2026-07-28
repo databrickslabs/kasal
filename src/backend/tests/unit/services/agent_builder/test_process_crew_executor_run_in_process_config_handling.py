@@ -245,7 +245,7 @@ class TestProcessLogQueueCoverage:
             [
                 f"2025-01-01 {execution_id[:8]} Task 1 started",
                 f"2025-01-01 {execution_id[:8]} Task 1 completed",
-                f"2025-01-01 other-exec-id Something else",
+                "2025-01-01 other-exec-id Something else",
                 f"2025-01-01 {execution_id[:8]} Task 2 started",
             ]
         )

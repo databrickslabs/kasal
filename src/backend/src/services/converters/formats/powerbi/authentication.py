@@ -330,7 +330,7 @@ class AadService:
                 "🔑 AUTHENTICATION METHOD: Service Principal (client credentials)"
             )
             self.logger.info("=" * 80)
-            self.logger.info(f"[AUTH DEBUG] Acquiring token with:")
+            self.logger.info("[AUTH DEBUG] Acquiring token with:")
             self.logger.info(
                 f"[AUTH DEBUG]   tenant_id: '{tenant_id}' (type: {type(tenant_id).__name__})"
             )
@@ -411,7 +411,7 @@ class AadService:
             # SECURITY: service-account credential context is diagnostic only —
             # keep at DEBUG so it is not emitted to production logs.
             self.logger.debug("=" * 80)
-            self.logger.debug(f"[AUTH DEBUG] Acquiring token with service account:")
+            self.logger.debug("[AUTH DEBUG] Acquiring token with service account:")
             self.logger.debug(f"[AUTH DEBUG]   tenant_id: '{self.tenant_id}'")
             self.logger.debug(f"[AUTH DEBUG]   client_id: '{self.client_id}'")
             self.logger.debug(f"[AUTH DEBUG]   username: '{username}'")
@@ -479,10 +479,10 @@ class AadService:
             if self.client_secret:
                 credential_kwargs["client_secret"] = self.client_secret
                 self.logger.info(
-                    f"[AUTH DEBUG] Including client_secret (confidential client)"
+                    "[AUTH DEBUG] Including client_secret (confidential client)"
                 )
             else:
-                self.logger.info(f"[AUTH DEBUG] No client_secret (public client)")
+                self.logger.info("[AUTH DEBUG] No client_secret (public client)")
 
             credential = UsernamePasswordCredential(**credential_kwargs)
 

@@ -399,11 +399,11 @@ class PowerBIAnalysisTool(
 
                 if kwarg_has_value:
                     value = kwarg_val
-                    logger.info(f"[CONTEXT ENRICHMENT DEBUG]     → Using kwargs value")
+                    logger.info("[CONTEXT ENRICHMENT DEBUG]     → Using kwargs value")
                 elif default_has_value:
                     value = default_val
                     logger.info(
-                        f"[CONTEXT ENRICHMENT DEBUG]     → Using default_config value"
+                        "[CONTEXT ENRICHMENT DEBUG]     → Using default_config value"
                     )
                 else:
                     # Both empty - use appropriate empty collection

@@ -511,7 +511,7 @@ class DatabaseManagementService:
 
                 if actual_session_db_type == "postgres":
                     logger.debug(
-                        f"[SERVICE] Taking Lakebase path - passing session to repository"
+                        "[SERVICE] Taking Lakebase path - passing session to repository"
                     )
                     db_session = session if session else self.session
                     info_result = await self.repository.get_database_info(

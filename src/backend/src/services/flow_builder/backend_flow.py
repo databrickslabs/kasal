@@ -231,7 +231,7 @@ class BackendFlow:
                     "flow_config": self._config.get("flow_config", {}),
                 }
                 logger.info(
-                    f"[flow] Successfully populated _flow_data from config for unsaved flow"
+                    "[flow] Successfully populated _flow_data from config for unsaved flow"
                 )
             else:
                 # Saved flow - load from database
@@ -297,7 +297,7 @@ class BackendFlow:
                 from src.utils.user_context import UserContext
 
                 UserContext.set_group_context(group_context)
-                logger.info(f"Set group context for flow execution callbacks")
+                logger.info("Set group context for flow execution callbacks")
             except Exception as e:
                 logger.warning(f"Could not set group context in _init_callbacks: {e}")
 
@@ -378,7 +378,7 @@ class BackendFlow:
                         "flow_config": self._config.get("flow_config", {}),
                     }
                     logger.info(
-                        f"[kickoff_async] Successfully populated _flow_data from config for unsaved flow"
+                        "[kickoff_async] Successfully populated _flow_data from config for unsaved flow"
                     )
                 else:
                     # Saved flow - load from database
@@ -438,7 +438,7 @@ class BackendFlow:
             try:
                 if hasattr(engine_flow, "kickoff_async"):
                     logger.info("Using CrewAI's native kickoff_async method")
-                    logger.info(f"About to call kickoff_async() on flow instance")
+                    logger.info("About to call kickoff_async() on flow instance")
 
                     # CRITICAL: Pass restore_uuid as 'id' in inputs for checkpoint resume
                     # CrewAI's @persist decorator loads state from persistence when 'id' is in inputs
@@ -477,7 +477,7 @@ class BackendFlow:
                     logger.info(
                         "kickoff_async not available, using synchronous kickoff"
                     )
-                    logger.info(f"About to call kickoff() on flow instance")
+                    logger.info("About to call kickoff() on flow instance")
                     # CRITICAL: Pass restore_uuid as 'id' in inputs for checkpoint resume
                     resume_from_flow_uuid = self._config.get("resume_from_flow_uuid")
                     if resume_from_flow_uuid:
@@ -507,19 +507,19 @@ class BackendFlow:
                     )
                 elif isinstance(result, dict):
                     result_value = result
-                    logger.info(f"Flow result is already a dictionary")
+                    logger.info("Flow result is already a dictionary")
                 elif isinstance(result, str):
                     result_value = result
                     logger.info(f"Flow result is a string, length: {len(result_value)}")
                 elif hasattr(result, "to_dict"):
                     result_value = result.to_dict()
-                    logger.info(f"Used to_dict() for flow result conversion")
+                    logger.info("Used to_dict() for flow result conversion")
                 elif hasattr(result, "__dict__"):
                     result_value = result.__dict__
-                    logger.info(f"Used __dict__ for flow result conversion")
+                    logger.info("Used __dict__ for flow result conversion")
                 else:
                     result_value = str(result)
-                    logger.info(f"Used string fallback for flow result conversion")
+                    logger.info("Used string fallback for flow result conversion")
 
                 logger.info(f"Flow result processed, type: {type(result_value)}")
 
@@ -672,7 +672,7 @@ class BackendFlow:
                         "flow_config": self._config.get("flow_config", {}),
                     }
                     logger.info(
-                        f"Successfully populated _flow_data from config for unsaved flow"
+                        "Successfully populated _flow_data from config for unsaved flow"
                     )
                 else:
                     # Saved flow - load from database
@@ -706,7 +706,7 @@ class BackendFlow:
                 if "edges" in self._config:
                     self._flow_data["edges"] = self._config["edges"]
 
-                logger.info(f"[kickoff] Updated flow_data with flow_config from config")
+                logger.info("[kickoff] Updated flow_data with flow_config from config")
                 if "startingPoints" in self._config.get("flow_config", {}):
                     logger.info(
                         f"[kickoff] flow_config has {len(self._config['flow_config']['startingPoints'])} startingPoints"
@@ -852,7 +852,7 @@ class BackendFlow:
                 elif isinstance(flow_result, dict):
                     # Already a dictionary - use as is
                     processed_result = flow_result
-                    logger.info(f"Flow result is already a dictionary")
+                    logger.info("Flow result is already a dictionary")
                 elif isinstance(flow_result, str):
                     # String result - use directly
                     processed_result = flow_result
@@ -862,15 +862,15 @@ class BackendFlow:
                 elif hasattr(flow_result, "to_dict"):
                     # Use to_dict method if available
                     processed_result = flow_result.to_dict()
-                    logger.info(f"Used to_dict() for flow result conversion")
+                    logger.info("Used to_dict() for flow result conversion")
                 elif hasattr(flow_result, "__dict__"):
                     # Use __dict__ as fallback
                     processed_result = flow_result.__dict__
-                    logger.info(f"Used __dict__ for flow result conversion")
+                    logger.info("Used __dict__ for flow result conversion")
                 else:
                     # Fallback to string representation
                     processed_result = str(flow_result)
-                    logger.info(f"Used string fallback for flow result conversion")
+                    logger.info("Used string fallback for flow result conversion")
             except Exception as conv_error:
                 logger.error(
                     f"Error processing flow result: {conv_error}", exc_info=True
@@ -878,7 +878,7 @@ class BackendFlow:
                 # Use string representation as fallback
                 processed_result = str(flow_result) if flow_result else None
 
-            logger.info(f"Flow executed successfully, result processed")
+            logger.info("Flow executed successfully, result processed")
 
             # Extract flow_uuid (state.id) for checkpoint/resume functionality
             # This is CrewAI's internal state identifier when using @persist

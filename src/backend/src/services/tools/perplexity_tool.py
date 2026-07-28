@@ -67,7 +67,7 @@ class PerplexitySearchTool(BaseTool):
         super().__init__()
 
         # Log all relevant info about key source
-        logger.info(f"Initializing PerplexitySearchTool")
+        logger.info("Initializing PerplexitySearchTool")
         logger.info(f"API key provided directly: {bool(api_key)}")
         logger.info(
             f"API key in environment: {bool(os.environ.get('PERPLEXITY_API_KEY'))}"

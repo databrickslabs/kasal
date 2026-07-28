@@ -336,7 +336,7 @@ class FlowBuilder:
                             )
                 elif node_type == "agentNode":
                     # Agent nodes don't have tasks, skip them
-                    logger.info(f"  ⏭️  Skipping agentNode (no tasks)")
+                    logger.info("  ⏭️  Skipping agentNode (no tasks)")
                     continue
                 else:
                     # Simple format - try to get taskId directly
@@ -1545,7 +1545,7 @@ class FlowBuilder:
                                 f"Error evaluating router condition: {e}", exc_info=True
                             )
                             logger.warning(
-                                f"Router condition evaluation failed - no route taken (flow stops)"
+                                "Router condition evaluation failed - no route taken (flow stops)"
                             )
                             return None
                     else:
@@ -1665,7 +1665,7 @@ class FlowBuilder:
 
                             # Log and store previous output from router
                             if previous_output:
-                                logger.info(f"📥 RECEIVED PREVIOUS OUTPUT FROM ROUTER:")
+                                logger.info("📥 RECEIVED PREVIOUS OUTPUT FROM ROUTER:")
                                 logger.info(
                                     f"  Output: {str(previous_output)[:200]}..."
                                 )

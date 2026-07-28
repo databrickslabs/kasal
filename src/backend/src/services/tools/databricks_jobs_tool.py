@@ -343,7 +343,7 @@ class DatabricksJobsTool(BaseTool):
                     )
                 if databricks_host.endswith("/"):
                     databricks_host = databricks_host[:-1]
-                    logger.info(f"Stripped trailing slash from host")
+                    logger.info("Stripped trailing slash from host")
 
             self._host = databricks_host
             logger.info(f"Final host after processing: {self._host}")
@@ -474,8 +474,8 @@ class DatabricksJobsTool(BaseTool):
         # Log configuration
         logger.info("DatabricksJobsTool Configuration:")
         logger.info(f"Host: {self._host}")
-        logger.info(f"Authentication Method: PAT")
-        logger.info(f"Single Execution Control: Enabled (per-action limits)")
+        logger.info("Authentication Method: PAT")
+        logger.info("Single Execution Control: Enabled (per-action limits)")
         logger.info(f"Action Limits: {self._action_limits}")
 
         # Log token (masked)
@@ -522,7 +522,7 @@ class DatabricksJobsTool(BaseTool):
         )
 
         # Build detailed message
-        output = f"🔄 EXECUTION STATE RESET\n\nCleared tracking for:\n"
+        output = "🔄 EXECUTION STATE RESET\n\nCleared tracking for:\n"
         output += f"- {previous_run_executions} previous job runs\n"
         output += f"- {previous_create_executions} previous job creations\n"
         output += f"- Total: {total_executions} executions\n\n"
@@ -533,7 +533,7 @@ class DatabricksJobsTool(BaseTool):
             limit_str = f"/{act_limit}" if act_limit is not None else "/unlimited"
             output += f"- {action}: {count}{limit_str} → 0{limit_str}\n"
 
-        output += f"\n⚠️ Single execution protection is now reset - the tool can run and create jobs again."
+        output += "\n⚠️ Single execution protection is now reset - the tool can run and create jobs again."
 
         return output
 
@@ -919,7 +919,7 @@ class DatabricksJobsTool(BaseTool):
                         )
 
                         # Add execution tracking info to result
-                        result += f"\n\n🔒 EXECUTION TRACKING: This tool will prevent duplicate runs of this job with these parameters."
+                        result += "\n\n🔒 EXECUTION TRACKING: This tool will prevent duplicate runs of this job with these parameters."
                         act_limit = self._action_limits.get(action)
                         if act_limit is not None:
                             result += f"\n📊 Action Usage: {action} {self._action_usage_counts[action]}/{act_limit}"
@@ -954,7 +954,7 @@ class DatabricksJobsTool(BaseTool):
                         )
 
                         # Add execution tracking info to result
-                        result += f"\n\n🔒 EXECUTION TRACKING: This tool will prevent duplicate creation of jobs with this configuration."
+                        result += "\n\n🔒 EXECUTION TRACKING: This tool will prevent duplicate creation of jobs with this configuration."
                         act_limit = self._action_limits.get(action)
                         if act_limit is not None:
                             result += f"\n📊 Action Usage: {action} {self._action_usage_counts[action]}/{act_limit}"
@@ -1236,7 +1236,7 @@ class DatabricksJobsTool(BaseTool):
         try:
             # Get job details
             response = await self._make_api_call(
-                "GET", f"/api/2.2/jobs/get", params={"job_id": job_id}
+                "GET", "/api/2.2/jobs/get", params={"job_id": job_id}
             )
 
             job_id = response.get("job_id")
@@ -1664,7 +1664,7 @@ class DatabricksJobsTool(BaseTool):
 
                 output = f"✅ Successfully triggered job {job_id}\n\n"
                 output += f"Run ID: {run_id}\n"
-                output += f"Status: Unable to check initial status\n"
+                output += "Status: Unable to check initial status\n"
 
                 if job_params:
                     output += (
@@ -1863,7 +1863,7 @@ class DatabricksJobsTool(BaseTool):
                 output += f"\nSchedule: {cron}\n"
 
             output += f"\n🚀 Job created successfully in {execution_time:.2f}s"
-            output += f"\nNext steps:"
+            output += "\nNext steps:"
             output += f"\n  - Run now: action='run', job_id={job_id}"
             output += f"\n  - View details: action='get', job_id={job_id}"
             output += f"\n  - Analyze notebook: action='get_notebook', job_id={job_id}"
@@ -1879,7 +1879,9 @@ class DatabricksJobsTool(BaseTool):
             if "already exists" in error_msg.lower():
                 return f"Error: A job with the name '{job_config.get('name')}' already exists. Please choose a different name."
             elif "permission" in error_msg.lower():
-                return f"Error: You don't have permission to create jobs in this workspace."
+                return (
+                    "Error: You don't have permission to create jobs in this workspace."
+                )
             elif "invalid" in error_msg.lower():
                 return f"Error: Invalid job configuration - {error_msg}"
             else:
@@ -1903,13 +1905,13 @@ class DatabricksJobsTool(BaseTool):
             if notebook_output:
                 result = notebook_output.get("result", "")
                 truncated = notebook_output.get("truncated", False)
-                output += f"\n📔 Notebook Output:\n"
+                output += "\n📔 Notebook Output:\n"
                 if result:
                     output += f"   Result: {result}\n"
                 else:
-                    output += f"   Result: (empty)\n"
+                    output += "   Result: (empty)\n"
                 if truncated:
-                    output += f"   ⚠️ Output was truncated\n"
+                    output += "   ⚠️ Output was truncated\n"
 
             # Error information
             error = response.get("error")
@@ -1926,7 +1928,7 @@ class DatabricksJobsTool(BaseTool):
             # SQL output
             sql_output = response.get("sql_output")
             if sql_output:
-                output += f"\n📊 SQL Output:\n"
+                output += "\n📊 SQL Output:\n"
                 if "query_output" in sql_output:
                     query_out = sql_output["query_output"]
                     output += f"   Query: {query_out.get('query_text', 'N/A')}\n"
@@ -1944,7 +1946,7 @@ class DatabricksJobsTool(BaseTool):
             # Run job output (for run_job_task)
             run_job_output = response.get("run_job_output")
             if run_job_output:
-                output += f"\n🔗 Run Job Output:\n"
+                output += "\n🔗 Run Job Output:\n"
                 output += (
                     f"   Triggered Run ID: {run_job_output.get('run_id', 'N/A')}\n"
                 )
@@ -2040,7 +2042,7 @@ class DatabricksJobsTool(BaseTool):
             output += f"\n🚀 One-time run submitted in {execution_time:.2f}s"
             output += f"\n💡 Monitor progress with: action='monitor', run_id={run_id}"
             output += f"\n💡 Get results with: action='get_output', run_id={run_id}"
-            output += f"\nNote: This run is not associated with a persistent job."
+            output += "\nNote: This run is not associated with a persistent job."
 
             return output
 

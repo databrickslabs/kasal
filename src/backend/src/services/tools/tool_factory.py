@@ -418,7 +418,7 @@ class ToolFactory:
                             return (True, "Database configuration available")
                         else:
                             logger.warning(
-                                f"[AUTH VALIDATION] Databricks config exists but no auth method configured"
+                                "[AUTH VALIDATION] Databricks config exists but no auth method configured"
                             )
                             return (
                                 False,
@@ -2074,7 +2074,7 @@ class ToolFactory:
                             f"[TOOL_FACTORY] Databricks authentication validation failed: {auth_message}"
                         )
                         logger.warning(
-                            f"[TOOL_FACTORY] Proceeding with tool creation - authentication may be available through environment variables or fallback methods"
+                            "[TOOL_FACTORY] Proceeding with tool creation - authentication may be available through environment variables or fallback methods"
                         )
                     else:
                         logger.info(
@@ -2087,12 +2087,12 @@ class ToolFactory:
                         exc_info=True,
                     )
                     logger.warning(
-                        f"[TOOL_FACTORY] Proceeding with tool creation despite validation error"
+                        "[TOOL_FACTORY] Proceeding with tool creation despite validation error"
                     )
 
                 # CRITICAL DEBUG: Print to stdout
-                print(f"[TOOL_FACTORY] ========================================")
-                print(f"[TOOL_FACTORY] Creating DatabricksKnowledgeSearchTool")
+                print("[TOOL_FACTORY] ========================================")
+                print("[TOOL_FACTORY] Creating DatabricksKnowledgeSearchTool")
                 print(f"[TOOL_FACTORY]   - tool_config received: {tool_config}")
                 print(f"[TOOL_FACTORY]   - tool_config type: {type(tool_config)}")
 
@@ -2108,18 +2108,18 @@ class ToolFactory:
                 }
                 # Add any tool-specific config (includes file_paths and agent_id from task tool_configs)
                 if tool_config and isinstance(tool_config, dict):
-                    print(f"[TOOL_FACTORY]   - Merging tool_config into tool_args")
+                    print("[TOOL_FACTORY]   - Merging tool_config into tool_args")
                     tool_args.update(tool_config)
                 else:
                     print(
-                        f"[TOOL_FACTORY]   - tool_config is empty or not a dict, NOT merging"
+                        "[TOOL_FACTORY]   - tool_config is empty or not a dict, NOT merging"
                     )
 
                 print(f"[TOOL_FACTORY] Final tool_args: {tool_args}")
                 print(f"[TOOL_FACTORY]   - group_id: {tool_args.get('group_id')}")
                 print(f"[TOOL_FACTORY]   - file_paths: {tool_args.get('file_paths')}")
                 print(f"[TOOL_FACTORY]   - agent_id: {tool_args.get('agent_id')}")
-                print(f"[TOOL_FACTORY] ========================================")
+                print("[TOOL_FACTORY] ========================================")
 
                 tool = DatabricksKnowledgeSearchTool(**tool_args)
                 return tool
@@ -2245,7 +2245,7 @@ class ToolFactory:
                 business_mappings = tool_args.get("business_mappings")
                 field_synonyms = tool_args.get("field_synonyms")
                 active_filters = tool_args.get("active_filters")
-                logger.info(f"[TOOL_FACTORY] Context enrichment parameters:")
+                logger.info("[TOOL_FACTORY] Context enrichment parameters:")
                 logger.info(
                     f"[TOOL_FACTORY]   business_mappings: type={type(business_mappings).__name__}, value={str(business_mappings)[:100] if business_mappings else 'None'}"
                 )
@@ -2282,7 +2282,7 @@ class ToolFactory:
 
                 # Enhanced logging to track tool configuration
                 logger.info(
-                    f"[ToolFactory] Creating Measure Conversion Pipeline with merged config"
+                    "[ToolFactory] Creating Measure Conversion Pipeline with merged config"
                 )
                 logger.info(
                     f"[ToolFactory]   - inbound_connector: {tool_config.get('inbound_connector', 'NOT SET')}"
@@ -2319,7 +2319,7 @@ class ToolFactory:
                 try:
                     tool_instance = tool_class(**tool_config)
                     logger.info(
-                        f"[ToolFactory] ✓ Successfully created Measure Conversion Pipeline tool instance"
+                        "[ToolFactory] ✓ Successfully created Measure Conversion Pipeline tool instance"
                     )
                     return tool_instance
                 except Exception as e:
@@ -2338,7 +2338,7 @@ class ToolFactory:
 
                 # Enhanced logging to track tool configuration
                 logger.info(
-                    f"[ToolFactory] Creating M-Query Conversion Pipeline with merged config"
+                    "[ToolFactory] Creating M-Query Conversion Pipeline with merged config"
                 )
                 logger.info(
                     f"[ToolFactory]   - workspace_id: {tool_config.get('workspace_id', 'NOT SET')[:30] if tool_config.get('workspace_id') else 'NOT SET'}..."
@@ -2374,7 +2374,7 @@ class ToolFactory:
                 try:
                     tool_instance = tool_class(**tool_config)
                     logger.info(
-                        f"[ToolFactory] ✓ Successfully created M-Query Conversion Pipeline tool instance"
+                        "[ToolFactory] ✓ Successfully created M-Query Conversion Pipeline tool instance"
                     )
                     return tool_instance
                 except Exception as e:
@@ -2393,7 +2393,7 @@ class ToolFactory:
 
                 # Enhanced logging to track tool configuration
                 logger.info(
-                    f"[ToolFactory] Creating Power BI Relationships Tool with merged config"
+                    "[ToolFactory] Creating Power BI Relationships Tool with merged config"
                 )
                 logger.info(
                     f"[ToolFactory]   - workspace_id: {tool_config.get('workspace_id', 'NOT SET')[:30] if tool_config.get('workspace_id') else 'NOT SET'}..."
@@ -2430,7 +2430,7 @@ class ToolFactory:
                 try:
                     tool_instance = tool_class(**tool_config)
                     logger.info(
-                        f"[ToolFactory] ✓ Successfully created Power BI Relationships Tool instance"
+                        "[ToolFactory] ✓ Successfully created Power BI Relationships Tool instance"
                     )
                     return tool_instance
                 except Exception as e:
@@ -2449,7 +2449,7 @@ class ToolFactory:
 
                 # Enhanced logging to track tool configuration
                 logger.info(
-                    f"[ToolFactory] Creating Power BI Hierarchies Tool with merged config"
+                    "[ToolFactory] Creating Power BI Hierarchies Tool with merged config"
                 )
                 logger.info(
                     f"[ToolFactory]   - workspace_id: {tool_config.get('workspace_id', 'NOT SET')[:30] if tool_config.get('workspace_id') else 'NOT SET'}..."
@@ -2486,7 +2486,7 @@ class ToolFactory:
                 try:
                     tool_instance = tool_class(**tool_config)
                     logger.info(
-                        f"[ToolFactory] ✓ Successfully created Power BI Hierarchies Tool instance"
+                        "[ToolFactory] ✓ Successfully created Power BI Hierarchies Tool instance"
                     )
                     return tool_instance
                 except Exception as e:
@@ -2505,7 +2505,7 @@ class ToolFactory:
 
                 # Enhanced logging to track tool configuration
                 logger.info(
-                    f"[ToolFactory] Creating Power BI Field Parameters & Calculation Groups Tool with merged config"
+                    "[ToolFactory] Creating Power BI Field Parameters & Calculation Groups Tool with merged config"
                 )
                 logger.info(
                     f"[ToolFactory]   - workspace_id: {tool_config.get('workspace_id', 'NOT SET')[:30] if tool_config.get('workspace_id') else 'NOT SET'}..."
@@ -2542,7 +2542,7 @@ class ToolFactory:
                 try:
                     tool_instance = tool_class(**tool_config)
                     logger.info(
-                        f"[ToolFactory] ✓ Successfully created Power BI Field Parameters & Calculation Groups Tool instance"
+                        "[ToolFactory] ✓ Successfully created Power BI Field Parameters & Calculation Groups Tool instance"
                     )
                     return tool_instance
                 except Exception as e:

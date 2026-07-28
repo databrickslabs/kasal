@@ -159,7 +159,7 @@ class TestDatabricksVectorIndexRepository:
                 assert result["message"] == "Search completed successfully"
                 assert result["results"] == expected_results
                 mock_get_auth.assert_called_once_with(None)
-                expected_url = f"https://example.databricks.com/api/2.0/vector-search/indexes/catalog.schema.test_index/query"
+                expected_url = "https://example.databricks.com/api/2.0/vector-search/indexes/catalog.schema.test_index/query"
                 actual_url = mock_session.post.call_args[0][0]
                 assert actual_url == expected_url
 

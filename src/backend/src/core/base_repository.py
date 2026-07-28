@@ -242,7 +242,7 @@ class BaseRepository(Generic[ModelType]):
 
                 # Flush to ensure the delete is sent to the database
                 await self.session.flush()
-                logger.info(f"[BASE REPO DELETE] Flushed session after SQL DELETE")
+                logger.info("[BASE REPO DELETE] Flushed session after SQL DELETE")
 
                 logger.debug(
                     f"Successfully deleted {self.model.__name__} with ID {id} (flushed)"

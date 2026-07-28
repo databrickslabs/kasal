@@ -193,14 +193,14 @@ class TestBuildFlowCheckpointEdges:
 
         task1 = _make_task("t1")
         p = _patches()
-        p[f"FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
+        p["FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
             return_value={}
         )
-        p[f"FlowProcessorManager"].process_starting_points = AsyncMock(
+        p["FlowProcessorManager"].process_starting_points = AsyncMock(
             return_value=[("starting_point_0", ["t1"], [task1], "Crew1", {})]
         )
-        p[f"FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
-        p[f"FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
 
         fd = _make_flow_data(edges=[{"data": {"checkpoint": True}}])
 
@@ -218,14 +218,14 @@ class TestBuildFlowStartingPointExtraction:
 
         task1 = _make_task("t1")
         p = _patches()
-        p[f"FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
+        p["FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
             return_value={}
         )
-        p[f"FlowProcessorManager"].process_starting_points = AsyncMock(
+        p["FlowProcessorManager"].process_starting_points = AsyncMock(
             return_value=[("starting_point_0", ["t1"], [task1], "Crew1", {})]
         )
-        p[f"FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
-        p[f"FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
 
         sp = [{"nodeType": "crewNode", "nodeData": {"allTasks": [{"id": "t1"}]}}]
         fd = _make_flow_data(starting_points=sp)
@@ -240,14 +240,14 @@ class TestBuildFlowStartingPointExtraction:
 
         task1 = _make_task("t1")
         p = _patches()
-        p[f"FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
+        p["FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
             return_value={}
         )
-        p[f"FlowProcessorManager"].process_starting_points = AsyncMock(
+        p["FlowProcessorManager"].process_starting_points = AsyncMock(
             return_value=[("starting_point_0", ["t1"], [task1], "Crew1", {})]
         )
-        p[f"FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
-        p[f"FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
 
         sp = [
             {"nodeType": "agentNode"},
@@ -266,14 +266,14 @@ class TestBuildFlowStartingPointExtraction:
 
         task1 = _make_task("t1")
         p = _patches()
-        p[f"FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
+        p["FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
             return_value={}
         )
-        p[f"FlowProcessorManager"].process_starting_points = AsyncMock(
+        p["FlowProcessorManager"].process_starting_points = AsyncMock(
             return_value=[("starting_point_0", ["t1"], [task1], "Crew1", {})]
         )
-        p[f"FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
-        p[f"FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
 
         # Starting point refs task-999 which is not in all_tasks
         sp = [{"taskId": "task-999"}]
@@ -289,15 +289,15 @@ class TestBuildFlowStartingPointExtraction:
         from src.services.flow_builder.modules.flow_builder import FlowBuilder
 
         p = _patches()
-        p[f"FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
+        p["FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
             return_value={}
         )
         # Return empty starting points (no methods, but with a crew that has no tasks)
-        p[f"FlowProcessorManager"].process_starting_points = AsyncMock(
+        p["FlowProcessorManager"].process_starting_points = AsyncMock(
             return_value=[("starting_point_0", ["t1"], [], "Crew1", {})]
         )
-        p[f"FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
-        p[f"FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
 
         fd = _make_flow_data()
 
@@ -315,14 +315,14 @@ class TestBuildFlowCheckpointResume:
 
         task1 = _make_task("t1")
         p = _patches()
-        p[f"FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
+        p["FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
             return_value={}
         )
-        p[f"FlowProcessorManager"].process_starting_points = AsyncMock(
+        p["FlowProcessorManager"].process_starting_points = AsyncMock(
             return_value=[("starting_point_0", ["t1"], [task1], "Crew1", {})]
         )
-        p[f"FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
-        p[f"FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
 
         # Mock repositories
         exec_hist_repo = AsyncMock()
@@ -355,14 +355,14 @@ class TestBuildFlowCheckpointResume:
 
         task1 = _make_task("t1")
         p = _patches()
-        p[f"FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
+        p["FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
             return_value={}
         )
-        p[f"FlowProcessorManager"].process_starting_points = AsyncMock(
+        p["FlowProcessorManager"].process_starting_points = AsyncMock(
             return_value=[("starting_point_0", ["t1"], [task1], "Crew1", {})]
         )
-        p[f"FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
-        p[f"FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
 
         exec_hist_repo = AsyncMock()
         exec_hist_repo.get_execution_by_job_id = AsyncMock(return_value=None)
@@ -386,14 +386,14 @@ class TestBuildFlowCheckpointResume:
 
         task1 = _make_task("t1")
         p = _patches()
-        p[f"FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
+        p["FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
             return_value={}
         )
-        p[f"FlowProcessorManager"].process_starting_points = AsyncMock(
+        p["FlowProcessorManager"].process_starting_points = AsyncMock(
             return_value=[("starting_point_0", ["t1"], [task1], "Crew1", {})]
         )
-        p[f"FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
-        p[f"FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
 
         fd = _make_flow_data()
 
@@ -409,14 +409,14 @@ class TestBuildFlowCheckpointResume:
 
         task1 = _make_task("t1")
         p = _patches()
-        p[f"FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
+        p["FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
             return_value={}
         )
-        p[f"FlowProcessorManager"].process_starting_points = AsyncMock(
+        p["FlowProcessorManager"].process_starting_points = AsyncMock(
             return_value=[("starting_point_0", ["t1"], [task1], "Crew1", {})]
         )
-        p[f"FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
-        p[f"FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_listeners = AsyncMock(return_value=[])
+        p["FlowProcessorManager"].process_routers = AsyncMock(return_value=[])
 
         exec_hist_repo = AsyncMock()
         exec_hist_repo.get_execution_by_job_id = AsyncMock(
@@ -438,7 +438,7 @@ class TestBuildFlowCheckpointResume:
         from src.services.flow_builder.modules.flow_builder import FlowBuilder
 
         p = _patches()
-        p[f"FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
+        p["FlowConfigManager"].collect_agent_mcp_requirements = AsyncMock(
             side_effect=RuntimeError("boom")
         )
 
@@ -557,7 +557,7 @@ class TestCreateDynamicFlowInit:
         task1 = _make_task("t1")
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -581,7 +581,7 @@ class TestCreateDynamicFlowInit:
         task1 = _make_task("t1")
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -615,7 +615,7 @@ class TestCreateDynamicFlowStartMethods:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_skipped_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "skipped")
         )
@@ -646,7 +646,7 @@ class TestCreateDynamicFlowStartMethods:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_skipped_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "skipped")
         )
@@ -672,7 +672,7 @@ class TestCreateDynamicFlowStartMethods:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_skipped_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "skipped")
         )
@@ -698,7 +698,7 @@ class TestCreateDynamicFlowStartMethods:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "result")
         )
@@ -741,7 +741,7 @@ class TestCreateDynamicFlowStartMethods:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -778,7 +778,7 @@ class TestCreateDynamicFlowListeners:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -805,7 +805,7 @@ class TestCreateDynamicFlowListeners:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -832,7 +832,7 @@ class TestCreateDynamicFlowListeners:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -865,7 +865,7 @@ class TestCreateDynamicFlowListeners:
         task1 = _make_task("t1")
         task2 = _make_task("t2")
         task3 = _make_task("t3")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -899,7 +899,7 @@ class TestCreateDynamicFlowListeners:
         task1 = _make_task("t1")
         task1b = _make_task("t1b")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -935,7 +935,7 @@ class TestCreateDynamicFlowListeners:
         task1 = _make_task("t1")
         task1b = _make_task("t1b")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -969,7 +969,7 @@ class TestCreateDynamicFlowListeners:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1004,7 +1004,7 @@ class TestCreateDynamicFlowListeners:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1037,7 +1037,7 @@ class TestCreateDynamicFlowListeners:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1075,7 +1075,7 @@ class TestCreateDynamicFlowHITL:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1124,7 +1124,7 @@ class TestCreateDynamicFlowHITL:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1163,7 +1163,7 @@ class TestCreateDynamicFlowHITL:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1210,7 +1210,7 @@ class TestCreateDynamicFlowHITL:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1256,7 +1256,7 @@ class TestCreateDynamicFlowHITL:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1295,7 +1295,7 @@ class TestCreateDynamicFlowHITL:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1336,7 +1336,7 @@ class TestCreateDynamicFlowPersistence:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1370,7 +1370,7 @@ class TestCreateDynamicFlowPersistence:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1398,7 +1398,7 @@ class TestCreateDynamicFlowPersistence:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1441,7 +1441,7 @@ class TestRouterMethods:
         task1 = _make_task("t1")
         if all_tasks is None:
             all_tasks = {"t1": task1}
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1735,7 +1735,7 @@ class TestRouterBuildEvalContext:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1947,7 +1947,7 @@ class TestRouteListeners:
         task1 = _make_task("t1")
         task2 = _make_task("t2")
         task2.async_execution = False
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -1956,11 +1956,11 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="route_result")
         mock_crew_cls.return_value = mock_crew_instance
-        p[f"Crew"] = mock_crew_cls
+        p["Crew"] = mock_crew_cls
 
         mock_task_cls = MagicMock()
         mock_task_cls.return_value = MagicMock()
-        p[f"Task"] = mock_task_cls
+        p["Task"] = mock_task_cls
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -1998,7 +1998,7 @@ class TestRouteListeners:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2007,8 +2007,8 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="result")
         mock_crew_cls.return_value = mock_crew_instance
-        p[f"Crew"] = mock_crew_cls
-        p[f"Task"] = MagicMock(return_value=MagicMock())
+        p["Crew"] = mock_crew_cls
+        p["Task"] = MagicMock(return_value=MagicMock())
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2041,7 +2041,7 @@ class TestRouteListeners:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2050,12 +2050,12 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="ok")
         mock_crew_cls.return_value = mock_crew_instance
-        p[f"Crew"] = mock_crew_cls
-        p[f"Task"] = MagicMock(return_value=MagicMock())
+        p["Crew"] = mock_crew_cls
+        p["Task"] = MagicMock(return_value=MagicMock())
         # Make extract_final_answer return very long string
-        p[f"extract_final_answer"] = MagicMock(return_value="x" * 999999)
+        p["extract_final_answer"] = MagicMock(return_value="x" * 999999)
         # Small context to force truncation
-        p[f"get_model_context_limits"] = AsyncMock(return_value=(1000, 500))
+        p["get_model_context_limits"] = AsyncMock(return_value=(1000, 500))
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2091,7 +2091,7 @@ class TestRouteListeners:
         task2a.async_execution = True
         task2b = _make_task("t2b")
         task2b.async_execution = True
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2100,8 +2100,8 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="combined")
         mock_crew_cls.return_value = mock_crew_instance
-        p[f"Crew"] = mock_crew_cls
-        p[f"Task"] = MagicMock(return_value=MagicMock())
+        p["Crew"] = mock_crew_cls
+        p["Task"] = MagicMock(return_value=MagicMock())
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2141,7 +2141,7 @@ class TestRouteListeners:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2150,8 +2150,8 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="ok")
         mock_crew_cls.return_value = mock_crew_instance
-        p[f"Crew"] = mock_crew_cls
-        p[f"Task"] = MagicMock(return_value=MagicMock())
+        p["Crew"] = mock_crew_cls
+        p["Task"] = MagicMock(return_value=MagicMock())
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2184,18 +2184,18 @@ class TestRouteListeners:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
-        p[f"create_execution_callbacks"] = MagicMock(side_effect=RuntimeError("cb err"))
+        p["create_execution_callbacks"] = MagicMock(side_effect=RuntimeError("cb err"))
 
         mock_crew_cls = MagicMock()
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="ok")
         mock_crew_cls.return_value = mock_crew_instance
-        p[f"Crew"] = mock_crew_cls
-        p[f"Task"] = MagicMock(return_value=MagicMock())
+        p["Crew"] = mock_crew_cls
+        p["Task"] = MagicMock(return_value=MagicMock())
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2229,7 +2229,7 @@ class TestRouteListeners:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2", agent_role="MyAgent")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2238,8 +2238,8 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="ok")
         mock_crew_cls.return_value = mock_crew_instance
-        p[f"Crew"] = mock_crew_cls
-        p[f"Task"] = MagicMock(return_value=MagicMock())
+        p["Crew"] = mock_crew_cls
+        p["Task"] = MagicMock(return_value=MagicMock())
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2271,7 +2271,7 @@ class TestRouteListeners:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2280,8 +2280,8 @@ class TestRouteListeners:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="ok")
         mock_crew_cls.return_value = mock_crew_instance
-        p[f"Crew"] = mock_crew_cls
-        p[f"Task"] = MagicMock(return_value=MagicMock())
+        p["Crew"] = mock_crew_cls
+        p["Task"] = MagicMock(return_value=MagicMock())
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2313,7 +2313,7 @@ class TestRouteListeners:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2355,7 +2355,7 @@ class TestEdgeCases:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2400,7 +2400,7 @@ class TestEdgeCases:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2451,7 +2451,7 @@ class TestEdgeCases:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2498,7 +2498,7 @@ class TestEdgeCases:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2538,7 +2538,7 @@ class TestEdgeCases:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2563,7 +2563,7 @@ class TestEdgeCases:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_listener_method = MagicMock(
             return_value=_fake_listen("starting_point_0")(lambda self, x: "ok")
         )
@@ -2591,7 +2591,7 @@ class TestEdgeCases:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2626,7 +2626,7 @@ class TestEdgeCases:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2686,7 +2686,7 @@ class TestEdgeCases:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2695,8 +2695,8 @@ class TestEdgeCases:
         mock_crew_instance = MagicMock()
         mock_crew_instance.kickoff_async = AsyncMock(return_value="ok")
         mock_crew_cls.return_value = mock_crew_instance
-        p[f"Crew"] = mock_crew_cls
-        p[f"Task"] = MagicMock(return_value=MagicMock())
+        p["Crew"] = mock_crew_cls
+        p["Task"] = MagicMock(return_value=MagicMock())
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2727,7 +2727,7 @@ class TestEdgeCases:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2781,7 +2781,7 @@ class TestRouterMethodNamePatching:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
@@ -2816,15 +2816,15 @@ class TestRouterMethodNamePatching:
         p = _patches()
         task1 = _make_task("t1")
         task2 = _make_task("t2")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )
 
         mock_crew_cls = MagicMock()
         mock_crew_cls.return_value.kickoff_async = AsyncMock(return_value="ok")
-        p[f"Crew"] = mock_crew_cls
-        p[f"Task"] = MagicMock(return_value=MagicMock())
+        p["Crew"] = mock_crew_cls
+        p["Task"] = MagicMock(return_value=MagicMock())
 
         sp = [("starting_point_0", ["t1"], [task1], "Crew1", {})]
         router_cfg = {
@@ -2860,7 +2860,7 @@ class TestMergeHelpers:
 
         p = _patches()
         task1 = _make_task("t1")
-        factory = p[f"FlowMethodFactory"]
+        factory = p["FlowMethodFactory"]
         factory.create_starting_point_crew_method = MagicMock(
             return_value=_fake_start()(lambda self: "ok")
         )

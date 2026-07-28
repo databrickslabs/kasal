@@ -487,7 +487,7 @@ async def create_task(
                                 if mcp_tools == "mcp_service_adapter":
                                     # Skip this case since we've removed the service adapter
                                     logger.info(
-                                        f"MCP service adapter requested but not supported anymore"
+                                        "MCP service adapter requested but not supported anymore"
                                     )
                                     continue
                                 elif isinstance(mcp_tools, list):
@@ -521,7 +521,7 @@ async def create_task(
                                 f"Could not create tool instance for {tool_name}"
                             )
                             logger.error(
-                                f"Tool factory returned None - check tool factory logs for details"
+                                "Tool factory returned None - check tool factory logs for details"
                             )
                             logger.error(f"Tool config: {tool_config}")
                     except Exception as e:

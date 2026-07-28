@@ -576,7 +576,7 @@ class DatabricksVectorStorage:
                 )
             else:
                 self.memory_logger.info(
-                    f"Embedding search returned no results (empty result structure)"
+                    "Embedding search returned no results (empty result structure)"
                 )
 
             # Process results based on memory type

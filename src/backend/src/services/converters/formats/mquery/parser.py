@@ -383,7 +383,7 @@ class TableFromRowsConverter:
             SQL CREATE VIEW statement or None if conversion fails
         """
         if not self.is_table_from_rows(expression):
-            logger.info(f"[TableFromRows] Expression is not Table.FromRows, skipping")
+            logger.info("[TableFromRows] Expression is not Table.FromRows, skipping")
             return None
 
         # Extract rows

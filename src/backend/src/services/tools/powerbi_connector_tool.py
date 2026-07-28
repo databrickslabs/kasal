@@ -301,7 +301,7 @@ class PowerBIConnectorTool(BaseTool):
 
             if outbound_format_enum == OutboundFormat.DAX:
                 # Format DAX measures
-                formatted = f"# Power BI Measures Converted to DAX\n\n"
+                formatted = "# Power BI Measures Converted to DAX\n\n"
                 formatted += f"Extracted {measure_count} measures from Power BI dataset '{semantic_model_id}'\n\n"
                 for measure in output:
                     formatted += f"## {measure['name']}\n\n"
@@ -312,21 +312,21 @@ class PowerBIConnectorTool(BaseTool):
 
             elif outbound_format_enum == OutboundFormat.SQL:
                 # Format SQL query
-                formatted = f"# Power BI Measures Converted to SQL\n\n"
+                formatted = "# Power BI Measures Converted to SQL\n\n"
                 formatted += f"Extracted {measure_count} measures from Power BI dataset '{semantic_model_id}'\n\n"
                 formatted += f"```sql\n{output}\n```\n"
                 return formatted
 
             elif outbound_format_enum == OutboundFormat.UC_METRICS:
                 # Format UC Metrics YAML
-                formatted = f"# Power BI Measures Converted to UC Metrics\n\n"
+                formatted = "# Power BI Measures Converted to UC Metrics\n\n"
                 formatted += f"Extracted {measure_count} measures from Power BI dataset '{semantic_model_id}'\n\n"
                 formatted += f"```yaml\n{output}\n```\n"
                 return formatted
 
             elif outbound_format_enum == OutboundFormat.YAML:
                 # Format YAML output
-                formatted = f"# Power BI Measures Exported as YAML\n\n"
+                formatted = "# Power BI Measures Exported as YAML\n\n"
                 formatted += f"Extracted {measure_count} measures from Power BI dataset '{semantic_model_id}'\n\n"
                 formatted += f"```yaml\n{output}\n```\n"
                 return formatted

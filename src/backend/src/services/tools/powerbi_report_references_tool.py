@@ -2295,7 +2295,7 @@ class PowerBIReportReferencesTool(BaseTool):
             pages = r["pages"]
             cross_ref = r["cross_ref"]
 
-            output.append(f"---\n")
+            output.append("---\n")
             output.append(f"## Report: [{rname}]({rurl})\n")
 
             page_names = [p["displayName"] for p in pages]

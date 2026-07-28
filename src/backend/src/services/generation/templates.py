@@ -157,7 +157,7 @@ class TemplateGenerationService:
                     ),
                 )
 
-                logger.info(f"Generated templates successfully")
+                logger.info("Generated templates successfully")
                 logger.debug(f"Generated templates: {content}")
 
                 # Log the successful interaction

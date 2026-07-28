@@ -81,7 +81,7 @@ async def upload_knowledge_file(
     Returns:
         Upload response with file path and metadata
     """
-    logger.info(f"[API] 🚀 UPLOAD REQUEST RECEIVED!")
+    logger.info("[API] 🚀 UPLOAD REQUEST RECEIVED!")
     logger.info(f"[API] Execution ID: {execution_id}")
     logger.info(f"[API] File: {file.filename} ({file.content_type})")
     logger.info(f"[API] Volume config: {volume_config}")

@@ -502,7 +502,7 @@ class CodeGenerator:
             code_parts.append("    load_dotenv()\n")
             code_parts.append("    \n")
             code_parts.append("    # Define inputs\n")
-            code_parts.append(f"    inputs = {{\n")
+            code_parts.append("    inputs = {\n")
             for key, value in sample_inputs.items():
                 code_parts.append(f"        '{key}': '{value}',\n")
             code_parts.append("    }\n")
@@ -727,13 +727,13 @@ class CodeGenerator:
         for_notebook: bool = False,
     ) -> str:
         """Generate agent method"""
-        code = f"    @agent\n"
+        code = "    @agent\n"
         code += f"    def {agent_name}(self) -> Agent:\n"
 
         if include_comments:
             code += f'        """Create {agent_name} agent"""\n'
 
-        code += f"        return Agent(\n"
+        code += "        return Agent(\n"
         code += f"            config=self.agents_config['{agent_name}'],\n"
 
         # Add tools if any
@@ -746,8 +746,8 @@ class CodeGenerator:
             if tool_instances:
                 code += f"            tools=[{tool_instances}],\n"
 
-        code += f"            verbose=True\n"
-        code += f"        )\n"
+        code += "            verbose=True\n"
+        code += "        )\n"
 
         return code
 
@@ -755,15 +755,15 @@ class CodeGenerator:
         self, task_name: str, include_comments: bool, for_notebook: bool = False
     ) -> str:
         """Generate task method"""
-        code = f"    @task\n"
+        code = "    @task\n"
         code += f"    def {task_name}(self) -> Task:\n"
 
         if include_comments:
             code += f'        """Create {task_name} task"""\n'
 
-        code += f"        return Task(\n"
+        code += "        return Task(\n"
         code += f"            config=self.tasks_config['{task_name}']\n"
-        code += f"        )\n"
+        code += "        )\n"
 
         return code
 
@@ -962,7 +962,7 @@ class CodeGenerator:
                 f'if "agent" in {task_name}_config and isinstance({task_name}_config["agent"], str):\n'
             )
             body.append(f'    agent_name = {task_name}_config["agent"]\n')
-            body.append(f"    # Map agent name to agent variable\n")
+            body.append("    # Map agent name to agent variable\n")
 
             # Build agent map string outside f-string to avoid backslash in expression
             agent_items = []
@@ -975,20 +975,20 @@ class CodeGenerator:
             body.append(
                 f'    {task_name}_config["agent"] = agent_map.get(agent_name)\n'
             )
-            body.append(f"\n")
+            body.append("\n")
 
             # Map context strings to task instances
             body.append(
                 f'if "context" in {task_name}_config and isinstance({task_name}_config["context"], list):\n'
             )
-            body.append(f"    context_tasks = []\n")
+            body.append("    context_tasks = []\n")
             body.append(f'    for ctx_task_name in {task_name}_config["context"]:\n')
             body.append(
-                f"        if isinstance(ctx_task_name, str) and ctx_task_name in task_map:\n"
+                "        if isinstance(ctx_task_name, str) and ctx_task_name in task_map:\n"
             )
-            body.append(f"            context_tasks.append(task_map[ctx_task_name])\n")
+            body.append("            context_tasks.append(task_map[ctx_task_name])\n")
             body.append(f'    {task_name}_config["context"] = context_tasks\n')
-            body.append(f"\n")
+            body.append("\n")
 
             # Instantiate tools if present
             task_tools = task.get("tools", [])
@@ -1000,7 +1000,7 @@ class CodeGenerator:
                     if tool_instance:
                         body.append(f"{task_name}_tools.append({tool_instance})\n")
                 body.append(f'{task_name}_config["tools"] = {task_name}_tools\n')
-                body.append(f"\n")
+                body.append("\n")
 
             # Guardrails: LLM guardrails map to CrewAI's LLMGuardrail; code/factory
             # guardrails are Kasal built-ins that can't be bundled — surface a TODO.

@@ -986,7 +986,7 @@ def emit_yaml(
             ms = _by_cat.get(cat)
             if not ms:
                 continue
-            lines.append(f"  #")
+            lines.append("  #")
             lines.append(f"  # [{cat}] ({len(ms)}) \u2014 {_cat_why[cat]}")
             for m in sorted(ms, key=lambda x: x.referenced_by, reverse=True):
                 lines.append(
@@ -998,7 +998,7 @@ def emit_yaml(
                 # under the measure name for readability.
                 dax = (getattr(m, "dax_expression", "") or "").strip()
                 if dax:
-                    lines.append(f"  #       DAX:")
+                    lines.append("  #       DAX:")
                     for dax_line in dax.split("\n"):
                         lines.append(f"  #         {dax_line}")
 

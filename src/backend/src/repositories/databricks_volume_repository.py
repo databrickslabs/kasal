@@ -519,7 +519,7 @@ class DatabricksVolumeRepository:
                     # Check if this is a SDK API version mismatch (databricks-sdk 0.71.0+)
                     if "unexpected keyword argument 'content'" in error_msg.lower():
                         logger.warning(
-                            f"SDK API mismatch detected - falling back to REST API"
+                            "SDK API mismatch detected - falling back to REST API"
                         )
                         return {"_use_rest_api": True, "error": error_msg}
 

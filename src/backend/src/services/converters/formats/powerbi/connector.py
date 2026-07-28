@@ -126,7 +126,7 @@ class PowerBIConnector(BaseInboundConnector):
 
         # Initialize AadService for authentication
         # Debug logging to help diagnose authentication issues
-        self.logger.info(f"[POWERBI CONNECTOR DEBUG] Initializing with:")
+        self.logger.info("[POWERBI CONNECTOR DEBUG] Initializing with:")
         self.logger.info(f"[POWERBI CONNECTOR DEBUG]   tenant_id: '{tenant_id}'")
         self.logger.info(f"[POWERBI CONNECTOR DEBUG]   client_id: '{client_id}'")
         self.logger.info(

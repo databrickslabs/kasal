@@ -921,7 +921,7 @@ class DatabricksIndexService:
             # Get repository
             repo = self._get_index_repository(workspace_url)
 
-            entity_logger.info(f"Using repository for query_entity_data operation")
+            entity_logger.info("Using repository for query_entity_data operation")
             entity_logger.info(
                 f"Querying index: {index_name} on endpoint: {endpoint_name}"
             )
@@ -957,7 +957,7 @@ class DatabricksIndexService:
 
             search_results = search_response.get("results", {})
 
-            entity_logger.info(f"Search completed, processing results...")
+            entity_logger.info("Search completed, processing results...")
             entity_logger.info(f"Raw search_results type: {type(search_results)}")
             entity_logger.info(
                 f"Raw search_results keys: {list(search_results.keys()) if isinstance(search_results, dict) else 'Not a dict'}"
@@ -1004,7 +1004,7 @@ class DatabricksIndexService:
                     # Use the entity schema columns we requested
                     column_names = entity_columns
                     entity_logger.info(
-                        f"No column names in response, using schema columns"
+                        "No column names in response, using schema columns"
                     )
 
                 # Log the column names we're receiving
@@ -1318,13 +1318,13 @@ class DatabricksIndexService:
                     f" Query entity data summary: {len(entities)} entities, {len(relationships)} relationships"
                 )
                 if entities:
-                    entity_logger.info(f" First 3 entities:")
+                    entity_logger.info(" First 3 entities:")
                     for i in range(min(3, len(entities))):
                         entity_logger.info(
                             f"   Entity {i}: name='{entities[i].get('name')}', type='{entities[i].get('type')}', id='{entities[i].get('id')}'"
                         )
                 if relationships:
-                    entity_logger.info(f" First 3 relationships:")
+                    entity_logger.info(" First 3 relationships:")
                     for i in range(min(3, len(relationships))):
                         entity_logger.info(f"   Relationship {i}: {relationships[i]}")
 

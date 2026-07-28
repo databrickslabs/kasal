@@ -221,7 +221,7 @@ class KasalFlowService:
 
             # Build response message
             if resume_from_flow_uuid:
-                message = f"Flow execution resumed from checkpoint in isolated process"
+                message = "Flow execution resumed from checkpoint in isolated process"
             else:
                 message = "Flow execution started in isolated process"
 

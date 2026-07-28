@@ -468,7 +468,7 @@ class LakebaseService(BaseService):
             if "workspace limit" in error_str.lower() or "quota" in error_str.lower():
                 logger.warning(f"Quota limit reached: {e}")
                 raise ValueError(
-                    f"Failed to create database instance because you have hit the workspace limit. Contact Databricks for quota increase."
+                    "Failed to create database instance because you have hit the workspace limit. Contact Databricks for quota increase."
                 )
             logger.error(f"Error creating Lakebase instance: {e}")
             raise
@@ -827,19 +827,19 @@ class LakebaseService(BaseService):
                 logger.warning(
                     f"⚠️  LAKEBASE MIGRATION COMPLETED WITH ERRORS! {failed_tables} table(s) failed."
                 )
-                logger.warning(f"")
-                logger.warning(f"Failed tables:")
+                logger.warning("")
+                logger.warning("Failed tables:")
                 for failed in failed_tables_list:
                     logger.warning(
                         f"  • {failed['table']}: {failed['error_type']} - {failed['error']}"
                     )
-                logger.warning(f"⚠️  Lakebase was NOT enabled due to migration errors")
-            logger.info(f"📊 Summary:")
+                logger.warning("⚠️  Lakebase was NOT enabled due to migration errors")
+            logger.info("📊 Summary:")
             logger.info(f"  • Tables migrated: {len(migrated_tables)}/{len(tables)}")
             logger.info(f"  • Total rows: {total_rows:,}")
             logger.info(f"  • Duration: {duration:.2f} seconds")
             logger.info(f"  • Instance: {instance_name}")
-            logger.info(f"  • Status: READY")
+            logger.info("  • Status: READY")
             logger.info("=" * 80)
 
             return {
@@ -904,7 +904,7 @@ class LakebaseService(BaseService):
                 "step": "auth",
             }
             cred = await self.connection_service.generate_credentials(instance_name)
-            yield {"type": "success", "message": f"✅ Generated database credential"}
+            yield {"type": "success", "message": "✅ Generated database credential"}
 
             # Use SPN client_id as PG username (deterministic, no guessing)
             user_email = await self.connection_service.get_username()
@@ -1474,7 +1474,7 @@ class LakebaseService(BaseService):
                 "message": f"  • Timeout per table: {TABLE_MIGRATION_TIMEOUT_SECONDS}s",
             }
             yield {"type": "info", "message": f"  • Instance: {instance_name}"}
-            yield {"type": "info", "message": f"  • Status: READY"}
+            yield {"type": "info", "message": "  • Status: READY"}
 
             # Show 5 slowest tables for observability
             if table_durations:

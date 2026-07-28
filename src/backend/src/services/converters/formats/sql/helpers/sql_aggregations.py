@@ -558,7 +558,7 @@ class SQLFilterProcessor:
                     else:
                         with open("/tmp/sql_debug.log", "a") as f:
                             f.write(
-                                f"SQLFilterProcessor: No 'query_filter' found in definition_filters\n"
+                                "SQLFilterProcessor: No 'query_filter' found in definition_filters\n"
                             )
                     continue
 

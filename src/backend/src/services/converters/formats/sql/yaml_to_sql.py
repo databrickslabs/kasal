@@ -285,7 +285,7 @@ class SQLGenerator:
             if formula and formula.upper() != "*":
                 return f"COUNT({self.quote_identifier(source_table)}.{self.quote_identifier(formula)})"
             else:
-                return f"COUNT(*)"
+                return "COUNT(*)"
 
         elif sql_agg_type == SQLAggregationType.COUNT_DISTINCT:
             column = formula if self._is_simple_column_reference(formula) else "*"

@@ -477,7 +477,7 @@ class PowerBIMetadataReducerTool(BaseTool):
         elif strategy == "combined":
             # ── Combined: fuzzy pre-screening + LLM with hints ──
             logger.info(
-                f"[MetadataReducer][FUZZY_SCORING] Pre-screening for combined strategy..."
+                "[MetadataReducer][FUZZY_SCORING] Pre-screening for combined strategy..."
             )
             ranked_tables = scorer.rank_tables(
                 tables,
@@ -609,7 +609,7 @@ class PowerBIMetadataReducerTool(BaseTool):
 
         # Step 4: Measure dependency resolution
         t4 = time.time()
-        logger.info(f"[MetadataReducer][DEPENDENCY_RESOLUTION] Starting...")
+        logger.info("[MetadataReducer][DEPENDENCY_RESOLUTION] Starting...")
         resolver = MeasureDependencyResolver(measures, tables)
         resolved_measures = resolver.resolve(selected_measure_names)
         resolved_measure_names = [m["name"] for m in resolved_measures]
@@ -864,7 +864,7 @@ class PowerBIMetadataReducerTool(BaseTool):
             normalized_filters = merged_filters
             normalization_log = []
             logger.info(
-                f"[MetadataReducer][VALUE_NORMALIZATION] Skipped (no filters or normalization disabled)"
+                "[MetadataReducer][VALUE_NORMALIZATION] Skipped (no filters or normalization disabled)"
             )
 
         # Step 6b: Build DAX skeleton (optional)
@@ -887,7 +887,7 @@ class PowerBIMetadataReducerTool(BaseTool):
             )
         else:
             logger.info(
-                f"[MetadataReducer][DAX_SKELETON] No skeleton built (0 measures)"
+                "[MetadataReducer][DAX_SKELETON] No skeleton built (0 measures)"
             )
 
         # Step 7: Build reduced output

@@ -131,7 +131,7 @@ class BaseInboundConnector(ABC):
             KPIDefinition containing all extracted measures
         """
         if not self._connected:
-            raise RuntimeError(f"Connector not connected. Call connect() first.")
+            raise RuntimeError("Connector not connected. Call connect() first.")
 
         self.logger.info(f"Extracting measures for definition: {definition_name}")
 

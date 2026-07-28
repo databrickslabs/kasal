@@ -309,7 +309,7 @@ class PowerBITmdlParsingMixin:
                         if "filters" in report_json:
                             filters_str = report_json["filters"]
                             logger.info(
-                                f"[Filter Extraction] Found 'filters' field, parsing..."
+                                "[Filter Extraction] Found 'filters' field, parsing..."
                             )
 
                             # Parse filters JSON string
@@ -332,7 +332,7 @@ class PowerBITmdlParsingMixin:
 
                         else:
                             logger.info(
-                                f"[Filter Extraction] ⚠️ No 'filters' field found in report JSON"
+                                "[Filter Extraction] ⚠️ No 'filters' field found in report JSON"
                             )
 
                     except json.JSONDecodeError as e:
@@ -383,7 +383,7 @@ class PowerBITmdlParsingMixin:
 
             if not table or not column:
                 logger.info(
-                    f"[Filter Extraction] ⚠️ Could not extract table/column from filter"
+                    "[Filter Extraction] ⚠️ Could not extract table/column from filter"
                 )
                 return (None, None)
 
@@ -395,7 +395,7 @@ class PowerBITmdlParsingMixin:
             where_clauses = filter_obj.get("Where", [])
 
             if not where_clauses:
-                logger.info(f"[Filter Extraction] ⚠️ No Where clause found")
+                logger.info("[Filter Extraction] ⚠️ No Where clause found")
                 return (filter_name, "has filter (unknown type)")
 
             # Parse the first Where clause

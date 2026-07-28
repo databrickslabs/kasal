@@ -1153,7 +1153,7 @@ class DaxTranslator:
         den_result = self.translate_expression(den_dax.strip(), table_key)
         if num_result and den_result:
             return f"{num_result} / NULLIF({den_result}, 0)", ""
-        return None, f"DIVIDE sub-expression not translatable"
+        return None, "DIVIDE sub-expression not translatable"
 
     # ── Helpers ──────────────────────────────────────────────────────────
 

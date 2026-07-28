@@ -312,7 +312,7 @@ class ExecutionHistoryRepository:
 
             # Flush to ensure operations are sent to database
             await session.flush()
-            logger.debug(f"[DELETE] Flushed delete operations to database")
+            logger.debug("[DELETE] Flushed delete operations to database")
 
             # Only commit if we created our own session
             if commit:
@@ -320,9 +320,9 @@ class ExecutionHistoryRepository:
                     f"[DELETE] Committing transaction for session {id(session)}"
                 )
                 await session.commit()
-                logger.debug(f"[DELETE] Transaction committed successfully")
+                logger.debug("[DELETE] Transaction committed successfully")
             else:
-                logger.debug(f"[DELETE] Not committing - external session management")
+                logger.debug("[DELETE] Not committing - external session management")
 
             logger.debug(f"[DELETE] Successfully deleted execution {execution_id}")
             return {

@@ -63,7 +63,7 @@ async def execute_flow(
     )
 
     if (
-        not result.get("success", True) is False
+        result.get("success", True) is not False
     ):  # Assume success unless explicitly False
         return result
     else:
@@ -92,7 +92,7 @@ async def get_flow_execution(
     result = await service.get_flow_execution(execution_id, group_ids=group_ids)
 
     if (
-        not result.get("success", True) is False
+        result.get("success", True) is not False
     ):  # Assume success unless explicitly False
         # If result contains an 'execution' key, return that, otherwise return the whole result
         return result.get("execution", result)
@@ -121,7 +121,7 @@ async def get_flow_executions_by_flow(
     result = await service.get_flow_executions_by_flow(flow_id, group_ids=group_ids)
 
     if (
-        not result.get("success", True) is False
+        result.get("success", True) is not False
     ):  # Assume success unless explicitly False
         # If result contains an 'executions' key, return that, otherwise return the whole result
         return result.get("executions", result)

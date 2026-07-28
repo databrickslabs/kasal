@@ -456,7 +456,7 @@ class AgentBricksRepository:
             if request.return_trace and isinstance(result, dict):
                 trace_info = result.get("trace") or result.get("metadata")
 
-            logger.info(f"AgentBricks query completed successfully")
+            logger.info("AgentBricks query completed successfully")
 
             return AgentBricksQueryResponse(
                 response=response_text or str(result),

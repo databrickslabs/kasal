@@ -184,14 +184,14 @@ class CrewMemoryService:
         logger.info("=" * 80)
         logger.info("CREW_ID GENERATION - DETAILED DEBUG INFO")
         logger.info("=" * 80)
-        logger.info(f"Crew Identifier Components (used for memory persistence):")
+        logger.info("Crew Identifier Components (used for memory persistence):")
         logger.info(f"  - Agent Roles: {agent_roles}")
         logger.info(f"  - Task Names: {task_names}")
         logger.info(f"  - Crew Name: {crew_identifier['crew_name']}")
         logger.info(f"  - Model: {crew_identifier['model']}")
         logger.info(f"  - Group ID: {group_id} (SECURITY: ensures tenant isolation)")
         logger.info(
-            f"  NOTE: run_name is NOT included - memory persists across runs with same crew structure"
+            "  NOTE: run_name is NOT included - memory persists across runs with same crew structure"
         )
         logger.info(f"JSON for hashing (sorted): {crew_identifier_json}")
         logger.info(
@@ -203,7 +203,7 @@ class CrewMemoryService:
             f"SECURITY: Memory is isolated by group_id - {group_id} cannot access other groups' memory"
         )
         logger.info(
-            f"This crew_id will persist across ALL runs with the SAME crew configuration"
+            "This crew_id will persist across ALL runs with the SAME crew configuration"
         )
         logger.info("=" * 80)
 

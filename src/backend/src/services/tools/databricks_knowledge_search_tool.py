@@ -94,8 +94,8 @@ class DatabricksKnowledgeSearchTool(BaseTool):
             **kwargs: Additional arguments for BaseTool
         """
         # CRITICAL DEBUG: Print to stdout (will show in logs even before logging is configured)
-        print(f"[TOOL __INIT__] ========================================")
-        print(f"[TOOL __INIT__] DatabricksKnowledgeSearchTool created!")
+        print("[TOOL __INIT__] ========================================")
+        print("[TOOL __INIT__] DatabricksKnowledgeSearchTool created!")
         print(f"[TOOL __INIT__]   - group_id: {group_id}")
         print(f"[TOOL __INIT__]   - execution_id: {execution_id}")
         print(f"[TOOL __INIT__]   - file_paths: {file_paths}")
@@ -103,7 +103,7 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         print(
             f"[TOOL __INIT__]   - kwargs keys: {list(kwargs.keys()) if kwargs else 'None'}"
         )
-        print(f"[TOOL __INIT__] ========================================")
+        print("[TOOL __INIT__] ========================================")
 
         super().__init__(**kwargs)
 
@@ -117,7 +117,7 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         self._agent_id = agent_id  # Store agent ID for access control
         self._budget = KnowledgeSearchBudget()
 
-        logger.info(f"Initialized DatabricksKnowledgeSearchTool")
+        logger.info("Initialized DatabricksKnowledgeSearchTool")
         logger.info(f"  - Configured file_paths: {self._configured_file_paths}")
         logger.info(f"  - Configured agent_id: {self._agent_id}")
         logger.info(f"  Group ID: {group_id}")

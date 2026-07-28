@@ -283,7 +283,7 @@ async def verify_databricks_resources(
         config = await service.get_default_memory_backend(
             group_context.primary_group_id
         )
-        logger.info(f"Using default backend config")
+        logger.info("Using default backend config")
 
     # Use the service to verify resources
     result = await service.verify_databricks_resources(
@@ -623,7 +623,7 @@ async def get_entity_data(
 
     databricks_logger = LoggerManager.get_instance().databricks_vector_search
 
-    databricks_logger.info(f"[ENTITY] API endpoint called: /databricks/entity-data")
+    databricks_logger.info("[ENTITY] API endpoint called: /databricks/entity-data")
     databricks_logger.info(
         f"[ENTITY] Parameters: index_name={index_name}, workspace_url={workspace_url}, endpoint_name={endpoint_name}, limit={limit}"
     )

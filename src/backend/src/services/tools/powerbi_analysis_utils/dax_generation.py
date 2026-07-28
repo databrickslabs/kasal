@@ -323,7 +323,7 @@ CALCULATETABLE(...)
             dax = self._extract_dax_from_llm_response(content)
 
             # Log the extracted DAX
-            logger.info(f"[DAX Generation] Extracted DAX Query:")
+            logger.info("[DAX Generation] Extracted DAX Query:")
             logger.info(dax)
             logger.info("=" * 80)
 

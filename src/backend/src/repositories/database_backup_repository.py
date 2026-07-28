@@ -660,7 +660,7 @@ class DatabaseBackupRepository:
                             # Special handling for users table to preserve admin UUID
                             if table_name == "users" and current_admin_info:
                                 logger.info(
-                                    f"[IMPORT]   Processing users table with admin UUID preservation"
+                                    "[IMPORT]   Processing users table with admin UUID preservation"
                                 )
 
                                 # Insert rows, but update admin user's UUID
@@ -727,7 +727,7 @@ class DatabaseBackupRepository:
                 backup_conn.close()
                 target_conn.close()
 
-                logger.info(f"[IMPORT] ✓ Import completed successfully")
+                logger.info("[IMPORT] ✓ Import completed successfully")
 
             except Exception as import_error:
                 logger.error(
@@ -745,7 +745,7 @@ class DatabaseBackupRepository:
             # Clean up temp file
             os.unlink(tmp_path)
 
-            logger.info(f"SQLite database restored successfully from volume backup")
+            logger.info("SQLite database restored successfully from volume backup")
 
             return {
                 "success": True,
@@ -1120,7 +1120,7 @@ class DatabaseBackupRepository:
                 # Explicit session provided - assume PostgreSQL/Lakebase
                 db_type = "postgres"
                 logger.debug(
-                    f"[DB INFO] Using PostgreSQL/Lakebase (explicit session provided)"
+                    "[DB INFO] Using PostgreSQL/Lakebase (explicit session provided)"
                 )
             else:
                 # No explicit parameters - check settings

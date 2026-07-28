@@ -806,7 +806,7 @@ class SQLStructureExpander:
         subquery_where = ""
         if sql_measure.filters:
             subquery_where = (
-                f"\n        WHERE\n            "
+                "\n        WHERE\n            "
                 + "\n            AND ".join(sql_measure.filters)
             )
 

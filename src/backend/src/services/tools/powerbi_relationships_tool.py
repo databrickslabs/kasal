@@ -227,7 +227,7 @@ class PowerBIRelationshipsTool(BaseTool):
         try:
             instance_id = getattr(self, "_instance_id", "UNKNOWN")
             logger.info("=" * 80)
-            logger.info(f"🔧 TOOL EXECUTION: PowerBIRelationshipsTool._run() STARTED")
+            logger.info("🔧 TOOL EXECUTION: PowerBIRelationshipsTool._run() STARTED")
             logger.info("=" * 80)
             logger.info(
                 f"[PowerBIRelationshipsTool] Instance {instance_id} - _run() called"
@@ -346,7 +346,7 @@ class PowerBIRelationshipsTool(BaseTool):
             # DYNAMIC PARAMETER RESOLUTION
             if execution_inputs:
                 logger.info(
-                    f"[PARAM RESOLUTION] Resolving parameters with execution_inputs"
+                    "[PARAM RESOLUTION] Resolving parameters with execution_inputs"
                 )
                 resolved_kwargs = {}
                 for key, value in merged_kwargs.items():

@@ -300,7 +300,7 @@ class ModelConfigRepository(BaseRepository[ModelConfig]):
 
             # Flush to ensure the delete is sent to the database
             await self.session.flush()
-            logger.debug(f"Flushed session after SQL DELETE")
+            logger.debug("Flushed session after SQL DELETE")
 
             logger.info(f"Successfully deleted model with key {key} (ID: {model_id})")
             return result.rowcount > 0

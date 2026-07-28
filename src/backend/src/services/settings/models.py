@@ -202,7 +202,7 @@ class ModelConfigService:
         )
         if group_id:
             await model_config_cache.invalidate(group_id, "models")
-        logger.info(f"[CACHE INVALIDATE] Model config cache invalidated after create")
+        logger.info("[CACHE INVALIDATE] Model config cache invalidated after create")
 
         return result
 
@@ -244,7 +244,7 @@ class ModelConfigService:
         # Also invalidate the model's own group if it has one
         if existing_model.group_id:
             await model_config_cache.invalidate(existing_model.group_id, "models")
-        logger.info(f"[CACHE INVALIDATE] Model config cache invalidated after update")
+        logger.info("[CACHE INVALIDATE] Model config cache invalidated after update")
 
         return result
 
@@ -280,7 +280,7 @@ class ModelConfigService:
             if result and result.group_id:
                 await model_config_cache.invalidate(result.group_id, "models")
             logger.info(
-                f"[CACHE INVALIDATE] Model config cache invalidated after toggle"
+                "[CACHE INVALIDATE] Model config cache invalidated after toggle"
             )
 
             return result
@@ -321,7 +321,7 @@ class ModelConfigService:
             if model_group_id:
                 await model_config_cache.invalidate(model_group_id, "models")
             logger.info(
-                f"[CACHE INVALIDATE] Model config cache invalidated after delete"
+                "[CACHE INVALIDATE] Model config cache invalidated after delete"
             )
 
         return result
@@ -342,7 +342,7 @@ class ModelConfigService:
             # Invalidate entire cache (affects all groups)
             await model_config_cache.clear()
             logger.info(
-                f"[CACHE INVALIDATE] Model config cache cleared after enable_all"
+                "[CACHE INVALIDATE] Model config cache cleared after enable_all"
             )
 
             # Return all models
@@ -367,7 +367,7 @@ class ModelConfigService:
             # Invalidate entire cache (affects all groups)
             await model_config_cache.clear()
             logger.info(
-                f"[CACHE INVALIDATE] Model config cache cleared after disable_all"
+                "[CACHE INVALIDATE] Model config cache cleared after disable_all"
             )
 
             # Return all models
@@ -704,9 +704,7 @@ class ModelConfigService:
 
         # Invalidate entire cache since global models affect all groups
         await model_config_cache.clear()
-        logger.info(
-            f"[CACHE INVALIDATE] Model config cache cleared after toggle_global"
-        )
+        logger.info("[CACHE INVALIDATE] Model config cache cleared after toggle_global")
 
         return await self.repository.find_global_by_key(key)
 

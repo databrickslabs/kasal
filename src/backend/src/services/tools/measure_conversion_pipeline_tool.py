@@ -527,7 +527,7 @@ class MeasureConversionPipelineTool(BaseTool):
             # DYNAMIC PARAMETER RESOLUTION: Resolve placeholders from execution inputs
             if execution_inputs:
                 logger.info(
-                    f"[PARAM RESOLUTION] Resolving parameters with execution_inputs"
+                    "[PARAM RESOLUTION] Resolving parameters with execution_inputs"
                 )
                 resolved_kwargs = {}
                 for key, value in merged_kwargs.items():
@@ -537,7 +537,7 @@ class MeasureConversionPipelineTool(BaseTool):
                 merged_kwargs = resolved_kwargs
             else:
                 logger.info(
-                    f"[PARAM RESOLUTION] No execution_inputs provided, using static configuration"
+                    "[PARAM RESOLUTION] No execution_inputs provided, using static configuration"
                 )
 
             # Extract common parameters from merged config
@@ -586,7 +586,7 @@ class MeasureConversionPipelineTool(BaseTool):
                 }
 
                 # DEBUG: Log the actual credential values being used BEFORE validation
-                logger.info(f"[TOOL DEBUG] PowerBI credentials being used:")
+                logger.info("[TOOL DEBUG] PowerBI credentials being used:")
                 logger.info(
                     f"[TOOL DEBUG]   tenant_id: '{auth_config.get('tenant_id')}'"
                 )
@@ -631,7 +631,7 @@ class MeasureConversionPipelineTool(BaseTool):
                         f"[TOOL DEBUG] ⚠️  AUTO-DETECTED AUTH METHOD: {detected_method}"
                     )
                     logger.info(
-                        f"[TOOL DEBUG] Authentication is PROBABILISTIC - will try available credentials"
+                        "[TOOL DEBUG] Authentication is PROBABILISTIC - will try available credentials"
                     )
 
                 # Validate authentication using shared utility
@@ -779,7 +779,7 @@ class MeasureConversionPipelineTool(BaseTool):
             from src.services.converters.formats.sql import SQLDialect, SQLGenerator
             from src.services.converters.formats.uc_metrics import UCMetricsGenerator
 
-            print(f"[YAML DEBUG] Imports successful, creating parser")
+            print("[YAML DEBUG] Imports successful, creating parser")
 
             # Parse YAML
             parser = YAMLKPIParser()
@@ -787,7 +787,7 @@ class MeasureConversionPipelineTool(BaseTool):
                 print(f"[YAML DEBUG] Parsing YAML from file: {yaml_file_path}")
                 definition = parser.parse_file(yaml_file_path)
             else:
-                print(f"[YAML DEBUG] Parsing YAML from content")
+                print("[YAML DEBUG] Parsing YAML from content")
                 import tempfile
 
                 with tempfile.NamedTemporaryFile(

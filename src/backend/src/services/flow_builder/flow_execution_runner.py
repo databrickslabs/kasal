@@ -128,11 +128,11 @@ async def run_flow_in_process(
         if user_token:
             config["user_token"] = user_token
             logger.info(
-                f"[run_flow_in_process] Added user_token to flow_config for OBO authentication"
+                "[run_flow_in_process] Added user_token to flow_config for OBO authentication"
             )
         else:
             logger.info(
-                f"[run_flow_in_process] No user_token - subprocess will use PAT or SPN fallback"
+                "[run_flow_in_process] No user_token - subprocess will use PAT or SPN fallback"
             )
 
         # CRITICAL: Ensure group_id is in config for PAT authentication fallback

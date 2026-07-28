@@ -226,7 +226,7 @@ class MCPAdapter:
                 f"MCP discovery using Bearer token (length={len(auth_value) - 7})"
             )
         else:
-            logger.warning(f"MCP discovery using non-Bearer auth type")
+            logger.warning("MCP discovery using non-Bearer auth type")
 
         # Add User-Agent header to identify Kasal MCP client for Databricks telemetry tracking
         clean_headers = {
@@ -276,7 +276,7 @@ class MCPAdapter:
             in ("databricks_obo", "databricks_spn")
         ):
             logger.warning(
-                f"OBO authentication rejected by MCP server (403/401). Attempting SPN fallback..."
+                "OBO authentication rejected by MCP server (403/401). Attempting SPN fallback..."
             )
             spn_headers = await self._get_spn_fallback_headers()
             if spn_headers:

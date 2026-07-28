@@ -180,6 +180,6 @@ def configure_output_json_approach(task_args, pydantic_class):
         f"```json\n{json.dumps(simplified_schema, indent=2)}\n```"
     )
 
-    logger.info(f"Using output_json=True instead of Pydantic model conversion")
+    logger.info("Using output_json=True instead of Pydantic model conversion")
 
     return task_args

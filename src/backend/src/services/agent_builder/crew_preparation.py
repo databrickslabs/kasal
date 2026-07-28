@@ -199,7 +199,7 @@ class CrewPreparation:
 
         if not agent_reference or agent_reference == "unknown":
             logger.info(
-                f"[_find_agent_by_reference] Returning None for unknown/empty reference"
+                "[_find_agent_by_reference] Returning None for unknown/empty reference"
             )
             return None
 
@@ -829,7 +829,7 @@ class CrewPreparation:
                     for async_task in async_tasks:
                         if getattr(async_task, "context", None):
                             logger.info(
-                                f"Removing context from async task to enable parallel execution"
+                                "Removing context from async task to enable parallel execution"
                             )
                             async_task.context = None
 
@@ -866,7 +866,7 @@ class CrewPreparation:
                         f"  {len(async_tasks)} tasks will run in PARALLEL: {parallel_descriptions}"
                     )
                     logger.info(
-                        f"  Added completion task to collect results and satisfy CrewAI validation"
+                        "  Added completion task to collect results and satisfy CrewAI validation"
                     )
 
             return True

@@ -126,7 +126,7 @@ async def export_database(
 
     if not service.user_token:
         logger.warning(
-            f"[EXPORT DEBUG] No user token available - will use fallback authentication"
+            "[EXPORT DEBUG] No user token available - will use fallback authentication"
         )
 
     # Use the injected service

@@ -150,7 +150,21 @@ exclude = [
 # here, with profile = "black" so the two agree. Selecting it in both means two
 # tools formatting the same thing, free to disagree the day their settings drift.
 select = ["E", "F"]
-ignore = []
+
+# E501 (line-too-long) is BLACK's job, and black has now been applied to the
+# whole backend. What ruff still flags at 88 columns is exclusively what black
+# refuses to split — long string literals, docstrings and f-strings — because
+# splitting them would change their content. Leaving it selected means ~5,100
+# findings no formatter will ever clear, which is how a lint gate becomes
+# something everyone passes with --no-verify.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# SQLAlchemy filters are built with `==`, not truthiness: `where(Model.flag == True)`
+# compiles to SQL, while ruff's suggested `where(Model.flag)` evaluates the COLUMN
+# OBJECT in Python and silently changes the query. Same for `== None` vs `.is_(None)`.
+# Every E711/E712 in the repository layer is one of these.
+"src/repositories/*.py" = ["E711", "E712"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

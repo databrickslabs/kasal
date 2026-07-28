@@ -1213,7 +1213,7 @@ class DatabricksVectorIndexRepository:
                 return {
                     "success": False,
                     "error": f"JSON serialization failed: {json_error}",
-                    "message": f"Failed to upsert records: Records are not JSON serializable",
+                    "message": "Failed to upsert records: Records are not JSON serializable",
                 }
 
             # Create payload with inputs_json as a string
@@ -1299,7 +1299,7 @@ class DatabricksVectorIndexRepository:
                             return {
                                 "success": False,
                                 "error": "Empty or malformed payload",
-                                "message": f"The upsert payload is empty or malformed. Check that records contain valid data.",
+                                "message": "The upsert payload is empty or malformed. Check that records contain valid data.",
                                 "details": response_text,
                             }
                         else:

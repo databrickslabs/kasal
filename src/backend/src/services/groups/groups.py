@@ -87,7 +87,7 @@ class GroupService:
             id=primary_group_id,
             name=name,
             status=GroupStatus.ACTIVE,
-            description=f"Auto-created group",
+            description="Auto-created group",
             auto_created=True,
             created_by_email=group_email,
             created_at=datetime.utcnow(),

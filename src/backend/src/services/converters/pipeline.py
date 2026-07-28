@@ -372,7 +372,7 @@ class ConversionPipeline:
                 lines.append(f"    # {kpi.description}")
             if not is_transpilable:
                 lines.append(
-                    f"    # WARNING: Not transpilable - using original DAX formula"
+                    "    # WARNING: Not transpilable - using original DAX formula"
                 )
             lines.append("")
 

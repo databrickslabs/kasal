@@ -231,7 +231,7 @@ class TaskGenerationService:
         # Include agent context inline in the system prompt if provided (no external retrieval)
         if request.agent:
             agent = request.agent
-            base_message += f"\n\nCreate a task specifically for an agent with the following profile:\n"
+            base_message += "\n\nCreate a task specifically for an agent with the following profile:\n"
             base_message += f"Name: {agent.name}\n"
             base_message += f"Role: {agent.role}\n"
             base_message += f"Goal: {agent.goal}\n"

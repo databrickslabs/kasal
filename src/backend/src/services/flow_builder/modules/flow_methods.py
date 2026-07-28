@@ -124,7 +124,7 @@ async def get_model_context_limits(agent, group_context) -> tuple[int, int]:
                 return default_context_window, default_max_output
 
         if not model_name:
-            logger.info(f"No model name found for agent, using defaults")
+            logger.info("No model name found for agent, using defaults")
             return default_context_window, default_max_output
 
         # Extract group_id from group_context
@@ -136,7 +136,7 @@ async def get_model_context_limits(agent, group_context) -> tuple[int, int]:
                 group_id = group_context.group_ids[0]
 
         if not group_id:
-            logger.info(f"No group_id found, using defaults")
+            logger.info("No group_id found, using defaults")
             return default_context_window, default_max_output
 
         # Use ModelConfigService to get model configuration
@@ -564,10 +564,10 @@ class FlowMethodFactory:
                 )
             elif crew_memory_from_config is False:
                 crew_memory = False
-                logger.info(f"Crew memory explicitly disabled in configuration")
+                logger.info("Crew memory explicitly disabled in configuration")
             elif crew_memory_from_config is True:
                 crew_memory = True
-                logger.info(f"Using crew memory setting from configuration: True")
+                logger.info("Using crew memory setting from configuration: True")
             else:
                 # Default: at least one agent has memory enabled
                 crew_memory = True
@@ -580,11 +580,11 @@ class FlowMethodFactory:
             if crew_data and hasattr(crew_data, "process") and crew_data.process:
                 if crew_data.process.lower() == "hierarchical":
                     process_type = Process.hierarchical
-                    logger.info(f"Using hierarchical process from crew configuration")
+                    logger.info("Using hierarchical process from crew configuration")
                 else:
-                    logger.info(f"Using sequential process from crew configuration")
+                    logger.info("Using sequential process from crew configuration")
             else:
-                logger.info(f"Using default sequential process")
+                logger.info("Using default sequential process")
 
             # Determine verbose setting from crew_data
             crew_verbose = True  # Default
@@ -1063,13 +1063,11 @@ class FlowMethodFactory:
                 )
             elif crew_memory_from_config is False:
                 crew_memory = False
-                logger.info(
-                    f"Listener crew memory explicitly disabled in configuration"
-                )
+                logger.info("Listener crew memory explicitly disabled in configuration")
             elif crew_memory_from_config is True:
                 crew_memory = True
                 logger.info(
-                    f"Using listener crew memory setting from configuration: True"
+                    "Using listener crew memory setting from configuration: True"
                 )
             else:
                 # Default: at least one agent has memory enabled
@@ -1084,14 +1082,14 @@ class FlowMethodFactory:
                 if crew_data.process.lower() == "hierarchical":
                     process_type = Process.hierarchical
                     logger.info(
-                        f"Using hierarchical process for listener crew from configuration"
+                        "Using hierarchical process for listener crew from configuration"
                     )
                 else:
                     logger.info(
-                        f"Using sequential process for listener crew from configuration"
+                        "Using sequential process for listener crew from configuration"
                     )
             else:
-                logger.info(f"Using default sequential process for listener crew")
+                logger.info("Using default sequential process for listener crew")
 
             # Determine verbose setting from crew_data
             crew_verbose = True  # Default
@@ -1651,7 +1649,7 @@ class FlowMethodFactory:
                         f"  🔍 DIAGNOSTIC - _method_outputs keys: {list(flow_instance._method_outputs.keys()) if isinstance(flow_instance._method_outputs, dict) else 'not a dict'}"
                     )
             else:
-                logger.info(f"  🔍 DIAGNOSTIC - _method_outputs does not exist")
+                logger.info("  🔍 DIAGNOSTIC - _method_outputs does not exist")
 
             if hasattr(flow_instance, "state"):
                 state = flow_instance.state
@@ -1663,7 +1661,7 @@ class FlowMethodFactory:
                         f"  🔍 DIAGNOSTIC - state attrs: {list(vars(state).keys())}"
                     )
             else:
-                logger.info(f"  🔍 DIAGNOSTIC - state does not exist")
+                logger.info("  🔍 DIAGNOSTIC - state does not exist")
 
             # Try to get from _method_outputs (CrewAI @persist stores outputs here)
             if (
@@ -1718,7 +1716,7 @@ class FlowMethodFactory:
                     if "previous_output" in state:
                         cached_output = state.get("previous_output")
                         logger.info(
-                            f"  📦 Found cached output in state['previous_output']"
+                            "  📦 Found cached output in state['previous_output']"
                         )
                         return cached_output
                 else:
@@ -1735,7 +1733,7 @@ class FlowMethodFactory:
             # Fall back to previous_output if provided (pass-through for listeners)
             if prev_output is not None:
                 logger.info(
-                    f"  📦 Using previous_output as fallback (pass-through mode)"
+                    "  📦 Using previous_output as fallback (pass-through mode)"
                 )
                 return prev_output
 
@@ -1753,7 +1751,7 @@ class FlowMethodFactory:
                     f"⏭️  CHECKPOINT RESUME: Skipping crew '{crew_name}' (sequence: {crew_sequence})"
                 )
                 logger.info(f"Method: {method_name}")
-                logger.info(f"This crew was already completed in a previous execution")
+                logger.info("This crew was already completed in a previous execution")
 
                 # Primary source: checkpoint_output from database traces (passed from flow builder)
                 result_output = checkpoint_output
@@ -1772,7 +1770,7 @@ class FlowMethodFactory:
                         )
                     else:
                         logger.warning(
-                            f"  ⚠️ No checkpoint output found, returning placeholder"
+                            "  ⚠️ No checkpoint output found, returning placeholder"
                         )
                         # Create a placeholder output to allow flow to continue
                         result_output = {
@@ -1811,7 +1809,7 @@ class FlowMethodFactory:
                 logger.info(
                     f"Previous output received: {str(previous_output)[:200] if previous_output else 'None'}..."
                 )
-                logger.info(f"This crew was already completed in a previous execution")
+                logger.info("This crew was already completed in a previous execution")
 
                 # Primary source: checkpoint_output from database traces (passed from flow builder)
                 result_output = checkpoint_output
@@ -1832,7 +1830,7 @@ class FlowMethodFactory:
                         )
                     else:
                         logger.warning(
-                            f"  ⚠️ No checkpoint output found and no previous_output, returning placeholder"
+                            "  ⚠️ No checkpoint output found and no previous_output, returning placeholder"
                         )
                         # Create a placeholder output to allow flow to continue
                         result_output = {
@@ -1920,7 +1918,7 @@ class FlowMethodFactory:
             job_id = callbacks.get("job_id") if callbacks else None
             flow_id = callbacks.get("flow_id") if callbacks else None
 
-            logger.info(f"📋 Extracted from callbacks:")
+            logger.info("📋 Extracted from callbacks:")
             logger.info(f"   job_id: {job_id}")
             logger.info(f"   flow_id: {flow_id}")
             logger.info(
@@ -1992,7 +1990,7 @@ class FlowMethodFactory:
                                 import json
 
                                 logger.info(
-                                    f"   📝 Found edited_config in checkpoint_data — using user edits"
+                                    "   📝 Found edited_config in checkpoint_data — using user edits"
                                 )
                                 return json.dumps(edited_config)
                     except Exception as e:
@@ -2025,7 +2023,7 @@ class FlowMethodFactory:
 
             # Get flow_uuid for checkpoint
             flow_uuid = None
-            logger.info(f"🔍 HITL gate checkpoint extraction:")
+            logger.info("🔍 HITL gate checkpoint extraction:")
             logger.info(f"   hasattr(self, 'state'): {hasattr(self, 'state')}")
             if hasattr(self, "state"):
                 state = self.state
@@ -2055,7 +2053,7 @@ class FlowMethodFactory:
                             setattr(self.state, "id", flow_uuid)
                         elif isinstance(self.state, dict):
                             self.state["id"] = flow_uuid
-                        logger.info(f"   ✅ Stored generated flow_uuid in state")
+                        logger.info("   ✅ Stored generated flow_uuid in state")
                     except Exception as e:
                         logger.warning(f"   Could not store flow_uuid in state: {e}")
 

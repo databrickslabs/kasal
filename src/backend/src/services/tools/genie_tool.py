@@ -303,7 +303,7 @@ class GenieTool(BaseTool):
                         logger.info(
                             f"Token scopes: {payload.get('scope', 'No scope found')}"
                         )
-                        logger.info(f"Required scopes: sql, dashboards.genie")
+                        logger.info("Required scopes: sql, dashboards.genie")
                         # SECURITY: identity claims (subject / client_id) are only
                         # logged at DEBUG to avoid identity disclosure in prod logs.
                         logger.debug(
@@ -325,10 +325,10 @@ class GenieTool(BaseTool):
                         if missing_scopes:
                             logger.error(f"❌ MISSING SCOPES: {missing_scopes}")
                             logger.error(
-                                f"❌ SOLUTION: User needs to re-authorize app or token needs refresh"
+                                "❌ SOLUTION: User needs to re-authorize app or token needs refresh"
                             )
                         else:
-                            logger.info(f"✅ All required scopes present in token")
+                            logger.info("✅ All required scopes present in token")
 
                     except Exception as jwt_error:
                         logger.warning(f"Could not decode JWT token: {jwt_error}")
@@ -343,11 +343,11 @@ class GenieTool(BaseTool):
                     elif response.status == 403:
                         error_text = await response.text()
                         logger.error(
-                            f"❌ 403 FORBIDDEN: Token lacks permissions for Genie API"
+                            "❌ 403 FORBIDDEN: Token lacks permissions for Genie API"
                         )
                         logger.error(f"❌ Response: {error_text}")
                         logger.error(
-                            f"❌ This confirms the OAuth scope issue - user token doesn't have sql/dashboards.genie scopes"
+                            "❌ This confirms the OAuth scope issue - user token doesn't have sql/dashboards.genie scopes"
                         )
                         return False
                     else:

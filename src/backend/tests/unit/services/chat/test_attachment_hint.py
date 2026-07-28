@@ -94,7 +94,7 @@ class TestBuildAttachmentHint:
 
         hint = build_attachment_hint(spec)
 
-        assert f"(and 5 more)" in hint
+        assert "(and 5 more)" in hint
         assert f"file-{MAX_LISTED + 4}.md" not in hint
 
     def test_the_report_question_now_has_an_answerable_prompt(self):

@@ -175,7 +175,7 @@ def run_crew_in_process(
             try:
                 crew_config = json.loads(crew_config)
                 print(
-                    f"[SUBPROCESS] Parsed crew_config from JSON string", file=sys.stderr
+                    "[SUBPROCESS] Parsed crew_config from JSON string", file=sys.stderr
                 )
             except json.JSONDecodeError as e:
                 error_msg = f"Failed to parse crew_config JSON: {e}"
@@ -298,7 +298,7 @@ def run_crew_in_process(
                     context_window = config.get("context_window", 128000)
                     LLM_CONTEXT_WINDOW_SIZES[full_model_name] = context_window
             print(
-                f"[SUBPROCESS] Registered Databricks models with CrewAI context window sizes",
+                "[SUBPROCESS] Registered Databricks models with CrewAI context window sizes",
                 file=sys.stderr,
             )
         except Exception as reg_err:
@@ -431,14 +431,14 @@ def run_crew_in_process(
                         f"[SUBPROCESS] ✗ UserContext verification FAILED: got {verify_context}"
                     )
                     subprocess_logger.error(
-                        f"[SUBPROCESS] This indicates a ContextVar issue in subprocess"
+                        "[SUBPROCESS] This indicates a ContextVar issue in subprocess"
                     )
             except Exception as e:
                 subprocess_logger.error(
                     f"[SUBPROCESS] Failed to set up UserContext: {e}"
                 )
                 subprocess_logger.error(
-                    f"[SUBPROCESS] This will cause multi-tenant isolation failures!"
+                    "[SUBPROCESS] This will cause multi-tenant isolation failures!"
                 )
         else:
             subprocess_logger.error(
@@ -532,7 +532,7 @@ def run_crew_in_process(
                     user_token = crew_config.get("user_token")
                     if user_token:
                         UserContext.set_user_token(user_token)
-                        async_logger.info(f"[ASYNC] ✓ UserContext set with OBO token")
+                        async_logger.info("[ASYNC] ✓ UserContext set with OBO token")
 
                     # Verify
                     verify = UserContext.get_group_context()
@@ -675,7 +675,7 @@ def run_crew_in_process(
                             )
                         else:
                             async_logger.warning(
-                                f"[SUBPROCESS] crew_config['inputs'] is not a dict, cannot inject execution inputs"
+                                "[SUBPROCESS] crew_config['inputs'] is not a dict, cannot inject execution inputs"
                             )
                 except Exception as e:
                     async_logger.warning(
@@ -836,7 +836,7 @@ def run_crew_in_process(
 
                 # Use the CrewPreparation class for crew setup
                 # Debug log to check knowledge_sources right before CrewPreparation
-                async_logger.info(f"[DEBUG] Before CrewPreparation creation:")
+                async_logger.info("[DEBUG] Before CrewPreparation creation:")
                 for idx, agent_cfg in enumerate(crew_config.get("agents", [])):
                     agent_id = agent_cfg.get("id", f"agent_{idx}")
                     ks = agent_cfg.get("knowledge_sources", [])
@@ -909,7 +909,7 @@ def run_crew_in_process(
                                     )
                             else:
                                 async_logger.info(
-                                    f"[JOB_CONFIGURATION]     Knowledge Sources: None"
+                                    "[JOB_CONFIGURATION]     Knowledge Sources: None"
                                 )
                             if agent.get("llm"):
                                 llm_config = agent["llm"]
@@ -949,7 +949,7 @@ def run_crew_in_process(
                                 f"[JOB_CONFIGURATION] Inputs provided: {json.dumps(inputs, indent=2)}"
                             )
                         else:
-                            async_logger.info(f"[JOB_CONFIGURATION] No inputs provided")
+                            async_logger.info("[JOB_CONFIGURATION] No inputs provided")
 
                         # Log complete configuration as JSON for debugging
                         async_logger.info(
@@ -1315,7 +1315,7 @@ def run_crew_in_process(
                     async_logger.info(f"Inputs provided: {list(inputs.keys())}")
                 else:
                     async_logger.info("No inputs provided")
-                async_logger.info(f"[SUBPROCESS] ABOUT TO CALL crew.kickoff()")
+                async_logger.info("[SUBPROCESS] ABOUT TO CALL crew.kickoff()")
 
                 from src.services.otel_tracing.mlflow_setup import (
                     execute_with_mlflow_trace_async,
@@ -1421,7 +1421,7 @@ def run_crew_in_process(
                             )
                     except Exception as flush_err:
                         async_logger.warning(f"Memory write flush skipped: {flush_err}")
-                async_logger.info(f"✅ Crew execution completed successfully")
+                async_logger.info("✅ Crew execution completed successfully")
 
                 await post_execution_mlflow_cleanup(
                     mlflow_result=mlflow_result,
@@ -1928,7 +1928,7 @@ class ProcessCrewExecutor:
                 ):
                     crew_config["user_token"] = group_context.access_token
                     logger.info(
-                        f"[ProcessCrewExecutor] Added user_token to crew_config for OBO authentication"
+                        "[ProcessCrewExecutor] Added user_token to crew_config for OBO authentication"
                     )
                 else:
                     logger.info(
@@ -2117,7 +2117,7 @@ class ProcessCrewExecutor:
                 result = {
                     "status": "STOPPED",
                     "execution_id": execution_id,
-                    "message": f"Execution was stopped by user",
+                    "message": "Execution was stopped by user",
                     "exit_code": process.exitcode,
                 }
             elif drained_result:
@@ -2638,7 +2638,7 @@ class ProcessCrewExecutor:
                         if process.pid:
                             psutil_proc = psutil.Process(process.pid)
                             psutil_proc.kill()
-                            logger.info(f"Force killed process using psutil")
+                            logger.info("Force killed process using psutil")
                             terminated = True
                     except:
                         pass

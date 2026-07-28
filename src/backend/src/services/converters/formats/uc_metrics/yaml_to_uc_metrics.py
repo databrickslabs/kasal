@@ -404,7 +404,7 @@ class UCMetricsGenerator:
 
             # Add window configuration if present (for exception aggregations)
             if "window" in measure:
-                lines.append(f"    window:")
+                lines.append("    window:")
                 for window_entry in measure["window"]:
                     lines.append(f"      - order: {window_entry['order']}")
                     lines.append(f"        range: {window_entry['range']}")
@@ -414,7 +414,7 @@ class UCMetricsGenerator:
 
             # Add subquery if present (for exception aggregations)
             if "subquery" in measure:
-                lines.append(f"    subquery: |")
+                lines.append("    subquery: |")
                 # Indent each line of the subquery
                 subquery_lines = measure["subquery"].split("\n")
                 for subquery_line in subquery_lines:

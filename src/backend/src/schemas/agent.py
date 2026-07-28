@@ -142,7 +142,7 @@ class AgentBase(BaseModel):
         """SECURITY: Always force allow_code_execution to False for safety."""
         if v is True:
             print(
-                f"WARNING: Attempted to set allow_code_execution=True, forcing to False for security"
+                "WARNING: Attempted to set allow_code_execution=True, forcing to False for security"
             )
         return False
 
@@ -213,7 +213,7 @@ class AgentUpdate(BaseModel):
         """SECURITY: Always force allow_code_execution to False for safety."""
         if v is not None and v is True:
             print(
-                f"WARNING: Attempted to set allow_code_execution=True in update, forcing to False for security"
+                "WARNING: Attempted to set allow_code_execution=True in update, forcing to False for security"
             )
             return False
         return v  # Return None if None, False if False

@@ -203,7 +203,7 @@ class CompleteGenerationMixin:
                 # Parse JSON setup
                 logger.info("CREATE CREW: Parsing JSON response from LLM")
                 crew_setup = robust_json_parser(content)
-                logger.info(f"CREATE CREW: Successfully parsed JSON")
+                logger.info("CREATE CREW: Successfully parsed JSON")
 
                 # No persistent memory backend → disable memory on generated agents
                 # (avoids writing to ephemeral local storage that doesn't persist).

@@ -529,7 +529,7 @@ class MqueryConversionPipelineTool(BaseTool):
             # DYNAMIC PARAMETER RESOLUTION
             if execution_inputs:
                 logger.info(
-                    f"[PARAM RESOLUTION] Resolving parameters with execution_inputs"
+                    "[PARAM RESOLUTION] Resolving parameters with execution_inputs"
                 )
                 resolved_kwargs = {}
                 for key, value in merged_kwargs.items():
@@ -619,7 +619,7 @@ class MqueryConversionPipelineTool(BaseTool):
             _dbsql_pat = merged_kwargs.get("databricks_pat")
             if _sql_endpoint and _dbsql_pat:
                 logger.info(
-                    f"[TOOL CALL] DBSQL validation configured — running classify-first validation flow"
+                    "[TOOL CALL] DBSQL validation configured — running classify-first validation flow"
                 )
                 output = run_sync(self._execute_with_validation(merged_kwargs))
                 # Cache the validation output too
@@ -667,11 +667,11 @@ class MqueryConversionPipelineTool(BaseTool):
                     llm_workspace_url = llm_workspace_url or env_workspace_url
                     llm_token = llm_token or env_token
                     logger.info(
-                        f"[TOOL CALL] Auto-detected Databricks credentials for LLM from environment"
+                        "[TOOL CALL] Auto-detected Databricks credentials for LLM from environment"
                     )
                 else:
                     logger.warning(
-                        f"[TOOL CALL] LLM credentials not provided and not found in environment. Complex M-Query expressions may not convert properly."
+                        "[TOOL CALL] LLM credentials not provided and not found in environment. Complex M-Query expressions may not convert properly."
                     )
 
             # Ensure workspace URL has https:// prefix

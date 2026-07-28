@@ -126,18 +126,18 @@ async def flush_async_logging(async_logger: Optional[logging.Logger] = None) -> 
     alog = async_logger or logger
 
     try:
-        alog.info(f"[mlflow_tracing] [DEBUG] Starting MLflow flush operation")
+        alog.info("[mlflow_tracing] [DEBUG] Starting MLflow flush operation")
         if mlflow and hasattr(mlflow, "flush_trace_async_logging"):
             alog.info(
-                f"[mlflow_tracing] [DEBUG] About to call mlflow.flush_trace_async_logging()"
+                "[mlflow_tracing] [DEBUG] About to call mlflow.flush_trace_async_logging()"
             )
             mlflow.flush_trace_async_logging()
             alog.info(
-                f"[mlflow_tracing] [DEBUG] MLflow flush_trace_async_logging() completed successfully"
+                "[mlflow_tracing] [DEBUG] MLflow flush_trace_async_logging() completed successfully"
             )
         else:
             alog.info(
-                f"[mlflow_tracing] [DEBUG] MLflow not available or flush_trace_async_logging not found"
+                "[mlflow_tracing] [DEBUG] MLflow not available or flush_trace_async_logging not found"
             )
     except Exception as e:
         alog.warning(

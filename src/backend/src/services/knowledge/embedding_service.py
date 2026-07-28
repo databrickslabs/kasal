@@ -65,7 +65,7 @@ class KnowledgeEmbeddingService:
             if agent_ids:
                 logger.info(f"[EMBEDDING] Agent IDs for access control: {agent_ids}")
             else:
-                logger.warning(f"[EMBEDDING] No agent_ids provided")
+                logger.warning("[EMBEDDING] No agent_ids provided")
 
             # Chunk the content with context enrichment
             chunks = await self._chunk_with_context(file_content, file_path)

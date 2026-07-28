@@ -183,7 +183,7 @@ async def require_authenticated_user(
         )
 
     logger.debug(
-        f"[AUTH DEBUG] About to call get_current_user_from_email in require_authenticated_user"
+        "[AUTH DEBUG] About to call get_current_user_from_email in require_authenticated_user"
     )
     user = await get_current_user_from_email(session, group_context)
 

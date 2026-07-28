@@ -100,7 +100,7 @@ class DatabricksKnowledgeService:
             logger.info(f"[SERVICE] ✅ Agent IDs detected: {agent_ids}")
         else:
             logger.warning(
-                f"[SERVICE] ⚠️ No agent_ids provided - this will result in null agent_ids in vector index!"
+                "[SERVICE] ⚠️ No agent_ids provided - this will result in null agent_ids in vector index!"
             )
 
         logger.info(f"File: {file.filename}")
@@ -780,7 +780,7 @@ class DatabricksKnowledgeService:
                     ),
                     timeout=10,  # Increased timeout
                 )
-                logger.info(f"[DK SERVICE] Query completed, checking results...")
+                logger.info("[DK SERVICE] Query completed, checking results...")
             except asyncio.TimeoutError:
                 logger.error("[DK SERVICE] Query timed out after 10 seconds")
                 return filenames

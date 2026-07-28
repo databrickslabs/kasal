@@ -63,7 +63,7 @@ class BaseTreeParsingGenerator(ABC, Generic[TMeasure]):
             for cycle in cycles:
                 cycle_descriptions.append(" -> ".join(cycle))
             raise ValueError(
-                f"Circular dependencies detected:\n" + "\n".join(cycle_descriptions)
+                "Circular dependencies detected:\n" + "\n".join(cycle_descriptions)
             )
 
         # Get measures in dependency order

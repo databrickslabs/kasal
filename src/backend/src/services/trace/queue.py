@@ -14,7 +14,7 @@ class TraceQueue:
         if cls._instance is None:
             cls._instance = super(TraceQueue, cls).__new__(cls)
             cls._instance._queue = queue.Queue()
-            logger.debug(f"[TRACE_DEBUG] TraceQueue singleton created with new queue")
+            logger.debug("[TRACE_DEBUG] TraceQueue singleton created with new queue")
         return cls._instance
 
     def get_queue(self) -> queue.Queue:
@@ -27,5 +27,5 @@ class TraceQueue:
 
 # Function to get the singleton queue instance easily
 def get_trace_queue() -> queue.Queue:
-    logger.debug(f"[TRACE_DEBUG] get_trace_queue function called")
+    logger.debug("[TRACE_DEBUG] get_trace_queue function called")
     return TraceQueue().get_queue()

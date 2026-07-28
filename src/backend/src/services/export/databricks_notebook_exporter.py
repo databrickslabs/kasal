@@ -810,7 +810,7 @@ The following custom tools are used in this crew: {', '.join(custom_tools)}
 print("Custom tools loaded: {', '.join(custom_tools)}")'''
         else:
             logger.warning(
-                f"[Tool Export] No tool implementations found, using placeholder"
+                "[Tool Export] No tool implementations found, using placeholder"
             )
             # Fallback to placeholder if no tool implementations found
             return f'''"""
@@ -829,7 +829,7 @@ print("Custom tools detected but not implemented. Please add implementations abo
 
     def _generate_evaluation_code(self, crew_name: str) -> str:
         """Generate MLflow evaluation code"""
-        return f'''"""
+        return '''"""
 Evaluate the Crew's Output
 
 This cell demonstrates how to evaluate your crew's performance using MLflow.
@@ -847,28 +847,28 @@ runs_df = mlflow.search_runs(
 )
 
 if not runs_df.empty:
-    print(f"\\nFound {{len(runs_df)}} recent runs:")
+    print(f"\\nFound {len(runs_df)} recent runs:")
     for idx, row in runs_df.head().iterrows():
-        print(f"   {{idx+1}}. Run ID: {{row['run_id'][:8]}}... | Started: {{row['start_time']}}")
+        print(f"   {idx+1}. Run ID: {row['run_id'][:8]}... | Started: {row['start_time']}")
 
     # Use the most recent run
     latest_run_id = runs_df.iloc[0]["run_id"]
     latest_run = mlflow.get_run(latest_run_id)
 
-    print(f"\\nUsing latest run: {{latest_run_id}}")
-    print(f"   - Experiment: {{latest_run.info.experiment_id}}")
-    print(f"   - Status: {{latest_run.info.status}}")
+    print(f"\\nUsing latest run: {latest_run_id}")
+    print(f"   - Experiment: {latest_run.info.experiment_id}")
+    print(f"   - Status: {latest_run.info.status}")
 
     # Create evaluation dataset
     # You can customize the ground truth and expected outputs based on your use case
-    eval_data = pd.DataFrame({{
+    eval_data = pd.DataFrame({
         "inputs": [
             "Artificial Intelligence trends in 2025"
         ],
         "ground_truth": [
             "A comprehensive analysis covering AI trends, including generative AI, large language models, multimodal AI, AI safety, and practical applications across industries."
         ]
-    }})
+    })
 
     # Define a function to get predictions from the crew
     def crew_model(inputs):
@@ -915,13 +915,13 @@ if not runs_df.empty:
 
         # Display relevancy metrics
         print("\\nRelevancy Assessment:")
-        print(f"   - Answer Relevance: {{eval_results.metrics.get('answer_relevance/v1/mean', 'N/A')}}")
-        print(f"   - Answer Correctness: {{eval_results.metrics.get('answer_correctness/v1/mean', 'N/A')}}")
-        print(f"   - Faithfulness: {{eval_results.metrics.get('faithfulness/v1/mean', 'N/A')}}")
+        print(f"   - Answer Relevance: {eval_results.metrics.get('answer_relevance/v1/mean', 'N/A')}")
+        print(f"   - Answer Correctness: {eval_results.metrics.get('answer_correctness/v1/mean', 'N/A')}")
+        print(f"   - Faithfulness: {eval_results.metrics.get('faithfulness/v1/mean', 'N/A')}")
 
         # Display safety metrics
         print("\\nSafety Assessment:")
-        print(f"   - Toxicity Score: {{eval_results.metrics.get('toxicity/v1/mean', 'N/A')}}")
+        print(f"   - Toxicity Score: {eval_results.metrics.get('toxicity/v1/mean', 'N/A')}")
         print(f"     (Lower is better - scores >0.5 indicate potentially toxic content)")
 
         # Display evaluation results table
@@ -931,16 +931,16 @@ if not runs_df.empty:
         # Log comprehensive metrics to the original run
         with mlflow.start_run(run_id=latest_run_id):
             # Log relevancy metrics
-            mlflow.log_metrics({{
+            mlflow.log_metrics({
                 "eval_answer_relevance": eval_results.metrics.get('answer_relevance/v1/mean', 0.0),
                 "eval_answer_correctness": eval_results.metrics.get('answer_correctness/v1/mean', 0.0),
                 "eval_faithfulness": eval_results.metrics.get('faithfulness/v1/mean', 0.0),
                 "eval_toxicity": eval_results.metrics.get('toxicity/v1/mean', 0.0),
-            }})
+            })
             print("\\nEvaluation metrics logged to MLflow run")
 
     except Exception as e:
-        print(f"\\nEvaluation failed: {{str(e)}}")
+        print(f"\\nEvaluation failed: {str(e)}")
         print("\\nNote: Make sure you have the required evaluation dependencies:")
         print("   %pip install mlflow[genai] openai")
 

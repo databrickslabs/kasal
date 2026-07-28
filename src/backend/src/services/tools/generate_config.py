@@ -1532,7 +1532,7 @@ def extract_report_definition(
                 print("  Report definition: 202 but no Location header")
                 return None
 
-            print(f"  Report definition: polling (202 Accepted)...")
+            print("  Report definition: polling (202 Accepted)...")
             for attempt in range(60):
                 time.sleep(2)
                 poll_resp = requests.get(
@@ -2365,7 +2365,7 @@ def main():
             auto_count += 1
 
     print(f"\n{'=' * 60}")
-    print(f"CONFIG SUMMARY")
+    print("CONFIG SUMMARY")
     print(f"{'=' * 60}")
     print(f"  Total keys: {len(config)}")
     print(f"  Auto-filled: {auto_count}")

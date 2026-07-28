@@ -174,7 +174,7 @@ class DAXAggregationBuilder:
         # Skip if formula already looks properly formatted
         if (
             f"{source_table}[" in formula
-            and not f"{source_table}[{source_table}[" in formula
+            and f"{source_table}[{source_table}[" not in formula
         ):
             return formula
 

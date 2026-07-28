@@ -85,7 +85,7 @@ class SmartUCMetricsGenerator:
             if cycles:
                 cycle_descriptions = [" -> ".join(cycle) for cycle in cycles]
                 raise ValueError(
-                    f"Circular dependencies detected:\n" + "\n".join(cycle_descriptions)
+                    "Circular dependencies detected:\n" + "\n".join(cycle_descriptions)
                 )
 
             # Generate all measures with dependencies resolved

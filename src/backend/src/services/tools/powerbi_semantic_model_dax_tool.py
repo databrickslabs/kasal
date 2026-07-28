@@ -600,7 +600,7 @@ class PowerBISemanticModelDaxTool(BaseTool):
                                 best_llm_dax, config, model_context
                             )
                             logger.info(
-                                f"[DaxTool] Using patched LLM DAX with active_filters instead of full deterministic"
+                                "[DaxTool] Using patched LLM DAX with active_filters instead of full deterministic"
                             )
                         else:
                             generated_dax = self._generate_deterministic_dax(
@@ -1548,7 +1548,7 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text, no explanatio
             dax = self._extract_dax_from_llm_response(content)
             if not dax:
                 logger.warning(
-                    f"[DaxTool] LLM returned no extractable DAX, trying deterministic fallback"
+                    "[DaxTool] LLM returned no extractable DAX, trying deterministic fallback"
                 )
                 return self._generate_deterministic_dax(
                     user_question, model_context, config
@@ -1632,12 +1632,12 @@ OUTPUT: Return ONLY the DAX query starting with EVALUATE. No text."""
                 else:
                     filter_lines.append(f'  {k} = "{v}"')
             filter_reminder = (
-                f"\n\nMANDATORY — these active_filters MUST appear in the new query, exactly as shown:\n"
+                "\n\nMANDATORY — these active_filters MUST appear in the new query, exactly as shown:\n"
                 + "\n".join(filter_lines)
             )
             if preserved_treatas:
                 filter_reminder += (
-                    f"\n\nCOPY these TREATAS expressions from the previous attempt unchanged:\n"
+                    "\n\nCOPY these TREATAS expressions from the previous attempt unchanged:\n"
                     + "\n".join(f"  {t}" for t in preserved_treatas)
                 )
             filter_reminder += "\n\nFix ONLY what the error says. Do NOT remove any of the above TREATAS expressions."
@@ -1683,7 +1683,7 @@ Use ONLY the ALLOWED TABLES. Use SUMMARIZECOLUMNS with TREATAS. Return ONLY the 
             if dax:
                 return dax
             # Empty extraction — LLM returned garbage, return None to trigger retry
-            logger.warning(f"[DaxTool] Self-correction returned no extractable DAX")
+            logger.warning("[DaxTool] Self-correction returned no extractable DAX")
             return None
 
         except Exception as e:

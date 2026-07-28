@@ -122,7 +122,7 @@ class CrewGeneratorRepository:
                     logger.error(f"Task with ID {entity_id} not found for update")
             else:
                 # For other entities
-                logger.error(f"Update for entity type not implemented")
+                logger.error("Update for entity type not implemented")
 
             return None
         except Exception as e:

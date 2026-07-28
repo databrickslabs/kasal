@@ -370,7 +370,7 @@ def emit_migration_report(
 
     # Conditional formatting
     lines.append(
-        f"| Conditional Formatting | Improved | — | Business logic now detected |"
+        "| Conditional Formatting | Improved | — | Business logic now detected |"
     )
 
     lines.append("")

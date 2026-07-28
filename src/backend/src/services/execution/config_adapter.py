@@ -67,7 +67,7 @@ def adapt_config(config: CrewConfig) -> Dict[str, Any]:
 
     # Log reasoning settings
     if config.reasoning:
-        logger.info(f"Reasoning is enabled for execution")
+        logger.info("Reasoning is enabled for execution")
     else:
         logger.debug("Reasoning is disabled for execution")
 

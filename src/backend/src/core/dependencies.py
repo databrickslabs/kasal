@@ -84,7 +84,7 @@ async def get_group_context(
             logger.info(f"[CACHE HIT] Returning cached GroupContext for {user_email}")
             return cached
 
-    logger.debug(f"get_group_context called with:")
+    logger.debug("get_group_context called with:")
     logger.debug(f"  X-Auth-Request-Email: {x_auth_request_email}")
     logger.debug(f"  X-Forwarded-Email: {x_forwarded_email}")
     logger.debug(f"  group_id: {x_group_id}")

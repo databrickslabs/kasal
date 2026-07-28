@@ -406,7 +406,7 @@ class FlowRunnerService:
                     execution.id, flow_id, job_id, config
                 )
             else:
-                logger.info(f"Starting execution for dynamic flow")
+                logger.info("Starting execution for dynamic flow")
                 flow_result = await self._run_dynamic_flow(execution.id, job_id, config)
 
             # Return the actual flow result instead of just a status message
@@ -551,7 +551,7 @@ class FlowRunnerService:
                 # CRITICAL: For dynamic flows, we need to populate _flow_data from config
                 # (not load from database since there's no flow_id)
                 if config:
-                    logger.info(f"Updating flow config with provided configuration")
+                    logger.info("Updating flow config with provided configuration")
                     backend_flow.config.update(config)
 
                     # Use the flow_config built by the frontend (buildFlowConfiguration utility)
@@ -742,7 +742,7 @@ class FlowRunnerService:
                                 )
                         else:
                             logger.warning(
-                                f"⚠️ No flow_uuid available - checkpoint NOT saved! Resume dialog will not work."
+                                "⚠️ No flow_uuid available - checkpoint NOT saved! Resume dialog will not work."
                             )
 
                     return {
@@ -1043,7 +1043,7 @@ class FlowRunnerService:
                             # but MERGE listeners from database if they exist
                             if "startingPoints" in frontend_flow_config:
                                 logger.info(
-                                    f"Using flow_config from frontend (has startingPoints)"
+                                    "Using flow_config from frontend (has startingPoints)"
                                 )
                                 config["flow_config"] = frontend_flow_config
 
@@ -1062,7 +1062,7 @@ class FlowRunnerService:
                                             f"Merged {len(db_flow_config['listeners'])} listeners from database into flow_config"
                                         )
                             else:
-                                logger.info(f"Using flow_config from database")
+                                logger.info("Using flow_config from database")
                                 config["flow_config"] = db_flow_config
 
                         # If we still don't have nodes, try direct database access as fallback
@@ -1100,7 +1100,7 @@ class FlowRunnerService:
                         "startingPoints"
                     ):
                         logger.warning(
-                            f"flow_config missing startingPoints - building from nodes/edges"
+                            "flow_config missing startingPoints - building from nodes/edges"
                         )
 
                         # Identify starting nodes (nodes with no incoming edges)
@@ -1146,7 +1146,7 @@ class FlowRunnerService:
 
                 # If config is provided, update the backend flow's config
                 if config:
-                    logger.info(f"Updating flow config with provided configuration")
+                    logger.info("Updating flow config with provided configuration")
                     backend_flow.config.update(config)
 
                 # Update status to RUNNING
@@ -1313,7 +1313,7 @@ class FlowRunnerService:
                                 )
                         else:
                             logger.warning(
-                                f"⚠️ No flow_uuid available - checkpoint NOT saved! Resume dialog will not work."
+                                "⚠️ No flow_uuid available - checkpoint NOT saved! Resume dialog will not work."
                             )
 
                     return {

@@ -178,7 +178,7 @@ def run_flow_in_process(
             try:
                 flow_config = json.loads(flow_config)
                 print(
-                    f"[FLOW_SUBPROCESS] Parsed flow_config from JSON string",
+                    "[FLOW_SUBPROCESS] Parsed flow_config from JSON string",
                     file=sys.stderr,
                 )
             except json.JSONDecodeError as e:
@@ -312,7 +312,7 @@ def run_flow_in_process(
                 if user_token:
                     UserContext.set_user_token(user_token)
                     async_logger.info(
-                        f"[FLOW_SUBPROCESS] ✓ UserContext set with OBO token"
+                        "[FLOW_SUBPROCESS] ✓ UserContext set with OBO token"
                     )
 
                 # Verify
@@ -498,7 +498,7 @@ def run_flow_in_process(
                     )
 
                 async_logger.info(
-                    f"[FLOW_SUBPROCESS] Successfully initialized tracing and event listeners"
+                    "[FLOW_SUBPROCESS] Successfully initialized tracing and event listeners"
                 )
 
             except Exception as trace_init_error:
@@ -619,7 +619,7 @@ def run_flow_in_process(
                     ).get("flow_id")
                     run_name = flow_config.get("run_name")
 
-                    async_logger.info(f"[FLOW_SUBPROCESS] Starting flow execution")
+                    async_logger.info("[FLOW_SUBPROCESS] Starting flow execution")
                     async_logger.info(f"  flow_id: {flow_id}")
                     async_logger.info(f"  execution_id: {execution_id}")
                     async_logger.info(f"  run_name: {run_name}")
@@ -652,7 +652,7 @@ def run_flow_in_process(
                     )
 
                     async_logger.info(
-                        f"[FLOW_SUBPROCESS] Flow execution completed successfully"
+                        "[FLOW_SUBPROCESS] Flow execution completed successfully"
                     )
 
                     # CRITICAL: Flush the CrewAI event bus to ensure all event handlers
@@ -766,7 +766,7 @@ def run_flow_in_process(
                     f"[FLOW_SUBPROCESS] Flow execution failed: {flow_error}"
                 )
             else:
-                async_logger.info(f"[FLOW_SUBPROCESS] Flow completed successfully")
+                async_logger.info("[FLOW_SUBPROCESS] Flow completed successfully")
 
             # Process result - extract actual content like ProcessCrewExecutor does
             processed_result = None
@@ -832,7 +832,7 @@ def run_flow_in_process(
             if isinstance(result, dict) and (
                 result.get("hitl_paused") or result.get("paused_for_approval")
             ):
-                async_logger.info(f"[FLOW_SUBPROCESS] 🚦 Flow paused for HITL approval")
+                async_logger.info("[FLOW_SUBPROCESS] 🚦 Flow paused for HITL approval")
                 return_dict = {
                     "status": "WAITING_FOR_APPROVAL",
                     "execution_id": execution_id,
@@ -1546,7 +1546,7 @@ class ProcessFlowExecutor:
         Returns:
             True if termination successful, False otherwise
         """
-        logger.info(f"[FLOW_STOP] ========== FLOW STOP REQUESTED ==========")
+        logger.info("[FLOW_STOP] ========== FLOW STOP REQUESTED ==========")
         logger.info(f"[FLOW_STOP] execution_id: {execution_id}")
         logger.info(f"[FLOW_STOP] graceful: {graceful}")
         logger.info(
@@ -1607,7 +1607,7 @@ class ProcessFlowExecutor:
             self._running_futures.pop(execution_id, None)
         else:
             logger.info(
-                f"[FLOW_STOP] Process NOT found in tracking (server may have reloaded)"
+                "[FLOW_STOP] Process NOT found in tracking (server may have reloaded)"
             )
 
         # If not found in tracking (e.g., server reloaded), search ALL processes
@@ -1619,10 +1619,10 @@ class ProcessFlowExecutor:
 
         if terminated:
             self._metrics["terminated_executions"] += 1
-            logger.info(f"[FLOW_STOP] ========== FLOW STOP SUCCESSFUL ==========")
+            logger.info("[FLOW_STOP] ========== FLOW STOP SUCCESSFUL ==========")
         else:
             logger.warning(
-                f"[FLOW_STOP] ========== FLOW STOP FAILED - NO PROCESS FOUND =========="
+                "[FLOW_STOP] ========== FLOW STOP FAILED - NO PROCESS FOUND =========="
             )
 
         return terminated
@@ -1909,7 +1909,7 @@ class ProcessFlowExecutor:
                 f"[ProcessFlowExecutor] Failed to write logs to database (non-critical): {e}"
             )
             logger.info(
-                f"[ProcessFlowExecutor] Logs are still available in flow.log file"
+                "[ProcessFlowExecutor] Logs are still available in flow.log file"
             )
 
     async def _write_logs_sqlite_sync(self, logs_to_write: list, db_path: str):

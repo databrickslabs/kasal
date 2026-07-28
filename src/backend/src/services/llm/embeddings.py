@@ -383,7 +383,7 @@ async def get_embedding(
                                                     "embedding", result["data"][0]
                                                 )
                                                 embedding_logger.info(
-                                                    f"Successfully created embedding after token refresh"
+                                                    "Successfully created embedding after token refresh"
                                                 )
                                                 return embedding
                                             else:

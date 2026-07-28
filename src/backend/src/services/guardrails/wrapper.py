@@ -89,7 +89,7 @@ class GuardrailWrapper:
                 self.logger.info(f"Validation result: {result}")
                 # Write to debug log
                 with open(os.path.join(self.log_dir, "guardrail_debug.log"), "a") as f:
-                    f.write(f"Validation PASSED\n")
+                    f.write("Validation PASSED\n")
 
                 # Return a tuple indicating success (True, output)
                 return (True, output)

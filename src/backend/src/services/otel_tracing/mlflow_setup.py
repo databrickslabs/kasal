@@ -803,7 +803,7 @@ def log_mlflow_state(
             if active_run:
                 alog.info(f"[SUBPROCESS] - Active run: {active_run.info.run_id}")
             else:
-                alog.info(f"[SUBPROCESS] - No active run (traces may be run-less)")
+                alog.info("[SUBPROCESS] - No active run (traces may be run-less)")
         except Exception as e:
             alog.info(f"[SUBPROCESS] - Error checking active run: {e}")
 
@@ -862,7 +862,7 @@ async def capture_trace_and_update_execution(
                 f"[SUBPROCESS] - Stored MLflow trace ID {last_trace_id} in execution history"
             )
         else:
-            alog.info(f"[SUBPROCESS] - No last active trace id available")
+            alog.info("[SUBPROCESS] - No last active trace id available")
         return last_trace_id
     except Exception as e:
         alog.warning(f"[SUBPROCESS] - Failed to capture/store trace ID: {e}")

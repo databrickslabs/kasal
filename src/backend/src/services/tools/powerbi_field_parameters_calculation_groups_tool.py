@@ -1489,7 +1489,7 @@ FROM {qualified_table}"""
             fp = field_parameters[0]
 
             # Generate YTD View
-            sql_lines.append(f"-- YTD (Year-to-Date) View")
+            sql_lines.append("-- YTD (Year-to-Date) View")
             sql_lines.append(
                 f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_ytd AS"
             )
@@ -1525,7 +1525,7 @@ WHERE date_column >= DATE_TRUNC('year', CURRENT_DATE())
             sql_lines.append("")
 
             # Generate MTD View
-            sql_lines.append(f"-- MTD (Month-to-Date) View")
+            sql_lines.append("-- MTD (Month-to-Date) View")
             sql_lines.append(
                 f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_mtd AS"
             )
@@ -1561,7 +1561,7 @@ WHERE date_column >= DATE_TRUNC('month', CURRENT_DATE())
             sql_lines.append("")
 
             # Generate Prior Year View
-            sql_lines.append(f"-- PY (Prior Year) View")
+            sql_lines.append("-- PY (Prior Year) View")
             sql_lines.append(
                 f"CREATE OR REPLACE VIEW {target_catalog}.{target_schema}.v_kpi_py AS"
             )
@@ -1631,17 +1631,17 @@ WHERE date_column >= DATEADD(year, -1, DATE_TRUNC('year', CURRENT_DATE()))
             sql_lines.append("")
 
             sql_lines.append("-- Usage examples:")
-            sql_lines.append(f"-- Get all KPIs with all time periods:")
+            sql_lines.append("-- Get all KPIs with all time periods:")
             sql_lines.append(
                 f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods;"
             )
             sql_lines.append("")
-            sql_lines.append(f"-- Get specific KPI across time periods:")
+            sql_lines.append("-- Get specific KPI across time periods:")
             sql_lines.append(
                 f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods WHERE kpi_name = 'Confirmed PHC';"
             )
             sql_lines.append("")
-            sql_lines.append(f"-- Compare Current vs YTD for all KPIs:")
+            sql_lines.append("-- Compare Current vs YTD for all KPIs:")
             sql_lines.append(
                 f"--   SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods WHERE time_period IN ('Current', 'YTD');"
             )
@@ -1735,7 +1735,7 @@ WHERE date_column >= DATEADD(year, -1, DATE_TRUNC('year', CURRENT_DATE()))
         )
         sql_lines.append("--")
         sql_lines.append("-- Quick Start:")
-        sql_lines.append(f"--   1. Run this SQL to create all objects")
+        sql_lines.append("--   1. Run this SQL to create all objects")
         sql_lines.append(
             f"--   2. SELECT * FROM {target_catalog}.{target_schema}.v_kpi_all_periods;"
         )
