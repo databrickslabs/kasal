@@ -39,6 +39,7 @@ from src.api.hitl_router import router as hitl_router
 from src.api.kpi_conversion_router import router as kpi_conversion_router
 from src.api.logs_router import router as logs_router
 from src.api.mcp_router import router as mcp_router
+from src.api.mcp_server_router import router as mcp_server_router
 from src.api.memory_backend import router as memory_backend_router
 from src.api.mlflow_router import router as mlflow_router
 from src.api.models_router import router as models_router
@@ -66,6 +67,9 @@ api_router = APIRouter()
 # Include all the sub-routers
 api_router.include_router(agents_router)
 api_router.include_router(crews_router)
+# Kasal as an MCP SERVER (what external agents call). Distinct from
+# mcp_router above, which is the MCP CLIENT registry.
+api_router.include_router(mcp_server_router)
 api_router.include_router(crews_export_router)
 api_router.include_router(databricks_router)
 api_router.include_router(ui_config_router)
