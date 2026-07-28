@@ -562,7 +562,7 @@ class TestCreateAgents:
         cp = CrewPreparation(config=config)
 
         mock_agent = MagicMock()
-        with patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+        with patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.engines.kasal.paths.crew.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
              patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
 
@@ -586,7 +586,7 @@ class TestCreateAgents:
         cp = CrewPreparation(config=config)
 
         mock_agent = MagicMock()
-        with patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+        with patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.engines.kasal.paths.crew.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
              patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
 
@@ -610,7 +610,7 @@ class TestCreateAgents:
         }
         cp = CrewPreparation(config=config)
 
-        with patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+        with patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.engines.kasal.paths.crew.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
              patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
 
@@ -631,7 +631,7 @@ class TestCreateAgents:
         }
         cp = CrewPreparation(config=config)
 
-        with patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+        with patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.engines.kasal.paths.crew.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
              patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
 
@@ -655,7 +655,7 @@ class TestCreateAgents:
         mock_agent = MagicMock()
         mcp_requirements = {"ag1": [{"name": "server1", "url": "http://server1"}]}
 
-        with patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+        with patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.engines.kasal.paths.crew.crew_preparation.create_agent", new_callable=AsyncMock) as mock_ca, \
              patch.object(cp, "_lookup_kasal_agent_uuid_via_service", new_callable=AsyncMock) as mock_lookup:
 

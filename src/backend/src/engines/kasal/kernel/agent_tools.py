@@ -49,7 +49,7 @@ async def add_mcp_tools(mcp_config: Dict[str, Any], label: str, call_config: Any
     """
     tools: List[Any] = []
     try:
-        from src.engines.kasal.tools.mcp_integration import MCPIntegration
+        from src.services.tools.mcp_integration import MCPIntegration
 
         if MCPIntegration._extract_mcp_servers_from_config((mcp_config or {}).get('tool_configs', {})):
             from src.services.mcp_service import MCPService

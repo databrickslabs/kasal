@@ -83,7 +83,7 @@ async def test_run_light_agent_success_writes_completed_with_raw_answer():
     with patch("src.db.session.request_scoped_session", return_value=_fake_session()), \
          patch("src.utils.user_context.UserContext"), \
          patch("src.services.api_keys_service.ApiKeysService"), \
-         patch("src.engines.kasal.tools.tool_factory.ToolFactory.create",
+         patch("src.services.tools.tool_factory.ToolFactory.create",
                new_callable=AsyncMock, return_value=MagicMock()), \
          patch("src.engines.kasal.kernel.agent_tools.build_agent_with_tools",
                new_callable=AsyncMock, return_value=mock_agent), \
@@ -137,7 +137,7 @@ async def _run_with_captured_handlers(exec_id, config, ctx, mock_agent, trace_in
          patch("src.db.session.get_isolated_db_session", side_effect=lambda: _fake_session()), \
          patch("src.utils.user_context.UserContext"), \
          patch("src.services.api_keys_service.ApiKeysService"), \
-         patch("src.engines.kasal.tools.tool_factory.ToolFactory.create",
+         patch("src.services.tools.tool_factory.ToolFactory.create",
                new_callable=AsyncMock, return_value=MagicMock()), \
          patch("src.engines.kasal.kernel.agent_tools.build_agent_with_tools",
                new_callable=AsyncMock, return_value=mock_agent), \
@@ -357,7 +357,7 @@ async def test_run_light_agent_failure_marks_failed():
     with patch("src.db.session.request_scoped_session", return_value=_fake_session()), \
          patch("src.utils.user_context.UserContext"), \
          patch("src.services.api_keys_service.ApiKeysService"), \
-         patch("src.engines.kasal.tools.tool_factory.ToolFactory.create",
+         patch("src.services.tools.tool_factory.ToolFactory.create",
                new_callable=AsyncMock, return_value=MagicMock()), \
          patch("src.engines.kasal.kernel.agent_tools.build_agent_with_tools",
                new_callable=AsyncMock, side_effect=RuntimeError("boom")), \
@@ -426,7 +426,7 @@ def _light_patches(mock_agent, update_mock, compose_mock):
         patch("src.db.session.request_scoped_session", return_value=_fake_session()),
         patch("src.utils.user_context.UserContext"),
         patch("src.services.api_keys_service.ApiKeysService"),
-        patch("src.engines.kasal.tools.tool_factory.ToolFactory.create",
+        patch("src.services.tools.tool_factory.ToolFactory.create",
               new_callable=AsyncMock, return_value=MagicMock()),
         patch("src.engines.kasal.kernel.agent_tools.build_agent_with_tools",
               new_callable=AsyncMock, return_value=mock_agent),

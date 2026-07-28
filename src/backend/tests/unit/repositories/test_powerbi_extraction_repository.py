@@ -115,7 +115,7 @@ class TestToolPersistenceHook:
 
     @pytest.mark.asyncio
     async def test_save_is_fail_open_on_repo_error(self, monkeypatch):
-        from src.engines.kasal.tools.custom.pipeline_config_generator_tool import (
+        from src.services.tools.pipeline_config_generator_tool import (
             PipelineConfigGeneratorTool,
         )
 
@@ -124,7 +124,7 @@ class TestToolPersistenceHook:
         tool = PipelineConfigGeneratorTool()
 
         # Force the persistence path to blow up; the method must swallow it.
-        import src.engines.kasal.tools.tool_session_provider as tsp
+        import src.services.tools.tool_session_provider as tsp
 
         class _Boom:
             async def __aenter__(self): raise RuntimeError("db down")

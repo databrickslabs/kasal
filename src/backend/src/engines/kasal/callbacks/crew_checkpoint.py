@@ -18,7 +18,7 @@ from typing import Any, Dict, Optional
 from kasal_engine.events import crewai_event_bus
 from kasal_engine.events.types import CrewKickoffCompletedEvent, TaskCompletedEvent
 
-from src.engines.kasal.tools.async_bridge import run_async_with_context
+from src.services.tools.async_bridge import run_async_with_context
 
 logger = logging.getLogger(__name__)
 

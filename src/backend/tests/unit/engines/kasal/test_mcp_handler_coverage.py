@@ -1,11 +1,11 @@
 """
-Coverage tests for src/engines/kasal/tools/mcp_handler.py
+Coverage tests for src/services/tools/mcp_handler.py
 """
 import pytest
 import asyncio
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch, call
-import src.engines.kasal.tools.mcp_handler as mcp_handler
+import src.services.tools.mcp_handler as mcp_handler
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
@@ -188,7 +188,7 @@ async def test_stop_all_adapters_stops_pooled_and_tracked():
     mcp_handler._mcp_connection_pool["key1"] = mock_adapter
     mcp_handler._active_mcp_adapters["id1"] = mock_adapter
 
-    with patch("src.engines.kasal.tools.mcp_handler.stop_mcp_adapter", new=AsyncMock()) as mock_stop:
+    with patch("src.services.tools.mcp_handler.stop_mcp_adapter", new=AsyncMock()) as mock_stop:
         await mcp_handler.stop_all_adapters()
 
     assert len(mcp_handler._active_mcp_adapters) == 0
@@ -204,7 +204,7 @@ async def test_stop_all_adapters_handles_errors():
     async def raise_error(adapter):
         raise Exception("stop failed")
 
-    with patch("src.engines.kasal.tools.mcp_handler.stop_mcp_adapter", side_effect=raise_error):
+    with patch("src.services.tools.mcp_handler.stop_mcp_adapter", side_effect=raise_error):
         await mcp_handler.stop_all_adapters()
 
     # Should complete without raising despite error
@@ -219,7 +219,7 @@ async def test_stop_all_adapters_pooled_adapter_error():
     async def raise_error(adapter):
         raise Exception("pool stop failed")
 
-    with patch("src.engines.kasal.tools.mcp_handler.stop_mcp_adapter", side_effect=raise_error):
+    with patch("src.services.tools.mcp_handler.stop_mcp_adapter", side_effect=raise_error):
         await mcp_handler.stop_all_adapters()
 
     # Pool should be cleared even after error
@@ -308,7 +308,7 @@ async def test_get_databricks_workspace_host_exception():
 
 @pytest.mark.asyncio
 async def test_call_databricks_api_auth_error():
-    with patch("src.engines.kasal.tools.mcp_handler.get_databricks_auth_headers",
+    with patch("src.services.tools.mcp_handler.get_databricks_auth_headers",
                new=AsyncMock(return_value=(None, "auth failed"))):
         result = await mcp_handler.call_databricks_api("/api/test")
 
@@ -317,7 +317,7 @@ async def test_call_databricks_api_auth_error():
 
 @pytest.mark.asyncio
 async def test_call_databricks_api_no_headers():
-    with patch("src.engines.kasal.tools.mcp_handler.get_databricks_auth_headers",
+    with patch("src.services.tools.mcp_handler.get_databricks_auth_headers",
                new=AsyncMock(return_value=(None, None))):
         result = await mcp_handler.call_databricks_api("/api/test")
 
@@ -326,9 +326,9 @@ async def test_call_databricks_api_no_headers():
 
 @pytest.mark.asyncio
 async def test_call_databricks_api_host_error():
-    with patch("src.engines.kasal.tools.mcp_handler.get_databricks_auth_headers",
+    with patch("src.services.tools.mcp_handler.get_databricks_auth_headers",
                new=AsyncMock(return_value=({"Authorization": "Bearer tok"}, None))):
-        with patch("src.engines.kasal.tools.mcp_handler.get_databricks_workspace_host",
+        with patch("src.services.tools.mcp_handler.get_databricks_workspace_host",
                    new=AsyncMock(return_value=(None, "host error"))):
             result = await mcp_handler.call_databricks_api("/api/test")
 
@@ -417,7 +417,7 @@ def test_wrap_mcp_tool_standard_event_loop_fallback():
 
     wrapped = mcp_handler.wrap_mcp_tool(tool)
 
-    with patch("src.engines.kasal.tools.mcp_handler.run_in_separate_process", new=AsyncMock(return_value="process_result")):
+    with patch("src.services.tools.mcp_handler.run_in_separate_process", new=AsyncMock(return_value="process_result")):
         result = wrapped._run()
     assert result == "process_result"
 
@@ -454,7 +454,7 @@ def test_wrap_mcp_tool_genie_tool_fallback_to_process():
 
     wrapped = mcp_handler.wrap_mcp_tool(tool)
 
-    with patch("src.engines.kasal.tools.mcp_handler.run_in_separate_process", new=AsyncMock(return_value="process result")):
+    with patch("src.services.tools.mcp_handler.run_in_separate_process", new=AsyncMock(return_value="process result")):
         result = wrapped._run(space_id="s1", content="hello")
     assert result == "process result"
 
@@ -467,8 +467,8 @@ def test_wrap_mcp_tool_genie_fallback_process_starts_error():
 
     wrapped = mcp_handler.wrap_mcp_tool(tool)
 
-    with patch("src.engines.kasal.tools.mcp_handler.run_in_separate_process", new=AsyncMock(return_value="Error: something")):
-        with patch("src.engines.kasal.tools.mcp_handler.call_databricks_api", new=AsyncMock(return_value={"data": "ok"})):
+    with patch("src.services.tools.mcp_handler.run_in_separate_process", new=AsyncMock(return_value="Error: something")):
+        with patch("src.services.tools.mcp_handler.call_databricks_api", new=AsyncMock(return_value={"data": "ok"})):
             result = wrapped._run(space_id="s1", conversation_id="c1", content="hello")
     # Should return api result
     assert result is not None
@@ -482,7 +482,7 @@ def test_wrap_mcp_tool_genie_all_approaches_fail():
 
     wrapped = mcp_handler.wrap_mcp_tool(tool)
 
-    with patch("src.engines.kasal.tools.mcp_handler.run_in_separate_process", new=AsyncMock(side_effect=Exception("process fail"))):
+    with patch("src.services.tools.mcp_handler.run_in_separate_process", new=AsyncMock(side_effect=Exception("process fail"))):
         result = wrapped._run(space_id="s1")
     assert "Error" in result
 

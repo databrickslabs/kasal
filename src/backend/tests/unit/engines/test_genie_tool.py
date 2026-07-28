@@ -6,7 +6,7 @@ is lightweight (pydantic only), so the real BaseTool imports directly.
 """
 import pytest
 from unittest.mock import patch, AsyncMock, Mock, MagicMock
-from src.engines.kasal.tools.custom.genie_tool import GenieTool, GenieInput
+from src.services.tools.genie_tool import GenieTool, GenieInput
 import logging
 
 logger = logging.getLogger(__name__)

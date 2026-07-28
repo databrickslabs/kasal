@@ -508,7 +508,7 @@ class TestMcpAdaptersStoppedOnSuccess:
             mock_shutdown_provider,
         ):
             with patch(
-                "src.engines.kasal.tools.mcp_handler.stop_all_adapters",
+                "src.services.tools.mcp_handler.stop_all_adapters",
                 mock_stop_all,
             ):
                 # --- Reproduce the exact cleanup sequence ---
@@ -521,7 +521,7 @@ class TestMcpAdaptersStoppedOnSuccess:
 
                 # Step 2: Stop MCP adapters to close streaming HTTP connections
                 try:
-                    from src.engines.kasal.tools.mcp_handler import stop_all_adapters
+                    from src.services.tools.mcp_handler import stop_all_adapters
                     await stop_all_adapters()
                 except Exception:
                     pass
@@ -545,7 +545,7 @@ class TestMcpAdaptersStoppedOnSuccess:
             mock_shutdown_provider,
         ):
             with patch(
-                "src.engines.kasal.tools.mcp_handler.stop_all_adapters",
+                "src.services.tools.mcp_handler.stop_all_adapters",
                 mock_stop_all,
             ):
                 # Reproduce cleanup logic with error resilience
@@ -560,7 +560,7 @@ class TestMcpAdaptersStoppedOnSuccess:
                     pass
 
                 try:
-                    from src.engines.kasal.tools.mcp_handler import stop_all_adapters
+                    from src.services.tools.mcp_handler import stop_all_adapters
                     await stop_all_adapters()
                     mcp_called = True
                 except Exception:

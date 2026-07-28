@@ -57,7 +57,7 @@ def _patch_create_agent_deps():
         patch('src.core.llm_manager.LLMManager'),
         patch('src.db.session.request_scoped_session'),
         patch('src.services.mcp_service.MCPService'),
-        patch('src.engines.kasal.tools.mcp_integration.MCPIntegration'),
+        patch('src.services.tools.mcp_integration.MCPIntegration'),
     )
 
 
@@ -70,7 +70,7 @@ async def _run_create_agent(agent_config, mock_config, mock_tools, agent_class_m
          patch('src.core.llm_manager.LLMManager') as mock_llm_manager, \
          patch('src.db.session.request_scoped_session') as mock_session_factory, \
          patch('src.services.mcp_service.MCPService'), \
-         patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp:
+         patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp:
 
         mock_agent_instance = MagicMock()
         mock_agent_class.return_value = mock_agent_instance

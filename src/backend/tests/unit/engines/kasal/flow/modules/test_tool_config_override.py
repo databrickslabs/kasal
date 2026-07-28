@@ -40,7 +40,7 @@ def _load_modules_isolated():
         "src", "src.core", "src.core.logger",
         "src.utils", "src.utils.user_context",
         "src.engines", "src.engines.kasal",
-        "src.engines.kasal.tools", "src.engines.kasal.tools.tool_factory",
+        "src.services.tools", "src.services.tools.tool_factory",
         "src.engines.kasal.paths.flow", "src.engines.kasal.paths.flow.modules",
         "src.engines.kasal.guardrails",
         "src.services.guardrails", "src.services.guardrails.guardrail_factory",
@@ -50,7 +50,7 @@ def _load_modules_isolated():
         "src.services.mcp_service",
         "src.models", "src.models.agent",
         "src.core.llm_manager",
-        "src.engines.kasal.tools.mcp_integration",
+        "src.services.tools.mcp_integration",
         "crewai", "crewai.flow", "kasal_engine.flow",
         "crewai.tasks", "kasal_engine.core",
     ]
@@ -92,7 +92,7 @@ def _load_modules_isolated():
     _set_attr("crewai", "Task", MagicMock)
     _set_attr("crewai", "Agent", MagicMock)
     _set_attr("crewai", "LLM", MagicMock)
-    _set_attr("src.engines.kasal.tools.tool_factory", "ToolFactory", MagicMock)
+    _set_attr("src.services.tools.tool_factory", "ToolFactory", MagicMock)
     _set_attr("src.db.session", "request_scoped_session", MagicMock)
     _set_attr("src.services.api_keys_service", "ApiKeysService", MagicMock)
 
@@ -226,7 +226,7 @@ class TestTaskConfigToolOverride:
 
         Returns (tf_mod, db_mod, orig_tf, orig_rss) for cleanup.
         """
-        tf_mod = sys.modules["src.engines.kasal.tools.tool_factory"]
+        tf_mod = sys.modules["src.services.tools.tool_factory"]
         db_mod = sys.modules["src.db.session"]
         orig_tf = getattr(tf_mod, "ToolFactory", None)
         orig_rss = getattr(db_mod, "request_scoped_session", None)

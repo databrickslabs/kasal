@@ -68,7 +68,7 @@ def _run_completion(model: str, messages, max_tokens: int = 8):
 
     # Context-preserving bridge: LLMManager.completion needs the group_id
     # ContextVar, which a bare ThreadPoolExecutor offload would drop.
-    from src.engines.kasal.tools.async_bridge import run_async_with_context
+    from src.services.tools.async_bridge import run_async_with_context
     return run_async_with_context(_call(), timeout=30)
 
 

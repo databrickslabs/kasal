@@ -135,7 +135,7 @@ class TestAddMcpTools:
     @pytest.mark.asyncio
     async def test_no_servers_skips_session(self):
         # No MCP servers → returns [] without opening a DB session.
-        with patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mcp:
+        with patch("src.services.tools.mcp_integration.MCPIntegration") as mcp:
             mcp._extract_mcp_servers_from_config.return_value = []
             tools = await add_mcp_tools({"tool_configs": {}}, "agent", {})
         assert tools == []

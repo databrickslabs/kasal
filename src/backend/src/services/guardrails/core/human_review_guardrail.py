@@ -107,7 +107,7 @@ class HumanReviewGuardrail:
 
     def __call__(self, task_output: Any) -> Tuple[bool, Any]:
         from src.engines.kasal.kernel.tool_approval import _notify
-        from src.engines.kasal.tools.async_bridge import run_async_with_context
+        from src.services.tools.async_bridge import run_async_with_context
 
         raw = getattr(task_output, "raw", None)
         raw = raw if isinstance(raw, str) else str(task_output)
@@ -169,7 +169,7 @@ class HumanReviewGuardrail:
         )
 
     def _best_effort_restore(self) -> None:
-        from src.engines.kasal.tools.async_bridge import run_async_with_context
+        from src.services.tools.async_bridge import run_async_with_context
 
         try:
             run_async_with_context(self._restore_running(), timeout=15)

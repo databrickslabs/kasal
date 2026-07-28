@@ -447,7 +447,7 @@ def _make_agent(role="Analyst"):
 async def _create_task_patched(task_key, task_config, agent, **kwargs):
     """Helper to call create_task with all heavy deps mocked."""
     with patch("src.services.mcp_service.MCPService"), \
-         patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+         patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
          patch("src.db.session.request_scoped_session") as mock_sess, \
          patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
          patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -550,7 +550,7 @@ class TestCreateTaskBasic:
     async def test_task_creation_exception_reraises(self):
         agent = _make_agent()
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -585,7 +585,7 @@ class TestCreateTaskToolResolution:
         mock_tool_factory.create_tool = MagicMock(return_value=mock_tool_instance)
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -626,7 +626,7 @@ class TestCreateTaskToolResolution:
         mock_tool_factory.create_tool = MagicMock(return_value=(True, [mcp_t1, mcp_t2]))
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -666,7 +666,7 @@ class TestCreateTaskToolResolution:
         mock_tool_factory.create_tool = MagicMock(return_value=(True, "mcp_service_adapter"))
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -708,7 +708,7 @@ class TestCreateTaskToolResolution:
         mock_tool_factory.create_tool = MagicMock(return_value=mock_genie)
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -752,7 +752,7 @@ class TestCreateTaskToolResolution:
         mock_tool_factory.create_tool = MagicMock(return_value=mock_serper)
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -789,7 +789,7 @@ class TestCreateTaskGuardrail:
         task_config = _base_task_config(guardrail=guardrail_cfg)
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -832,7 +832,7 @@ class TestCreateTaskGuardrail:
         )
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -867,7 +867,7 @@ class TestCreateTaskGuardrail:
         task_config = _base_task_config(guardrail=guardrail_cfg)
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -920,7 +920,7 @@ class TestCreateTaskGuardrail:
             return MagicMock()
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -975,7 +975,7 @@ class TestCreateTaskGuardrail:
             return MagicMock()
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -1018,7 +1018,7 @@ class TestCreateTaskGuardrail:
         task_config = _base_task_config(llm_guardrail=llm_guardrail)
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -1055,7 +1055,7 @@ class TestCreateTaskGuardrail:
         task_config = _base_task_config(llm_guardrail=llm_guardrail)
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -1103,7 +1103,7 @@ class TestCreateTaskGuardrail:
         task_config = _base_task_config(llm_guardrail=llm_guardrail)
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -1152,7 +1152,7 @@ class TestCreateTaskGuardrail:
         task_config = _base_task_config(llm_guardrail=llm_guardrail)
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -1203,7 +1203,7 @@ class TestCreateTaskGuardrail:
         task_config = _base_task_config(llm_guardrail=llm_guardrail)
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -1245,7 +1245,7 @@ class TestCreateTaskGuardrail:
         task_config = _base_task_config(llm_guardrail=llm_guardrail)
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -1285,7 +1285,7 @@ class TestCreateTaskGuardrail:
         )
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -1316,7 +1316,7 @@ class TestCreateTaskGuardrail:
         task_config = _base_task_config(callback=my_callback)
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -1350,7 +1350,7 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
         task_config = _base_task_config()
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
@@ -1396,7 +1396,7 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
         task_config = _base_task_config()
 
         with patch("src.services.mcp_service.MCPService"), \
-             patch("src.engines.kasal.tools.mcp_integration.MCPIntegration") as mock_mcp, \
+             patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.engines.kasal.paths.crew.task_adapter.Task") as mock_task_cls, \
              patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \

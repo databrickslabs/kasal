@@ -1210,7 +1210,7 @@ class TestCreateAgentsMCPRequirements:
         mock_agent = MagicMock()
         return (
             patch(
-                "src.engines.kasal.tools.mcp_integration.MCPIntegration.collect_agent_mcp_requirements",
+                "src.services.tools.mcp_integration.MCPIntegration.collect_agent_mcp_requirements",
                 new_callable=AsyncMock,
                 return_value=mcp_requirements,
             ),

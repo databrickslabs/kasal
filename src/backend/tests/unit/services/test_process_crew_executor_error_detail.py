@@ -93,7 +93,7 @@ def _run_with_prepare_false(crew_config):
         )
         stack.enter_context(
             patch(
-                "src.engines.kasal.tools.tool_factory.ToolFactory.create",
+                "src.services.tools.tool_factory.ToolFactory.create",
                 new=AsyncMock(return_value=MagicMock()),
             )
         )

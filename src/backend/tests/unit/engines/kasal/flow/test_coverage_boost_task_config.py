@@ -659,7 +659,7 @@ class TestConfigureTaskTools:
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
              patch("src.services.api_keys_service.ApiKeysService"), \
-             patch("src.engines.kasal.tools.tool_factory.ToolFactory") as MockTF:
+             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=MagicMock())
 
             await TaskConfig._configure_task_tools(task_data, agent, None)
@@ -682,7 +682,7 @@ class TestConfigureTaskTools:
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
              patch("src.services.api_keys_service.ApiKeysService"), \
-             patch("src.engines.kasal.tools.tool_factory.ToolFactory") as MockTF:
+             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
             await TaskConfig._configure_task_tools(task_data, agent, None)
@@ -703,7 +703,7 @@ class TestConfigureTaskTools:
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
              patch("src.services.api_keys_service.ApiKeysService"), \
-             patch("src.engines.kasal.tools.tool_factory.ToolFactory") as MockTF:
+             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
             await TaskConfig._configure_task_tools(task_data, agent, None)
@@ -720,7 +720,7 @@ class TestConfigureTaskTools:
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
              patch("src.services.api_keys_service.ApiKeysService"), \
-             patch("src.engines.kasal.tools.tool_factory.ToolFactory") as MockTF:
+             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=MagicMock())
 
             # Should not raise
@@ -736,7 +736,7 @@ class TestConfigureTaskTools:
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
              patch("src.services.api_keys_service.ApiKeysService"), \
-             patch("src.engines.kasal.tools.tool_factory.ToolFactory") as MockTF:
+             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=MagicMock())
 
             await TaskConfig._configure_task_tools(task_data, agent, None)
@@ -758,7 +758,7 @@ class TestConfigureTaskTools:
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
              patch("src.services.api_keys_service.ApiKeysService"), \
-             patch("src.engines.kasal.tools.tool_factory.ToolFactory") as MockTF:
+             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
             await TaskConfig._configure_task_tools(task_data, agent, None)
@@ -780,7 +780,7 @@ class TestConfigureTaskTools:
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
              patch("src.services.api_keys_service.ApiKeysService"), \
-             patch("src.engines.kasal.tools.tool_factory.ToolFactory") as MockTF:
+             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=mock_tool_factory)
 
             await TaskConfig._configure_task_tools(task_data, agent, None)
@@ -799,7 +799,7 @@ class TestConfigureTaskTools:
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
              patch("src.services.api_keys_service.ApiKeysService"), \
-             patch("src.engines.kasal.tools.tool_factory.ToolFactory") as MockTF:
+             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             mock_tf = AsyncMock()
             MockTF.create = AsyncMock(return_value=mock_tf)
 
@@ -830,7 +830,7 @@ class TestConfigureTaskTools:
 
         with patch("src.db.session.request_scoped_session", return_value=fail_ctx), \
              patch("src.services.api_keys_service.ApiKeysService"), \
-             patch("src.engines.kasal.tools.tool_factory.ToolFactory") as MockTF:
+             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.return_value = mock_factory
 
             await TaskConfig._configure_task_tools(task_data, agent, None)
@@ -865,7 +865,7 @@ class TestConfigureTaskTools:
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
              patch("src.services.api_keys_service.ApiKeysService"), \
-             patch("src.engines.kasal.tools.tool_factory.ToolFactory") as MockTF:
+             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=mock_factory)
 
             await TaskConfig._configure_task_tools(task_data, agent, flow_data)
@@ -883,7 +883,7 @@ class TestConfigureTaskTools:
 
         with patch("src.db.session.request_scoped_session", return_value=session_ctx), \
              patch("src.services.api_keys_service.ApiKeysService"), \
-             patch("src.engines.kasal.tools.tool_factory.ToolFactory") as MockTF:
+             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=MagicMock())
 
             await TaskConfig._configure_task_tools(task_data, agent, None)

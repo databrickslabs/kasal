@@ -500,8 +500,8 @@ def run_crew_in_process(
             import warnings
 
             from src.engines.kasal.paths.crew.crew_preparation import CrewPreparation
-            from src.engines.kasal.tools.mcp_integration import MCPIntegration
-            from src.engines.kasal.tools.tool_factory import ToolFactory
+            from src.services.tools.mcp_integration import MCPIntegration
+            from src.services.tools.tool_factory import ToolFactory
             from src.services.api_keys_service import ApiKeysService
             from src.services.tool_service import ToolService
 
@@ -1541,7 +1541,7 @@ def run_crew_in_process(
 
                 # Stop MCP adapters to close streaming HTTP connections
                 try:
-                    from src.engines.kasal.tools.mcp_handler import stop_all_adapters
+                    from src.services.tools.mcp_handler import stop_all_adapters
 
                     await stop_all_adapters()
                 except Exception as mcp_err:
@@ -1658,7 +1658,7 @@ def run_crew_in_process(
         # Collect MCP warnings to surface in the execution trace/UI
         mcp_warnings = []
         try:
-            from src.engines.kasal.tools.mcp_integration import MCPIntegration
+            from src.services.tools.mcp_integration import MCPIntegration
 
             mcp_warnings = MCPIntegration.get_warnings()
             if mcp_warnings:

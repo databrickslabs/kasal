@@ -623,7 +623,7 @@ def run_flow_in_process(
 
             # Reset MCP warnings at the start of each flow execution
             try:
-                from src.engines.kasal.tools.mcp_integration import MCPIntegration
+                from src.services.tools.mcp_integration import MCPIntegration
 
                 MCPIntegration.reset_warnings()
             except Exception:
@@ -891,7 +891,7 @@ def run_flow_in_process(
                 # Collect MCP warnings to surface in the execution trace/UI
                 mcp_warnings = []
                 try:
-                    from src.engines.kasal.tools.mcp_integration import MCPIntegration
+                    from src.services.tools.mcp_integration import MCPIntegration
 
                     mcp_warnings = MCPIntegration.get_warnings()
                     if mcp_warnings:

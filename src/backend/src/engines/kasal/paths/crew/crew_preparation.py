@@ -344,7 +344,7 @@ class CrewPreparation:
         """
         try:
             # Use MCP integration to collect agent MCP requirements
-            from src.engines.kasal.tools.mcp_integration import MCPIntegration
+            from src.services.tools.mcp_integration import MCPIntegration
 
             agent_mcp_requirements = (
                 await MCPIntegration.collect_agent_mcp_requirements(self.config)

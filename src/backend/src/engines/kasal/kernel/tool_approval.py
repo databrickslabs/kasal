@@ -167,7 +167,7 @@ def _notify(execution_id: str, payload: Dict[str, Any]) -> None:
             logger.debug(f"[tool_approval] pipe notify skipped: {pipe_err}")
         return
     try:
-        from src.engines.kasal.tools.async_bridge import run_async_with_context
+        from src.services.tools.async_bridge import run_async_with_context
 
         run_async_with_context(_notify_sse(execution_id, payload), timeout=10)
     except Exception as sse_err:  # noqa: BLE001
@@ -176,7 +176,7 @@ def _notify(execution_id: str, payload: Dict[str, Any]) -> None:
 
 def make_tool_approval_hook(execution_id: str, group_context: Optional[GroupContext]):
     """Build the pre-execution hook for one execution's tool calls."""
-    from src.engines.kasal.tools.async_bridge import run_async_with_context
+    from src.services.tools.async_bridge import run_async_with_context
 
     group_id = getattr(group_context, "primary_group_id", None) or "default"
 

@@ -711,7 +711,7 @@ class TestTaskConfigSupplemental:
 
         with patch("src.db.session.request_scoped_session", return_value=mock_session_ctx()), \
              patch("src.services.api_keys_service.ApiKeysService"), \
-             patch("src.engines.kasal.tools.tool_factory.ToolFactory") as MockTF:
+             patch("src.services.tools.tool_factory.ToolFactory") as MockTF:
             MockTF.create = AsyncMock(return_value=mock_factory)
 
             await TaskConfig._configure_task_tools(task_data, mock_agent, None)

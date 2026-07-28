@@ -75,7 +75,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
+                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
                 result = await create_agent(
@@ -116,7 +116,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
+                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
                 result = await create_agent(
@@ -158,7 +158,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
+                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
                 result = await create_agent(
@@ -199,7 +199,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
+                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
                 result = await create_agent(
@@ -239,7 +239,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
+                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
                 result = await create_agent(
@@ -279,7 +279,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
+                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
                 result = await create_agent(
@@ -319,7 +319,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
+                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
                 result = await create_agent(
@@ -364,7 +364,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
+                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
                 result = await create_agent(
@@ -412,7 +412,7 @@ class TestCreateAgentDateAwareness:
             mock_session_factory.return_value = mock_session
 
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
+                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
                 result = await create_agent(
@@ -483,7 +483,7 @@ class TestCreateAgentDateFormatVariations:
             mock_session_factory.return_value = mock_session
 
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
+                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
                 result = await create_agent(
@@ -523,7 +523,7 @@ class TestCreateAgentDateFormatVariations:
             mock_session_factory.return_value = mock_session
 
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
+                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
                 result = await create_agent(
@@ -592,7 +592,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session_factory.return_value = mock_session
 
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
+                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
                 result = await create_agent(
@@ -643,7 +643,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session_factory.return_value = mock_session
 
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
+                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
                 result = await create_agent(
@@ -699,7 +699,7 @@ class TestCreateAgentDateAwarenessWithOtherParams:
             mock_session_factory.return_value = mock_session
 
             with patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-                 patch('src.engines.kasal.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
+                 patch('src.services.tools.mcp_integration.MCPIntegration') as mock_mcp_integration:
                 mock_mcp_integration.create_mcp_tools_for_agent = AsyncMock(return_value=[])
 
                 result = await create_agent(

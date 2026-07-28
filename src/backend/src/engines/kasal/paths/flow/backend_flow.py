@@ -27,7 +27,7 @@ from src.core.llm_manager import LLMManager
 # Import the refactored modules
 from src.engines.kasal.paths.flow.modules.flow_builder import FlowBuilder
 from src.engines.kasal.paths.flow.modules.callback_manager import CallbackManager
-from src.engines.kasal.tools.tool_factory import ToolFactory
+from src.services.tools.tool_factory import ToolFactory
 from src.engines.kasal.paths.flow.exceptions import FlowPausedForApprovalException
 
 # Initialize logger manager - use flow logger for flow execution

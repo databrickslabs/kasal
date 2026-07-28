@@ -340,7 +340,7 @@ class LightAgentService:
 
             # ── Build the ToolFactory (DB-backed API keys), then the agent, then
             # kickoff — all within one DB session so MCP/tool resources stay live.
-            from src.engines.kasal.tools.tool_factory import ToolFactory
+            from src.services.tools.tool_factory import ToolFactory
             from src.services.api_keys_service import ApiKeysService
 
             _factory_group = group_id if group_id != "default" else None

@@ -265,7 +265,7 @@ async def create_task(
     
     # Use centralized MCP integration module for task MCP tools
     try:
-        from src.engines.kasal.tools.mcp_integration import MCPIntegration
+        from src.services.tools.mcp_integration import MCPIntegration
 
         # Cheap dict check FIRST: with no explicit servers the integration
         # returns [] without ever touching the service, so opening a DB

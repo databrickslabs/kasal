@@ -60,7 +60,7 @@ class KnowledgeSearch:
         self, query: str, limit: int = 10, file_paths: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """The matching chunks, unformatted — for callers that want the data."""
-        from src.engines.kasal.tools.tool_session_provider import ToolSessionProvider
+        from src.services.tools.tool_session_provider import ToolSessionProvider
         from src.utils.user_context import GroupContext, UserContext
 
         if self.group_id:

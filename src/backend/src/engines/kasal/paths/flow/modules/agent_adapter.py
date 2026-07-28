@@ -6,7 +6,7 @@ This module handles the configuration of agents for CrewAI flows.
 import json
 
 from src.core.logger import LoggerManager
-from src.engines.kasal.tools.tool_factory import ToolFactory
+from src.services.tools.tool_factory import ToolFactory
 
 # Initialize logger
 logger = LoggerManager.get_instance().flow

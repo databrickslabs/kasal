@@ -10,7 +10,7 @@ from src.core.logger import LoggerManager
 from src.utils.user_context import GroupContext
 from kasal_engine.core import Task
 
-from src.engines.kasal.tools.tool_factory import ToolFactory
+from src.services.tools.tool_factory import ToolFactory
 # Single source of truth for per-tool override resolution (shared with the crew
 # path). The common version additionally guards get_tool_info in try/except.
 from src.engines.kasal.kernel.agent_tools import (
@@ -234,7 +234,7 @@ class TaskConfig:
             group_context: Group context for multi-tenant tool access (optional)
         """
         # Initialize the ToolFactory with proper context for API key access
-        from src.engines.kasal.tools.tool_factory import ToolFactory
+        from src.services.tools.tool_factory import ToolFactory
 
         # Build config with group_id for multi-tenant isolation
         factory_config = {}

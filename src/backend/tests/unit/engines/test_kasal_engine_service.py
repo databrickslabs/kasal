@@ -320,7 +320,7 @@ class TestRunExecution:
             "src.engines.kasal.kasal_engine_service.TraceManager.ensure_writer_started",
             new_callable=AsyncMock,
         ), patch(
-            "src.engines.kasal.tools.tool_factory.ToolFactory.create",
+            "src.services.tools.tool_factory.ToolFactory.create",
             new_callable=AsyncMock,
         ) as mock_factory_create, patch(
             "src.engines.kasal.kasal_engine_service.run_crew_in_process",

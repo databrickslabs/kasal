@@ -70,7 +70,7 @@ class TestMCPServersExcludedFromAutoResolution:
         mock_mcp_service_cls = MagicMock()
 
         with patch(
-            "src.engines.kasal.tools.mcp_integration.MCPIntegration",
+            "src.services.tools.mcp_integration.MCPIntegration",
             mock_mcp_integration,
         ), patch(
             "src.services.mcp_service.MCPService",
