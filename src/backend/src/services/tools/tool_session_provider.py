@@ -52,7 +52,7 @@ class ToolSessionProvider:
                 cached = await svc.get_cached_metadata(group_id=gid, ...)
         """
         from src.db.session import async_session_factory
-        from src.services.powerbi_semantic_model_cache_service import PowerBISemanticModelCacheService
+        from src.services.powerbi.semantic_model_cache import PowerBISemanticModelCacheService
 
         async with async_session_factory() as session:
             try:

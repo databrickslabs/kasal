@@ -249,7 +249,7 @@ class MLflowService:
         # Fallback: try to read workspace URL from stored Databricks configuration
         if not workspace_url:
             try:
-                from src.services.databricks_service import DatabricksService
+                from src.services.databricks.service import DatabricksService
                 svc = DatabricksService(self.session)
                 cfg = await svc.get_databricks_config()
                 if cfg and getattr(cfg, "workspace_url", None):

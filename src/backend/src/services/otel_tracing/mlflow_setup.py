@@ -313,7 +313,7 @@ async def configure_mlflow_in_subprocess(
         warehouse_id = None
         try:
             from src.db.session import async_session_factory
-            from src.services.databricks_service import DatabricksService
+            from src.services.databricks.service import DatabricksService
 
             async with async_session_factory() as session:
                 databricks_service = DatabricksService(

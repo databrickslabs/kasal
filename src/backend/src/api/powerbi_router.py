@@ -20,8 +20,8 @@ from src.schemas.powerbi_context_config import (
     PowerBIContextConfigBulkResponse,
     PowerBIContextConfigDict
 )
-from src.services.powerbi_service import PowerBIService
-from src.services.powerbi_context_config_service import PowerBIContextConfigService
+from src.services.powerbi.service import PowerBIService
+from src.services.powerbi.context_config import PowerBIContextConfigService
 from src.core.dependencies import SessionDep, GroupContextDep
 from src.core.permissions import is_workspace_admin
 

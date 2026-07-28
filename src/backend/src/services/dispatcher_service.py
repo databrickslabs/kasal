@@ -50,7 +50,7 @@ from src.schemas.task_generation import TaskGenerationRequest, TaskGenerationRes
 from src.services.agent_generation_service import AgentGenerationService
 from src.services.crew_generation_service import CrewGenerationService
 from src.services.crew_service import CrewService
-from src.services.databricks_service import DatabricksService
+from src.services.databricks.service import DatabricksService
 from src.services.flow_service import FlowService
 from src.services.log_service import LLMLogService
 from src.services.mlflow.service import MLflowService

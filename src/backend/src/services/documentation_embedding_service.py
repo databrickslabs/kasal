@@ -156,7 +156,7 @@ class DocumentationEmbeddingService:
             logger.info(f"Checking if index is ready before initializing Databricks storage - endpoint: {endpoint_name}, index: {index_name}")
 
             # Use DatabricksIndexService to wait for index readiness with retries
-            from src.services.databricks_index_service import DatabricksIndexService
+            from src.services.databricks.index import DatabricksIndexService
             index_service = DatabricksIndexService(workspace_url)
 
             # Wait for index to be ready (with shorter timeout for documentation embedding)

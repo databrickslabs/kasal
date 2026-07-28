@@ -94,7 +94,7 @@ def _crew_execution_context(crew, mlflow_result=None, mcp_warnings=None, otel_br
         patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
         patch("src.db.database_router.get_smart_db_session",
               new=_make_db_session_mock()),
-        patch("src.services.databricks_service.DatabricksService",
+        patch("src.services.databricks.service.DatabricksService",
               return_value=MagicMock(
                   get_databricks_config=AsyncMock(return_value=None))),
         patch("src.utils.databricks_auth.get_auth_context",
@@ -290,7 +290,7 @@ class TestRunCrewInProcessWithMockCrew:
             patch("src.services.mlflow.tracing.cleanup_async_db_connections"),
             patch("src.db.database_router.get_smart_db_session",
                   new=_make_db_session_mock()),
-            patch("src.services.databricks_service.DatabricksService",
+            patch("src.services.databricks.service.DatabricksService",
                   return_value=MagicMock(
                       get_databricks_config=AsyncMock(return_value=None))),
             patch("src.utils.databricks_auth.get_auth_context",

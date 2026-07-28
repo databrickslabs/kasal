@@ -708,7 +708,7 @@ class TestGetDatabricksCatalogSchema:
             catalog='example_catalog', schema='kasal',
             warehouse_id='w', workspace_url='', enabled=True,
         )
-        with patch('src.services.databricks_service.DatabricksService') as MockSvc:
+        with patch('src.services.databricks.service.DatabricksService') as MockSvc:
             MockSvc.return_value.get_databricks_config = AsyncMock(return_value=config)
             catalog, schema, warehouse = await service._get_databricks_catalog_schema(mock_group_context)
         assert catalog == 'example_catalog'
@@ -718,14 +718,14 @@ class TestGetDatabricksCatalogSchema:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_config(self, service, mock_group_context):
         """No active Databricks config → (None, None, None) so exporter uses defaults."""
-        with patch('src.services.databricks_service.DatabricksService') as MockSvc:
+        with patch('src.services.databricks.service.DatabricksService') as MockSvc:
             MockSvc.return_value.get_databricks_config = AsyncMock(return_value=None)
             assert await service._get_databricks_catalog_schema(mock_group_context) == (None, None, None)
 
     @pytest.mark.asyncio
     async def test_non_fatal_on_error(self, service, mock_group_context):
         """Errors are swallowed → (None, None, None), export still proceeds."""
-        with patch('src.services.databricks_service.DatabricksService') as MockSvc:
+        with patch('src.services.databricks.service.DatabricksService') as MockSvc:
             MockSvc.return_value.get_databricks_config = AsyncMock(side_effect=RuntimeError('boom'))
             assert await service._get_databricks_catalog_schema(mock_group_context) == (None, None, None)
 

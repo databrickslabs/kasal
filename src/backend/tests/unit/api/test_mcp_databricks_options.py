@@ -244,7 +244,7 @@ async def test_genie_spaces_step_returns_mcp_urls_and_page_token():
     with (
         patch("src.utils.databricks_auth.get_auth_context", AsyncMock(return_value=_auth())),
         patch("src.utils.databricks_auth.extract_user_token_from_request", return_value="tok"),
-        patch("src.services.genie_service.GenieService", MagicMock(return_value=genie_service)),
+        patch("src.services.databricks.genie.GenieService", MagicMock(return_value=genie_service)),
     ):
         result = await list_genie_mcp_spaces(
             _request(), search="sales", page_token=None, group_context=_admin_ctx()

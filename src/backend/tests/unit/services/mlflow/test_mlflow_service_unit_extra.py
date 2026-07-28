@@ -56,7 +56,7 @@ async def test_get_trace_deeplink_builds_url(monkeypatch):
             return SimpleNamespace(workspace_url="acme.databricks.com")
     fake_dbs_mod.DatabricksService = FakeDBSvc
     # Use monkeypatch to avoid leaking sys.modules changes
-    monkeypatch.setitem(sys.modules, 'src.services.databricks_service', fake_dbs_mod)
+    monkeypatch.setitem(sys.modules, 'src.services.databricks.service', fake_dbs_mod)
 
     # no job id
     out = await svc.get_trace_deeplink()

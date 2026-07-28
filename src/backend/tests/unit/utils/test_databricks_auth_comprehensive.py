@@ -154,7 +154,7 @@ class TestLoadConfig:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         with patch.object(auth, "_check_oauth_environment"), \
-             patch("src.services.databricks_service.DatabricksService", return_value=mock_service), \
+             patch("src.services.databricks.service.DatabricksService", return_value=mock_service), \
              patch("src.db.session.request_scoped_session", return_value=mock_session):
             result = await auth._load_config()
         assert result is True
@@ -169,7 +169,7 @@ class TestLoadConfig:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
         with patch.object(auth, "_check_oauth_environment"), \
-             patch("src.services.databricks_service.DatabricksService", return_value=mock_service), \
+             patch("src.services.databricks.service.DatabricksService", return_value=mock_service), \
              patch("src.db.session.request_scoped_session", return_value=mock_session):
             result = await auth._load_config()
         assert result is True
@@ -180,7 +180,7 @@ class TestLoadConfig:
         with patch.object(auth, "_check_oauth_environment"):
             original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
             def fail_import(name, *args, **kwargs):
-                if name == "src.services.databricks_service":
+                if name == "src.services.databricks.service":
                     raise ImportError("no module")
                 return original_import(name, *args, **kwargs)
             with patch("builtins.__import__", side_effect=fail_import):

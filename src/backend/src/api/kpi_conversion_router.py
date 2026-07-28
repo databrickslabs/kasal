@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional, List, Dict, Any
 import logging
 
-from src.services.kpi_conversion_service import KPIConversionService
+from src.services.powerbi.kpi_conversion import KPIConversionService
 from src.schemas.kpi_conversion import (
     ConversionRequest,
     ConversionResponse,

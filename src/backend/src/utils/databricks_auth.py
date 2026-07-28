@@ -431,7 +431,7 @@ class DatabricksAuth:
 
             # Try to load workspace host from database configuration
             try:
-                from src.services.databricks_service import DatabricksService
+                from src.services.databricks.service import DatabricksService
                 from src.db.session import async_session_factory
 
                 async with async_session_factory() as session:

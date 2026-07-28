@@ -81,7 +81,7 @@ class TestConfigGeneratorToolExtended:
             return CM()
 
         with (
-            patch('src.services.powerbi_semantic_model_cache_service.PowerBISemanticModelCacheService',
+            patch('src.services.powerbi.semantic_model_cache.PowerBISemanticModelCacheService',
                   return_value=mock_svc),
             patch('src.services.tools.metric_view_utils.utils.run_async',
                   return_value=cached_data),
@@ -640,7 +640,7 @@ class TestConfigGeneratorFilterSetsFromIn:
 
         with (
             patch('src.db.session.async_session_factory', mock_session_factory),
-            patch('src.services.powerbi_semantic_model_cache_service.PowerBISemanticModelCacheService',
+            patch('src.services.powerbi.semantic_model_cache.PowerBISemanticModelCacheService',
                   return_value=mock_svc),
         ):
             result = tool._run(

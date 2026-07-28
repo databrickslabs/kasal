@@ -241,7 +241,7 @@ class TestParentSetupMemoization:
         svc, dbx, setup = self._enabled_stack()
         with (
             patch("src.services.mlflow.service.MLflowService", MagicMock(return_value=svc)),
-            patch("src.services.databricks_service.DatabricksService", MagicMock(return_value=dbx)),
+            patch("src.services.databricks.service.DatabricksService", MagicMock(return_value=dbx)),
             patch("src.services.otel_tracing.mlflow_parent_setup._setup_sync", setup),
         ):
             assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1")) is True
@@ -256,7 +256,7 @@ class TestParentSetupMemoization:
         svc, dbx, setup = self._enabled_stack()
         with (
             patch("src.services.mlflow.service.MLflowService", MagicMock(return_value=svc)),
-            patch("src.services.databricks_service.DatabricksService", MagicMock(return_value=dbx)),
+            patch("src.services.databricks.service.DatabricksService", MagicMock(return_value=dbx)),
             patch("src.services.otel_tracing.mlflow_parent_setup._setup_sync", setup),
         ):
             assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1")) is True
@@ -281,7 +281,7 @@ class TestParentSetupMemoization:
         svc, dbx, setup = self._enabled_stack(setup_result=False)
         with (
             patch("src.services.mlflow.service.MLflowService", MagicMock(return_value=svc)),
-            patch("src.services.databricks_service.DatabricksService", MagicMock(return_value=dbx)),
+            patch("src.services.databricks.service.DatabricksService", MagicMock(return_value=dbx)),
             patch("src.services.otel_tracing.mlflow_parent_setup._setup_sync", setup),
         ):
             assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1")) is False
@@ -294,7 +294,7 @@ class TestParentSetupMemoization:
         svc, dbx, setup = self._enabled_stack()
         with (
             patch("src.services.mlflow.service.MLflowService", MagicMock(return_value=svc)),
-            patch("src.services.databricks_service.DatabricksService", MagicMock(return_value=dbx)),
+            patch("src.services.databricks.service.DatabricksService", MagicMock(return_value=dbx)),
             patch("src.services.otel_tracing.mlflow_parent_setup._setup_sync", setup),
         ):
             assert await configure_parent_mlflow_tracing(MagicMock(), self._ctx("g1")) is True
@@ -336,7 +336,7 @@ class TestConfigureParentMlflowTracing:
 
         with (
             patch("src.services.mlflow.service.MLflowService", MagicMock(return_value=svc)),
-            patch("src.services.databricks_service.DatabricksService", MagicMock(return_value=dbx)),
+            patch("src.services.databricks.service.DatabricksService", MagicMock(return_value=dbx)),
             patch("src.services.otel_tracing.mlflow_parent_setup._setup_sync", side_effect=_fake_setup),
         ):
             ok = await configure_parent_mlflow_tracing(MagicMock(), None, label="CrewGeneration")

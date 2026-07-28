@@ -349,7 +349,7 @@ class PromptOptimizationService(
 
         # Managed MLflow: UC prompt registry needs a three-level name from the
         # workspace's configured catalog + schema.
-        from src.services.databricks_service import DatabricksService
+        from src.services.databricks.service import DatabricksService
 
         db_config = await DatabricksService(
             self.session, group_id=group_id

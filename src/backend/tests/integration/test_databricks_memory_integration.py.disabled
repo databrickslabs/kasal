@@ -27,8 +27,8 @@ from src.engines.crewai.memory.databricks_vector_storage import DatabricksVector
 #     LongTermMemorySchema,
 #     EntityMemorySchema
 # )  # These schema classes don't exist - commented out
-from src.services.databricks_index_service import DatabricksIndexService
-from src.services.databricks_service import DatabricksService
+from src.services.databricks.index import DatabricksIndexService
+from src.services.databricks.service import DatabricksService
 
 
 # DISABLED: Integration tests have multiple API signature mismatches and missing dependencies

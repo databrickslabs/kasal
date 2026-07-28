@@ -24,7 +24,7 @@ from kasal_engine.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr
 import httpx
 
-from src.services.dax_rag_retriever import DaxRagRetriever
+from src.services.powerbi.dax_rag_retriever import DaxRagRetriever
 from src.services.tools.tool_session_provider import ToolSessionProvider
 
 logger = logging.getLogger(__name__)

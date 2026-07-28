@@ -947,7 +947,7 @@ class TestConfigureMlflowFullSPNPath:
         }):
             with (
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
-                patch("src.services.databricks_service.DatabricksService",
+                patch("src.services.databricks.service.DatabricksService",
                       MagicMock(return_value=mock_service_instance)),
             ):
                 result = await configure_mlflow_in_subprocess(
@@ -1017,7 +1017,7 @@ class TestConfigureMlflowFullSPNPath:
         }):
             with (
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
-                patch("src.services.databricks_service.DatabricksService",
+                patch("src.services.databricks.service.DatabricksService",
                       MagicMock(return_value=mock_service_instance)),
                 patch("src.services.mlflow.integration.enable_autologs",
                       mock_enable_autologs),
@@ -1088,7 +1088,7 @@ class TestConfigureMlflowFullSPNPath:
         }):
             with (
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
-                patch("src.services.databricks_service.DatabricksService",
+                patch("src.services.databricks.service.DatabricksService",
                       MagicMock(return_value=mock_service_instance)),
                 patch("src.services.mlflow.integration.enable_autologs",
                       MagicMock()),
@@ -1151,7 +1151,7 @@ class TestConfigureMlflowFullSPNPath:
         }):
             with (
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
-                patch("src.services.databricks_service.DatabricksService", mock_service_cls),
+                patch("src.services.databricks.service.DatabricksService", mock_service_cls),
                 patch("src.services.otel_tracing.mlflow_setup.enable_autologs" if False else "src.services.mlflow.integration.enable_autologs", MagicMock()),
             ):
                 result = await configure_mlflow_in_subprocess(
@@ -1235,7 +1235,7 @@ class TestConfigureMlflowFullSPNPath:
         }):
             with (
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
-                patch("src.services.databricks_service.DatabricksService", mock_service_cls),
+                patch("src.services.databricks.service.DatabricksService", mock_service_cls),
             ):
                 result = await configure_mlflow_in_subprocess(
                     db_config=_make_db_config(True),
@@ -1284,7 +1284,7 @@ class TestConfigureMlflowFullSPNPath:
         }):
             with (
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
-                patch("src.services.databricks_service.DatabricksService", MagicMock(return_value=mock_service_instance)),
+                patch("src.services.databricks.service.DatabricksService", MagicMock(return_value=mock_service_instance)),
             ):
                 result = await configure_mlflow_in_subprocess(
                     db_config=_make_db_config(True),
@@ -1328,7 +1328,7 @@ class TestConfigureMlflowFullSPNPath:
         }):
             with (
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
-                patch("src.services.databricks_service.DatabricksService", MagicMock(return_value=mock_service_instance)),
+                patch("src.services.databricks.service.DatabricksService", MagicMock(return_value=mock_service_instance)),
             ):
                 result = await configure_mlflow_in_subprocess(
                     db_config=_make_db_config(True),
@@ -1376,7 +1376,7 @@ class TestConfigureMlflowFullSPNPath:
         }):
             with (
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
-                patch("src.services.databricks_service.DatabricksService", MagicMock(return_value=mock_service_instance)),
+                patch("src.services.databricks.service.DatabricksService", MagicMock(return_value=mock_service_instance)),
             ):
                 result = await configure_mlflow_in_subprocess(
                     db_config=_make_db_config(True),
@@ -1676,7 +1676,7 @@ class TestTrackedCompletionMonkeyPatch:
         }):
             with (
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
-                patch("src.services.databricks_service.DatabricksService", MagicMock(return_value=mock_svc)),
+                patch("src.services.databricks.service.DatabricksService", MagicMock(return_value=mock_svc)),
             ):
                 result = await configure_mlflow_in_subprocess(
                     db_config=_make_db_config(True),
@@ -1774,7 +1774,7 @@ class TestTrackedCompletionMonkeyPatch:
             }):
                 with (
                     patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
-                    patch("src.services.databricks_service.DatabricksService", MagicMock(return_value=mock_svc)),
+                    patch("src.services.databricks.service.DatabricksService", MagicMock(return_value=mock_svc)),
                     patch.object(_litellm, "completion", mock_original_completion),
                 ):
                     result = await configure_mlflow_in_subprocess(

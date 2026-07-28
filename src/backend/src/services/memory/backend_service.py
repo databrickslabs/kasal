@@ -15,12 +15,12 @@ from src.schemas.memory_backend import (
     MemoryBackendType,
     MemoryBackendUpdate,
 )
-from src.services.databricks_connection_service import DatabricksConnectionService
-from src.services.databricks_index_service import DatabricksIndexService
-from src.services.databricks_vectorsearch_setup_service import (
+from src.services.databricks.connection import DatabricksConnectionService
+from src.services.databricks.index import DatabricksIndexService
+from src.services.databricks.vectorsearch_setup import (
     DatabricksVectorSearchSetupService,
 )
-from src.services.databricks_vectorsearch_verification_service import (
+from src.services.databricks.vectorsearch_verification import (
     DatabricksVectorSearchVerificationService,
 )
 

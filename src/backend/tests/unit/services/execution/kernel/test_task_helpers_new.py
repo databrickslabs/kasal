@@ -450,7 +450,7 @@ async def _create_task_patched(task_key, task_config, agent, **kwargs):
          patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
          patch("src.db.session.request_scoped_session") as mock_sess, \
          patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-         patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+         patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
          patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc:
 
         mock_mcp_instance = MagicMock()
@@ -553,7 +553,7 @@ class TestCreateTaskBasic:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
@@ -588,7 +588,7 @@ class TestCreateTaskToolResolution:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
@@ -629,7 +629,7 @@ class TestCreateTaskToolResolution:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
@@ -669,7 +669,7 @@ class TestCreateTaskToolResolution:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
@@ -711,7 +711,7 @@ class TestCreateTaskToolResolution:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
@@ -755,7 +755,7 @@ class TestCreateTaskToolResolution:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.agent_builder.task_adapter.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
@@ -792,7 +792,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
              patch("src.services.agent_builder.task_adapter.GuardrailWrapper") as mock_gw:
@@ -835,7 +835,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
              patch("src.services.task_output.databricks_volume.DatabricksVolumeCallback") as mock_dvcb:
@@ -870,7 +870,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
              patch("src.services.agent_builder.task_adapter.GuardrailWrapper") as mock_gw:
@@ -923,7 +923,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
              patch("src.services.agent_builder.task_adapter.GuardrailWrapper") as mock_gw:
@@ -978,7 +978,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.guardrails.guardrail_factory.GuardrailFactory") as mock_gf, \
              patch("src.services.agent_builder.task_adapter.GuardrailWrapper") as mock_gw:
@@ -1021,7 +1021,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("kasal_engine.core.LLMGuardrail") as mock_llm_g, \
              patch("kasal_engine.llm.LLM") as mock_llm_cls:
@@ -1058,7 +1058,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("kasal_engine.core.LLMGuardrail") as mock_llm_g, \
              patch("kasal_engine.llm.LLM") as mock_llm_cls:
@@ -1106,7 +1106,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("kasal_engine.core.LLMGuardrail") as mock_llm_g, \
              patch("src.core.llm_manager.LLMManager.configure_kasal_llm",
@@ -1155,7 +1155,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("kasal_engine.core.LLMGuardrail") as mock_llm_g, \
              patch("src.core.llm_manager.LLMManager.configure_kasal_llm",
@@ -1206,7 +1206,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("kasal_engine.core.LLMGuardrail") as mock_llm_g, \
              patch("src.core.llm_manager.LLMManager.configure_kasal_llm",
@@ -1248,7 +1248,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("kasal_engine.core.LLMGuardrail") as mock_llm_g, \
              patch("kasal_engine.llm.LLM") as mock_llm_cls:
@@ -1288,7 +1288,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.task_output.databricks_volume.DatabricksVolumeCallback") as mock_dvcb:
 
@@ -1319,7 +1319,7 @@ class TestCreateTaskGuardrail:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])
@@ -1353,7 +1353,7 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc, \
              patch("src.services.task_output.databricks_volume.DatabricksVolumeCallback") as mock_dvcb:
 
@@ -1399,7 +1399,7 @@ class TestCreateTaskDatabricksVolumeAutoCallback:
              patch("src.services.tools.mcp_integration.MCPIntegration") as mock_mcp, \
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.agent_builder.task_adapter.Task") as mock_task_cls, \
-             patch("src.services.databricks_service.DatabricksService") as mock_db_svc, \
+             patch("src.services.databricks.service.DatabricksService") as mock_db_svc, \
              patch("src.services.memory.backend_service.MemoryBackendService") as mock_mem_svc:
 
             mock_mcp.create_mcp_tools_for_task = AsyncMock(return_value=[])

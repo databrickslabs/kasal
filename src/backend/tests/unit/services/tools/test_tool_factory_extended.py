@@ -594,7 +594,7 @@ class TestValidateDatabricksAuth:
 
             with (
                 patch("src.db.session.request_scoped_session", mock_sess_ctx),
-                patch("src.services.databricks_service.DatabricksService", mock_svc_cls),
+                patch("src.services.databricks.service.DatabricksService", mock_svc_cls),
             ):
                 valid, msg = await f._validate_databricks_auth()
 

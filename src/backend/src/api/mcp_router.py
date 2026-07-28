@@ -337,7 +337,7 @@ async def list_genie_mcp_spaces(
         raise ForbiddenError("Only admins can browse Databricks MCP servers")
 
     from src.schemas.genie import GenieAuthConfig, GenieSpacesRequest
-    from src.services.genie_service import GenieService
+    from src.services.databricks.genie import GenieService
     from src.utils.databricks_auth import (
         extract_user_token_from_request,
         get_auth_context,

@@ -349,7 +349,7 @@ class ToolFactory:
             
             # Check for Databricks config in database
             try:
-                from src.services.databricks_service import DatabricksService
+                from src.services.databricks.service import DatabricksService
                 from src.db.session import request_scoped_session
                 
                 group_id = self.config.get('group_id', 'default') if isinstance(self.config, dict) else 'default'
@@ -1241,7 +1241,7 @@ class ToolFactory:
                     if not databricks_host:
                         try:
                             # Try to get from DatabricksService configuration
-                            from src.services.databricks_service import DatabricksService
+                            from src.services.databricks.service import DatabricksService
                             from src.db.session import request_scoped_session
 
                             async def get_databricks_config():

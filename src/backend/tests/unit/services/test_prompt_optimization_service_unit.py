@@ -618,7 +618,7 @@ class TestRegistryResolution:
             return_value=SimpleNamespace(catalog="main", db_schema="kasal")
         )
         with patch(
-            "src.services.databricks_service.DatabricksService", return_value=fake_db
+            "src.services.databricks.service.DatabricksService", return_value=fake_db
         ):
             uri, name = await svc._resolve_registry("detect_intent", _group())
         assert uri == "databricks-uc"
@@ -633,7 +633,7 @@ class TestRegistryResolution:
         fake_db = MagicMock()
         fake_db.get_databricks_config = AsyncMock(return_value=None)
         with patch(
-            "src.services.databricks_service.DatabricksService", return_value=fake_db
+            "src.services.databricks.service.DatabricksService", return_value=fake_db
         ):
             with pytest.raises(ValueError, match="catalog and schema"):
                 await svc._resolve_registry("detect_intent", _group())

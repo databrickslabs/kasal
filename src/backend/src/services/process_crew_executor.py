@@ -575,7 +575,7 @@ def run_crew_in_process(
             db_config = None
             try:
                 from src.db.database_router import get_smart_db_session
-                from src.services.databricks_service import DatabricksService
+                from src.services.databricks.service import DatabricksService
 
                 async for session in get_smart_db_session():
                     current_group_id = (

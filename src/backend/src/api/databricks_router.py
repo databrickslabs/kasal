@@ -12,7 +12,7 @@ from src.schemas.databricks_config import (
     DatabricksConfigResponse,
 )
 from src.services.api_keys_service import ApiKeysService
-from src.services.databricks_service import DatabricksService
+from src.services.databricks.service import DatabricksService
 
 router = APIRouter(
     prefix="/databricks",

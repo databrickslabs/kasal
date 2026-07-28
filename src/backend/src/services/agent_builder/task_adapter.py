@@ -449,7 +449,7 @@ async def create_task(
     # Check for global Databricks volume configuration if no callback is set
     if not existing_callback:
         try:
-            from src.services.databricks_service import DatabricksService
+            from src.services.databricks.service import DatabricksService
             from src.services.memory.backend_service import MemoryBackendService
             from src.db.session import request_scoped_session
 

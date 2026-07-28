@@ -39,7 +39,7 @@ _EMBEDDING_QUEUE = f"{_SVC}.embedding_queue"
 # Local imports inside methods - must patch at SOURCE modules
 _DOC_EMBEDDING_REPO_CLS = "src.repositories.documentation_embedding_repository.DocumentationEmbeddingRepository"
 _ASYNC_SESSION_FACTORY = "src.db.session.request_scoped_session"
-_DATABRICKS_INDEX_SERVICE = "src.services.databricks_index_service.DatabricksIndexService"
+_DATABRICKS_INDEX_SERVICE = "src.services.databricks.index.DatabricksIndexService"
 _DATABRICKS_VECTOR_STORAGE = "src.services.memory.databricks_vector_storage.DatabricksVectorStorage"
 _DATABRICKS_VECTOR_INDEX_REPO = "src.repositories.databricks_vector_index_repository.DatabricksVectorIndexRepository"
 

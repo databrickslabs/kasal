@@ -222,7 +222,7 @@ class TestGetTraceDeeplink:
         svc = make_service()
         ctx, m = _patch_auth(return_value=None)
         with ctx:
-            with patch("src.services.databricks_service.DatabricksService") as ds_cls:
+            with patch("src.services.databricks.service.DatabricksService") as ds_cls:
                 ds_cls.return_value.get_databricks_config = AsyncMock(return_value=None)
                 result = await svc.get_trace_deeplink()
         assert result["url"] is None

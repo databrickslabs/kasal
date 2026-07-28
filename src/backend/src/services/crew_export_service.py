@@ -249,7 +249,7 @@ class CrewExportService:
         exporter fall back to its defaults (main/agents).
         """
         try:
-            from src.services.databricks_service import DatabricksService
+            from src.services.databricks.service import DatabricksService
 
             group_id = group_context.primary_group_id if group_context else None
             service = DatabricksService(self.session, group_id=group_id)

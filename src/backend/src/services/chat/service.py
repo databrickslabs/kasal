@@ -1227,7 +1227,7 @@ class LightAgentService:
                 extract_trace_outputs,
             )
             from src.db.session import async_session_factory
-            from src.services.databricks_service import DatabricksService
+            from src.services.databricks.service import DatabricksService
 
             # Load the workspace's Databricks config (same source crew/flow use).
             async with async_session_factory() as _session:

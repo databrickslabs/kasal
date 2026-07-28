@@ -624,7 +624,7 @@ class TestValidateDatabricksAuthExtended:
         with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock,
                    side_effect=Exception("no auth")), \
              patch("src.db.session.request_scoped_session") as mock_sess_ctx, \
-             patch("src.services.databricks_service.DatabricksService", return_value=mock_svc):
+             patch("src.services.databricks.service.DatabricksService", return_value=mock_svc):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -649,7 +649,7 @@ class TestValidateDatabricksAuthExtended:
         with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock,
                    side_effect=Exception("no auth")), \
              patch("src.db.session.request_scoped_session") as mock_sess_ctx, \
-             patch("src.services.databricks_service.DatabricksService", return_value=mock_svc):
+             patch("src.services.databricks.service.DatabricksService", return_value=mock_svc):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -669,7 +669,7 @@ class TestValidateDatabricksAuthExtended:
         with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock,
                    side_effect=Exception("no auth")), \
              patch("src.db.session.request_scoped_session") as mock_sess_ctx, \
-             patch("src.services.databricks_service.DatabricksService", return_value=mock_svc):
+             patch("src.services.databricks.service.DatabricksService", return_value=mock_svc):
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -987,7 +987,7 @@ class TestValidateDatabricksAuthFallbacks:
         with patch("src.utils.databricks_auth.get_auth_context", new_callable=AsyncMock,
                    side_effect=Exception("no auth")), \
              patch("src.db.session.request_scoped_session") as mock_sess_ctx, \
-             patch("src.services.databricks_service.DatabricksService") as mock_svc_cls:
+             patch("src.services.databricks.service.DatabricksService") as mock_svc_cls:
             mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
             mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
             # Service itself raises

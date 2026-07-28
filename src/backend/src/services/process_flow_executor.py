@@ -511,7 +511,7 @@ def run_flow_in_process(
             mlflow_result = None
             try:
                 from src.db.database_router import get_smart_db_session
-                from src.services.databricks_service import DatabricksService
+                from src.services.databricks.service import DatabricksService
 
                 db_config = None
                 async for _db_session in get_smart_db_session():
