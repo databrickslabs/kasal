@@ -22,7 +22,7 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
 
-from src.services.execution.runtime.executor import extract_json_dict
+from src.core.llm.json_extraction import extract_json_dict
 from .base import BaseLLM
 
 logger = logging.getLogger(__name__)

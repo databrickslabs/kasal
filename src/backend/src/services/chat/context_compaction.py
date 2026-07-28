@@ -172,8 +172,8 @@ async def maintain_session_summary(
         # Same event the tool-loop trim emits, so BOTH kinds of compaction show
         # up as one row type in the trace instead of only the chat log knowing.
         try:
-            from src.services.execution.events.bus import event_bus
-            from src.services.execution.events.types import ContextCompactionEvent
+            from src.core.events.bus import event_bus
+            from src.core.events.types import ContextCompactionEvent
 
             event_bus.emit(
                 None,

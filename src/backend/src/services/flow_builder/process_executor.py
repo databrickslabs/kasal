@@ -361,7 +361,7 @@ def run_flow_in_process(
                 )
 
                 from src.services.execution.logs.writer_task import LogWriterTask
-                from src.services.execution.events import event_bus
+                from src.core.events import event_bus
 
                 # Start trace and logs writers
                 await LogWriterTask.ensure_writer_started()
@@ -657,7 +657,7 @@ def run_flow_in_process(
                     # (agent execution started/completed, tool usage, etc.) complete their
                     # work before we return.
                     try:
-                        from src.services.execution.events import event_bus as _event_bus
+                        from src.core.events import event_bus as _event_bus
 
                         async_logger.info(
                             "[FLOW_SUBPROCESS] Flushing CrewAI event bus to ensure all trace handlers complete..."
@@ -713,7 +713,7 @@ def run_flow_in_process(
                 )
                 # Flush event bus even on error to capture partial traces
                 try:
-                    from src.services.execution.events import event_bus as _event_bus
+                    from src.core.events import event_bus as _event_bus
 
                     _event_bus.flush(timeout=10.0)
                 except Exception:
@@ -894,7 +894,7 @@ def run_flow_in_process(
                 # This is essential for llm_request/llm_response traces that are written
                 # asynchronously by the event bus's thread pool
                 try:
-                    from src.services.execution.events import (
+                    from src.core.events import (
                         event_bus as _cleanup_event_bus,
                     )
 

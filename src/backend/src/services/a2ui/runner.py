@@ -79,8 +79,8 @@ def _emit_surface_event(
     try:
         import time
 
-        from src.services.execution.events.bus import event_bus
-        from src.services.execution.events.types import A2UISurfaceEvent
+        from src.core.events.bus import event_bus
+        from src.core.events.types import A2UISurfaceEvent
 
         components = None
         if isinstance(surface, dict):

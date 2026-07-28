@@ -6,8 +6,8 @@ from unittest.mock import patch
 import pytest
 
 from src.services.execution.runtime.types import Process, TaskOutput
-from src.services.execution.events.bus import EventsBus
-from src.services.execution.events.types import CrewKickoffCompletedEvent, TaskCompletedEvent
+from src.core.events.bus import EventsBus
+from src.core.events.types import CrewKickoffCompletedEvent, TaskCompletedEvent
 
 from src.services.execution.checkpoint import (
     CrewTaskCheckpointRecorder,

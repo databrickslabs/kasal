@@ -445,21 +445,21 @@ class LightAgentService:
                 # the DB on refresh). Both are matched by agent id so a concurrent
                 # light run's tools never bleed into this run's timeline.
                 import json
-                from src.services.execution.events import event_bus
-                from src.services.execution.events import ToolUsageStartedEvent, ToolUsageFinishedEvent, ToolUsageErrorEvent
+                from src.core.events import event_bus
+                from src.core.events import ToolUsageStartedEvent, ToolUsageFinishedEvent, ToolUsageErrorEvent
                 # ``Agent.kickoff_async`` runs as a CrewAI "LiteAgent" and emits these
                 # lifecycle events on the SAME bus — they fire on every run, even one
                 # that calls no tools, which is what gives the chat a trace when the
                 # answer is pure prose (the tool handlers above never fire then).
-                from src.services.execution.events import LiteAgentExecutionStartedEvent, LiteAgentExecutionCompletedEvent, LiteAgentExecutionErrorEvent
-                from src.services.execution.events import LLMCallStartedEvent, LLMCallCompletedEvent, LLMCallFailedEvent
-                from src.services.execution.events import LLMStreamChunkEvent
+                from src.core.events import LiteAgentExecutionStartedEvent, LiteAgentExecutionCompletedEvent, LiteAgentExecutionErrorEvent
+                from src.core.events import LLMCallStartedEvent, LLMCallCompletedEvent, LLMCallFailedEvent
+                from src.core.events import LLMStreamChunkEvent
                 # Memory recall/persist events — emitted by the unified Memory with
                 # source=<the Memory> (no agent_id), so they're matched by identity
                 # (source is _agent_memory). These give the chat trace the same
                 # "Memory Read / Memory Context Retrieved / Memory Write" rows the
                 # crew/flow OTel timeline shows — homogeneous across paths.
-                from src.services.execution.events import MemoryQueryCompletedEvent, MemoryRetrievalCompletedEvent, MemorySaveCompletedEvent
+                from src.core.events import MemoryQueryCompletedEvent, MemoryRetrievalCompletedEvent, MemorySaveCompletedEvent
 
                 _agent_id = str(getattr(agent, "id", "") or "")
                 # Mutable holder so the (sync, possibly worker-thread) started/completed

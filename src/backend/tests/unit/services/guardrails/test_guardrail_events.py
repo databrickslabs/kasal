@@ -14,7 +14,7 @@ import pytest
 from src.services.execution.runtime.guardrail import LLMGuardrail
 from src.services.execution.runtime.task import Task
 from src.services.execution.runtime.types import TaskOutput
-from src.services.execution.events import (
+from src.core.events import (
     LLMGuardrailCompletedEvent,
     LLMGuardrailFailedEvent,
     LLMGuardrailStartedEvent,

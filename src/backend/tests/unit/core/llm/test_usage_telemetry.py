@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.services.execution.events import LLMCallCompletedEvent, LLMCallType
+from src.core.events import LLMCallCompletedEvent, LLMCallType
 from src.core.llm import usage_telemetry
 
 
@@ -97,7 +97,7 @@ class TestHandler:
 
 class TestRegistration:
     def test_registers_on_the_engine_bus_once(self):
-        from src.services.execution.events.bus import event_bus
+        from src.core.events.bus import event_bus
 
         usage_telemetry._registered = False
         try:

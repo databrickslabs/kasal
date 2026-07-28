@@ -21,8 +21,8 @@ import logging
 import os
 from typing import Any, Optional
 
-from src.services.execution.events import LLMCallCompletedEvent
-from src.services.execution.events.bus import event_bus
+from src.core.events import LLMCallCompletedEvent
+from src.core.events.bus import event_bus
 
 logger = logging.getLogger(__name__)
 

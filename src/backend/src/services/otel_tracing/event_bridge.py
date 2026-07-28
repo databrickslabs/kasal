@@ -327,66 +327,66 @@ class OTelEventBridge:
         # Each tuple: (module_path, class_name)
         _EVENT_CLASSES = [
             # Crew lifecycle
-            ("src.services.execution.events", "CrewKickoffStartedEvent"),
-            ("src.services.execution.events", "CrewKickoffCompletedEvent"),
+            ("src.core.events", "CrewKickoffStartedEvent"),
+            ("src.core.events", "CrewKickoffCompletedEvent"),
             # Agent execution
-            ("src.services.execution.events", "AgentExecutionStartedEvent"),
-            ("src.services.execution.events", "AgentExecutionCompletedEvent"),
+            ("src.core.events", "AgentExecutionStartedEvent"),
+            ("src.core.events", "AgentExecutionCompletedEvent"),
             # Task lifecycle
-            ("src.services.execution.events", "TaskStartedEvent"),
-            ("src.services.execution.events", "TaskCompletedEvent"),
-            ("src.services.execution.events", "TaskFailedEvent"),
+            ("src.core.events", "TaskStartedEvent"),
+            ("src.core.events", "TaskCompletedEvent"),
+            ("src.core.events", "TaskFailedEvent"),
             # Tool usage
-            ("src.services.execution.events", "ToolUsageStartedEvent"),
-            ("src.services.execution.events", "ToolUsageFinishedEvent"),
-            ("src.services.execution.events", "ToolUsageErrorEvent"),
+            ("src.core.events", "ToolUsageStartedEvent"),
+            ("src.core.events", "ToolUsageFinishedEvent"),
+            ("src.core.events", "ToolUsageErrorEvent"),
             # LLM calls
-            ("src.services.execution.events", "LLMCallStartedEvent"),
-            ("src.services.execution.events", "LLMCallCompletedEvent"),
-            ("src.services.execution.events", "LLMCallFailedEvent"),
-            ("src.services.execution.events", "LLMStreamChunkEvent"),
+            ("src.core.events", "LLMCallStartedEvent"),
+            ("src.core.events", "LLMCallCompletedEvent"),
+            ("src.core.events", "LLMCallFailedEvent"),
+            ("src.core.events", "LLMStreamChunkEvent"),
             # Memory
-            ("src.services.execution.events", "MemorySaveStartedEvent"),
-            ("src.services.execution.events", "MemorySaveCompletedEvent"),
-            ("src.services.execution.events", "MemorySaveFailedEvent"),
-            ("src.services.execution.events", "MemoryQueryStartedEvent"),
-            ("src.services.execution.events", "MemoryQueryCompletedEvent"),
-            ("src.services.execution.events", "MemoryQueryFailedEvent"),
-            ("src.services.execution.events", "MemoryRetrievalCompletedEvent"),
-            ("src.services.execution.events", "MemoryRetrievalFailedEvent"),
+            ("src.core.events", "MemorySaveStartedEvent"),
+            ("src.core.events", "MemorySaveCompletedEvent"),
+            ("src.core.events", "MemorySaveFailedEvent"),
+            ("src.core.events", "MemoryQueryStartedEvent"),
+            ("src.core.events", "MemoryQueryCompletedEvent"),
+            ("src.core.events", "MemoryQueryFailedEvent"),
+            ("src.core.events", "MemoryRetrievalCompletedEvent"),
+            ("src.core.events", "MemoryRetrievalFailedEvent"),
             # Knowledge
-            ("src.services.execution.events", "KnowledgeRetrievalStartedEvent"),
-            ("src.services.execution.events", "KnowledgeRetrievalCompletedEvent"),
+            ("src.core.events", "KnowledgeRetrievalStartedEvent"),
+            ("src.core.events", "KnowledgeRetrievalCompletedEvent"),
             # Reasoning
-            ("src.services.execution.events", "AgentReasoningStartedEvent"),
-            ("src.services.execution.events", "AgentReasoningCompletedEvent"),
-            ("src.services.execution.events", "AgentReasoningFailedEvent"),
+            ("src.core.events", "AgentReasoningStartedEvent"),
+            ("src.core.events", "AgentReasoningCompletedEvent"),
+            ("src.core.events", "AgentReasoningFailedEvent"),
             # Guardrails
-            ("src.services.execution.events", "LLMGuardrailStartedEvent"),
-            ("src.services.execution.events", "LLMGuardrailCompletedEvent"),
-            ("src.services.execution.events", "LLMGuardrailFailedEvent"),
+            ("src.core.events", "LLMGuardrailStartedEvent"),
+            ("src.core.events", "LLMGuardrailCompletedEvent"),
+            ("src.core.events", "LLMGuardrailFailedEvent"),
             # Flow. No FlowCreatedEvent: the engine's Flow has no "created"
             # lifecycle point (only kickoff start/finish), so subscribing to one
             # would be permanently dead wiring — which is exactly how flow spans
             # went missing in the first place.
-            ("src.services.execution.events", "FlowStartedEvent"),
-            ("src.services.execution.events", "FlowFinishedEvent"),
+            ("src.core.events", "FlowStartedEvent"),
+            ("src.core.events", "FlowFinishedEvent"),
             # MCP
-            ("src.services.execution.events", "MCPConnectionStartedEvent"),
-            ("src.services.execution.events", "MCPConnectionCompletedEvent"),
-            ("src.services.execution.events", "MCPToolExecutionStartedEvent"),
-            ("src.services.execution.events", "MCPToolExecutionCompletedEvent"),
+            ("src.core.events", "MCPConnectionStartedEvent"),
+            ("src.core.events", "MCPConnectionCompletedEvent"),
+            ("src.core.events", "MCPToolExecutionStartedEvent"),
+            ("src.core.events", "MCPToolExecutionCompletedEvent"),
             # HITL
-            ("src.services.execution.events", "HumanFeedbackRequestedEvent"),
-            ("src.services.execution.events", "HumanFeedbackReceivedEvent"),
+            ("src.core.events", "HumanFeedbackRequestedEvent"),
+            ("src.core.events", "HumanFeedbackReceivedEvent"),
             # A2UI surface composition. Emitted for every outcome, including the
             # gates that decline — a chat turn that produced no surface is the
             # case people ask about, and it left no trace at all.
-            ("src.services.execution.events", "A2UISurfaceEvent"),
+            ("src.core.events", "A2UISurfaceEvent"),
             # Context compaction. Lossy, and its absence from this list is how
             # a whole event type stays invisible: the map below is not enough,
             # the bridge only ever sees what it SUBSCRIBES to here.
-            ("src.services.execution.events", "ContextCompactionEvent"),
+            ("src.core.events", "ContextCompactionEvent"),
         ]
 
         import importlib
@@ -541,7 +541,7 @@ class OTelEventBridge:
             # pending background memory save still needs.
             if not is_run_level:
                 try:
-                    from src.services.execution.events import set_event_context
+                    from src.core.events import set_event_context
                     set_event_context(
                         agent_role=agent_name or None,
                         agent_id=getattr(event, "agent_id", None)

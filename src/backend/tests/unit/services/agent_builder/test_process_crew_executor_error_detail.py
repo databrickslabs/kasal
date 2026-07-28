@@ -63,7 +63,7 @@ def _run_with_prepare_false(crew_config):
                     "src.services.execution.subprocess_bootstrap": mock_logging_config,
                     "crewai": MagicMock(),
                     "src.core.llm.transport": MagicMock(LLM_CONTEXT_WINDOW_SIZES={}),
-                    "src.services.execution.events": MagicMock(),
+                    "src.core.events": MagicMock(),
                     "crewai.utilities": MagicMock(),
                     "crewai.utilities.exceptions": MagicMock(),
                     "src.core.llm.transport": MagicMock(

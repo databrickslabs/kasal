@@ -148,7 +148,7 @@ def remember_async(
 
     try:
         # copy_context: the caller's ambient event attribution (agent/task set
-        # via src.services.execution.events.event_context) rides into the writer thread,
+        # via src.core.events.event_context) rides into the writer thread,
         # so MemorySave* events land under the right task in the trace.
         ctx = contextvars.copy_context()
         future = _WRITE_POOL.submit(ctx.run, _write)
@@ -203,7 +203,7 @@ def inject_task_memory(memory: Any, tasks: list[Any]) -> int:
 def _task_event_context(task: Any):
     """Scoped ambient event attribution for ``task`` (no-op fallback)."""
     try:
-        from src.services.execution.events import event_context
+        from src.core.events import event_context
 
         agent = getattr(task, "agent", None)
         return event_context(
@@ -297,7 +297,7 @@ def register_task_output_persistence(crew: Any) -> Any:
     if mem is None:
         return lambda: None
     try:
-        from src.services.execution.events import TaskCompletedEvent, event_bus
+        from src.core.events import TaskCompletedEvent, event_bus
     except ImportError:  # pragma: no cover - engine always present in app
         return lambda: None
 

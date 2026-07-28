@@ -13,8 +13,8 @@ and the OTel bridge turns it into a row the timeline can render.
 
 import pytest
 
-from src.services.execution.events.bus import event_bus
-from src.services.execution.events.types import A2UISurfaceEvent
+from src.core.events.bus import event_bus
+from src.core.events.types import A2UISurfaceEvent
 from src.services.a2ui import runner as a2ui_runner
 
 

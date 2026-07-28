@@ -19,8 +19,8 @@ from typing import Any, ClassVar, Generic, TypeVar
 
 from pydantic import BaseModel
 
-from src.services.execution.events.bus import event_bus
-from src.services.execution.events.types import FlowFinishedEvent, FlowStartedEvent
+from src.core.events.bus import event_bus
+from src.core.events.types import FlowFinishedEvent, FlowStartedEvent
 
 logger = logging.getLogger(__name__)
 

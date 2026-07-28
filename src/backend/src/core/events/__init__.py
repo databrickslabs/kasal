@@ -1,6 +1,25 @@
-"""src.services.execution.events — generated from the kasal_engine datamodel.
+"""
+The event bus: what a run announces while it happens.
 
-Generated from the kasal_engine datamodel — do not edit by hand."""
+Agents, tasks, tools, LLM calls, memory, guardrails and A2UI surfaces all emit
+here. Exactly ONE subscriber writes traces — ``OTelEventBridge`` in
+``services/otel_tracing`` — and adding a second is how this codebase ended up
+with three generations of dead listeners (see services/execution/CLAUDE.md).
+
+**This is core infrastructure, not a service.** No business logic, no group
+scoping, no repository: process-wide pub/sub that the LLM transport, the agent
+runtime, tools, memory and guardrails all publish to.
+
+It spent a few hours under ``services/execution/`` during the engine flattening,
+and that was wrong in a way worth recording. ``core/llm/transport`` emits events,
+so a service-layer bus made ``core`` import ``services`` at module level — the
+layering inverted, and the import graph stayed acyclic only by luck.
+
+``event_bus`` is the process-wide singleton. It was ``crewai_event_bus`` until
+the engine stopped being a vendored package; the old name is gone, not aliased,
+because a compatibility alias here would have outlived everyone who remembered
+why.
+"""
 
 from .bus import (
     BaseEventListener,

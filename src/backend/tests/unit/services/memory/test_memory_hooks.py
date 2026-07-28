@@ -165,7 +165,7 @@ class TestTaskOutputPersistence:
         return SimpleNamespace(memory=memory, tasks=[task]), task
 
     def test_persists_completed_task_output(self):
-        from src.services.execution.events import TaskCompletedEvent, event_bus
+        from src.core.events import TaskCompletedEvent, event_bus
 
         done = threading.Event()
         memory = MagicMock()
@@ -189,7 +189,7 @@ class TestTaskOutputPersistence:
         assert memory.remember.call_args.kwargs["agent_role"] == "Researcher"
 
     def test_foreign_task_is_ignored(self):
-        from src.services.execution.events import TaskCompletedEvent, event_bus
+        from src.core.events import TaskCompletedEvent, event_bus
 
         memory = MagicMock()
         crew, _task = self._crew(memory)

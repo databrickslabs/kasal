@@ -23,7 +23,7 @@ from src.services.otel_tracing.event_bridge import OTelEventBridge
 
 @pytest.fixture
 def bus():
-    from src.services.execution.events import event_bus
+    from src.core.events import event_bus
 
     snapshot = {k: list(v) for k, v in event_bus._handlers.items()}
     yield event_bus
@@ -104,7 +104,7 @@ class TestGuardrailSpans:
 
     def test_bridge_subscribes_to_guardrail_events(self, bus, spans):
         """The migration's dangling subscriptions must resolve now."""
-        from src.services.execution.events import LLMGuardrailStartedEvent
+        from src.core.events import LLMGuardrailStartedEvent
 
         assert any(
             handlers

@@ -15,8 +15,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from src.services.execution.events import event_bus
-from src.services.execution.events.types import CrewKickoffCompletedEvent, TaskCompletedEvent
+from src.core.events import event_bus
+from src.core.events.types import CrewKickoffCompletedEvent, TaskCompletedEvent
 
 from src.services.tools.async_bridge import run_async_with_context
 

@@ -34,7 +34,7 @@ def _embedder(texts):
 @pytest.fixture
 def bus():
     """Global engine bus with handler snapshot/restore (bridge has no off())."""
-    from src.services.execution.events import event_bus
+    from src.core.events import event_bus
 
     snapshot = {k: list(v) for k, v in event_bus._handlers.items()}
     yield event_bus
@@ -102,7 +102,7 @@ class TestPersistReachesTrace:
         )
         crew = SimpleNamespace(memory=memory, tasks=[task])
 
-        from src.services.execution.events import TaskCompletedEvent, event_bus
+        from src.core.events import TaskCompletedEvent, event_bus
 
         unregister = register_task_output_persistence(crew)
         try:
@@ -128,7 +128,7 @@ class TestPersistReachesTrace:
         """The crew subprocess flushes after kickoff: once flush returns, the
         record is in storage and the Memory Write span is exported — nothing
         left to die with the interpreter."""
-        from src.services.execution.events import TaskCompletedEvent, event_bus
+        from src.core.events import TaskCompletedEvent, event_bus
         from src.services.memory.hooks import flush_memory_writes
 
         backend = LocalMemoryStorage(tmp_path / "m.db", embedder=_embedder)

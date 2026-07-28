@@ -1689,7 +1689,7 @@ class TestCodexHandlerVendor:
                 "from src.core.llm.transport import OpenAICompletion",
             ).replace(
                 "from crewai.events.types.llm_events import LLMCallType",
-                "from src.services.execution.events import LLMCallType",
+                "from src.core.events import LLMCallType",
             )
 
         assert _normalize(vendored.read_text(encoding="utf-8")) == _normalize(

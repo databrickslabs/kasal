@@ -17,8 +17,8 @@ from typing import Any, Literal
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field
 
-from src.services.execution.events.bus import event_bus
-from src.services.execution.events.types import (
+from src.core.events.bus import event_bus
+from src.core.events.types import (
     AgentExecutionCompletedEvent,
     AgentExecutionStartedEvent,
     LiteAgentExecutionCompletedEvent,

@@ -16,10 +16,12 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
+from src.core.llm.json_extraction import extract_json_dict
+
 from pydantic import BaseModel, Field
 
-from src.services.execution.events.bus import event_bus
-from src.services.execution.events.types import (
+from src.core.events.bus import event_bus
+from src.core.events.types import (
     ToolUsageErrorEvent,
     ToolUsageFinishedEvent,
     ToolUsageStartedEvent,
@@ -29,7 +31,6 @@ from src.services.tools.base import BaseTool, sanitize_tool_name
 logger = logging.getLogger(__name__)
 
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
-_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
 def interpolate_text(text: str | None, inputs: dict[str, Any]) -> str | None:
@@ -198,31 +199,6 @@ def call_llm(
     kwargs = {k: v for k, v in optional.items() if k in accepted}
     result = call(messages, **kwargs)
     return result if isinstance(result, str) else str(result)
-
-
-def extract_json_dict(text: str) -> dict[str, Any] | None:
-    """Pull the first JSON object out of an LLM response, tolerantly."""
-    candidates = _JSON_FENCE_RE.findall(text)
-    if not candidates:
-        start = text.find("{")
-        if start != -1:
-            depth = 0
-            for i in range(start, len(text)):
-                if text[i] == "{":
-                    depth += 1
-                elif text[i] == "}":
-                    depth -= 1
-                    if depth == 0:
-                        candidates = [text[start : i + 1]]
-                        break
-    for candidate in candidates:
-        try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            return parsed
-    return None
 
 
 def structured_from_raw(model: type[BaseModel], raw: str) -> BaseModel | None:

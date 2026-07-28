@@ -146,7 +146,7 @@ class EventPipeWriter:
 
     def register(self, bus: Any) -> "EventPipeWriter":
         from kasal_engine import events as engine_events
-        from src.services.execution.events import (
+        from src.core.events import (
             LLMCallCompletedEvent,
             LLMStreamChunkEvent,
             TaskCompletedEvent,

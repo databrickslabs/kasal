@@ -114,7 +114,7 @@ async def test_run_light_agent_success_writes_completed_with_raw_answer():
 # getattr on the event), exactly as crewai's bus would during kickoff.
 
 import asyncio  # noqa: E402
-import src.services.execution.events as _ce
+import src.core.events as _ce
 
 
 async def _run_with_captured_handlers(exec_id, config, ctx, mock_agent, trace_instance, emit_during_kickoff):

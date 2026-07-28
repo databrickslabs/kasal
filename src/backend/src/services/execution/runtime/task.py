@@ -19,8 +19,8 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
-from src.services.execution.events.bus import event_bus
-from src.services.execution.events.types import (
+from src.core.events.bus import event_bus
+from src.core.events.types import (
     LLMGuardrailCompletedEvent,
     LLMGuardrailFailedEvent,
     LLMGuardrailStartedEvent,

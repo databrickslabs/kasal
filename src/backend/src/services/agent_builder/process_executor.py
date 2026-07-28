@@ -1027,7 +1027,7 @@ def run_crew_in_process(
 
                     # Event subscriptions belong to the OTel bridge, registered
                     # just below on this same bus.
-                    from src.services.execution.events import event_bus
+                    from src.core.events import event_bus
 
                     async_logger.info(
                         f"CREW_SUBPROCESS_MODE={os.environ.get('CREW_SUBPROCESS_MODE')} - Direct DB writes enabled"
@@ -1465,7 +1465,7 @@ def run_crew_in_process(
                 # thread pool, so without an explicit flush, DB writes for llm_request/
                 # llm_response traces may not complete before subprocess cleanup begins.
                 try:
-                    from src.services.execution.events import event_bus as _event_bus
+                    from src.core.events import event_bus as _event_bus
 
                     async_logger.info(
                         "[SUBPROCESS] Flushing CrewAI event bus to ensure all trace handlers complete..."
@@ -1525,7 +1525,7 @@ def run_crew_in_process(
                 # This is essential for llm_request/llm_response traces that are written
                 # asynchronously by the event bus's thread pool
                 try:
-                    from src.services.execution.events import (
+                    from src.core.events import (
                         event_bus as _cleanup_event_bus,
                     )
 
@@ -1640,7 +1640,7 @@ def run_crew_in_process(
 
         # Flush event bus even on error to capture partial traces
         try:
-            from src.services.execution.events import event_bus as _event_bus
+            from src.core.events import event_bus as _event_bus
 
             _event_bus.flush(timeout=10.0)
         except Exception:

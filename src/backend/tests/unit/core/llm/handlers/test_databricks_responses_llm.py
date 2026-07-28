@@ -121,7 +121,7 @@ _MOCK_MODULES = {
     "src.core.llm.transport": MagicMock(
         OpenAICompletion=_FakeOpenAICompletion,
     ),
-    "src.services.execution.events": MagicMock(
+    "src.core.events": MagicMock(
         LLMCallType=MagicMock(LLM_CALL="LLM_CALL", TOOL_CALL="TOOL_CALL"),
     ),
 }
@@ -141,7 +141,7 @@ for _key, _mock_mod in _MOCK_MODULES.items():
 # Derived from the module key rather than hand-assembled path parts: those did
 # not follow the package when it moved, and a load failure here leaves the mocks
 # below installed for the WHOLE session (a MagicMock standing in for
-# `src.services.execution.events` makes every later `src.services.execution.events.bus` import fail
+# `src.core.events` makes every later `src.core.events.bus` import fail
 # with "not a package"). Hence the try/finally too — restore must be
 # unconditional.
 _handler_path = str(

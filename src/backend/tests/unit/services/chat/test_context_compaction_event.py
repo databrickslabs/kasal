@@ -19,8 +19,8 @@ Two defects this guards:
 """
 import pytest
 
-from src.services.execution.events.bus import event_bus
-from src.services.execution.events.types import ContextCompactionEvent
+from src.core.events.bus import event_bus
+from src.core.events.types import ContextCompactionEvent
 from src.core.llm.transport.completion import OpenAICompletion
 
 

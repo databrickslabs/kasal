@@ -16,8 +16,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, PrivateAttr
 
-from src.services.execution.events.bus import event_bus
-from src.services.execution.events.types import ContextCompactionEvent, LLMCallType, LLMStreamChunkEvent
+from src.core.events.bus import event_bus
+from src.core.events.types import ContextCompactionEvent, LLMCallType, LLMStreamChunkEvent
 from .base import BaseLLM
 from .constants import CONTEXT_WINDOW_USAGE_RATIO, LLM_CONTEXT_WINDOW_SIZES
 from .exceptions import (
