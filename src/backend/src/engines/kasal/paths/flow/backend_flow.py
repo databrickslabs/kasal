@@ -26,7 +26,6 @@ from src.core.llm_manager import LLMManager
 
 # Import the refactored modules
 from src.engines.kasal.paths.flow.modules.flow_builder import FlowBuilder
-from src.engines.kasal.paths.flow.modules.callback_manager import CallbackManager
 from src.services.tools.tool_factory import ToolFactory
 from src.engines.kasal.paths.flow.exceptions import FlowPausedForApprovalException
 
@@ -531,8 +530,9 @@ class BackendFlow:
                 "flow_id": self._flow_id
             }
         finally:
-            # Clean up callbacks using the CallbackManager
-            CallbackManager.cleanup_callbacks(callbacks)
+            # Nothing to tear down: flows register no async callback objects.
+            # Live events and traces come off the event bus in the subprocess.
+            pass
 
     async def kickoff(self) -> Dict[str, Any]:
         """Execute the flow and return the result"""
@@ -771,8 +771,9 @@ class BackendFlow:
                 "flow_id": self._flow_id
             }
         finally:
-            # Clean up callbacks using the CallbackManager
-            CallbackManager.cleanup_callbacks(callbacks)
+            # Nothing to tear down: flows register no async callback objects.
+            # Live events and traces come off the event bus in the subprocess.
+            pass
 
     async def plot(self, filename: str = "flow_diagram") -> Optional[str]:
         """

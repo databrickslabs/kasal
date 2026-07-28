@@ -1,16 +1,13 @@
 """
-CrewAI Callbacks Package
+Kasal engine callbacks.
 
-This package contains callbacks for use with the CrewAI engine. Callbacks provide
-additional functionality that can be attached to task processing pipelines, such as
-logging and storage of outputs.
+What lives here is what an execution wires into the engine itself:
+the crew's step/task hooks (``execution_callback``) and the volume writer.
+Event SUBSCRIPTIONS belong to the OTel bridge (``services/otel_tracing``),
+not to this package.
 """
 
 from src.engines.kasal.callbacks.base import KasalCallback
-from src.engines.kasal.callbacks.streaming_callbacks import (
-    LogCaptureHandler,
-    JobOutputCallback
-)
 from src.engines.kasal.callbacks.databricks_volume_callback import (
     DatabricksVolumeCallback
 )
@@ -18,10 +15,6 @@ from src.engines.kasal.callbacks.databricks_volume_callback import (
 __all__ = [
     # Base
     'KasalCallback',
-
-    # Streaming
-    'LogCaptureHandler',
-    'JobOutputCallback',
 
     # Storage
     'DatabricksVolumeCallback',

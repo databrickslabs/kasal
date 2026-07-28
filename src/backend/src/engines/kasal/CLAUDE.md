@@ -51,7 +51,7 @@ engines/kasal/
 ├── infra/                     # logging_config, trace_management, mlflow_integration, crew_logger
 ├── guardrails/                # GuardrailWrapper ONLY — the engine's guardrail label
 ├── config/                    # crew/embedder/manager config builders
-└── callbacks/                 # live callbacks only (streaming, execution, volume)
+└── callbacks/                 # the crew's own step/task hooks + the volume writer
 ```
 
 ## Rules
@@ -84,6 +84,13 @@ engines/kasal/
   writer (trace persistence moved to OTel/MLflow); `infra/crew_logger.py`
   (`CrewLogger`) is **live** despite an old audit note — it is used by the engine
   hub and several services.
+- **One subscriber owns the event bus: `OTelEventBridge`.** Every trace row a run
+  produces comes from it, via `KasalDBSpanExporter`. Do not add a second listener
+  class that writes traces — that is how the codebase ended up with three
+  generations of dead listeners. If a new event needs to show up in the trace,
+  map it in the bridge (`_EVENT_SPAN_MAP` **and** the `_EVENT_CLASSES`
+  subscription list in `register()` — a mapping without a subscription writes
+  nothing, silently).
 - All engine work is async; Databricks calls need User-Agent telemetry
   (`src/backend/CLAUDE.md`).
 

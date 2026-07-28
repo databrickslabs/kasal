@@ -290,8 +290,7 @@ class TestKickoffAsync:
         mock_crewai_flow.state = MagicMock()
         mock_crewai_flow.state.id = "state-id-1"
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -306,8 +305,7 @@ class TestKickoffAsync:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value=None)
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -322,8 +320,7 @@ class TestKickoffAsync:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value=raw_dict)
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -337,8 +334,7 @@ class TestKickoffAsync:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value="some string")
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -354,8 +350,7 @@ class TestKickoffAsync:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value=obj)
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -374,8 +369,7 @@ class TestKickoffAsync:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value=WeirdObj())
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -390,8 +384,7 @@ class TestKickoffAsync:
         mock_crewai_flow = MagicMock(spec=["kickoff"])
         mock_crewai_flow.kickoff.return_value = "sync result"
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -405,8 +398,7 @@ class TestKickoffAsync:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value="done")
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
             result = await bf.kickoff_async()
 
         # Should have passed id=resume-uuid as input
@@ -423,8 +415,7 @@ class TestKickoffAsync:
         mock_crewai_flow = MagicMock()
         mock_crewai_flow.kickoff_async = AsyncMock(side_effect=pause_exc)
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
             with pytest.raises(FlowPausedForApprovalException):
                 await bf.kickoff_async()
 
@@ -435,8 +426,7 @@ class TestKickoffAsync:
         mock_crewai_flow = MagicMock()
         mock_crewai_flow.kickoff_async = AsyncMock(side_effect=RuntimeError("exec fail"))
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
             result = await bf.kickoff_async()
 
         assert result["success"] is False
@@ -446,8 +436,7 @@ class TestKickoffAsync:
     async def test_kickoff_async_flow_creation_fails(self):
         bf = self._setup_bf()
 
-        with patch.object(bf, "flow", new=AsyncMock(side_effect=RuntimeError("create fail"))), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(side_effect=RuntimeError("create fail"))):
             result = await bf.kickoff_async()
 
         assert result["success"] is False
@@ -468,8 +457,7 @@ class TestKickoffAsync:
         mock_crewai_flow.kickoff_async = AsyncMock(return_value="ok")
         mock_crewai_flow.state = None
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
             result = await bf.kickoff_async()
 
         assert bf._flow_data is not None
@@ -484,7 +472,6 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"), \
              patch("src.engines.kasal.infra.trace_management.TraceManager") as MockTM:
             MockTM.ensure_writer_started = AsyncMock()
             result = await bf.kickoff_async()
@@ -502,7 +489,6 @@ class TestKickoffAsync:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"), \
              patch("src.engines.kasal.infra.trace_management.TraceManager") as MockTM:
             MockTM.ensure_writer_started = AsyncMock(side_effect=Exception("trace fail"))
             result = await bf.kickoff_async()
@@ -526,8 +512,7 @@ class TestKickoffAsync:
         state_mock.__getitem__.side_effect = KeyError("id")
         mock_crewai_flow.state = state_mock
 
-        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)):
             result = await bf.kickoff_async()
 
         assert result["success"] is True
@@ -537,8 +522,7 @@ class TestKickoffAsync:
     async def test_kickoff_async_outer_exception_returns_failure(self):
         bf = self._setup_bf()
         # Make flow() itself raise at the outer level
-        with patch.object(bf, "flow", new=AsyncMock(side_effect=Exception("outer fail"))), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(side_effect=Exception("outer fail"))):
             result = await bf.kickoff_async()
         # The outer handler catches and returns failure
         assert result["success"] is False
@@ -567,7 +551,6 @@ class TestKickoff:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -587,7 +570,6 @@ class TestKickoff:
         mock_crewai_flow.state = state
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -606,7 +588,6 @@ class TestKickoff:
         mock_crewai_flow.kickoff_async = AsyncMock(side_effect=pause_exc)
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             with pytest.raises(FlowPausedForApprovalException):
                 await bf.kickoff()
@@ -621,7 +602,6 @@ class TestKickoff:
         mock_crewai_flow.kickoff_async = AsyncMock(side_effect=RuntimeError("kick error"))
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -632,8 +612,7 @@ class TestKickoff:
     async def test_kickoff_flow_create_fails_returns_failure(self):
         bf = self._setup_bf()
 
-        with patch.object(bf, "flow", new=AsyncMock(side_effect=RuntimeError("create fail"))), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
+        with patch.object(bf, "flow", new=AsyncMock(side_effect=RuntimeError("create fail"))):
             result = await bf.kickoff()
 
         assert result["success"] is False
@@ -650,7 +629,6 @@ class TestKickoff:
         mock_crewai_flow = EmptyFlow()
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -668,7 +646,6 @@ class TestKickoff:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -685,7 +662,6 @@ class TestKickoff:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -702,7 +678,6 @@ class TestKickoff:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -722,7 +697,6 @@ class TestKickoff:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -734,8 +708,7 @@ class TestKickoff:
         bf._flow_data = None
         bf._config = {}  # No nodes, no repo to load
 
-        with patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
-            result = await bf.kickoff()
+        result = await bf.kickoff()
 
         assert result["success"] is False
 
@@ -755,7 +728,6 @@ class TestKickoff:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 
@@ -768,8 +740,7 @@ class TestKickoff:
         bf._config = {}
         bf._repositories = {"flow": None}
 
-        with patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"):
-            result = await bf.kickoff()
+        result = await bf.kickoff()
 
         assert result["success"] is False
 
@@ -790,7 +761,6 @@ class TestKickoff:
         mock_crewai_flow.state = None
 
         with patch.object(bf, "flow", new=AsyncMock(return_value=mock_crewai_flow)), \
-             patch("src.engines.kasal.paths.flow.backend_flow.CallbackManager"), \
              patch("src.db.session._request_session"):
             result = await bf.kickoff()
 

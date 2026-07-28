@@ -20,7 +20,6 @@ from src.services.kasal_execution_service import KasalExecutionService, JobStatu
 from src.db.session import async_session_factory
 from src.models.execution_history import ExecutionHistory as Run
 from src.config.settings import settings
-from src.engines.kasal.callbacks import JobOutputCallback
 from src.core.logger import LoggerManager
 from src.services.execution_service import ExecutionService
 from src.schemas.execution import ExecutionNameGenerationRequest

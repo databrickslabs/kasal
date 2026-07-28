@@ -716,27 +716,6 @@ class TestBackendFlow:
             assert result["error"] == "Failed to create CrewAI flow: General error"
 
     @pytest.mark.asyncio
-    async def test_kickoff_cleanup_callbacks(self):
-        """Test kickoff method cleanup callbacks in finally block."""
-        flow = BackendFlow(job_id="test-job")
-        flow._config = {"callbacks": {"callback1": Mock()}}
-        flow._flow_data = {"nodes": [{"id": "node1"}]}
-
-        mock_crewai_flow = self.create_mock_crewai_flow(
-            kickoff_async_result={"output": "test"},
-            start_method_names=['starting_point_node1']
-        )
-
-        with patch('src.engines.kasal.paths.flow.backend_flow.CallbackManager') as mock_callback_manager:
-            with patch.object(flow, 'flow', new_callable=AsyncMock) as mock_flow_method:
-                mock_flow_method.return_value = mock_crewai_flow
-
-                result = await flow.kickoff()
-
-                assert result["success"] is True
-                mock_callback_manager.cleanup_callbacks.assert_called_once()
-
-    @pytest.mark.asyncio
     async def test_kickoff_result_update_dict(self):
         """Test kickoff method with dict result that gets updated."""
         flow = BackendFlow(job_id="test-job")
