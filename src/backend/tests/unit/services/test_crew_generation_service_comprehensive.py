@@ -3192,7 +3192,7 @@ class TestProgressiveGeneration:
             with patch.dict(
                 "sys.modules",
                 {
-                    "src.services.mlflow_tracing_service": Mock(
+                    "src.services.mlflow.tracing": Mock(
                         start_root_trace=Mock(return_value=mock_trace_ctx)
                     ),
                 },
@@ -3216,7 +3216,7 @@ class TestProgressiveGeneration:
             with patch.dict(
                 "sys.modules",
                 {
-                    "src.services.mlflow_tracing_service": Mock(
+                    "src.services.mlflow.tracing": Mock(
                         start_root_trace=Mock(side_effect=ImportError("no mlflow"))
                     ),
                 },

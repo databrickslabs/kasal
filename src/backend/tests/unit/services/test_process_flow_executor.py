@@ -84,7 +84,7 @@ def _run(flow_result, flow_config=None, group_context=None):
            with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
             with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
              with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-              with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+              with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                return run_flow_in_process("exec1", flow_config or {"k": "v"}, group_context=group_context)
 
 class TestActivateLakebaseInSubprocessCalled:
@@ -731,7 +731,7 @@ class TestRunFlowInProcess:
            with patch("signal.signal"):
             with patch("asyncio.new_event_loop", return_value=ml):
              with patch("asyncio.set_event_loop"):
-              with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+              with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                assert run_flow_in_process("e1", '{"k":"v"}')["status"] == "FAILED"
     def test_success(self):
         assert _run({"status": "COMPLETED", "result": "ok"})["status"] == "COMPLETED"
@@ -781,7 +781,7 @@ class TestRunFlowInProcess:
          with patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr", p["restore"]):
           with patch("src.services.execution.subprocess_bootstrap.configure_subprocess_logging", p["configure"]):
            with patch("signal.signal"):
-            with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+            with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
              assert "init" in run_flow_in_process("e1", {"k": "v"})["error"]
     def test_pending_tasks(self):
         from src.services.process_flow_executor import run_flow_in_process
@@ -800,7 +800,7 @@ class TestRunFlowInProcess:
                 with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                  with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                   with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                   with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                   with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                     run_flow_in_process("e1", {"k": "v"})
         t.cancel.assert_called_once()
     def test_stdout(self):
@@ -820,7 +820,7 @@ class TestRunFlowInProcess:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    assert run_flow_in_process("e1", {"k": "v"})["status"] == "COMPLETED"
     def test_group_ids_fallback(self):
         class GC:
@@ -845,7 +845,7 @@ class TestRunFlowInProcess:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock(side_effect=RuntimeError("otel"))):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    assert run_flow_in_process("e1", {"k": "v"})["status"] == "COMPLETED"
 
 class TestModuleLevelCode:
@@ -930,7 +930,7 @@ class TestRunFlowInProcessDeep:
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
-        all_patches.append(patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()))
+        all_patches.append(patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()))
         all_patches.append(patch("src.services.otel_tracing.create_kasal_tracer_provider", return_value=mock_otel_provider))
         all_patches.append(patch("src.services.otel_tracing.shutdown_provider", MagicMock()))
         if bridge_exc:
@@ -993,7 +993,7 @@ class TestRunFlowInProcessEdgeCases:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    run_flow_in_process("sig_test", {"k": "v"})
         assert signal_mod.SIGTERM in handlers
         handler = handlers[signal_mod.SIGTERM]
@@ -1028,7 +1028,7 @@ class TestRunFlowInProcessEdgeCases:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    run_flow_in_process("sig_test2", {"k": "v"})
         handler = handlers[signal_mod.SIGTERM]
         mock_psutil = MagicMock()
@@ -1055,7 +1055,7 @@ class TestRunFlowInProcessEdgeCases:
                    with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                     with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                      with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                      with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                      with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                        with patch("src.config.settings.settings", mock_settings):
                         r = run_flow_in_process("e1", {"k": "v"})
             assert r["status"] == "COMPLETED"
@@ -1083,7 +1083,7 @@ class TestRunFlowInProcessEdgeCases:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True))), "psutil": mock_psutil}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    r = run_flow_in_process("e1", {"k": "v"})
         assert r["status"] == "COMPLETED"
     def test_stdout_capture_error(self):
@@ -1104,7 +1104,7 @@ class TestRunFlowInProcessEdgeCases:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    r = run_flow_in_process("e1", {"k": "v"})
         assert r["status"] == "COMPLETED"
 
@@ -1267,7 +1267,7 @@ class TestOtelBranches:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    from src.services.process_flow_executor import run_flow_in_process
                    r = run_flow_in_process("exec1", {"k": "v"}, group_context=None)
         assert r["status"] == "COMPLETED"
@@ -1295,7 +1295,7 @@ class TestOtelBranches:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=flush_mock))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    from src.services.process_flow_executor import run_flow_in_process
                    r = run_flow_in_process("exec1", {"k": "v"}, group_context=None)
         assert r["status"] == "COMPLETED"
@@ -1327,7 +1327,7 @@ class TestCleanupBranches:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=flush_mock))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    from src.services.process_flow_executor import run_flow_in_process
                    r = run_flow_in_process("exec1", {"k": "v"}, group_context=None)
         assert r["status"] == "COMPLETED"
@@ -1354,7 +1354,7 @@ class TestCleanupBranches:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    from src.services.process_flow_executor import run_flow_in_process
                    r = run_flow_in_process("exec1", {"k": "v"}, group_context=None)
         assert r["status"] == "COMPLETED"
@@ -1381,7 +1381,7 @@ class TestCleanupBranches:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", side_effect=Exception("db fail")):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", side_effect=Exception("db fail")):
                    from src.services.process_flow_executor import run_flow_in_process
                    r = run_flow_in_process("exec1", {"k": "v"}, group_context=None)
         assert r["status"] == "COMPLETED"
@@ -1411,7 +1411,7 @@ class TestCleanupBranches:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True))), "psutil": mock_psutil}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    from src.services.process_flow_executor import run_flow_in_process
                    r = run_flow_in_process("exec1", {"k": "v"}, group_context=None)
         assert r["status"] == "COMPLETED"
@@ -1442,7 +1442,7 @@ class TestCleanupBranches:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True))), "psutil": mock_psutil}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    from src.services.process_flow_executor import run_flow_in_process
                    r = run_flow_in_process("exec1", {"k": "v"}, group_context=None)
         assert r["status"] == "COMPLETED"
@@ -1470,7 +1470,7 @@ class TestCleanupBranches:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    with patch("builtins.__import__", side_effect=_fail_psutil):
                     from src.services.process_flow_executor import run_flow_in_process
                     r = run_flow_in_process("exec1", {"k": "v"}, group_context=None)
@@ -1494,7 +1494,7 @@ class TestCleanupBranches:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True))), "psutil": mock_psutil}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    from src.services.process_flow_executor import run_flow_in_process
                    r = run_flow_in_process("exec1", {"k": "v"}, group_context=None)
         assert r["status"] == "COMPLETED"
@@ -1597,7 +1597,7 @@ class TestSignalHandlerBranches:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    run_flow_in_process("sig_test", {"k": "v"})
         handler = handlers[signal_mod.SIGTERM]
         import psutil as _real_psutil
@@ -1635,7 +1635,7 @@ class TestSignalHandlerBranches:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    run_flow_in_process("sig_test", {"k": "v"})
         handler = handlers[signal_mod.SIGTERM]
         import psutil as _real_psutil
@@ -1746,7 +1746,7 @@ class TestDeepAsyncBranches:
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess", mock_configure_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
-        all_patches.append(patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()))
+        all_patches.append(patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()))
         if not otel_import_error:
             if otel_general_error:
                 all_patches.append(patch("src.services.otel_tracing.create_kasal_tracer_provider", side_effect=RuntimeError("otel fail")))
@@ -1887,7 +1887,7 @@ class TestDeepAsyncBranches:
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess", mock_configure_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
-        all_patches.append(patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()))
+        all_patches.append(patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()))
         all_patches.append(patch("src.services.otel_tracing.create_kasal_tracer_provider", return_value=mock_otel_provider))
         all_patches.append(patch("src.services.otel_tracing.shutdown_provider", MagicMock()))
         ctx_stack = []
@@ -1955,7 +1955,7 @@ class TestDeepAsyncBranches:
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
-        all_patches.append(patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()))
+        all_patches.append(patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()))
         all_patches.append(patch("src.services.otel_tracing.create_kasal_tracer_provider", return_value=mock_otel_provider))
         all_patches.append(patch("src.services.otel_tracing.shutdown_provider", MagicMock()))
         ctx_stack = []
@@ -2028,7 +2028,7 @@ class TestDeepAsyncBranches:
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess", mock_configure_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
-        all_patches.append(patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()))
+        all_patches.append(patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()))
         all_patches.append(patch("src.services.otel_tracing.create_kasal_tracer_provider", return_value=mock_otel_provider))
         all_patches.append(patch("src.services.otel_tracing.shutdown_provider", MagicMock()))
         ctx_stack = []
@@ -2090,7 +2090,7 @@ class TestDeepAsyncBranches:
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
-        all_patches.append(patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()))
+        all_patches.append(patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()))
         all_patches.append(patch("src.services.otel_tracing.create_kasal_tracer_provider", return_value=mock_otel_provider))
         all_patches.append(patch("src.services.otel_tracing.shutdown_provider", MagicMock()))
         ctx_stack = []
@@ -2192,7 +2192,7 @@ class TestAsyncCleanupException:
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
-        all_patches.append(patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()))
+        all_patches.append(patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()))
         all_patches.append(patch("src.services.otel_tracing.create_kasal_tracer_provider", return_value=mock_otel_provider))
         all_patches.append(patch("src.services.otel_tracing.shutdown_provider", MagicMock()))
         # Make asyncio.all_tasks raise to trigger cleanup exception at line 766
@@ -2263,7 +2263,7 @@ class TestAsyncCleanupException:
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
-        all_patches.append(patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()))
+        all_patches.append(patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()))
         all_patches.append(patch("src.services.otel_tracing.create_kasal_tracer_provider", return_value=mock_otel_provider))
         all_patches.append(patch("src.services.otel_tracing.shutdown_provider", MagicMock()))
         all_patches.append(patch("asyncio.all_tasks", side_effect=RuntimeError("all_tasks fail")))
@@ -2348,7 +2348,7 @@ class TestStdoutCaptureLoggerFails:
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
-        all_patches.append(patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()))
+        all_patches.append(patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()))
         all_patches.append(patch("src.services.otel_tracing.create_kasal_tracer_provider", return_value=mock_otel_provider))
         all_patches.append(patch("src.services.otel_tracing.shutdown_provider", MagicMock()))
         ctx_stack = []
@@ -2425,7 +2425,7 @@ class TestOtelLoggerHandlerRouting:
         all_patches.append(patch("src.services.databricks_service.DatabricksService", mock_ds_cls))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.execute_with_mlflow_trace_async", mock_exec_mlflow))
         all_patches.append(patch("src.services.otel_tracing.mlflow_setup.post_execution_mlflow_cleanup", mock_post_cleanup))
-        all_patches.append(patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()))
+        all_patches.append(patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()))
         all_patches.append(patch("src.services.otel_tracing.create_kasal_tracer_provider", return_value=mock_otel_provider))
         all_patches.append(patch("src.services.otel_tracing.shutdown_provider", MagicMock()))
         ctx_stack = []

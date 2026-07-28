@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
-from src.services.mlflow_service import MLflowService
+from src.services.mlflow.service import MLflowService
 
 
 @pytest.mark.asyncio

@@ -447,7 +447,7 @@ class TestCaptureTraceAndUpdateExecution:
         mock_update = AsyncMock(side_effect=RuntimeError("update failed"))
         mock_logger = Mock()
 
-        with patch("src.services.otel_tracing.mlflow_setup.get_last_active_trace_id" if False else "src.services.mlflow_tracing_service.get_last_active_trace_id", mock_get_last):
+        with patch("src.services.otel_tracing.mlflow_setup.get_last_active_trace_id" if False else "src.services.mlflow.tracing.get_last_active_trace_id", mock_get_last):
             pass
 
         # Directly test by patching internal imports
@@ -649,7 +649,7 @@ class TestExecuteWithMlflowTrace:
         mock_span.set_outputs = Mock()
 
         from contextlib import contextmanager
-        import src.services.mlflow_tracing_service as tracing_svc
+        import src.services.mlflow.tracing as tracing_svc
 
         @contextmanager
         def fake_root_trace(name, inputs):
@@ -672,7 +672,7 @@ class TestExecuteWithMlflowTrace:
         captured_name = []
 
         from contextlib import contextmanager
-        import src.services.mlflow_tracing_service as tracing_svc
+        import src.services.mlflow.tracing as tracing_svc
 
         @contextmanager
         def capture_trace(name, inputs):
@@ -693,7 +693,7 @@ class TestExecuteWithMlflowTrace:
         original_import = builtins.__import__
 
         def import_fail(name, *args, **kwargs):
-            if name == "src.services.mlflow_tracing_service":
+            if name == "src.services.mlflow.tracing":
                 raise ImportError("not available")
             return original_import(name, *args, **kwargs)
 
@@ -748,7 +748,7 @@ class TestExecuteWithMlflowTraceAsync:
         mock_span.set_outputs = Mock()
 
         from contextlib import contextmanager
-        import src.services.mlflow_tracing_service as tracing_svc
+        import src.services.mlflow.tracing as tracing_svc
 
         @contextmanager
         def fake_root_trace(name, inputs):
@@ -1019,7 +1019,7 @@ class TestConfigureMlflowFullSPNPath:
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
                 patch("src.services.databricks_service.DatabricksService",
                       MagicMock(return_value=mock_service_instance)),
-                patch("src.engines.kasal.infra.mlflow_integration.enable_autologs",
+                patch("src.services.mlflow.integration.enable_autologs",
                       mock_enable_autologs),
                 # UC trace location active (real builder needs MLflow >=3.11's
                 # UnityCatalog import, which the mocked mlflow breaks here).
@@ -1090,7 +1090,7 @@ class TestConfigureMlflowFullSPNPath:
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
                 patch("src.services.databricks_service.DatabricksService",
                       MagicMock(return_value=mock_service_instance)),
-                patch("src.engines.kasal.infra.mlflow_integration.enable_autologs",
+                patch("src.services.mlflow.integration.enable_autologs",
                       MagicMock()),
                 patch("src.services.otel_tracing.mlflow_setup._build_uc_trace_location",
                       return_value=MagicMock()),
@@ -1152,7 +1152,7 @@ class TestConfigureMlflowFullSPNPath:
             with (
                 patch("src.db.session.async_session_factory", return_value=mock_session_ctx),
                 patch("src.services.databricks_service.DatabricksService", mock_service_cls),
-                patch("src.services.otel_tracing.mlflow_setup.enable_autologs" if False else "src.engines.kasal.infra.mlflow_integration.enable_autologs", MagicMock()),
+                patch("src.services.otel_tracing.mlflow_setup.enable_autologs" if False else "src.services.mlflow.integration.enable_autologs", MagicMock()),
             ):
                 result = await configure_mlflow_in_subprocess(
                     db_config=_make_db_config(True),
@@ -1446,8 +1446,8 @@ class TestCaptureTraceRealPaths:
         mock_logger = MagicMock()
 
         with (
-            patch("src.services.mlflow_tracing_service.get_last_active_trace_id", mock_get_last),
-            patch("src.engines.kasal.infra.mlflow_integration.update_execution_trace_id", mock_update),
+            patch("src.services.mlflow.tracing.get_last_active_trace_id", mock_get_last),
+            patch("src.services.mlflow.integration.update_execution_trace_id", mock_update),
         ):
             result = await capture_trace_and_update_execution(
                 execution_id="exec-1",
@@ -1465,7 +1465,7 @@ class TestCaptureTraceRealPaths:
         mock_get_last = MagicMock(return_value=None)
         mock_logger = MagicMock()
 
-        with patch("src.services.mlflow_tracing_service.get_last_active_trace_id", mock_get_last):
+        with patch("src.services.mlflow.tracing.get_last_active_trace_id", mock_get_last):
             result = await capture_trace_and_update_execution(
                 execution_id="exec-1",
                 experiment_name=None,
@@ -1480,7 +1480,7 @@ class TestCaptureTraceRealPaths:
         """Returns None when an exception occurs."""
         mock_logger = MagicMock()
 
-        with patch("src.services.mlflow_tracing_service.get_last_active_trace_id", side_effect=ImportError("not found")):
+        with patch("src.services.mlflow.tracing.get_last_active_trace_id", side_effect=ImportError("not found")):
             result = await capture_trace_and_update_execution(
                 execution_id="exec-1",
                 experiment_name=None,
@@ -1511,10 +1511,10 @@ class TestPostExecutionCleanupReal:
         mock_logger = MagicMock()
 
         with (
-            patch("src.services.mlflow_tracing_service.flush_async_logging", mock_flush),
+            patch("src.services.mlflow.tracing.flush_async_logging", mock_flush),
             patch("src.services.otel_tracing.mlflow_setup.log_mlflow_state", mock_log_state),
             patch("src.services.otel_tracing.mlflow_setup.capture_trace_and_update_execution", mock_capture),
-            patch("src.engines.kasal.infra.mlflow_integration.flush_and_stop_writers", mock_flush_stop),
+            patch("src.services.mlflow.integration.flush_and_stop_writers", mock_flush_stop),
         ):
             await post_execution_mlflow_cleanup(
                 mlflow_result=mlflow_result,
@@ -1534,10 +1534,10 @@ class TestPostExecutionCleanupReal:
         mock_logger = MagicMock()
 
         with (
-            patch("src.services.mlflow_tracing_service.flush_async_logging", AsyncMock(side_effect=RuntimeError("flush error"))),
+            patch("src.services.mlflow.tracing.flush_async_logging", AsyncMock(side_effect=RuntimeError("flush error"))),
             patch("src.services.otel_tracing.mlflow_setup.log_mlflow_state", MagicMock()),
             patch("src.services.otel_tracing.mlflow_setup.capture_trace_and_update_execution", AsyncMock(return_value=None)),
-            patch("src.engines.kasal.infra.mlflow_integration.flush_and_stop_writers", AsyncMock()),
+            patch("src.services.mlflow.integration.flush_and_stop_writers", AsyncMock()),
         ):
             await post_execution_mlflow_cleanup(
                 mlflow_result=mlflow_result,
@@ -1554,10 +1554,10 @@ class TestPostExecutionCleanupReal:
         mock_logger = MagicMock()
 
         with (
-            patch("src.services.mlflow_tracing_service.flush_async_logging", AsyncMock()),
+            patch("src.services.mlflow.tracing.flush_async_logging", AsyncMock()),
             patch("src.services.otel_tracing.mlflow_setup.log_mlflow_state", MagicMock()),
             patch("src.services.otel_tracing.mlflow_setup.capture_trace_and_update_execution", AsyncMock(return_value=None)),
-            patch("src.engines.kasal.infra.mlflow_integration.flush_and_stop_writers", AsyncMock(side_effect=RuntimeError("stop error"))),
+            patch("src.services.mlflow.integration.flush_and_stop_writers", AsyncMock(side_effect=RuntimeError("stop error"))),
         ):
             await post_execution_mlflow_cleanup(
                 mlflow_result=mlflow_result,
@@ -1587,7 +1587,7 @@ class TestExecuteWithTraceSetOutputs:
         kickoff = MagicMock(return_value=result_obj)
 
         from contextlib import contextmanager
-        import src.services.mlflow_tracing_service as tracing_svc
+        import src.services.mlflow.tracing as tracing_svc
 
         @contextmanager
         def fake_trace(name, inputs):
@@ -1607,7 +1607,7 @@ class TestExecuteWithTraceSetOutputs:
         kickoff = MagicMock(return_value=result_obj)
 
         from contextlib import contextmanager
-        import src.services.mlflow_tracing_service as tracing_svc
+        import src.services.mlflow.tracing as tracing_svc
 
         @contextmanager
         def fake_trace_none(name, inputs):

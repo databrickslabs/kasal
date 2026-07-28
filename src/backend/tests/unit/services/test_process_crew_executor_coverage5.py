@@ -96,7 +96,7 @@ class TestRunCrewInProcessDirect:
              patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
+             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil, \
              patch("psutil.wait_procs", return_value=([], [mock_alive_child])):
             mock_psutil.return_value.children.return_value = [mock_child]
@@ -119,7 +119,7 @@ class TestRunCrewInProcessDirect:
              patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow_tracing_service.cleanup_async_db_connections",
+             patch("src.services.mlflow.tracing.cleanup_async_db_connections",
                    side_effect=RuntimeError("cleanup failed")), \
              patch("psutil.Process") as mock_psutil:
             mock_psutil.return_value.children.return_value = []
@@ -150,7 +150,7 @@ class TestRunCrewInProcessDirect:
              patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
+             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil, \
              patch("src.utils.user_context.UserContext.set_group_context") as mock_set_ctx, \
              patch("src.utils.user_context.UserContext.set_user_token") as mock_set_tok, \

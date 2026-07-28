@@ -83,7 +83,7 @@ class AgentGenerationService:
             self.session, group_context, label="AgentGeneration"
         )
         if mlflow_on:
-            from src.services.mlflow_tracing_service import start_root_trace
+            from src.services.mlflow.tracing import start_root_trace
             trace_ctx = start_root_trace(
                 "agent_generation",
                 inputs={"prompt": prompt_text, "model": model or "default"},

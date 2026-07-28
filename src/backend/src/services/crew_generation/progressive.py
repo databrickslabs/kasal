@@ -76,7 +76,7 @@ class ProgressiveGenerationMixin:
 
         if mlflow_enabled:
             try:
-                from src.services.mlflow_tracing_service import start_root_trace
+                from src.services.mlflow.tracing import start_root_trace
                 trace_ctx = start_root_trace(
                     "crew_generation",
                     inputs={"prompt": request.prompt, "model": request.model or "default"},

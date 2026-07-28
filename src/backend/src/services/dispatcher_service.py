@@ -53,7 +53,7 @@ from src.services.crew_service import CrewService
 from src.services.databricks_service import DatabricksService
 from src.services.flow_service import FlowService
 from src.services.log_service import LLMLogService
-from src.services.mlflow_service import MLflowService
+from src.services.mlflow.service import MLflowService
 from src.services.task_generation_service import TaskGenerationService
 from src.services.template_service import TemplateService
 from src.utils.prompt_utils import robust_json_parser
@@ -1197,7 +1197,7 @@ Please analyze this message and provide your intent classification."""
         # Use mlflow_tracing_service for robust trace context creation
         if mlflow_enabled:
             try:
-                from src.services.mlflow_tracing_service import (
+                from src.services.mlflow.tracing import (
                     get_last_active_trace_id,
                     start_root_trace,
                 )

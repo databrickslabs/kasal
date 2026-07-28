@@ -6,7 +6,7 @@ Auto-generated test template. TODO: Add comprehensive test coverage.
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from src.engines.kasal.infra.mlflow_integration import (enable_autologs
+from src.services.mlflow.integration import (enable_autologs
 )
 
 

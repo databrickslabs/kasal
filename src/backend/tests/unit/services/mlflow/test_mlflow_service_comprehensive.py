@@ -4,7 +4,7 @@ from typing import Optional, Dict, Any
 
 # Test MLflowService - based on actual code inspection
 
-from src.services.mlflow_service import MLflowService
+from src.services.mlflow.service import MLflowService
 
 
 class TestMLflowServiceInit:

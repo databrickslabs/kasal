@@ -9,7 +9,7 @@ import pytest
 from contextlib import contextmanager
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
-from src.services.mlflow_tracing_service import (
+from src.services.mlflow.tracing import (
     _get_mlflow,
     start_root_trace,
     get_last_active_trace_id,
@@ -31,7 +31,7 @@ class TestGetMlflow:
         with patch("builtins.__import__", side_effect=ImportError("no mlflow")):
             pass  # Can't easily unimport mlflow if already imported
         # Test by patching the import inside the function
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=None) as mock_fn:
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=None) as mock_fn:
             result = mock_fn()
         assert result is None
 
@@ -40,7 +40,7 @@ class TestStartRootTrace:
     """Tests for start_root_trace context manager."""
 
     def test_yields_none_when_mlflow_unavailable(self):
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=None):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=None):
             with start_root_trace("test-trace") as span:
                 assert span is None
 
@@ -54,7 +54,7 @@ class TestStartRootTrace:
 
         mock_mlflow.start_trace = fake_start_trace
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             with start_root_trace("test-trace", inputs={"k": "v"}) as span:
                 assert span is mock_span
 
@@ -73,7 +73,7 @@ class TestStartRootTrace:
         mock_mlflow.start_span = fake_start_span
         mock_mlflow.tracing = None
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             with start_root_trace("test-trace", inputs={"key": "val"}) as span:
                 assert span is mock_span
 
@@ -87,7 +87,7 @@ class TestStartRootTrace:
         mock_mlflow.start_span = None
         mock_mlflow.tracing = None
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             with start_root_trace("test-trace") as span:
                 # nullcontext yields None
                 assert span is None
@@ -102,7 +102,7 @@ class TestStartRootTrace:
 
         mock_mlflow.start_trace = fake_start_trace
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             with start_root_trace("test") as span:
                 pass  # No exception means inputs defaulted to {}
 
@@ -120,7 +120,7 @@ class TestStartRootTrace:
         mock_tracing.start_trace = fake_start_trace
         mock_mlflow.tracing = mock_tracing
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             with start_root_trace("test-trace") as span:
                 assert span is mock_span
 
@@ -137,7 +137,7 @@ class TestStartRootTrace:
         mock_mlflow.start_span = fake_start_span
         mock_mlflow.tracing = None
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             with start_root_trace("test", inputs={"a": 1}) as span:
                 pass
 
@@ -156,7 +156,7 @@ class TestStartRootTrace:
         mock_mlflow.start_span = fake_start_span
         mock_mlflow.tracing = None
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             with start_root_trace("test", inputs={"a": 1}) as span:
                 pass  # Should not raise
 
@@ -165,7 +165,7 @@ class TestGetLastActiveTraceId:
     """Tests for get_last_active_trace_id."""
 
     def test_returns_none_when_mlflow_unavailable(self):
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=None):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=None):
             result = get_last_active_trace_id()
         assert result is None
 
@@ -175,7 +175,7 @@ class TestGetLastActiveTraceId:
         mock_tracing.get_last_active_trace_id = Mock(return_value="trace-abc")
         mock_mlflow.tracing = mock_tracing
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             result = get_last_active_trace_id()
 
         assert result == "trace-abc"
@@ -185,7 +185,7 @@ class TestGetLastActiveTraceId:
         mock_mlflow.get_last_active_trace_id = Mock(return_value="trace-xyz")
         mock_mlflow.tracing = MagicMock(spec=[])  # no get_last_active_trace_id
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             result = get_last_active_trace_id()
 
         assert result == "trace-xyz"
@@ -194,7 +194,7 @@ class TestGetLastActiveTraceId:
         mock_mlflow = MagicMock()
         mock_mlflow.tracing.get_last_active_trace_id = Mock(side_effect=RuntimeError("error"))
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             result = get_last_active_trace_id()
 
         assert result is None
@@ -204,7 +204,7 @@ class TestGetLastActiveTraceId:
         mock_mlflow.tracing = None
         mock_mlflow.get_last_active_trace_id = None
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             result = get_last_active_trace_id()
 
         assert result is None
@@ -215,7 +215,7 @@ class TestFlushAsyncLogging:
 
     @pytest.mark.asyncio
     async def test_noop_when_mlflow_unavailable(self):
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=None):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=None):
             # Should not raise
             await flush_async_logging()
 
@@ -224,7 +224,7 @@ class TestFlushAsyncLogging:
         mock_mlflow = MagicMock()
         mock_mlflow.flush_trace_async_logging = Mock()
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             await flush_async_logging()
 
         mock_mlflow.flush_trace_async_logging.assert_called_once()
@@ -233,7 +233,7 @@ class TestFlushAsyncLogging:
     async def test_logs_when_flush_not_available(self):
         mock_mlflow = MagicMock(spec=[])  # No flush_trace_async_logging attr
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             await flush_async_logging()  # Should not raise
 
     @pytest.mark.asyncio
@@ -241,7 +241,7 @@ class TestFlushAsyncLogging:
         mock_mlflow = MagicMock()
         mock_mlflow.flush_trace_async_logging = Mock(side_effect=RuntimeError("flush failed"))
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             await flush_async_logging()  # Should not raise
 
     @pytest.mark.asyncio
@@ -250,7 +250,7 @@ class TestFlushAsyncLogging:
         mock_mlflow = MagicMock()
         mock_mlflow.flush_trace_async_logging = Mock()
 
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=mock_mlflow):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=mock_mlflow):
             await flush_async_logging(async_logger=mock_logger)
 
         mock_logger.info.assert_called()
@@ -258,7 +258,7 @@ class TestFlushAsyncLogging:
     @pytest.mark.asyncio
     async def test_none_mlflow_logs_debug(self):
         mock_logger = Mock()
-        with patch("src.services.mlflow_tracing_service._get_mlflow", return_value=None):
+        with patch("src.services.mlflow.tracing._get_mlflow", return_value=None):
             await flush_async_logging(async_logger=mock_logger)
         mock_logger.info.assert_called()
 

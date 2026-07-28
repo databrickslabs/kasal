@@ -125,7 +125,7 @@ async def flush_and_stop_writers(async_logger: Optional[logging.Logger] = None) 
     alog = async_logger or logger
 
     # Flush MLflow async traces (use generic service)
-    from src.services.mlflow_tracing_service import flush_async_logging
+    from src.services.mlflow.tracing import flush_async_logging
     await flush_async_logging(async_logger=alog)
 
     # Drain any custom trace queue and stop LogWriterTask if available (CrewAI-specific)

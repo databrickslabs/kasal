@@ -1303,7 +1303,7 @@ def _patch_mlflow_uc_stack(mlflow_result, update_mock):
     with patch("src.db.session.async_session_factory", side_effect=lambda: _fake_session()), \
          patch("src.services.databricks_service.DatabricksService", svc_cls), \
          patch("src.services.otel_tracing.mlflow_setup.configure_mlflow_in_subprocess", configure_mock), \
-         patch("src.services.mlflow_tracing_service.start_root_trace", _fake_trace), \
+         patch("src.services.mlflow.tracing.start_root_trace", _fake_trace), \
          patch("src.services.otel_tracing.mlflow_setup.set_trace_attributes"), \
          patch("src.services.otel_tracing.mlflow_setup.extract_trace_outputs", return_value=None), \
          patch.object(mlflow, "update_current_trace", update_mock):

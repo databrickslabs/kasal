@@ -138,9 +138,9 @@ def _deep_run_extended(
     if mlflow_otel_exc:
         all_patches.append(patch("src.services.otel_tracing.mlflow_exporter.KasalMLflowSpanExporter", side_effect=RuntimeError("exporter_fail")))
     if db_cleanup_exc:
-        all_patches.append(patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock(side_effect=RuntimeError("db_cleanup_fail"))))
+        all_patches.append(patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock(side_effect=RuntimeError("db_cleanup_fail"))))
     else:
-        all_patches.append(patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()))
+        all_patches.append(patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()))
     mock_psutil = MagicMock()
     mock_psutil.NoSuchProcess = type("NSP", (Exception,), {})
     mock_psutil.AccessDenied = type("AD", (Exception,), {})
@@ -204,7 +204,7 @@ class TestSignalHandlerChildNSPCov:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    run_flow_in_process("sig_nsp", {"k": "v"})
         return handlers.get(signal_mod.SIGTERM)
     def test_child_terminate_nosuchprocess(self):
@@ -318,7 +318,7 @@ class TestCleanupEventBusFlushCov:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=mock_bus)}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    r = run_flow_in_process("cleanup_flush_exc", {"k": "v"})
         assert r["status"] == "COMPLETED"
 
@@ -344,7 +344,7 @@ class TestOuterCleanupExceptionCov:
               with patch("asyncio.all_tasks", return_value=set()):
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                 with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                 with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                   r = run_flow_in_process("cleanup_exc", {"k": "v"})
         assert r["status"] == "COMPLETED"
     def test_cleanup_exception_logger_also_fails(self):
@@ -371,7 +371,7 @@ class TestOuterCleanupExceptionCov:
               with patch("asyncio.all_tasks", return_value=set()):
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                 with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                 with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                   r = run_flow_in_process("cleanup_logger_exc", {"k": "v"})
         assert r["status"] == "COMPLETED"
 
@@ -401,7 +401,7 @@ class TestStdoutCaptureBarExceptCov:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True)))}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    r = run_flow_in_process("stdout_bare", {"k": "v"})
         assert r["status"] == "COMPLETED"
 
@@ -432,7 +432,7 @@ class TestFinalPsutilCleanupCov:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True))), "psutil": None}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    r = run_flow_in_process("psutil_imp_err", {"k": "v"})
         assert r["status"] == "COMPLETED"
     def test_psutil_general_exception(self):
@@ -453,7 +453,7 @@ class TestFinalPsutilCleanupCov:
                with patch.dict("sys.modules", {"kasal_engine.events": MagicMock(crewai_event_bus=MagicMock(flush=MagicMock(return_value=True))), "psutil": mock_psutil}):
                 with patch("src.services.execution.logs.writer_task.LogWriterTask.stop_writer", new_callable=AsyncMock):
                  with patch("src.services.otel_tracing.shutdown_provider", MagicMock()):
-                  with patch("src.services.mlflow_tracing_service.cleanup_async_db_connections", MagicMock()):
+                  with patch("src.services.mlflow.tracing.cleanup_async_db_connections", MagicMock()):
                    r = run_flow_in_process("psutil_gen_exc", {"k": "v"})
         assert r["status"] == "COMPLETED"
 

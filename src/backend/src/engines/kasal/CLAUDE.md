@@ -49,7 +49,6 @@ engines/kasal/
 │                              #   agent_security, model_conversion_handler, a2ui_runner,
 │                              #   execution_callback (the crew's step/task hooks)
 ├── memory/                    # memory_hooks ONLY — recall before a task, persist after
-├── infra/                     # mlflow_integration (the rest moved to services/execution/logs/)
 ├── guardrails/                # GuardrailWrapper ONLY — the engine's guardrail label
 └── config/                    # crew/embedder/manager config builders
 ```
@@ -120,6 +119,7 @@ orchestration: what runs, in what order, wired to what.
 | `services/crew_checkpoint.py` | task-checkpoint recorder + resume builder |
 | `services/execution/logs/` | log capture, queue, writer, and the writer task |
 | `services/execution/subprocess_bootstrap.py` | `configure_subprocess_logging` + the stdout muzzle |
+| `services/mlflow/` | experiments, tracing, autolog integration, evaluation |
 
 The test for which side something belongs on: does it import `kasal_engine`
 (a vendored LIBRARY — that is fine in services, like `BaseTool`), or

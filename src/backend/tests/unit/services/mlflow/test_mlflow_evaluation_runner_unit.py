@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch, call
 
 import pandas as pd
 
-from src.services.mlflow_evaluation_runner import MLflowEvaluationRunner
+from src.services.mlflow.evaluation_runner import MLflowEvaluationRunner
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ def _make_runner(**overrides):
 # ---------------------------------------------------------------------------
 # Module-level patch path prefix
 # ---------------------------------------------------------------------------
-MOD = "src.services.mlflow_evaluation_runner"
+MOD = "src.services.mlflow.evaluation_runner"
 
 
 # ===========================================================================

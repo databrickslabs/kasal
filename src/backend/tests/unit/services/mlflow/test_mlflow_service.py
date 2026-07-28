@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.services.mlflow_service import MLflowService
+from src.services.mlflow.service import MLflowService
 
 
 class TestMLflowServiceInit:

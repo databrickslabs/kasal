@@ -505,7 +505,7 @@ async def configure_mlflow_in_subprocess(
         # we enable the same autologs — the difference is only the destination
         # (UC tables vs managed experiment).
         try:
-            from src.engines.kasal.infra.mlflow_integration import (
+            from src.services.mlflow.integration import (
                 enable_autologs as _enable_autologs,
             )
 
@@ -820,10 +820,10 @@ async def capture_trace_and_update_execution(
     """
     alog = async_logger or logger
     try:
-        from src.engines.kasal.infra.mlflow_integration import (
+        from src.services.mlflow.integration import (
             update_execution_trace_id as _update_trace,
         )
-        from src.services.mlflow_tracing_service import (
+        from src.services.mlflow.tracing import (
             get_last_active_trace_id as _get_last_id,
         )
 
@@ -1037,7 +1037,7 @@ def execute_with_mlflow_trace(
 
     # Import the root trace context manager from tracing service
     try:
-        from src.services.mlflow_tracing_service import start_root_trace
+        from src.services.mlflow.tracing import start_root_trace
     except ImportError:
         alog.warning("[SUBPROCESS] start_root_trace not available, executing without trace")
         return kickoff_fn()
@@ -1102,7 +1102,7 @@ async def execute_with_mlflow_trace_async(
         return await kickoff_coro_fn(**kickoff_kwargs)
 
     try:
-        from src.services.mlflow_tracing_service import start_root_trace
+        from src.services.mlflow.tracing import start_root_trace
     except ImportError:
         alog.warning("[SUBPROCESS] start_root_trace not available, executing without trace")
         return await kickoff_coro_fn(**kickoff_kwargs)
@@ -1159,7 +1159,7 @@ async def post_execution_mlflow_cleanup(
     # 1. Flush MLflow async logging FIRST — autolog traces are queued
     #    asynchronously and must be committed before we can read trace IDs.
     try:
-        from src.services.mlflow_tracing_service import (
+        from src.services.mlflow.tracing import (
             flush_async_logging as _flush_mlflow,
         )
         await _flush_mlflow(async_logger=alog)
@@ -1182,7 +1182,7 @@ async def post_execution_mlflow_cleanup(
 
     # 4. Flush and stop LogWriterTask writer (CrewAI-specific)
     try:
-        from src.engines.kasal.infra.mlflow_integration import (
+        from src.services.mlflow.integration import (
             flush_and_stop_writers as _flush_stop,
         )
         await _flush_stop(async_logger=alog)

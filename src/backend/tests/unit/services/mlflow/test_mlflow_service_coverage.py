@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.services.mlflow_service import MLflowService
+from src.services.mlflow.service import MLflowService
 
 
 # ---------------------------------------------------------------------------
@@ -16,9 +16,9 @@ from src.services.mlflow_service import MLflowService
 
 def make_service(group_id="g1"):
     session = AsyncMock(spec=AsyncSession)
-    with patch("src.services.mlflow_service.MLflowRepository"), \
-         patch("src.services.mlflow_service.ExecutionHistoryRepository"), \
-         patch("src.services.mlflow_service.ModelConfigService"):
+    with patch("src.services.mlflow.service.MLflowRepository"), \
+         patch("src.services.mlflow.service.ExecutionHistoryRepository"), \
+         patch("src.services.mlflow.service.ModelConfigService"):
         svc = MLflowService(session=session, group_id=group_id)
     svc.repo = AsyncMock()
     svc.exec_repo = AsyncMock()
@@ -352,7 +352,7 @@ class TestTriggerEvaluation:
         mock_runner = MagicMock()
         mock_runner.create_run = MagicMock(return_value={"experiment_id": exp_id, "run_id": run_id})
         mock_runner_cls.return_value = mock_runner
-        stack.enter_context(patch("src.services.mlflow_evaluation_runner.MLflowEvaluationRunner", mock_runner_cls))
+        stack.enter_context(patch("src.services.mlflow.evaluation_runner.MLflowEvaluationRunner", mock_runner_cls))
         stack.enter_context(patch("asyncio.to_thread", AsyncMock(return_value={"experiment_id": exp_id, "run_id": run_id})))
         stack.enter_context(patch("asyncio.create_task", MagicMock()))
         ess_mock = MagicMock()
@@ -530,7 +530,7 @@ class TestInnerFunctionPaths:
         # Non-databricks model - should skip auth
         with patch.object(svc, "_resolve_judge_model", return_value="gpt-4"):
             with patch("asyncio.to_thread", AsyncMock(return_value={"experiment_id": "e-99", "run_id": None})):
-                with patch("src.services.mlflow_evaluation_runner.MLflowEvaluationRunner") as runner_cls:
+                with patch("src.services.mlflow.evaluation_runner.MLflowEvaluationRunner") as runner_cls:
                     mock_runner = MagicMock()
                     mock_runner.create_run = MagicMock(return_value={"experiment_id": "e-99", "run_id": None})
                     runner_cls.return_value = mock_runner

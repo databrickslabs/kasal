@@ -285,7 +285,7 @@ async def configure_parent_mlflow_tracing(
             return True
 
         try:
-            from src.services.mlflow_service import MLflowService
+            from src.services.mlflow.service import MLflowService
 
             group_id = (
                 getattr(group_context, "primary_group_id", None) if group_context else None

@@ -1240,7 +1240,7 @@ class TestDispatchWithMlflow:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.mlflow_tracing_service": MagicMock(
+                "src.services.mlflow.tracing": MagicMock(
                     start_root_trace=MagicMock(return_value=mock_trace),
                     get_last_active_trace_id=MagicMock(return_value="trace-123"),
                 )
@@ -1271,7 +1271,7 @@ class TestDispatchWithMlflow:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.mlflow_tracing_service": MagicMock(
+                "src.services.mlflow.tracing": MagicMock(
                     start_root_trace=MagicMock(side_effect=RuntimeError("trace fail")),
                     get_last_active_trace_id=MagicMock(return_value=None),
                 )
@@ -1307,7 +1307,7 @@ class TestDispatchWithMlflow:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.mlflow_tracing_service": MagicMock(
+                "src.services.mlflow.tracing": MagicMock(
                     start_root_trace=MagicMock(return_value=mock_trace),
                     get_last_active_trace_id=MagicMock(return_value=None),
                 )
@@ -1345,7 +1345,7 @@ class TestDispatchWithMlflow:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.mlflow_tracing_service": MagicMock(
+                "src.services.mlflow.tracing": MagicMock(
                     start_root_trace=MagicMock(return_value=mock_trace),
                     get_last_active_trace_id=MagicMock(return_value=None),
                 )
@@ -1381,7 +1381,7 @@ class TestDispatchWithMlflow:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.mlflow_tracing_service": MagicMock(
+                "src.services.mlflow.tracing": MagicMock(
                     start_root_trace=MagicMock(return_value=mock_trace),
                     get_last_active_trace_id=MagicMock(return_value=None),
                 )
@@ -1412,7 +1412,7 @@ class TestDispatchWithMlflow:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.mlflow_tracing_service": MagicMock(
+                "src.services.mlflow.tracing": MagicMock(
                     start_root_trace=MagicMock(side_effect=RuntimeError("fail")),
                     get_last_active_trace_id=MagicMock(
                         side_effect=RuntimeError("fail")
@@ -1450,7 +1450,7 @@ class TestDispatchWithMlflow:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.mlflow_tracing_service": MagicMock(
+                "src.services.mlflow.tracing": MagicMock(
                     start_root_trace=MagicMock(return_value=mock_trace),
                     get_last_active_trace_id=MagicMock(
                         side_effect=RuntimeError("trace id fail")
@@ -1488,7 +1488,7 @@ class TestDispatchWithMlflow:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.mlflow_tracing_service": MagicMock(
+                "src.services.mlflow.tracing": MagicMock(
                     start_root_trace=MagicMock(return_value=mock_trace),
                     get_last_active_trace_id=MagicMock(return_value=None),
                 )
@@ -1520,7 +1520,7 @@ class TestDispatchWithMlflow:
         with patch.dict(
             "sys.modules",
             {
-                "src.services.mlflow_tracing_service": MagicMock(
+                "src.services.mlflow.tracing": MagicMock(
                     start_root_trace=MagicMock(return_value=bare_trace),
                     get_last_active_trace_id=MagicMock(return_value=None),
                 )

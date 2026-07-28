@@ -1697,7 +1697,7 @@ def run_crew_in_process(
 
         # Clean up database connections and engines via tracing service utility
         try:
-            from src.services.mlflow_tracing_service import (
+            from src.services.mlflow.tracing import (
                 cleanup_async_db_connections as _cleanup_db,
             )
 

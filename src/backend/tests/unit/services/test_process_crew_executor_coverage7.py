@@ -44,7 +44,7 @@ def _call_run_crew_in_process_with_mocks(config, exec_id="test-exec-1234-5678"):
          patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
          patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-         patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
+         patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
          patch("psutil.Process") as mock_psutil:
         mock_psutil.return_value.children.return_value = []
         mock_psutil.return_value.is_running.return_value = False
@@ -282,7 +282,7 @@ class TestRunCrewInProcessConfigLogging:
              patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
+             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil:
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-dict-inputs", config, inputs=inputs)
@@ -301,7 +301,7 @@ class TestRunCrewInProcessConfigLogging:
              patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
+             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil:
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-str-inputs2", config, inputs=inputs)
@@ -320,7 +320,7 @@ class TestRunCrewInProcessErrorPaths:
              patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
+             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil:
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-traceback", {"agents": [], "tasks": []})

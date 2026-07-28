@@ -8,7 +8,7 @@ from src.schemas.mlflow import (
     MLflowEvaluateRequest,
     MLflowEvaluateResponse,
 )
-from src.services.mlflow_service import MLflowService
+from src.services.mlflow.service import MLflowService
 
 router = APIRouter(prefix="/mlflow", tags=["mlflow"])
 

@@ -91,7 +91,7 @@ class TestSignalHandlerInSubprocess:
              patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
+             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
              patch("psutil.Process", return_value=mock_parent), \
              patch("psutil.wait_procs", return_value=([], [])):
             # Run briefly to register the handler
@@ -126,7 +126,7 @@ class TestCrewAIPatchingWarnings:
              patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
+             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
              patch("kasal_engine.llm.LLM_CONTEXT_WINDOW_SIZES",
                    side_effect=ImportError("no crewai.llm")), \
              patch("psutil.Process") as mock_psutil:
@@ -147,7 +147,7 @@ class TestCrewAIPatchingWarnings:
              patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
+             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil:
             mock_psutil.return_value.children.return_value = []
             # Force the context_window_exceeding_exception import to fail
@@ -182,7 +182,7 @@ class TestPrepareAndRunErrorPaths:
              patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
+             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil:
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-prep-fail", config)
@@ -205,7 +205,7 @@ class TestPrepareAndRunErrorPaths:
              patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
+             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil, \
              patch("src.services.otel_tracing.shutdown_provider", mock_shutdown):
             mock_psutil.return_value.children.return_value = []
@@ -228,7 +228,7 @@ class TestPrepareAndRunErrorPaths:
              patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
+             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil:
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-bus-flush", config)
@@ -246,7 +246,7 @@ class TestPrepareAndRunErrorPaths:
              patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, MagicMock(getvalue=MagicMock(return_value="")))), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
+             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil:
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-tb", config)
@@ -276,7 +276,7 @@ class TestStdoutCapturePath:
              patch("src.services.execution.subprocess_bootstrap.suppress_stdout_stderr",
                    return_value=(sys.stdout, sys.stderr, mock_captured)), \
              patch("src.services.execution.subprocess_bootstrap.restore_stdout_stderr"), \
-             patch("src.services.mlflow_tracing_service.cleanup_async_db_connections"), \
+             patch("src.services.mlflow.tracing.cleanup_async_db_connections"), \
              patch("psutil.Process") as mock_psutil:
             mock_psutil.return_value.children.return_value = []
             result = run_crew_in_process("exec-stdout", config)

@@ -499,7 +499,7 @@ class MLflowService:
                 raise RuntimeError("Failed to configure authentication for MLflow evaluation")
 
         # Create evaluation runner with extracted parameters
-        from src.services.mlflow_evaluation_runner import MLflowEvaluationRunner
+        from src.services.mlflow.evaluation_runner import MLflowEvaluationRunner
         runner = MLflowEvaluationRunner(
             exec_obj=exec_obj,
             job_id=job_id,

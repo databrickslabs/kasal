@@ -6,7 +6,7 @@ Auto-generated test template. TODO: Add comprehensive test coverage.
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from src.services.mlflow_evaluation_runner import (
+from src.services.mlflow.evaluation_runner import (
     MLflowEvaluationRunner,
     create_run,
     complete_evaluation

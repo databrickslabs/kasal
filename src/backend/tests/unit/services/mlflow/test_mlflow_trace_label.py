@@ -37,7 +37,7 @@ def _capture_root_trace(store):
 async def test_trace_label_used_in_trace_name():
     store = {}
     with _capture_root_trace(store) as factory, \
-         patch("src.services.mlflow_tracing_service.start_root_trace", factory), \
+         patch("src.services.mlflow.tracing.start_root_trace", factory), \
          patch.object(mlflow_setup, "set_trace_attributes"), \
          patch.object(mlflow_setup, "extract_trace_outputs", return_value=None):
 
@@ -59,7 +59,7 @@ async def test_trace_label_used_in_trace_name():
 async def test_default_trace_label_is_flow_kickoff():
     store = {}
     with _capture_root_trace(store) as factory, \
-         patch("src.services.mlflow_tracing_service.start_root_trace", factory), \
+         patch("src.services.mlflow.tracing.start_root_trace", factory), \
          patch.object(mlflow_setup, "set_trace_attributes"), \
          patch.object(mlflow_setup, "extract_trace_outputs", return_value=None):
 

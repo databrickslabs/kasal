@@ -1220,7 +1220,7 @@ class LightAgentService:
         try:
             import logging as _logging
             import mlflow
-            from src.services.mlflow_tracing_service import start_root_trace
+            from src.services.mlflow.tracing import start_root_trace
             from src.services.otel_tracing.mlflow_setup import (
                 configure_mlflow_in_subprocess,
                 set_trace_attributes,
