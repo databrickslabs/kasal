@@ -58,10 +58,10 @@ def _patches(*, disabled_config=False, storage=MagicMock(), sets_memory=True):
         "src.services.memory.crew_memory",
         CrewMemoryService=MagicMock(return_value=mem_service),
     ), patch(
-        "src.engines.kasal.config.crew_config_builder.CrewConfigBuilder",
+        "src.services.execution.config.crew_config_builder.CrewConfigBuilder",
         MagicMock(return_value=cfg_builder),
     ), patch(
-        "src.engines.kasal.config.embedder_config_builder.EmbedderConfigBuilder",
+        "src.services.execution.config.embedder_config_builder.EmbedderConfigBuilder",
         MagicMock(return_value=embedder_builder),
     ), patch(
         "src.schemas.memory_backend.MemoryBackendConfig", MagicMock()

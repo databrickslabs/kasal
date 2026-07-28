@@ -693,7 +693,7 @@ class TestCreateTask:
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
              patch('src.engines.kasal.paths.crew.task_adapter.get_pydantic_class_from_name') as mock_get_pydantic, \
-             patch('src.engines.kasal.kernel.model_conversion_handler.get_compatible_converter_for_model') as mock_converter:
+             patch('src.services.execution.kernel.model_conversion_handler.get_compatible_converter_for_model') as mock_converter:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
@@ -1465,7 +1465,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
@@ -1509,7 +1509,7 @@ class TestCreateTask:
             ))
             
             # Make resolve_tool_ids_to_names raise an exception
-            with patch('src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+            with patch('src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
                 # This will trigger the exception at lines 449-450
                 mock_resolve.side_effect = Exception("Critical resolution error")
                 
@@ -1545,7 +1545,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
@@ -2201,7 +2201,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
@@ -2258,7 +2258,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
@@ -2308,7 +2308,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
@@ -2402,7 +2402,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
@@ -2493,7 +2493,7 @@ class TestCreateTask:
             
             # Make the tool service raise an exception before resolve_tool_ids_to_names is called
             # This should trigger the outer except block at lines 449-450
-            with patch('src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names', side_effect=Exception("Tool resolution system failed")):
+            with patch('src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names', side_effect=Exception("Tool resolution system failed")):
                 task = await create_task(
                     task_key, 
                     task_config, 
@@ -2569,7 +2569,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
@@ -2611,7 +2611,7 @@ class TestCreateTask:
         
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
-             patch('src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
+             patch('src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names') as mock_resolve:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
@@ -2712,7 +2712,7 @@ class TestCreateTask:
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
              patch('src.engines.kasal.paths.crew.task_adapter.get_pydantic_class_from_name') as mock_get_pydantic, \
-             patch('src.engines.kasal.kernel.model_conversion_handler.get_compatible_converter_for_model') as mock_converter:
+             patch('src.services.execution.kernel.model_conversion_handler.get_compatible_converter_for_model') as mock_converter:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
@@ -2759,7 +2759,7 @@ class TestCreateTask:
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
              patch('src.engines.kasal.paths.crew.task_adapter.get_pydantic_class_from_name') as mock_get_pydantic, \
-             patch('src.engines.kasal.kernel.model_conversion_handler.get_compatible_converter_for_model') as mock_converter:
+             patch('src.services.execution.kernel.model_conversion_handler.get_compatible_converter_for_model') as mock_converter:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))
@@ -2798,8 +2798,8 @@ class TestCreateTask:
         with patch('src.core.unit_of_work.UnitOfWork'), \
              patch('src.services.mcp_service.MCPService') as mock_mcp_service, \
              patch('src.engines.kasal.paths.crew.task_adapter.get_pydantic_class_from_name') as mock_get_pydantic, \
-             patch('src.engines.kasal.kernel.model_conversion_handler.get_compatible_converter_for_model') as mock_converter, \
-             patch('src.engines.kasal.kernel.model_conversion_handler.configure_output_json_approach') as mock_configure:
+             patch('src.services.execution.kernel.model_conversion_handler.get_compatible_converter_for_model') as mock_converter, \
+             patch('src.services.execution.kernel.model_conversion_handler.configure_output_json_approach') as mock_configure:
             mock_mcp_service.from_unit_of_work = AsyncMock(return_value=Mock(
                 get_enabled_servers=AsyncMock(return_value=Mock(servers=[]))
             ))

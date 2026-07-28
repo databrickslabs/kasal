@@ -6,7 +6,7 @@ Auto-generated test template. TODO: Add comprehensive test coverage.
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from src.engines.kasal.config.crew_config_builder import (
+from src.services.execution.config.crew_config_builder import (
     CrewConfigBuilder,
     determine_crew_memory_setting,
     determine_process_type,

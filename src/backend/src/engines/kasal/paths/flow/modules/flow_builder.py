@@ -27,7 +27,7 @@ from src.core.logger import LoggerManager
 from src.utils.safe_eval import safe_eval
 from src.engines.kasal.paths.flow.modules.agent_adapter import AgentConfig
 from src.engines.kasal.paths.flow.modules.task_adapter import TaskConfig
-from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
+from src.services.execution.kernel.execution_callback import create_execution_callbacks
 
 # Import new modular components
 from src.engines.kasal.paths.flow.modules.flow_config import FlowConfigManager

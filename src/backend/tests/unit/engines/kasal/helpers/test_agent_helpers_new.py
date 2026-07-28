@@ -55,7 +55,7 @@ async def _make_agent(agent_config=None, config=None, **kwargs):
          patch("src.db.session.request_scoped_session") as mock_sess, \
          patch("src.services.mcp_service.MCPService") as mock_mcp_svc, \
          patch("src.core.unit_of_work.UnitOfWork") as mock_uow, \
-         patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls:
+         patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls:
 
         mock_llm_instance = MagicMock()
         mock_llm_instance.model = agent_config.get("llm", "gpt-4o")
@@ -159,7 +159,7 @@ class TestCreateAgentBasic:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls:
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls:
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -204,7 +204,7 @@ class TestCreateAgentLLMConfig:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
              patch("kasal_engine.llm.LLM") as mock_llm_cls:
 
             mock_configured = MagicMock()
@@ -238,7 +238,7 @@ class TestCreateAgentLLMConfig:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
              patch("src.core.llm.handlers.databricks_retry_llm.DatabricksRetryLLM") as mock_retry:
 
             mock_configured = MagicMock()
@@ -272,7 +272,7 @@ class TestCreateAgentLLMConfig:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls:
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls:
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -308,7 +308,7 @@ class TestCreateAgentLLMConfig:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls:
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls:
 
             mock_lm.configure_kasal_llm = AsyncMock(side_effect=Exception("LLM config error"))
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(return_value=[])
@@ -351,8 +351,8 @@ class TestCreateAgentToolResolution:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names",
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
@@ -395,8 +395,8 @@ class TestCreateAgentToolResolution:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names",
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
@@ -435,8 +435,8 @@ class TestCreateAgentToolResolution:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names",
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
@@ -474,8 +474,8 @@ class TestCreateAgentToolResolution:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names",
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
@@ -511,8 +511,8 @@ class TestCreateAgentToolResolution:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names",
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
@@ -619,8 +619,8 @@ class TestCreateAgentAdditionalParams:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names",
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
@@ -655,7 +655,7 @@ class TestCreateAgentAdditionalParams:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls:
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls:
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
             mock_mcp.create_mcp_tools_for_agent = AsyncMock(side_effect=Exception("MCP error"))
@@ -684,8 +684,8 @@ class TestCreateAgentAdditionalParams:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names",
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
@@ -719,7 +719,7 @@ class TestCreateAgentLLMConfigExtended:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
              patch("kasal_engine.llm.LLM") as mock_llm_cls:
 
             mock_configured = MagicMock()
@@ -756,7 +756,7 @@ class TestCreateAgentLLMConfigExtended:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
              patch("kasal_engine.llm.LLM") as mock_llm_cls:
 
             mock_configured = MagicMock()
@@ -799,8 +799,8 @@ class TestCreateAgentLLMConfigExtended:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls, \
-             patch("src.engines.kasal.kernel.tool_helpers.resolve_tool_ids_to_names",
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.services.execution.kernel.tool_helpers.resolve_tool_ids_to_names",
                    new_callable=AsyncMock) as mock_resolve:
 
             mock_lm.configure_kasal_llm = AsyncMock(return_value=MagicMock())
@@ -831,7 +831,7 @@ class TestCreateAgentLLMConfigExtended:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls:
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls:
 
             mock_configured = MagicMock()
             mock_configured.model = "databricks/databricks-meta-llama"
@@ -864,7 +864,7 @@ class TestCreateAgentLLMConfigExtended:
              patch("src.db.session.request_scoped_session") as mock_sess, \
              patch("src.services.mcp_service.MCPService"), \
              patch("src.core.unit_of_work.UnitOfWork"), \
-             patch("src.engines.kasal.kernel.agent_builder.Agent") as mock_agent_cls, \
+             patch("src.services.execution.kernel.agent_builder.Agent") as mock_agent_cls, \
              patch("kasal_engine.llm.LLM") as mock_llm_cls:
 
             # Return a configured_llm without 'model' attribute

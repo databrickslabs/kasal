@@ -6,7 +6,7 @@ Auto-generated test template. TODO: Add comprehensive test coverage.
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from src.engines.kasal.config_adapter import (get_execution_logger
+from src.services.execution.config_adapter import (get_execution_logger
     adapt_config,
     normalize_config,
     normalize_flow_config

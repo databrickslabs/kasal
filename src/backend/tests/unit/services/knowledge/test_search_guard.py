@@ -156,14 +156,14 @@ class TestAgentWallClockDefault:
     one, so the field was inert for every generated crew."""
 
     def _kwargs(self, spec_extra=None):
-        from src.engines.kasal.kernel.agent_builder import build_agent_kwargs
+        from src.services.execution.kernel.agent_builder import build_agent_kwargs
 
         spec = {"role": "R", "goal": "G", "backstory": "B"}
         spec.update(spec_extra or {})
         return build_agent_kwargs(spec, tools=[], llm=object(), label="a")
 
     def test_a_default_is_applied_when_the_spec_sets_none(self):
-        from src.engines.kasal.kernel.agent_builder import (
+        from src.services.execution.kernel.agent_builder import (
             DEFAULT_AGENT_MAX_EXECUTION_TIME,
         )
 

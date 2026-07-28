@@ -10,8 +10,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from kasal_engine.core import Process
-from src.engines.kasal.config_adapter import adapt_config
-from src.engines.kasal.config.crew_config_builder import CrewConfigBuilder
+from src.services.execution.config_adapter import adapt_config
+from src.services.execution.config.crew_config_builder import CrewConfigBuilder
 from src.engines.kasal.paths.crew.crew_preparation import CrewPreparation
 from src.schemas.execution import CrewConfig
 

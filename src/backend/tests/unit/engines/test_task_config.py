@@ -924,7 +924,7 @@ class TestTaskConfigGuardrails:
 
         with patch('kasal_engine.core.Task', side_effect=_ctor), \
              patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
-             patch('src.engines.kasal.kernel.task_builder.GuardrailWrapper') as mock_wrapper_class, \
+             patch('src.services.execution.kernel.task_builder.GuardrailWrapper') as mock_wrapper_class, \
              patch('builtins.open', create=True), \
              patch('os.makedirs'):
 
@@ -997,7 +997,7 @@ class TestTaskConfigGuardrails:
 
         with patch('kasal_engine.core.Task', side_effect=_ctor), \
              patch('src.services.guardrails.guardrail_factory.GuardrailFactory') as mock_factory, \
-             patch('src.engines.kasal.kernel.task_builder.GuardrailWrapper') as mock_wrapper_class, \
+             patch('src.services.execution.kernel.task_builder.GuardrailWrapper') as mock_wrapper_class, \
              patch('kasal_engine.core.LLMGuardrail') as mock_llm_guardrail_class, \
              patch('src.core.llm_manager.LLMManager.configure_kasal_llm', new_callable=AsyncMock, return_value=Mock()), \
              patch('src.utils.user_context.UserContext.get_group_context', return_value=mock_gc), \

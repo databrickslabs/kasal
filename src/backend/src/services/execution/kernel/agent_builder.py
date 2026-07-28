@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 from kasal_engine.core import Agent
 
 from src.core.logger import LoggerManager
-from src.engines.kasal.kernel.agent_security import inject_security_preamble
+from src.services.execution.kernel.agent_security import inject_security_preamble
 
 logger = LoggerManager.get_instance().crew
 

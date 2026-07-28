@@ -192,7 +192,7 @@ async def configure_flow_crew_memory(
     Falls back gracefully (CrewAI default) when no backend is configured.
     """
     from src.services.memory.crew_memory import CrewMemoryService
-    from src.engines.kasal.config.embedder_config_builder import EmbedderConfigBuilder
+    from src.services.execution.config.embedder_config_builder import EmbedderConfigBuilder
     from src.schemas.memory_backend import MemoryBackendConfig as MemBackConfig
 
     model = None
@@ -682,7 +682,7 @@ class FlowMethodFactory:
             # with the crew path) so flow tool/memory traces carry job_id + group
             # attribution (e.g. custom llm_call trace events). Shared entry point
             # with the crew path; builds a minimal service from group_id+job_id.
-            from src.engines.kasal.kernel.trace_context import (
+            from src.services.execution.kernel.trace_context import (
                 attach_execution_trace_context,
             )
 
@@ -1191,7 +1191,7 @@ class FlowMethodFactory:
             # with the crew path) so flow tool/memory traces carry job_id + group
             # attribution (e.g. custom llm_call trace events). Shared entry point
             # with the crew path; builds a minimal service from group_id+job_id.
-            from src.engines.kasal.kernel.trace_context import (
+            from src.services.execution.kernel.trace_context import (
                 attach_execution_trace_context,
             )
 

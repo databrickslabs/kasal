@@ -4,7 +4,7 @@ these tests cover only the functional space-id bridge."""
 
 from types import SimpleNamespace
 
-from src.engines.kasal.kernel.genie_formatting import (
+from src.services.execution.kernel.genie_formatting import (
     _genie_space_id_from_url,
     apply_genie_mcp_space_id,
     genie_mcp_space_id,

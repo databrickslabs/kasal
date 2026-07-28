@@ -20,9 +20,9 @@ from src.utils.databricks_url_utils import DatabricksURLUtils
 
 # Import new service classes
 from src.services.memory.crew_memory import CrewMemoryService
-from src.engines.kasal.config.embedder_config_builder import EmbedderConfigBuilder
-from src.engines.kasal.config.manager_config_builder import ManagerConfigBuilder
-from src.engines.kasal.config.crew_config_builder import CrewConfigBuilder
+from src.services.execution.config.embedder_config_builder import EmbedderConfigBuilder
+from src.services.execution.config.manager_config_builder import ManagerConfigBuilder
+from src.services.execution.config.crew_config_builder import CrewConfigBuilder
 
 logger = LoggerManager.get_instance().crew
 
@@ -511,7 +511,7 @@ class CrewPreparation:
                         resolved_task_tool_names = []
                         if task_tools and self.tool_service:
                             try:
-                                from src.engines.kasal.kernel.tool_helpers import (
+                                from src.services.execution.kernel.tool_helpers import (
                                     resolve_tool_ids_to_names,
                                 )
 
@@ -1159,7 +1159,7 @@ class CrewPreparation:
             # exec_id/group_id come from its config. set_crew_reference_on_memory
             # stays crew-only (no flow equivalent).
             memory_service.set_crew_reference_on_memory(self.crew)
-            from src.engines.kasal.kernel.trace_context import (
+            from src.services.execution.kernel.trace_context import (
                 attach_execution_trace_context,
             )
 

@@ -85,7 +85,7 @@ async def test_run_light_agent_success_writes_completed_with_raw_answer():
          patch("src.services.api_keys_service.ApiKeysService"), \
          patch("src.services.tools.tool_factory.ToolFactory.create",
                new_callable=AsyncMock, return_value=MagicMock()), \
-         patch("src.engines.kasal.kernel.agent_tools.build_agent_with_tools",
+         patch("src.services.execution.kernel.agent_tools.build_agent_with_tools",
                new_callable=AsyncMock, return_value=mock_agent), \
          patch("src.services.execution_status_service.ExecutionStatusService.update_status",
                update_mock):
@@ -139,7 +139,7 @@ async def _run_with_captured_handlers(exec_id, config, ctx, mock_agent, trace_in
          patch("src.services.api_keys_service.ApiKeysService"), \
          patch("src.services.tools.tool_factory.ToolFactory.create",
                new_callable=AsyncMock, return_value=MagicMock()), \
-         patch("src.engines.kasal.kernel.agent_tools.build_agent_with_tools",
+         patch("src.services.execution.kernel.agent_tools.build_agent_with_tools",
                new_callable=AsyncMock, return_value=mock_agent), \
          patch("src.services.trace.ExecutionTraceService", trace_cls), \
          patch.object(_ce.crewai_event_bus, "register_handler", side_effect=_cap), \
@@ -359,7 +359,7 @@ async def test_run_light_agent_failure_marks_failed():
          patch("src.services.api_keys_service.ApiKeysService"), \
          patch("src.services.tools.tool_factory.ToolFactory.create",
                new_callable=AsyncMock, return_value=MagicMock()), \
-         patch("src.engines.kasal.kernel.agent_tools.build_agent_with_tools",
+         patch("src.services.execution.kernel.agent_tools.build_agent_with_tools",
                new_callable=AsyncMock, side_effect=RuntimeError("boom")), \
          patch("src.services.execution_status_service.ExecutionStatusService.update_status",
                update_mock):
@@ -428,7 +428,7 @@ def _light_patches(mock_agent, update_mock, compose_mock):
         patch("src.services.api_keys_service.ApiKeysService"),
         patch("src.services.tools.tool_factory.ToolFactory.create",
               new_callable=AsyncMock, return_value=MagicMock()),
-        patch("src.engines.kasal.kernel.agent_tools.build_agent_with_tools",
+        patch("src.services.execution.kernel.agent_tools.build_agent_with_tools",
               new_callable=AsyncMock, return_value=mock_agent),
         patch("src.services.a2ui.runner.compose_surface", compose_mock),
         patch("src.services.execution_status_service.ExecutionStatusService.update_status",

@@ -93,7 +93,7 @@ class TestAgentConfig:
         mock_tool_factory_class.return_value = mock_tool_factory
         mock_agent_instance = MagicMock()
 
-        with patch('src.engines.kasal.kernel.agent_tools.build_agent_with_tools',
+        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=mock_agent_instance) as mock_build:
             result = await AgentConfig.configure_agent_and_tools(mock_agent_data)
 
@@ -115,7 +115,7 @@ class TestAgentConfig:
         mock_tool_factory.initialize.side_effect = Exception("Tool factory error")
         mock_tool_factory_class.return_value = mock_tool_factory
 
-        with patch('src.engines.kasal.kernel.agent_tools.build_agent_with_tools',
+        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=MagicMock()):
             result = await AgentConfig.configure_agent_and_tools(mock_agent_data)
 
@@ -137,7 +137,7 @@ class TestAgentConfig:
         agent_data.backstory = "An experienced data analyst"
         agent_data.tools = []  # No direct tools
 
-        with patch('src.engines.kasal.kernel.agent_tools.build_agent_with_tools',
+        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=MagicMock()):
             result = await AgentConfig.configure_agent_and_tools(agent_data, mock_flow_data)
 
@@ -206,7 +206,7 @@ class TestAgentConfig:
         agent_data.backstory = "Backstory"
         del agent_data.tools  # No tools attribute
 
-        with patch('src.engines.kasal.kernel.agent_tools.build_agent_with_tools',
+        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=MagicMock()):
             result = await AgentConfig.configure_agent_and_tools(agent_data)
 
@@ -227,7 +227,7 @@ class TestAgentConfig:
         agent_data.backstory = "Backstory"
         agent_data.tools = None  # None tools
 
-        with patch('src.engines.kasal.kernel.agent_tools.build_agent_with_tools',
+        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=MagicMock()):
             result = await AgentConfig.configure_agent_and_tools(agent_data)
 
@@ -251,7 +251,7 @@ class TestAgentConfig:
         flow_data = MagicMock()
         del flow_data.nodes  # No nodes attribute
 
-        with patch('src.engines.kasal.kernel.agent_tools.build_agent_with_tools',
+        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=MagicMock()):
             result = await AgentConfig.configure_agent_and_tools(agent_data, flow_data)
 
@@ -292,7 +292,7 @@ class TestAgentConfigIntegration:
         agent_data.max_rpm = 5
         agent_data.config = {"temperature": 0.7}
 
-        with patch('src.engines.kasal.kernel.agent_tools.build_agent_with_tools',
+        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=mock_agent_instance) as mock_build:
             result = await AgentConfig.configure_agent_and_tools(agent_data)
 
@@ -333,7 +333,7 @@ class TestAgentConfigIntegration:
         agent_data.inject_date = True
         agent_data.date_format = "%Y-%m-%d"
 
-        with patch('src.engines.kasal.kernel.agent_tools.build_agent_with_tools',
+        with patch('src.services.execution.kernel.agent_tools.build_agent_with_tools',
                    new_callable=AsyncMock, return_value=mock_agent_instance) as mock_build:
             result = await AgentConfig.configure_agent_and_tools(agent_data)
 

@@ -13,7 +13,7 @@ from kasal_engine.core import Task
 from src.services.tools.tool_factory import ToolFactory
 # Single source of truth for per-tool override resolution (shared with the crew
 # path). The common version additionally guards get_tool_info in try/except.
-from src.engines.kasal.kernel.agent_tools import (
+from src.services.execution.kernel.agent_tools import (
     resolve_tool_override as _resolve_tool_override,
 )
 
@@ -67,7 +67,7 @@ class TaskConfig:
             # formatting + code/LLM guardrails + output_pydantic) — shared with the crew path.
             spec = TaskConfig._task_data_to_spec(task_data)
             group_id = getattr(group_context, 'primary_group_id', None) if group_context else None
-            from src.engines.kasal.kernel.task_builder import build_task_args
+            from src.services.execution.kernel.task_builder import build_task_args
             # Flow assigns tools to the agent (see _configure_task_tools), so the task
             # itself carries no tools list.
             task_args = await build_task_args(

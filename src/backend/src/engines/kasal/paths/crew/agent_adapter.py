@@ -13,7 +13,7 @@ from kasal_engine.core import Agent
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logger import LoggerManager
-from src.engines.kasal.kernel.tool_helpers import resolve_tool_ids_to_names
+from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names
 from src.utils.model_config import model_rejects_temperature
 
 # Get logger from the centralized logging system
@@ -27,7 +27,7 @@ logger = LoggerManager.get_instance().crew
 # Security: prompt hardening / spotlighting now lives in the shared common
 # package so the crew and flow agent builders inject the identical preamble.
 # Re-exported here for backward compatibility with existing call sites/tests.
-from src.engines.kasal.kernel.agent_security import (  # noqa: E402,F401
+from src.services.execution.kernel.agent_security import (  # noqa: E402,F401
     _SECURITY_PREAMBLE,
     _build_security_preamble,
     inject_security_preamble,
@@ -36,7 +36,7 @@ from src.engines.kasal.kernel.agent_security import (  # noqa: E402,F401
 
 # redact_llm_repr now lives in the shared common package (used by both the crew
 # and flow agent builders); re-exported here for existing call sites.
-from src.engines.kasal.kernel.agent_builder import redact_llm_repr  # noqa: E402,F401
+from src.services.execution.kernel.agent_builder import redact_llm_repr  # noqa: E402,F401
 
 
 async def create_agent(
@@ -83,7 +83,7 @@ async def create_agent(
         agent_config = agent_config.copy()
         del agent_config['knowledge_sources']
     
-    from src.engines.kasal.kernel.agent_tools import build_agent_with_tools
+    from src.services.execution.kernel.agent_tools import build_agent_with_tools
 
     group_id_param = config.get('group_id') if config else None
 

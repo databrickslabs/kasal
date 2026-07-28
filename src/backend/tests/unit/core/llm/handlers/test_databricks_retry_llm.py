@@ -250,7 +250,7 @@ class TestStructuredOutputKeepsToolLoop:
 
         from pydantic import BaseModel
 
-        from src.engines.kasal.kernel.model_conversion_handler import (
+        from src.services.execution.kernel.model_conversion_handler import (
             get_compatible_converter_for_model,
         )
 

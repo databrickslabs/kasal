@@ -65,7 +65,7 @@ for _mod_name, _mock_obj in _MODULES_TO_MOCK.items():
 
 import pytest
 from unittest.mock import patch, AsyncMock
-from src.engines.kasal.config.embedder_config_builder import EmbedderConfigBuilder
+from src.services.execution.config.embedder_config_builder import EmbedderConfigBuilder
 
 # Restore modules immediately after import
 for _mod_name, _original in _originals.items():
@@ -173,7 +173,7 @@ class TestGetDatabricksEndpointEnvFallback:
                         wraps=builder._get_databricks_endpoint
                     ):
                         # We need to patch DatabricksURLUtils at the right level
-                        with patch('src.engines.kasal.config.embedder_config_builder.DatabricksURLUtils') as mock_utils:
+                        with patch('src.services.execution.config.embedder_config_builder.DatabricksURLUtils') as mock_utils:
                             mock_utils.normalize_workspace_url.return_value = 'https://from-db.databricks.com'
                             with patch.dict(os.environ, {'DATABRICKS_HOST': 'from-env.databricks.com'}):
                                 result = await builder._get_databricks_endpoint()

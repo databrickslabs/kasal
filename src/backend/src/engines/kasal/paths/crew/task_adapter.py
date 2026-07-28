@@ -15,10 +15,10 @@ from kasal_engine.core import Agent, Task
 from kasal_engine.core import TaskOutput
 
 from src.core.logger import LoggerManager
-from src.engines.kasal.kernel.tool_helpers import resolve_tool_ids_to_names
+from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names
 from src.core.unit_of_work import UnitOfWork
 from src.services.guardrails.wrapper import GuardrailWrapper
-from src.engines.kasal.kernel.task_builder import build_task_args
+from src.services.execution.kernel.task_builder import build_task_args
 
 
 # Get loggers from the centralized logging system

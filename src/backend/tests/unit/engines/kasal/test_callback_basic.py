@@ -6,7 +6,7 @@ Simple tests to verify core callback functionality without complex mocking.
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.engines.kasal.kernel.execution_callback import create_execution_callbacks
+from src.services.execution.kernel.execution_callback import create_execution_callbacks
 
 
 class TestBasicCallbackFunctionality:
@@ -32,7 +32,7 @@ class TestBasicCallbackFunctionality:
     def test_callback_handles_missing_attributes(self):
         """Test that callbacks handle missing attributes gracefully."""
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_callback, _ = create_execution_callbacks("test_job", {}, None)
 
@@ -50,7 +50,7 @@ class TestBasicCallbackFunctionality:
         mock_group.group_email = "test@group.com"
 
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_callback, _ = create_execution_callbacks(
                 "test_job", {"model": "test"}, mock_group

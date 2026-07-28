@@ -20,7 +20,7 @@ from src.core.exceptions import ForbiddenError, NotFoundError
 from src.core.dependencies import GroupContextDep, SessionDep
 from src.core.logger import LoggerManager
 from src.core.permissions import check_role_in_context
-from src.engines.kasal.config_adapter import get_execution_logger
+from src.services.execution.config_adapter import get_execution_logger
 from src.schemas.execution import (
     CrewConfig,
     ExecutionCreateResponse,

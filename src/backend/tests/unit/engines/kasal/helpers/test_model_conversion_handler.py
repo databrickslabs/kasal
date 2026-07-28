@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch, Mock, call
 from typing import Dict, Any
 from pydantic import BaseModel
 
-from src.engines.kasal.kernel.model_conversion_handler import (
+from src.services.execution.kernel.model_conversion_handler import (
     detect_llm_provider,
     simplify_schema,
     get_compatible_converter_for_model,
@@ -300,7 +300,7 @@ class TestGetCompatibleConverterForModel:
         result = get_compatible_converter_for_model(agent, MockOutputModel)
         assert result == (None, MockOutputModel, False, False)
     
-    @patch('src.engines.kasal.kernel.model_conversion_handler.logger')
+    @patch('src.services.execution.kernel.model_conversion_handler.logger')
     def test_gemini_databricks_models(self, mock_logger):
         """Test Gemini and Databricks model detection."""
         for model_name, provider in [("gemini-pro", "gemini"), ("databricks-model", "databricks")]:
@@ -385,7 +385,7 @@ class TestSupportsNativeStructuredOutput:
 class TestConfigureOutputJsonApproach:
     """Test configure_output_json_approach function - 100% coverage."""
     
-    @patch('src.engines.kasal.kernel.model_conversion_handler.logger')
+    @patch('src.services.execution.kernel.model_conversion_handler.logger')
     def test_configure_output_json(self, mock_logger):
         """Test basic output_json configuration."""
         task_args = {'expected_output': 'Generate data'}
@@ -425,7 +425,7 @@ class TestConfigureOutputJsonApproach:
 class TestIntegrationAndEdgeCases:
     """Test integration scenarios and edge cases."""
     
-    @patch('src.engines.kasal.kernel.model_conversion_handler.logger')
+    @patch('src.services.execution.kernel.model_conversion_handler.logger')
     def test_full_workflow_gemini(self, mock_logger):
         """Test complete workflow for Gemini."""
         agent = MagicMock()
@@ -440,7 +440,7 @@ class TestIntegrationAndEdgeCases:
         configured = configure_output_json_approach(task_args, MockOutputModel)
         assert configured['output_json'] is True
     
-    @patch('src.engines.kasal.kernel.model_conversion_handler.logger')
+    @patch('src.services.execution.kernel.model_conversion_handler.logger')
     def test_full_workflow_databricks(self, mock_logger):
         """Test complete workflow for Databricks."""
         agent = MagicMock()
@@ -473,7 +473,7 @@ class TestDeadCodeCoverage:
     ensure we maintain visibility of that code for potential future use.
     """
     
-    @patch('src.engines.kasal.kernel.model_conversion_handler.logger')
+    @patch('src.services.execution.kernel.model_conversion_handler.logger')
     def test_force_dead_code_execution(self, mock_logger):
         """Force execution of the dead code paths."""
         # We can't directly test the converter classes due to CrewAI dependencies,
@@ -500,7 +500,7 @@ class TestDeadCodeCoverage:
 class TestDeadCodeForceExecution:
     """Force execution of dead code paths in get_compatible_converter_for_model."""
 
-    @patch('src.engines.kasal.kernel.model_conversion_handler.logger')
+    @patch('src.services.execution.kernel.model_conversion_handler.logger')
     def test_gemini_provider_returns_output_json(self, mock_logger):
         """Gemini provider always returns output_json approach (lines 257-259)."""
         agent = MagicMock()
@@ -510,7 +510,7 @@ class TestDeadCodeForceExecution:
         assert result == (None, None, True, True)
         mock_logger.info.assert_called_with("Detected gemini model, using compatible conversion approach")
 
-    @patch('src.engines.kasal.kernel.model_conversion_handler.logger')
+    @patch('src.services.execution.kernel.model_conversion_handler.logger')
     def test_databricks_provider_returns_output_json(self, mock_logger):
         """Databricks provider always returns output_json approach (lines 257-259)."""
         agent = MagicMock()

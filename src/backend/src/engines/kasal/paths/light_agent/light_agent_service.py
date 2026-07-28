@@ -149,7 +149,7 @@ class LightAgentService:
         import re
         from datetime import datetime, UTC
         from src.utils.user_context import UserContext
-        from src.engines.kasal.kernel.agent_tools import build_agent_with_tools
+        from src.services.execution.kernel.agent_tools import build_agent_with_tools
         from src.services.execution_status_service import ExecutionStatusService
         from src.db.session import request_scoped_session
         from src.services.agent_service import AgentService
@@ -868,7 +868,7 @@ class LightAgentService:
                 # wait for the human via SSE hitl_request + the approvals API.
                 _uninstall_approval_hook = None
                 try:
-                    from src.engines.kasal.kernel.tool_approval import (
+                    from src.services.execution.kernel.tool_approval import (
                         install_tool_approval_hook,
                     )
                     _uninstall_approval_hook = install_tool_approval_hook(
@@ -1170,7 +1170,7 @@ class LightAgentService:
         configured"). Output FORMATTING is intentionally not done here: the answer
         flows through the shared A2UI composer like every other deliverable.
         """
-        from src.engines.kasal.kernel.genie_formatting import apply_genie_mcp_space_id
+        from src.services.execution.kernel.genie_formatting import apply_genie_mcp_space_id
 
         # Copy the picked Genie MCP server's space id into any co-assigned GenieTool
         # (scans agent.tools) so it doesn't error "Genie space ID is not configured".
@@ -1518,8 +1518,8 @@ class LightAgentService:
             return None
         try:
             from src.services.memory.crew_memory import CrewMemoryService
-            from src.engines.kasal.config.crew_config_builder import CrewConfigBuilder
-            from src.engines.kasal.config.embedder_config_builder import EmbedderConfigBuilder
+            from src.services.execution.config.crew_config_builder import CrewConfigBuilder
+            from src.services.execution.config.embedder_config_builder import EmbedderConfigBuilder
             from src.schemas.memory_backend import MemoryBackendConfig
 
             user_token = getattr(group_context, "access_token", None)

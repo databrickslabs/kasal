@@ -30,7 +30,7 @@ async def test_no_active_config_falls_back_to_default_and_wires_memory():
     with patch(
         "src.services.memory.crew_memory.CrewMemoryService"
     ) as MockSvc, patch(
-        "src.engines.kasal.config.embedder_config_builder.EmbedderConfigBuilder"
+        "src.services.execution.config.embedder_config_builder.EmbedderConfigBuilder"
     ) as MockEmb:
         svc = MockSvc.return_value
         svc.fetch_memory_backend_config = AsyncMock(return_value=None)
@@ -68,7 +68,7 @@ async def test_backend_config_wires_unified_memory():
     with patch(
         "src.services.memory.crew_memory.CrewMemoryService"
     ) as MockSvc, patch(
-        "src.engines.kasal.config.embedder_config_builder.EmbedderConfigBuilder"
+        "src.services.execution.config.embedder_config_builder.EmbedderConfigBuilder"
     ) as MockEmb:
         svc = MockSvc.return_value
         svc.fetch_memory_backend_config = AsyncMock(return_value=backend_cfg)
@@ -107,7 +107,7 @@ async def test_backend_config_error_falls_back_gracefully():
     with patch(
         "src.services.memory.crew_memory.CrewMemoryService"
     ) as MockSvc, patch(
-        "src.engines.kasal.config.embedder_config_builder.EmbedderConfigBuilder"
+        "src.services.execution.config.embedder_config_builder.EmbedderConfigBuilder"
     ) as MockEmb:
         svc = MockSvc.return_value
         svc.fetch_memory_backend_config = AsyncMock(return_value=backend_cfg)

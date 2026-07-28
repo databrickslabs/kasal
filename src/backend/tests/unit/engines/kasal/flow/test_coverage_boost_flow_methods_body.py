@@ -236,7 +236,7 @@ class TestStartingPointMethodBody:
 
         with patch("src.engines.kasal.paths.flow.modules.flow_methods.Crew") as MockCrew, \
              patch("src.engines.kasal.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
-             patch("src.engines.kasal.kernel.trace_context.attach_execution_trace_context") as mock_attach:
+             patch("src.services.execution.kernel.trace_context.attach_execution_trace_context") as mock_attach:
             MockCrew.return_value = MagicMock()
             mock_result = MagicMock()
             mock_result.raw = "res"
@@ -473,7 +473,7 @@ class TestStartingPointMethodBody:
 
         with patch("src.engines.kasal.paths.flow.modules.flow_methods.Crew") as MockCrew, \
              patch("src.engines.kasal.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
-             patch("src.engines.kasal.config.embedder_config_builder.EmbedderConfigBuilder") as MockEmb:
+             patch("src.services.execution.config.embedder_config_builder.EmbedderConfigBuilder") as MockEmb:
             mock_builder = MagicMock()
             mock_builder.configure_embedder = AsyncMock(return_value=({"memory": True, "embedder": {"provider": "test"}}, None, None))
             MockEmb.return_value = mock_builder
@@ -515,7 +515,7 @@ class TestStartingPointMethodBody:
 
         with patch("src.engines.kasal.paths.flow.modules.flow_methods.Crew") as MockCrew, \
              patch("src.engines.kasal.paths.flow.modules.flow_methods.asyncio.wait_for") as mock_wait, \
-             patch("src.engines.kasal.config.embedder_config_builder.EmbedderConfigBuilder", side_effect=ImportError("no embedder")):
+             patch("src.services.execution.config.embedder_config_builder.EmbedderConfigBuilder", side_effect=ImportError("no embedder")):
             crew_inst = MagicMock()
             MockCrew.return_value = crew_inst
             mock_result = MagicMock()

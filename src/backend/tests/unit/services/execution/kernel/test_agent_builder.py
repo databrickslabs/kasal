@@ -4,7 +4,7 @@ These pin the canonical behavior so the two paths can never diverge."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.engines.kasal.kernel.agent_builder import (
+from src.services.execution.kernel.agent_builder import (
     build_agent,
     build_agent_kwargs,
     build_agent_llm,
@@ -271,7 +271,7 @@ class TestReasoningEffortReachesTheLLM:
 class TestBuildAgent:
     @pytest.mark.asyncio
     async def test_builds_llm_kwargs_preamble_construction_and_custom_attrs(self):
-        with patch("src.engines.kasal.kernel.agent_builder.Agent") as MockAgent, \
+        with patch("src.services.execution.kernel.agent_builder.Agent") as MockAgent, \
              patch("src.core.llm_manager.LLMManager") as MockLM:
             MockLM.configure_kasal_llm = AsyncMock(return_value="LLM-OBJ")
             MockAgent.return_value = MagicMock()
@@ -296,7 +296,7 @@ class TestBuildAgent:
 
     @pytest.mark.asyncio
     async def test_no_extra_kwargs_or_custom_attrs(self):
-        with patch("src.engines.kasal.kernel.agent_builder.Agent") as MockAgent, \
+        with patch("src.services.execution.kernel.agent_builder.Agent") as MockAgent, \
              patch("src.core.llm_manager.LLMManager") as MockLM:
             MockLM.configure_kasal_llm = AsyncMock(return_value="LLM")
             MockAgent.return_value = MagicMock()

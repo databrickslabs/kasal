@@ -222,7 +222,7 @@ class TestCreateAgentWithKnowledgeSources:
     """Test suite for create_agent function with knowledge sources."""
     
     @pytest.mark.asyncio
-    @patch('src.engines.kasal.kernel.agent_builder.Agent')
+    @patch('src.services.execution.kernel.agent_builder.Agent')
     @patch('src.engines.kasal.paths.crew.agent_adapter.process_knowledge_sources')
     @patch('src.core.llm_manager.LLMManager.configure_kasal_llm')
     @patch('src.core.unit_of_work.UnitOfWork')
@@ -290,7 +290,7 @@ class TestCreateAgentWithKnowledgeSources:
             assert result == mock_agent_instance
     
     @pytest.mark.asyncio
-    @patch('src.engines.kasal.kernel.agent_builder.Agent')
+    @patch('src.services.execution.kernel.agent_builder.Agent')
     @patch('src.core.llm_manager.LLMManager.configure_kasal_llm')
     @patch('src.core.unit_of_work.UnitOfWork')
     async def test_create_agent_without_knowledge_sources(self, mock_uow, mock_configure_llm, mock_agent_class):

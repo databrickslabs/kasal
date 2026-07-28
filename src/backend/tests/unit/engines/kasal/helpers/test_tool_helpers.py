@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from typing import List, Dict, Any
 
-from src.engines.kasal.kernel.tool_helpers import (
+from src.services.execution.kernel.tool_helpers import (
     resolve_tool_ids_to_names,
 )
 
@@ -33,7 +33,7 @@ class TestResolveToolIdsToNames:
         
         mock_tool_service.get_tool_by_id.side_effect = [mock_tool1, mock_tool2]
         
-        with patch('src.engines.kasal.kernel.tool_helpers.logger') as mock_logger:
+        with patch('src.services.execution.kernel.tool_helpers.logger') as mock_logger:
             result = await resolve_tool_ids_to_names([1, 2], mock_tool_service)
             
             assert result == ["Search Tool", "Calculator Tool"]
@@ -51,7 +51,7 @@ class TestResolveToolIdsToNames:
         mock_tool.title = "String ID Tool"
         mock_tool_service.get_tool_by_id.return_value = mock_tool
         
-        with patch('src.engines.kasal.kernel.tool_helpers.logger'):
+        with patch('src.services.execution.kernel.tool_helpers.logger'):
             result = await resolve_tool_ids_to_names(["123"], mock_tool_service)
             
             assert result == ["String ID Tool"]
@@ -69,7 +69,7 @@ class TestResolveToolIdsToNames:
         
         mock_tool_service.get_tool_by_id.side_effect = [mock_tool1, mock_tool2]
         
-        with patch('src.engines.kasal.kernel.tool_helpers.logger'):
+        with patch('src.services.execution.kernel.tool_helpers.logger'):
             result = await resolve_tool_ids_to_names(["10", 20], mock_tool_service)
             
             assert result == ["Tool 1", "Tool 2"]
@@ -87,7 +87,7 @@ class TestResolveToolIdsToNames:
         # First call succeeds, second call fails
         mock_tool_service.get_tool_by_id.side_effect = [mock_tool, Exception("Tool not found")]
         
-        with patch('src.engines.kasal.kernel.tool_helpers.logger') as mock_logger:
+        with patch('src.services.execution.kernel.tool_helpers.logger') as mock_logger:
             result = await resolve_tool_ids_to_names([1, 2], mock_tool_service)
             
             assert result == ["Working Tool", ""]  # Empty string for failed resolution
@@ -99,7 +99,7 @@ class TestResolveToolIdsToNames:
         """Test resolving with invalid string that can't convert to int."""
         mock_tool_service = AsyncMock()
         
-        with patch('src.engines.kasal.kernel.tool_helpers.logger') as mock_logger:
+        with patch('src.services.execution.kernel.tool_helpers.logger') as mock_logger:
             result = await resolve_tool_ids_to_names(["invalid"], mock_tool_service)
             
             assert result == [""]  # Empty string for failed conversion
@@ -113,7 +113,7 @@ class TestResolveToolIdsToNames:
         mock_tool_service = AsyncMock()
         mock_tool_service.get_tool_by_id.side_effect = Exception("Service unavailable")
         
-        with patch('src.engines.kasal.kernel.tool_helpers.logger') as mock_logger:
+        with patch('src.services.execution.kernel.tool_helpers.logger') as mock_logger:
             result = await resolve_tool_ids_to_names([1, 2, 3], mock_tool_service)
             
             assert result == ["", "", ""]

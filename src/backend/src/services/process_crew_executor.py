@@ -1000,7 +1000,7 @@ def run_crew_in_process(
 
                 # The crew's own step/task hooks (execution logs + secret
                 # redaction). Event SUBSCRIPTIONS are the OTel bridge's job.
-                from src.engines.kasal.kernel.execution_callback import (
+                from src.services.execution.kernel.execution_callback import (
                     create_execution_callbacks,
                 )
                 from src.services.execution.logs.writer_task import LogWriterTask
@@ -1093,7 +1093,7 @@ def run_crew_in_process(
                     # Tool-approval gates: approval-flagged tools pause and wait
                     # for the human (approval row + hitl_request over the pipe).
                     try:
-                        from src.engines.kasal.kernel.tool_approval import (
+                        from src.services.execution.kernel.tool_approval import (
                             install_tool_approval_hook,
                         )
 
@@ -1153,7 +1153,7 @@ def run_crew_in_process(
                     loggers_to_configure = [
                         logging.getLogger("crew"),  # Main crew logger
                         logging.getLogger(
-                            "src.engines.kasal.kernel.execution_callback"
+                            "src.services.execution.kernel.execution_callback"
                         ),
                         logging.getLogger("src.engines.kasal"),
                         logging.getLogger("mlflow"),

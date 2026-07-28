@@ -459,7 +459,7 @@ def run_flow_in_process(
 
                     # Tool-approval gates (same machinery as the crew path).
                     try:
-                        from src.engines.kasal.kernel.tool_approval import (
+                        from src.services.execution.kernel.tool_approval import (
                             install_tool_approval_hook,
                         )
 

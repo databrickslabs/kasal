@@ -105,7 +105,7 @@ class AgentConfig:
             # Resolve tools + build the agent via the SINGLE shared orchestrator
             # (the same one the crew path uses). Flow supplies its factory + the
             # graph-sourced ids; everything downstream is shared.
-            from src.engines.kasal.kernel.agent_tools import build_agent_with_tools
+            from src.services.execution.kernel.agent_tools import build_agent_with_tools
             spec = AgentConfig._agent_data_to_spec(agent_data)
             group_id = (getattr(group_context, 'primary_group_id', None) if group_context else None) or 'default'
             agent = await build_agent_with_tools(

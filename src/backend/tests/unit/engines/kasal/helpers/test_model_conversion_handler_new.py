@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch, Mock
 from pydantic import BaseModel
 from typing import List, Optional
 
-from src.engines.kasal.kernel.model_conversion_handler import (
+from src.services.execution.kernel.model_conversion_handler import (
     detect_llm_provider,
     simplify_schema,
     get_compatible_converter_for_model,

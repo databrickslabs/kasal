@@ -45,7 +45,7 @@ from src.models.execution_status import ExecutionStatus
 from src.services.execution.logs.writer_task import LogWriterTask
 from src.engines.kasal.paths.crew.execution_runner import run_crew_in_process, update_execution_status_with_retry
 from src.engines.kasal.paths.flow.flow_execution_runner import run_flow_in_process
-from src.engines.kasal.config_adapter import normalize_config, normalize_flow_config
+from src.services.execution.config_adapter import normalize_config, normalize_flow_config
 from src.engines.kasal.paths.crew.crew_preparation import CrewPreparation
 
 # Import CrewAI components

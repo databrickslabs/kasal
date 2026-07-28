@@ -12,7 +12,7 @@ the resolution + MCP wiring + agent construction all live in one place.
 from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
-from src.engines.kasal.kernel.agent_builder import build_agent
+from src.services.execution.kernel.agent_builder import build_agent
 
 logger = LoggerManager.get_instance().crew
 
@@ -96,7 +96,7 @@ async def resolve_agent_tools(
     # in id→name resolution must not fail agent creation (legacy crew behavior).
     try:
         if tool_service is not None:
-            from src.engines.kasal.kernel.tool_helpers import resolve_tool_ids_to_names
+            from src.services.execution.kernel.tool_helpers import resolve_tool_ids_to_names
             names = await resolve_tool_ids_to_names(tool_ids, tool_service)
             logger.info(f"Resolved tool names for agent {label}: {names}")
             identifiers = [(n, n) for n in names if n]

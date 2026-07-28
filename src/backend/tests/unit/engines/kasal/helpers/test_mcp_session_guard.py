@@ -20,7 +20,7 @@ async def test_agent_helper_skips_session_without_mcp_servers():
 
     mock_llm = MagicMock()
     with patch(
-        "src.engines.kasal.kernel.agent_builder.Agent", return_value=MagicMock()
+        "src.services.execution.kernel.agent_builder.Agent", return_value=MagicMock()
     ), patch(
         "src.core.llm_manager.LLMManager.configure_kasal_llm",
         new_callable=AsyncMock, return_value=mock_llm,

@@ -58,7 +58,7 @@ for _mod_name, _mock_obj in _MODULES_TO_MOCK.items():
 
 import pytest
 from unittest.mock import patch, AsyncMock
-from src.engines.kasal.config.embedder_config_builder import EmbedderConfigBuilder
+from src.services.execution.config.embedder_config_builder import EmbedderConfigBuilder
 
 # Immediately restore original modules after our import so that other test
 # files collected later by pytest do not see the mocked crewai modules.

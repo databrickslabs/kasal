@@ -16,7 +16,7 @@ import traceback
 from typing import Any, Dict, List, Optional
 
 from src.core.logger import LoggerManager
-from src.engines.kasal.kernel.genie_formatting import apply_genie_mcp_space_id
+from src.services.execution.kernel.genie_formatting import apply_genie_mcp_space_id
 from src.services.guardrails.wrapper import GuardrailWrapper
 
 logger = LoggerManager.get_instance().crew
@@ -318,7 +318,7 @@ async def _apply_output_pydantic(task_args, task_config, agent, task_key):
         )
         return
 
-    from src.engines.kasal.kernel.model_conversion_handler import (
+    from src.services.execution.kernel.model_conversion_handler import (
         get_compatible_converter_for_model,
         configure_output_json_approach,
     )

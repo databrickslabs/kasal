@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.engines.kasal.kernel.task_builder import build_task_args
+from src.services.execution.kernel.task_builder import build_task_args
 
 GENIE_MCP_URL = (
     "https://ws.databricks.com/api/2.0/mcp/genie/01f16bcd318214ec8ef983b7627e0221"
@@ -69,7 +69,7 @@ class TestCodeGuardrail:
             patch(
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as MockGF,
-            patch("src.engines.kasal.kernel.task_builder.GuardrailWrapper") as MockGW,
+            patch("src.services.execution.kernel.task_builder.GuardrailWrapper") as MockGW,
         ):
             MockGF.create_guardrail.return_value = MagicMock()
             MockGW.return_value = MagicMock()
@@ -98,7 +98,7 @@ class TestCodeGuardrail:
                 "src.services.guardrails.guardrail_factory.GuardrailFactory"
             ) as MockGF,
             patch(
-                "src.engines.kasal.kernel.task_builder.GuardrailWrapper",
+                "src.services.execution.kernel.task_builder.GuardrailWrapper",
                 return_value=MagicMock(),
             ),
         ):
@@ -236,7 +236,7 @@ class TestOutputPydantic:
                 return_value=FakeModel,
             ),
             patch(
-                "src.engines.kasal.kernel.model_conversion_handler.get_compatible_converter_for_model",
+                "src.services.execution.kernel.model_conversion_handler.get_compatible_converter_for_model",
                 return_value=(None, FakeModel, False, False),
             ),
         ):

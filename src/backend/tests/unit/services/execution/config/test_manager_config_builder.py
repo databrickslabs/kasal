@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from kasal_engine.core import Process
 
-from src.engines.kasal.config.manager_config_builder import ManagerConfigBuilder
+from src.services.execution.config.manager_config_builder import ManagerConfigBuilder
 
 
 class TestManagerConfigBuilder:
@@ -40,7 +40,7 @@ class TestManagerConfigBuilder:
         crew_kwargs = {}
         mock_llm = MagicMock()
 
-        with patch('src.engines.kasal.config.manager_config_builder.LLMManager.configure_kasal_llm',
+        with patch('src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm',
                    return_value=mock_llm) as mock_configure:
 
             result = await manager_builder.configure_manager(crew_kwargs, Process.hierarchical)
@@ -58,7 +58,7 @@ class TestManagerConfigBuilder:
         crew_kwargs = {}
         mock_fallback_llm = MagicMock()
 
-        with patch('src.engines.kasal.config.manager_config_builder.LLMManager.configure_kasal_llm',
+        with patch('src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm',
                    return_value=mock_fallback_llm) as mock_configure:
 
             result = await manager_builder.configure_manager(crew_kwargs, Process.hierarchical)
@@ -85,7 +85,7 @@ class TestManagerConfigBuilder:
         crew_kwargs = {}
         mock_fallback_llm = MagicMock()
 
-        with patch('src.engines.kasal.config.manager_config_builder.LLMManager.configure_kasal_llm') as mock_configure:
+        with patch('src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm') as mock_configure:
             # First call fails, second call (fallback) succeeds
             mock_configure.side_effect = [Exception("Model not found"), mock_fallback_llm]
 
@@ -104,7 +104,7 @@ class TestManagerConfigBuilder:
         manager_builder.config['crew']['manager_llm'] = "gpt-4"
         mock_llm = MagicMock()
 
-        with patch('src.engines.kasal.config.manager_config_builder.LLMManager.configure_kasal_llm',
+        with patch('src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm',
                    return_value=mock_llm) as mock_configure:
 
             result = await manager_builder.configure_manager(crew_kwargs, Process.hierarchical)
@@ -138,9 +138,9 @@ class TestManagerConfigBuilder:
         mock_agent = MagicMock()
         mock_llm = MagicMock()
 
-        with patch('src.engines.kasal.config.manager_config_builder.create_agent',
+        with patch('src.services.execution.config.manager_config_builder.create_agent',
                    return_value=mock_agent) as mock_create_agent, \
-             patch('src.engines.kasal.config.manager_config_builder.LLMManager.configure_kasal_llm',
+             patch('src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm',
                    return_value=mock_llm):
 
             result = await manager_builder.configure_manager(crew_kwargs, Process.hierarchical)
@@ -166,7 +166,7 @@ class TestManagerConfigBuilder:
         crew_kwargs = {}
         mock_llm = MagicMock()
 
-        with patch('src.engines.kasal.config.manager_config_builder.LLMManager.configure_kasal_llm',
+        with patch('src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm',
                    return_value=mock_llm) as mock_configure:
 
             result = await manager_builder.configure_manager(crew_kwargs, Process.sequential)
@@ -187,7 +187,7 @@ class TestManagerConfigBuilder:
         """
         crew_kwargs = {}
 
-        with patch('src.engines.kasal.config.manager_config_builder.LLMManager.configure_kasal_llm') as mock_configure:
+        with patch('src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm') as mock_configure:
             result = await manager_builder.configure_manager(crew_kwargs, Process.sequential)
 
             assert 'manager_llm' not in result
@@ -199,7 +199,7 @@ class TestManagerConfigBuilder:
         crew_kwargs = {}
         mock_fallback_llm = MagicMock()
 
-        with patch('src.engines.kasal.config.manager_config_builder.LLMManager.configure_kasal_llm',
+        with patch('src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm',
                    return_value=mock_fallback_llm) as mock_configure:
 
             result = await manager_builder._set_fallback_manager_llm(crew_kwargs)
@@ -213,7 +213,7 @@ class TestManagerConfigBuilder:
         """Test fallback manager LLM handles failure gracefully."""
         crew_kwargs = {}
 
-        with patch('src.engines.kasal.config.manager_config_builder.LLMManager.configure_kasal_llm',
+        with patch('src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm',
                    side_effect=Exception("Fallback failed")):
 
             result = await manager_builder._set_fallback_manager_llm(crew_kwargs)
@@ -239,7 +239,7 @@ class TestManagerConfigBuilder:
         manager_builder.config['crew']['manager_llm'] = "databricks-llama-4-maverick"  # Without prefix
         mock_llm = MagicMock()
 
-        with patch('src.engines.kasal.config.manager_config_builder.LLMManager.configure_kasal_llm') as mock_configure:
+        with patch('src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm') as mock_configure:
             # First call (without prefix) fails, second call (with prefix) succeeds
             mock_configure.side_effect = [
                 Exception("Model not found"),

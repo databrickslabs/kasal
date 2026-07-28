@@ -160,7 +160,7 @@ class TestRetryOnFailMapping:
 
     @pytest.mark.asyncio
     async def test_explicit_false_disables_retries(self):
-        from src.engines.kasal.kernel.task_builder import build_task_args
+        from src.services.execution.kernel.task_builder import build_task_args
 
         args = await build_task_args(
             {"description": "D", "expected_output": "E", "retry_on_fail": False},
@@ -172,7 +172,7 @@ class TestRetryOnFailMapping:
 
     @pytest.mark.asyncio
     async def test_true_or_absent_keeps_engine_retries(self):
-        from src.engines.kasal.kernel.task_builder import build_task_args
+        from src.services.execution.kernel.task_builder import build_task_args
 
         for config in (
             {"description": "D", "expected_output": "E"},
@@ -184,7 +184,7 @@ class TestRetryOnFailMapping:
 
     @pytest.mark.asyncio
     async def test_explicit_max_retries_wins(self):
-        from src.engines.kasal.kernel.task_builder import build_task_args
+        from src.services.execution.kernel.task_builder import build_task_args
 
         args = await build_task_args(
             {"description": "D", "expected_output": "E", "max_retries": 5},

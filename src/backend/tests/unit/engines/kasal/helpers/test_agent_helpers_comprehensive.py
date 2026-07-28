@@ -64,7 +64,7 @@ GLOBAL_CONFIG = {"group_id": "test-group-xyz", "api_keys": {}}
 def _patch_all_deps():
     """Patch every external dependency of create_agent."""
     return (
-        patch("src.engines.kasal.kernel.agent_builder.Agent"),
+        patch("src.services.execution.kernel.agent_builder.Agent"),
         patch("src.engines.kasal.paths.crew.agent_adapter.resolve_tool_ids_to_names", new_callable=AsyncMock, return_value=[]),
         patch("src.db.session.request_scoped_session"),
         patch("src.services.mcp_service.MCPService"),
@@ -138,7 +138,7 @@ class TestSecurityPreambleInjection:
             return MagicMock()
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -171,7 +171,7 @@ class TestSecurityPreambleInjection:
         agent_config["system_template"] = custom_template
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -194,7 +194,7 @@ class TestSecurityPreambleInjection:
             return MagicMock()
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -230,7 +230,7 @@ class TestCreateAgentLlmConfig:
         agent_config["llm"] = "gpt-4"
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm) as mock_configure,
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -249,7 +249,7 @@ class TestCreateAgentLlmConfig:
         captured_args = {}
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", return_value=MagicMock()),
+            patch("src.services.execution.kernel.agent_builder.Agent", return_value=MagicMock()),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()) as mock_configure,
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -278,7 +278,7 @@ class TestCreateAgentLlmConfig:
         mock_llm = MagicMock()
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=mock_llm) as mock_configure,
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -314,7 +314,7 @@ class TestKnowledgeSourcesRemoval:
         agent_config["knowledge_sources"] = ["some_source"]
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -346,7 +346,7 @@ class TestToolResolution:
         mock_tool.name = "MockTool"
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -371,7 +371,7 @@ class TestToolResolution:
         mcp_tool.name = "MCPTool"
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch(
@@ -409,7 +409,7 @@ class TestToolResolution:
         mock_tool_svc.get_tool_config_by_name = AsyncMock(return_value={})
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch(
@@ -450,7 +450,7 @@ class TestToolResolution:
         mock_tool_svc.get_tool_config_by_name = AsyncMock(return_value={})
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch(
@@ -497,7 +497,7 @@ class TestAdditionalAgentParams:
         agent_config["max_iter"] = 5
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -522,7 +522,7 @@ class TestAdditionalAgentParams:
         agent_config["memory"] = True
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -547,7 +547,7 @@ class TestAdditionalAgentParams:
         agent_config["max_iter"] = None  # None should NOT be passed
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -582,7 +582,7 @@ class TestPromptTemplates:
         agent_config["system_template"] = "Custom system template."
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -610,7 +610,7 @@ class TestPromptTemplates:
         agent_config["prompt_template"] = "Task prompt here."
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -635,7 +635,7 @@ class TestPromptTemplates:
         agent_config["response_template"] = "Response format."
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -664,7 +664,7 @@ class TestDefaultAgentSettings:
             return MagicMock()
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -687,7 +687,7 @@ class TestDefaultAgentSettings:
             return MagicMock()
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -705,7 +705,7 @@ class TestDefaultAgentSettings:
         mock_agent = MagicMock()
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", return_value=mock_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", return_value=mock_agent),
             patch("src.core.llm_manager.LLMManager.configure_kasal_llm", new_callable=AsyncMock, return_value=MagicMock()),
             patch("src.db.session.request_scoped_session") as mock_sess,
             patch("src.services.tools.mcp_integration.MCPIntegration.create_mcp_tools_for_agent", new_callable=AsyncMock, return_value=[]),
@@ -737,7 +737,7 @@ class TestLlmFallback:
         agent_config["llm"] = "my-fallback-model"
 
         with (
-            patch("src.engines.kasal.kernel.agent_builder.Agent", side_effect=capture_agent),
+            patch("src.services.execution.kernel.agent_builder.Agent", side_effect=capture_agent),
             patch(
                 "src.core.llm_manager.LLMManager.configure_kasal_llm",
                 new_callable=AsyncMock,

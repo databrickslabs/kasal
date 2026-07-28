@@ -40,8 +40,8 @@ def _make_crew_config(
 # ---------------------------------------------------------------------------
 # Patch target: extract_crew_yaml_data is called by adapt_config
 # ---------------------------------------------------------------------------
-EXTRACT_PATCH = "src.engines.kasal.config_adapter.extract_crew_yaml_data"
-LOGGER_MANAGER_PATCH = "src.engines.kasal.config_adapter.LoggerManager"
+EXTRACT_PATCH = "src.services.execution.config_adapter.extract_crew_yaml_data"
+LOGGER_MANAGER_PATCH = "src.services.execution.config_adapter.LoggerManager"
 
 
 # ============================================================================
@@ -52,7 +52,7 @@ class TestGetExecutionLogger:
     """Tests for get_execution_logger."""
 
     def test_returns_crew_logger_when_no_config(self):
-        from src.engines.kasal.config_adapter import get_execution_logger
+        from src.services.execution.config_adapter import get_execution_logger
         mock_mgr = MagicMock()
         with patch(LOGGER_MANAGER_PATCH) as mock_cls:
             mock_cls.get_instance.return_value = mock_mgr
@@ -60,7 +60,7 @@ class TestGetExecutionLogger:
         assert result is mock_mgr.crew
 
     def test_returns_crew_logger_when_empty_dict(self):
-        from src.engines.kasal.config_adapter import get_execution_logger
+        from src.services.execution.config_adapter import get_execution_logger
         mock_mgr = MagicMock()
         with patch(LOGGER_MANAGER_PATCH) as mock_cls:
             mock_cls.get_instance.return_value = mock_mgr
@@ -68,7 +68,7 @@ class TestGetExecutionLogger:
         assert result is mock_mgr.crew
 
     def test_returns_flow_logger_for_dynamic_flow_config(self):
-        from src.engines.kasal.config_adapter import get_execution_logger
+        from src.services.execution.config_adapter import get_execution_logger
         mock_mgr = MagicMock()
         with patch(LOGGER_MANAGER_PATCH) as mock_cls:
             mock_cls.get_instance.return_value = mock_mgr
@@ -81,7 +81,7 @@ class TestGetExecutionLogger:
         assert result is mock_mgr.flow
 
     def test_returns_crew_logger_when_flow_keys_missing(self):
-        from src.engines.kasal.config_adapter import get_execution_logger
+        from src.services.execution.config_adapter import get_execution_logger
         mock_mgr = MagicMock()
         with patch(LOGGER_MANAGER_PATCH) as mock_cls:
             mock_cls.get_instance.return_value = mock_mgr
@@ -91,7 +91,7 @@ class TestGetExecutionLogger:
 
     def test_returns_crew_logger_for_partial_flow_keys(self):
         """flow_config present but nodes/edges missing → crew."""
-        from src.engines.kasal.config_adapter import get_execution_logger
+        from src.services.execution.config_adapter import get_execution_logger
         mock_mgr = MagicMock()
         with patch(LOGGER_MANAGER_PATCH) as mock_cls:
             mock_cls.get_instance.return_value = mock_mgr
@@ -108,7 +108,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({"agent1": {}}, {"task1": {}}))
     def test_basic_adapt_config(self, mock_extract):
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(model="some-configured-model")
         result = adapt_config(cfg)
@@ -122,7 +122,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_tools_extracted_from_inputs(self, mock_extract):
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(inputs={"tools": ["tool_a", "tool_b"]})
         result = adapt_config(cfg)
@@ -131,7 +131,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_no_tools_when_inputs_empty(self, mock_extract):
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(inputs={})
         result = adapt_config(cfg)
@@ -140,7 +140,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_no_tools_when_inputs_is_none(self, mock_extract):
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(inputs=None)
         result = adapt_config(cfg)
@@ -152,7 +152,7 @@ class TestAdaptConfig:
         """The CrewAI-style planner was removed: `planning` is legacy request/DB
         compatibility only and must never reach the engine config, even when a
         stored crew still has planning=True."""
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(planning=True)
         result = adapt_config(cfg)
@@ -162,7 +162,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_reasoning_true_sets_flag(self, mock_extract):
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(reasoning=True)
         result = adapt_config(cfg)
@@ -172,7 +172,7 @@ class TestAdaptConfig:
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_planning_llm_in_inputs_is_ignored(self, mock_extract):
         """A legacy inputs.planning_llm must not resolve a planner model."""
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(inputs={"planning_llm": "gpt-4"}, planning=True)
         result = adapt_config(cfg)
@@ -181,7 +181,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_reasoning_llm_in_inputs(self, mock_extract):
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(inputs={"reasoning_llm": "gpt-4"}, reasoning=True)
         result = adapt_config(cfg)
@@ -190,7 +190,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_memory_backend_config_preserved(self, mock_extract):
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         memory_cfg = {"backend": "chroma"}
         cfg = _make_crew_config(inputs={"memory_backend_config": memory_cfg})
@@ -200,7 +200,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_hierarchical_process_with_manager_llm(self, mock_extract):
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(inputs={"process": "hierarchical", "manager_llm": "gpt-4"})
         result = adapt_config(cfg)
@@ -210,7 +210,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_hierarchical_process_with_manager_agent(self, mock_extract):
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(inputs={"process": "hierarchical", "manager_agent": {"role": "boss"}})
         result = adapt_config(cfg)
@@ -219,7 +219,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_max_rpm_from_inputs(self, mock_extract):
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(inputs={"max_rpm": 20})
         result = adapt_config(cfg)
@@ -228,7 +228,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_max_rpm_defaults_to_10_when_no_inputs(self, mock_extract):
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(inputs=None)
         result = adapt_config(cfg)
@@ -237,7 +237,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_model_defaults_to_the_engine_default_when_none(self, mock_extract):
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(model=None)
         result = adapt_config(cfg)
@@ -246,7 +246,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_original_config_preserved(self, mock_extract):
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(model="my-model", llm_provider="openai")
         result = adapt_config(cfg)
@@ -257,7 +257,7 @@ class TestAdaptConfig:
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_planning_llm_absent_when_not_in_inputs(self, mock_extract):
         """No planner => never a planning_llm key in the crew config."""
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(planning=True, inputs=None)
         result = adapt_config(cfg)
@@ -266,7 +266,7 @@ class TestAdaptConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_reasoning_llm_absent_when_not_in_inputs(self, mock_extract):
-        from src.engines.kasal.config_adapter import adapt_config
+        from src.services.execution.config_adapter import adapt_config
 
         cfg = _make_crew_config(reasoning=True, inputs=None)
         result = adapt_config(cfg)
@@ -283,7 +283,7 @@ class TestNormalizeConfig:
 
     @patch(EXTRACT_PATCH, return_value=({}, {}))
     def test_crew_config_object_calls_adapt_config(self, mock_extract):
-        from src.engines.kasal.config_adapter import normalize_config
+        from src.services.execution.config_adapter import normalize_config
 
         cfg = _make_crew_config(model="gpt-4")
         result = normalize_config(cfg)
@@ -293,7 +293,7 @@ class TestNormalizeConfig:
         assert "agents" in result
 
     def test_dict_passthrough(self):
-        from src.engines.kasal.config_adapter import normalize_config
+        from src.services.execution.config_adapter import normalize_config
 
         raw = {"agents": [], "tasks": [], "crew": {}}
         result = normalize_config(raw)
@@ -301,7 +301,7 @@ class TestNormalizeConfig:
         assert result is raw
 
     def test_arbitrary_dict_passthrough(self):
-        from src.engines.kasal.config_adapter import normalize_config
+        from src.services.execution.config_adapter import normalize_config
 
         raw = {"key": "value", "nested": {"a": 1}}
         result = normalize_config(raw)
@@ -341,7 +341,7 @@ class TestNormalizeFlowConfig:
         }
 
     def test_dynamic_flow_passes_through_unchanged(self):
-        from src.engines.kasal.config_adapter import normalize_flow_config
+        from src.services.execution.config_adapter import normalize_flow_config
 
         config = {
             "flow_config": {"id": "flow_1"},
@@ -355,7 +355,7 @@ class TestNormalizeFlowConfig:
         assert result["extra_key"] == "preserved"
 
     def test_traditional_flow_normalizes_agents(self):
-        from src.engines.kasal.config_adapter import normalize_flow_config
+        from src.services.execution.config_adapter import normalize_flow_config
 
         config = self._minimal_traditional()
         result = normalize_flow_config(config)
@@ -368,7 +368,7 @@ class TestNormalizeFlowConfig:
         assert agent["verbose"] is True
 
     def test_traditional_flow_normalizes_tasks(self):
-        from src.engines.kasal.config_adapter import normalize_flow_config
+        from src.services.execution.config_adapter import normalize_flow_config
 
         config = self._minimal_traditional()
         result = normalize_flow_config(config)
@@ -380,7 +380,7 @@ class TestNormalizeFlowConfig:
         assert task["markdown"] is False
 
     def test_traditional_flow_normalizes_flow_section(self):
-        from src.engines.kasal.config_adapter import normalize_flow_config
+        from src.services.execution.config_adapter import normalize_flow_config
 
         config = self._minimal_traditional()
         result = normalize_flow_config(config)
@@ -390,28 +390,28 @@ class TestNormalizeFlowConfig:
         assert result["flow"]["timeout"] == 3600
 
     def test_traditional_flow_missing_section_raises(self):
-        from src.engines.kasal.config_adapter import normalize_flow_config
+        from src.services.execution.config_adapter import normalize_flow_config
 
         config = {"agents": [], "tasks": []}  # missing 'flow'
         with pytest.raises(ValueError, match="Missing required section 'flow'"):
             normalize_flow_config(config)
 
     def test_traditional_flow_missing_agents_raises(self):
-        from src.engines.kasal.config_adapter import normalize_flow_config
+        from src.services.execution.config_adapter import normalize_flow_config
 
         config = {"tasks": [], "flow": {}}  # missing 'agents'
         with pytest.raises(ValueError, match="Missing required section 'agents'"):
             normalize_flow_config(config)
 
     def test_traditional_flow_missing_tasks_raises(self):
-        from src.engines.kasal.config_adapter import normalize_flow_config
+        from src.services.execution.config_adapter import normalize_flow_config
 
         config = {"agents": [], "flow": {}}  # missing 'tasks'
         with pytest.raises(ValueError, match="Missing required section 'tasks'"):
             normalize_flow_config(config)
 
     def test_extra_keys_copied_to_normalized(self):
-        from src.engines.kasal.config_adapter import normalize_flow_config
+        from src.services.execution.config_adapter import normalize_flow_config
 
         config = self._minimal_traditional()
         config["custom_key"] = "custom_value"
@@ -420,7 +420,7 @@ class TestNormalizeFlowConfig:
         assert result["custom_key"] == "custom_value"
 
     def test_agent_tool_configs_preserved(self):
-        from src.engines.kasal.config_adapter import normalize_flow_config
+        from src.services.execution.config_adapter import normalize_flow_config
 
         config = self._minimal_traditional()
         config["agents"][0]["tool_configs"] = {"MyTool": {"key": "val"}}
@@ -429,7 +429,7 @@ class TestNormalizeFlowConfig:
         assert result["agents"][0]["tool_configs"] == {"MyTool": {"key": "val"}}
 
     def test_task_tool_configs_preserved(self):
-        from src.engines.kasal.config_adapter import normalize_flow_config
+        from src.services.execution.config_adapter import normalize_flow_config
 
         config = self._minimal_traditional()
         config["tasks"][0]["tool_configs"] = {"MyTool": {"k": "v"}}
@@ -438,7 +438,7 @@ class TestNormalizeFlowConfig:
         assert result["tasks"][0]["tool_configs"] == {"MyTool": {"k": "v"}}
 
     def test_flow_defaults_applied(self):
-        from src.engines.kasal.config_adapter import normalize_flow_config
+        from src.services.execution.config_adapter import normalize_flow_config
 
         config = self._minimal_traditional()
         # Flow section has no optional keys
@@ -449,7 +449,7 @@ class TestNormalizeFlowConfig:
         assert result["flow"]["error_handling"] == {}
 
     def test_dynamic_flow_with_empty_nodes_and_edges(self):
-        from src.engines.kasal.config_adapter import normalize_flow_config
+        from src.services.execution.config_adapter import normalize_flow_config
 
         config = {"flow_config": {}, "nodes": [], "edges": []}
         result = normalize_flow_config(config)

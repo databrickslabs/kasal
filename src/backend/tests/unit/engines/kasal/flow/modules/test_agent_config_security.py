@@ -4,8 +4,8 @@ inject_security_preamble). Regression tests for the flow/crew alignment."""
 from types import SimpleNamespace
 
 from src.engines.kasal.paths.flow.modules.agent_adapter import AgentConfig
-from src.engines.kasal.kernel.agent_builder import build_agent_kwargs
-from src.engines.kasal.kernel.agent_security import (
+from src.services.execution.kernel.agent_builder import build_agent_kwargs
+from src.services.execution.kernel.agent_security import (
     _build_security_preamble,
     inject_security_preamble,
 )

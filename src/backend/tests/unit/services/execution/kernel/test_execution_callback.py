@@ -8,7 +8,7 @@ and the OTel pipeline.
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.engines.kasal.kernel.execution_callback import (
+from src.services.execution.kernel.execution_callback import (
     create_execution_callbacks,
     create_crew_callbacks,
     log_crew_initialization,
@@ -69,7 +69,7 @@ class TestCreateExecutionCallbacks:
     def test_step_callback_enqueues_log(self, mock_group_context, sample_config):
         """Test step callback enqueues execution log."""
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_callback, _ = create_execution_callbacks(
                 job_id="test_job_123",
@@ -91,7 +91,7 @@ class TestCreateExecutionCallbacks:
     def test_step_callback_handles_raw_attribute(self, mock_group_context, sample_config):
         """Test step callback reads 'raw' attribute when 'output' is missing."""
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_callback, _ = create_execution_callbacks(
                 job_id="j1", config=sample_config, group_context=mock_group_context
@@ -110,7 +110,7 @@ class TestCreateExecutionCallbacks:
     ):
         """Test step callback truncates content longer than 500 chars."""
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_callback, _ = create_execution_callbacks(
                 job_id="j1", config=sample_config, group_context=mock_group_context
@@ -129,7 +129,7 @@ class TestCreateExecutionCallbacks:
     def test_task_callback_enqueues_log(self, mock_group_context, sample_config):
         """Test task callback enqueues execution log with task info."""
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             _, task_callback = create_execution_callbacks(
                 job_id="test_job_123",
@@ -154,7 +154,7 @@ class TestCreateExecutionCallbacks:
     ):
         """Test task callback extracts description from task_output.task.description."""
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             _, task_callback = create_execution_callbacks(
                 job_id="j1", config=sample_config, group_context=mock_group_context
@@ -173,7 +173,7 @@ class TestCreateExecutionCallbacks:
     def test_callbacks_without_group_context(self, sample_config):
         """Test callbacks work without group context."""
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_callback, _ = create_execution_callbacks(
                 job_id="j1", config=sample_config, group_context=None
@@ -188,7 +188,7 @@ class TestCreateExecutionCallbacks:
     def test_callback_error_handling(self, mock_group_context, sample_config):
         """Test callbacks handle errors gracefully."""
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             mock_enqueue.side_effect = Exception("Queue error")
 
@@ -223,7 +223,7 @@ class TestCreateCrewCallbacks:
     def test_on_start_callback(self, mock_group_context, sample_config):
         """Test crew start callback creates execution log."""
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             callbacks = create_crew_callbacks(
                 job_id="j1", config=sample_config, group_context=mock_group_context
@@ -239,7 +239,7 @@ class TestCreateCrewCallbacks:
     def test_on_complete_callback(self, mock_group_context, sample_config):
         """Test crew completion callback creates execution log."""
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             callbacks = create_crew_callbacks(
                 job_id="j1", config=sample_config, group_context=mock_group_context
@@ -254,7 +254,7 @@ class TestCreateCrewCallbacks:
     def test_on_error_callback(self, mock_group_context, sample_config):
         """Test crew error callback."""
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             callbacks = create_crew_callbacks(
                 job_id="j1", config=sample_config, group_context=mock_group_context
@@ -274,7 +274,7 @@ class TestLogCrewInitialization:
     def test_log_initialization_success(self, mock_group_context, sample_config):
         """Test successful crew initialization logging."""
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             log_crew_initialization(
                 job_id="j1", config=sample_config, group_context=mock_group_context
@@ -296,7 +296,7 @@ class TestLogCrewInitialization:
         }
 
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             log_crew_initialization(
                 job_id="j1",
@@ -313,7 +313,7 @@ class TestLogCrewInitialization:
     def test_log_initialization_error_handling(self, mock_group_context):
         """Test error handling in crew initialization logging."""
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             mock_enqueue.side_effect = Exception("Logging error")
 
@@ -329,7 +329,7 @@ class TestCallbackIsolation:
     def test_multiple_executions_isolated(self, mock_group_context, sample_config):
         """Test that callbacks from different executions are isolated."""
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_callback_1, _ = create_execution_callbacks(
                 "job_1", sample_config, mock_group_context
@@ -362,7 +362,7 @@ class TestCallbackSecretRedaction:
 
     def test_step_callback_redacts_leaked_secret(self, mock_group_context, sample_config):
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_callback, _ = create_execution_callbacks(
                 job_id="job_redact",
@@ -380,7 +380,7 @@ class TestCallbackSecretRedaction:
 
     def test_step_callback_leaves_clean_output_untouched(self, mock_group_context, sample_config):
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             step_callback, _ = create_execution_callbacks(
                 job_id="job_clean",
@@ -398,7 +398,7 @@ class TestCallbackSecretRedaction:
 
     def test_task_callback_redacts_leaked_secret(self, mock_group_context, sample_config):
         with patch(
-            "src.engines.kasal.kernel.execution_callback.enqueue_log"
+            "src.services.execution.kernel.execution_callback.enqueue_log"
         ) as mock_enqueue:
             _, task_callback = create_execution_callbacks(
                 job_id="job_redact_task",

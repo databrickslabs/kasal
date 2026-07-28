@@ -1090,7 +1090,7 @@ class TestCrewPreparation:
             return mock_crew
 
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', side_effect=crew_side_effect) as mock_crew_class, \
-             patch('src.engines.kasal.config.manager_config_builder.LLMManager.configure_kasal_llm',
+             patch('src.services.execution.config.manager_config_builder.LLMManager.configure_kasal_llm',
                    return_value=mock_manager_llm), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
@@ -1140,7 +1140,7 @@ class TestCrewPreparation:
             return mock_manager_agent
 
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', side_effect=crew_side_effect) as mock_crew_class, \
-             patch('src.engines.kasal.config.manager_config_builder.create_agent', side_effect=mock_create_agent_func), \
+             patch('src.services.execution.config.manager_config_builder.create_agent', side_effect=mock_create_agent_func), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
              patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
