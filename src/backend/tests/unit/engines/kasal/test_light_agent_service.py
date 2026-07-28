@@ -55,7 +55,7 @@ def _patches(*, disabled_config=False, storage=MagicMock(), sets_memory=True):
     )
 
     return patch.multiple(
-        "src.engines.kasal.memory.crew_memory_service",
+        "src.services.memory.crew_memory",
         CrewMemoryService=MagicMock(return_value=mem_service),
     ), patch(
         "src.engines.kasal.config.crew_config_builder.CrewConfigBuilder",

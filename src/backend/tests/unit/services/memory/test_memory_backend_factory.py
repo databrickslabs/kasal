@@ -16,7 +16,7 @@ Key changes in the new API:
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from src.engines.kasal.memory.memory_backend_factory import (
+from src.services.memory.backend_factory import (
     MemoryBackendFactory,
     DatabricksIndexValidationError,
 )
@@ -183,7 +183,7 @@ class TestCreateUnifiedStorageLakebase:
         with patch.dict(
             "sys.modules",
             {
-                "src.engines.kasal.memory.lakebase_storage_backend": MagicMock(
+                "src.services.memory.lakebase_storage_backend": MagicMock(
                     LakebaseStorageBackend=mock_lakebase_cls
                 )
             },
@@ -226,7 +226,7 @@ class TestCreateMemoryBackendsLakebase:
         with patch.dict(
             "sys.modules",
             {
-                "src.engines.kasal.memory.lakebase_storage_backend": MagicMock(
+                "src.services.memory.lakebase_storage_backend": MagicMock(
                     LakebaseStorageBackend=mock_lakebase_cls
                 )
             },
@@ -257,7 +257,7 @@ class TestCreateMemoryBackendsLakebase:
         with patch.dict(
             "sys.modules",
             {
-                "src.engines.kasal.memory.lakebase_storage_backend": MagicMock(
+                "src.services.memory.lakebase_storage_backend": MagicMock(
                     LakebaseStorageBackend=MagicMock(side_effect=capture)
                 )
             },
@@ -280,7 +280,7 @@ class TestCreateMemoryBackendsLakebase:
         with patch.dict(
             "sys.modules",
             {
-                "src.engines.kasal.memory.lakebase_storage_backend": MagicMock(
+                "src.services.memory.lakebase_storage_backend": MagicMock(
                     LakebaseStorageBackend=MagicMock(return_value=mock_backend)
                 )
             },
@@ -403,7 +403,7 @@ class TestCreateMemoryBackendsDatabricks:
                 "src.repositories.databricks_vector_index_repository": MagicMock(
                     DatabricksVectorIndexRepository=MagicMock(return_value=mock_repo)
                 ),
-                "src.engines.kasal.memory.databricks_storage_backend": MagicMock(
+                "src.services.memory.databricks_storage_backend": MagicMock(
                     DatabricksStorageBackend=mock_backend_cls
                 ),
             },
@@ -446,7 +446,7 @@ class TestCreateMemoryBackendsDatabricks:
                 "src.repositories.databricks_vector_index_repository": MagicMock(
                     DatabricksVectorIndexRepository=MagicMock(return_value=mock_repo)
                 ),
-                "src.engines.kasal.memory.databricks_storage_backend": MagicMock(
+                "src.services.memory.databricks_storage_backend": MagicMock(
                     DatabricksStorageBackend=MagicMock(side_effect=capture)
                 ),
             },
@@ -488,7 +488,7 @@ class TestCreateMemoryBackendsDatabricks:
                 "src.repositories.databricks_vector_index_repository": MagicMock(
                     DatabricksVectorIndexRepository=MagicMock(return_value=mock_repo)
                 ),
-                "src.engines.kasal.memory.databricks_storage_backend": MagicMock(
+                "src.services.memory.databricks_storage_backend": MagicMock(
                     DatabricksStorageBackend=MagicMock(side_effect=capture)
                 ),
             },

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from kasal_engine.memory import MemoryRecord
-from src.engines.kasal.memory.engine_storage_adapter import (
+from src.services.memory.engine_storage_adapter import (
     EngineStorageAdapter,
     build_litellm_embedder,
     embed_text,

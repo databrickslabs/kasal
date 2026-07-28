@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from kasal_engine.memory import MemoryRecord
 
-from src.engines.kasal.memory.lakebase_storage_backend import (
+from src.services.memory.lakebase_storage_backend import (
     LakebaseStorageBackend,
     _to_aware_utc,
 )
@@ -74,7 +74,7 @@ class TestSaveTimestampTz:
         )
 
         with patch(
-            "src.engines.kasal.memory.lakebase_storage_backend.get_lakebase_session",
+            "src.services.memory.lakebase_storage_backend.get_lakebase_session",
             return_value=_make_lakebase_ctx(session),
         ):
             await backend.asave([record])
@@ -113,7 +113,7 @@ class TestHybridSearchSql:
 
         mock_session.execute = _execute
         with patch(
-            "src.engines.kasal.memory.lakebase_storage_backend.get_lakebase_session",
+            "src.services.memory.lakebase_storage_backend.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             asyncio.run(backend.asearch(query_embedding=[0.1, 0.2, 0.3, 0.4], **kwargs))

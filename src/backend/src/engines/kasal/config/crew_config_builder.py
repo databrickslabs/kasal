@@ -296,7 +296,7 @@ class CrewConfigBuilder:
                 logger.info(
                     "Records live in memory.db under the group's storage dir; "
                     "search is a numpy cosine over stored embeddings "
-                    "(engines/kasal/memory/local_storage_backend.py)"
+                    "(services/memory/local_storage_backend.py)"
                 )
                 logger.info("=" * 80)
         except Exception as banner_err:

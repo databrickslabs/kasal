@@ -69,7 +69,7 @@ for _mod_name, _mock_obj in _MODULES_TO_MOCK.items():
     sys.modules[_mod_name] = _mock_obj
 
 # Import while mocks are active so the module is loaded properly
-from src.engines.kasal.memory.databricks_vector_storage import (
+from src.services.memory.databricks_vector_storage import (
     DatabricksVectorStorage as _DVS,
 )
 
@@ -91,7 +91,7 @@ def _build_storage(
     mock_repository=None,
 ):
     with patch(
-        "src.engines.kasal.memory.databricks_vector_storage.DatabricksVectorIndexRepository"
+        "src.services.memory.databricks_vector_storage.DatabricksVectorIndexRepository"
     ) as mock_repo_cls:
         repo = mock_repository or MagicMock()
         mock_repo_cls.return_value = repo
@@ -125,7 +125,7 @@ class TestInitEdgeCases:
 
         with (
             patch(
-                "src.engines.kasal.memory.databricks_vector_storage.DatabricksVectorIndexRepository"
+                "src.services.memory.databricks_vector_storage.DatabricksVectorIndexRepository"
             ) as mock_repo_cls,
             patch("asyncio.run", return_value=mock_auth),
         ):
@@ -143,7 +143,7 @@ class TestInitEdgeCases:
         """When get_auth_context fails, workspace_url defaults to empty string."""
         with (
             patch(
-                "src.engines.kasal.memory.databricks_vector_storage.DatabricksVectorIndexRepository"
+                "src.services.memory.databricks_vector_storage.DatabricksVectorIndexRepository"
             ) as mock_repo_cls,
             patch("asyncio.run", side_effect=RuntimeError("no loop")),
         ):

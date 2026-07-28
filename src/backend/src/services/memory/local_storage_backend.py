@@ -26,7 +26,7 @@ from typing import Any
 import numpy as np
 
 from kasal_engine.memory import MemoryRecord, ScopeInfo
-from src.engines.kasal.memory.engine_storage_adapter import embed_text
+from src.services.memory.engine_storage_adapter import embed_text
 
 logger = logging.getLogger(__name__)
 

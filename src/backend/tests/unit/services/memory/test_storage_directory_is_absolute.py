@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from src.engines.kasal.memory.crew_memory_service import CrewMemoryService
+from src.services.memory.crew_memory import CrewMemoryService
 
 
 @pytest.fixture

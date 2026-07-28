@@ -18,8 +18,8 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 )
 
 from kasal_engine.memory import Memory
-from src.engines.kasal.memory.engine_storage_adapter import EngineStorageAdapter
-from src.engines.kasal.memory.local_storage_backend import LocalMemoryStorage
+from src.services.memory.engine_storage_adapter import EngineStorageAdapter
+from src.services.memory.local_storage_backend import LocalMemoryStorage
 from src.engines.kasal.memory.memory_hooks import (
     inject_task_memory,
     register_task_output_persistence,

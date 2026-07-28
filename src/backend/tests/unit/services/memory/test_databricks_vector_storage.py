@@ -67,12 +67,12 @@ def _build_storage(
 ):
     """Create a DatabricksVectorStorage with a mocked repository."""
     with patch(
-        "src.engines.kasal.memory.databricks_vector_storage.DatabricksVectorIndexRepository"
+        "src.services.memory.databricks_vector_storage.DatabricksVectorIndexRepository"
     ) as mock_repo_cls:
         repo = mock_repository or MagicMock()
         mock_repo_cls.return_value = repo
 
-        from src.engines.kasal.memory.databricks_vector_storage import (
+        from src.services.memory.databricks_vector_storage import (
             DatabricksVectorStorage,
         )
 
@@ -149,10 +149,10 @@ class TestDatabricksVectorStorageInit:
 
     def test_init_creates_repository(self):
         with patch(
-            "src.engines.kasal.memory.databricks_vector_storage.DatabricksVectorIndexRepository"
+            "src.services.memory.databricks_vector_storage.DatabricksVectorIndexRepository"
         ) as mock_repo_cls:
             mock_repo_cls.return_value = MagicMock()
-            from src.engines.kasal.memory.databricks_vector_storage import (
+            from src.services.memory.databricks_vector_storage import (
                 DatabricksVectorStorage,
             )
 

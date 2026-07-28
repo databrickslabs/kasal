@@ -17,7 +17,7 @@ from src.schemas.databricks_vector_index import IndexCreate
 from src.repositories.databricks_vector_endpoint_repository import DatabricksVectorEndpointRepository
 from src.repositories.databricks_vector_index_repository import DatabricksVectorIndexRepository
 from src.core.logger import LoggerManager
-from src.services.memory_backend_base_service import MemoryBackendBaseService
+from src.services.memory.backend_base_service import MemoryBackendBaseService
 
 logger = LoggerManager.get_instance().system
 

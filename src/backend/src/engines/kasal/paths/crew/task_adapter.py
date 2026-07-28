@@ -450,7 +450,7 @@ async def create_task(
     if not existing_callback:
         try:
             from src.services.databricks_service import DatabricksService
-            from src.services.memory_backend_service import MemoryBackendService
+            from src.services.memory.backend_service import MemoryBackendService
             from src.db.session import request_scoped_session
 
             async with request_scoped_session() as session:

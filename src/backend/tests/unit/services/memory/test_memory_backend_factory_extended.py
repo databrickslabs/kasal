@@ -13,7 +13,7 @@ import sys
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from src.engines.kasal.memory.memory_backend_factory import (
+from src.services.memory.backend_factory import (
     MemoryBackendFactory,
     DatabricksIndexValidationError,
 )
@@ -219,7 +219,7 @@ class TestDatabricksBackendCases:
                 "src.repositories.databricks_vector_index_repository": MagicMock(
                     DatabricksVectorIndexRepository=MagicMock(return_value=mock_repo)
                 ),
-                "src.engines.kasal.memory.databricks_storage_backend": MagicMock(
+                "src.services.memory.databricks_storage_backend": MagicMock(
                     DatabricksStorageBackend=MagicMock(side_effect=capture)
                 ),
             },
@@ -263,7 +263,7 @@ class TestDatabricksBackendCases:
                 "src.repositories.databricks_vector_index_repository": MagicMock(
                     DatabricksVectorIndexRepository=MagicMock(return_value=mock_repo)
                 ),
-                "src.engines.kasal.memory.databricks_storage_backend": MagicMock(
+                "src.services.memory.databricks_storage_backend": MagicMock(
                     DatabricksStorageBackend=MagicMock(side_effect=capture)
                 ),
             },
@@ -306,7 +306,7 @@ class TestDatabricksBackendCases:
                 "src.repositories.databricks_vector_index_repository": MagicMock(
                     DatabricksVectorIndexRepository=MagicMock(return_value=mock_repo)
                 ),
-                "src.engines.kasal.memory.databricks_storage_backend": MagicMock(
+                "src.services.memory.databricks_storage_backend": MagicMock(
                     DatabricksStorageBackend=MagicMock(side_effect=capture)
                 ),
             },
@@ -361,7 +361,7 @@ class TestLakebaseBackendCases:
         with patch.dict(
             "sys.modules",
             {
-                "src.engines.kasal.memory.lakebase_storage_backend": MagicMock(
+                "src.services.memory.lakebase_storage_backend": MagicMock(
                     LakebaseStorageBackend=MagicMock(side_effect=capture)
                 )
             },
@@ -392,7 +392,7 @@ class TestLakebaseBackendCases:
         with patch.dict(
             "sys.modules",
             {
-                "src.engines.kasal.memory.lakebase_storage_backend": MagicMock(
+                "src.services.memory.lakebase_storage_backend": MagicMock(
                     LakebaseStorageBackend=MagicMock(side_effect=capture)
                 )
             },
@@ -422,7 +422,7 @@ class TestLakebaseBackendCases:
         with patch.dict(
             "sys.modules",
             {
-                "src.engines.kasal.memory.lakebase_storage_backend": MagicMock(
+                "src.services.memory.lakebase_storage_backend": MagicMock(
                     LakebaseStorageBackend=MagicMock(side_effect=capture)
                 )
             },

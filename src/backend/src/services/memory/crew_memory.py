@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from src.core.logger import LoggerManager
-from src.engines.kasal.memory.memory_backend_factory import (
+from src.services.memory.backend_factory import (
     DatabricksIndexValidationError,
     MemoryBackendFactory,
 )
@@ -56,7 +56,7 @@ class CrewMemoryService:
         logger.info("=" * 80)
         try:
             from src.db.session import request_scoped_session
-            from src.services.memory_backend_service import MemoryBackendService
+            from src.services.memory.backend_service import MemoryBackendService
 
             async with request_scoped_session() as session:
                 service = MemoryBackendService(session)
@@ -558,7 +558,7 @@ class CrewMemoryService:
             crew_kwargs["memory"] = False
             return crew_kwargs
 
-        from src.engines.kasal.memory.engine_storage_adapter import (
+        from src.services.memory.engine_storage_adapter import (
             EngineStorageAdapter,
         )
 
@@ -626,10 +626,10 @@ class CrewMemoryService:
         try:
             from kasal_engine.utils import db_storage_path
 
-            from src.engines.kasal.memory.engine_storage_adapter import (
+            from src.services.memory.engine_storage_adapter import (
                 build_litellm_embedder,
             )
-            from src.engines.kasal.memory.local_storage_backend import (
+            from src.services.memory.local_storage_backend import (
                 LocalMemoryStorage,
             )
 
@@ -655,7 +655,7 @@ class CrewMemoryService:
 
             db_path = Path(db_storage_path()) / "memory.db"
             logger.info("Local memory storage at %s", db_path)
-            from src.engines.kasal.memory.memory_backend_factory import (
+            from src.services.memory.backend_factory import (
                 MemoryBackendFactory,
             )
 

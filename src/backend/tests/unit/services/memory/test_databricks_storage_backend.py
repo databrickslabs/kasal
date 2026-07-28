@@ -11,7 +11,7 @@ search round trip.
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from src.engines.kasal.memory.databricks_storage_backend import (
+from src.services.memory.databricks_storage_backend import (
     DatabricksStorageBackend,
     _SCHEMA_COLUMNS,
 )
@@ -20,7 +20,7 @@ from src.schemas.databricks_index_schemas import DatabricksIndexSchemas
 
 def _make_backend():
     with patch(
-        "src.engines.kasal.memory.databricks_storage_backend.DatabricksVectorIndexRepository"
+        "src.services.memory.databricks_storage_backend.DatabricksVectorIndexRepository"
     ):
         backend = DatabricksStorageBackend(
             index_name="cat.schema.idx",
@@ -122,7 +122,7 @@ class TestBridgeLoop:
 
     def test_lakebase_backend_shares_the_bridge_loop(self):
         import asyncio
-        from src.engines.kasal.memory.lakebase_storage_backend import (
+        from src.services.memory.lakebase_storage_backend import (
             LakebaseStorageBackend,
         )
 
@@ -151,7 +151,7 @@ class TestBridgeLoop:
             backend._run_sync(boom())
 
     def test_bridge_loop_recreated_if_closed(self):
-        from src.engines.kasal.memory import databricks_storage_backend as m
+        from src.services.memory import databricks_storage_backend as m
 
         loop1 = m._get_bridge_loop()
         loop1.call_soon_threadsafe(loop1.stop)

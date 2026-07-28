@@ -2,7 +2,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from src.services.memory_backend_service import MemoryBackendService
+from src.services.memory.backend_service import MemoryBackendService
 
 
 @pytest.mark.asyncio

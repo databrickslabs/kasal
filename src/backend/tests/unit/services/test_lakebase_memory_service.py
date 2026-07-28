@@ -4,7 +4,7 @@ Tests for LakebaseMemoryService (unified single-table model).
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.services.lakebase_memory_service import (
+from src.services.memory.lakebase_service import (
     LakebaseMemoryService,
     PGVECTOR_ADMIN_INSTRUCTIONS,
 )
@@ -49,7 +49,7 @@ class TestTestConnection:
         mock_session.execute = AsyncMock(side_effect=[version_result, pgvector_result])
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.test_connection()
@@ -71,7 +71,7 @@ class TestTestConnection:
         mock_session.execute = AsyncMock(side_effect=[version_result, pgvector_result])
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.test_connection()
@@ -86,7 +86,7 @@ class TestTestConnection:
     async def test_connection_failure(self, service):
         """Test connection failure."""
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             side_effect=Exception("Connection refused"),
         ):
             result = await service.test_connection()
@@ -118,7 +118,7 @@ class TestInitializeTables:
         mock_session.execute = AsyncMock(side_effect=_side_effect)
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.initialize_tables(embedding_dimension=1024)
@@ -147,7 +147,7 @@ class TestInitializeTables:
         mock_session.execute = AsyncMock(side_effect=_side_effect)
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.initialize_tables()
@@ -175,7 +175,7 @@ class TestInitializeTables:
         mock_session.execute = AsyncMock(side_effect=_side_effect)
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.initialize_tables()
@@ -201,7 +201,7 @@ class TestInitializeTables:
         mock_session.execute = AsyncMock(side_effect=_side_effect)
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.initialize_tables(memory_table="custom_mem")
@@ -230,7 +230,7 @@ class TestInitializeTables:
         mock_session.execute = AsyncMock(side_effect=_side_effect)
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.initialize_tables()
@@ -243,7 +243,7 @@ class TestInitializeTables:
     async def test_initialize_tables_connection_failure(self, service):
         """Test table initialization with connection failure."""
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             side_effect=Exception("Connection failed"),
         ):
             result = await service.initialize_tables()
@@ -263,7 +263,7 @@ class TestCheckTablesInitialized:
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             status = await service.check_tables_initialized()
@@ -277,7 +277,7 @@ class TestCheckTablesInitialized:
         mock_session.execute = AsyncMock(return_value=mock_result)
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             status = await service.check_tables_initialized()
@@ -287,7 +287,7 @@ class TestCheckTablesInitialized:
     async def test_check_tables_connection_failure(self, service):
         """Test check_tables_initialized exception path sets all to False."""
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             side_effect=Exception("boom"),
         ):
             status = await service.check_tables_initialized()
@@ -308,7 +308,7 @@ class TestGetTableStats:
         mock_session.execute = AsyncMock(side_effect=[exists_result, count_result])
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             stats = await service.get_table_stats()
@@ -324,7 +324,7 @@ class TestGetTableStats:
         mock_session.execute = AsyncMock(side_effect=[exists_result])
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             stats = await service.get_table_stats()
@@ -338,7 +338,7 @@ class TestGetTableStats:
         mock_session.execute = AsyncMock(side_effect=Exception("stats boom"))
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             stats = await service.get_table_stats()
@@ -350,7 +350,7 @@ class TestGetTableStats:
     async def test_get_stats_outer_exception(self, service):
         """Test outer exception handling (get_lakebase_session fails)."""
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             side_effect=Exception("connect boom"),
         ):
             stats = await service.get_table_stats()
@@ -379,7 +379,7 @@ class TestGetTableData:
         mock_session.execute = AsyncMock(side_effect=[count_result, rows_result])
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.get_table_data("crew_short_term_memory", limit=50)
@@ -415,7 +415,7 @@ class TestGetTableData:
         mock_session.execute = AsyncMock(side_effect=[count_result, rows_result])
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.get_table_data("crew_long_term_memory")
@@ -435,7 +435,7 @@ class TestGetTableData:
         mock_session.execute = AsyncMock(side_effect=[count_result, rows_result])
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.get_table_data("crew_entity_memory")
@@ -446,7 +446,7 @@ class TestGetTableData:
     async def test_get_table_data_connection_failure(self, service):
         """Test table data fetch with connection failure."""
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             side_effect=Exception("Connection refused"),
         ):
             result = await service.get_table_data("crew_short_term_memory")
@@ -471,7 +471,7 @@ class TestGetEntityData:
         mock_session.execute = AsyncMock(return_value=rows_result)
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.get_entity_data()
@@ -490,7 +490,7 @@ class TestGetEntityData:
         mock_session.execute = AsyncMock(return_value=rows_result)
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.get_entity_data(memory_table="crew_entity_memory")
@@ -514,7 +514,7 @@ class TestGetEntityData:
         mock_session.execute = AsyncMock(return_value=rows_result)
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.get_entity_data()
@@ -533,7 +533,7 @@ class TestGetEntityData:
         mock_session.execute = AsyncMock(return_value=rows_result)
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.get_entity_data()
@@ -554,7 +554,7 @@ class TestGetEntityData:
         mock_session.execute = AsyncMock(return_value=rows_result)
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.get_entity_data()
@@ -565,7 +565,7 @@ class TestGetEntityData:
     async def test_get_entity_data_connection_failure(self, service):
         """Test entity data fetch with connection failure."""
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             side_effect=Exception("Connection refused"),
         ):
             result = await service.get_entity_data()
@@ -583,7 +583,7 @@ class TestGetEntityData:
         mock_session.execute = AsyncMock(return_value=rows_result)
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.get_entity_data()
@@ -603,7 +603,7 @@ class TestGetEntityData:
         mock_session.execute = AsyncMock(return_value=rows_result)
 
         with patch(
-            "src.services.lakebase_memory_service.get_lakebase_session",
+            "src.services.memory.lakebase_service.get_lakebase_session",
             return_value=_make_lakebase_ctx(mock_session),
         ):
             result = await service.get_entity_data()

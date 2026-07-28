@@ -21,7 +21,7 @@ _SAFE_TABLE_NAME = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 class MemoryBackendType(str, Enum):
     """Supported memory backend types."""
 
-    DEFAULT = "default"  # Local SQLite store (engines/kasal/memory/local_storage_backend.py)
+    DEFAULT = "default"  # Local SQLite store (services/memory/local_storage_backend.py)
     DATABRICKS = "databricks"  # Databricks Vector Search
     LAKEBASE = "lakebase"  # Lakebase pgvector
 

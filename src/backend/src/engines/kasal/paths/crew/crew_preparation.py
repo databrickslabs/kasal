@@ -15,11 +15,11 @@ from src.core.logger import LoggerManager
 from src.engines.kasal.paths.crew.task_adapter import create_task, is_data_missing
 from src.engines.kasal.paths.crew.agent_adapter import create_agent
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
-from src.engines.kasal.memory.memory_backend_factory import MemoryBackendFactory
+from src.services.memory.backend_factory import MemoryBackendFactory
 from src.utils.databricks_url_utils import DatabricksURLUtils
 
 # Import new service classes
-from src.engines.kasal.memory.crew_memory_service import CrewMemoryService
+from src.services.memory.crew_memory import CrewMemoryService
 from src.engines.kasal.config.embedder_config_builder import EmbedderConfigBuilder
 from src.engines.kasal.config.manager_config_builder import ManagerConfigBuilder
 from src.engines.kasal.config.crew_config_builder import CrewConfigBuilder
@@ -1237,7 +1237,7 @@ class CrewPreparation:
                 from src.engines.kasal.memory.memory_hooks import (
                     flush_memory_writes,
                 )
-                from src.engines.kasal.memory.memory_maintenance import (
+                from src.services.memory.maintenance import (
                     run_memory_maintenance,
                 )
 

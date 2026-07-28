@@ -191,7 +191,7 @@ async def configure_flow_crew_memory(
     storage, and attach the configured ``Memory`` to the crew + its agents.
     Falls back gracefully (CrewAI default) when no backend is configured.
     """
-    from src.engines.kasal.memory.crew_memory_service import CrewMemoryService
+    from src.services.memory.crew_memory import CrewMemoryService
     from src.engines.kasal.config.embedder_config_builder import EmbedderConfigBuilder
     from src.schemas.memory_backend import MemoryBackendConfig as MemBackConfig
 

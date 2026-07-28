@@ -137,7 +137,7 @@ async def resolve_lakebase_instance(
     config cannot be read.
     """
     try:
-        from src.services.memory_config_service import MemoryConfigService
+        from src.services.memory.config_service import MemoryConfigService
         from src.schemas.memory_backend import MemoryBackendType
 
         config = await MemoryConfigService(app_session).get_active_config(group_id)

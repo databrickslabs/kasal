@@ -395,12 +395,12 @@ class KnowledgeSearchService:
             DatabricksVectorStorage instance or None
         """
         try:
-            from src.engines.kasal.memory.databricks_vector_storage import DatabricksVectorStorage
+            from src.services.memory.databricks_vector_storage import DatabricksVectorStorage
             from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
 
             # Lazy initialization of memory backend service
             if self._memory_backend_service is None:
-                from src.services.memory_backend_service import MemoryBackendService
+                from src.services.memory.backend_service import MemoryBackendService
                 self._memory_backend_service = MemoryBackendService(self.session)
 
             # Get memory backends for this group

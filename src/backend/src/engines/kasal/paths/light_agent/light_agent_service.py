@@ -1517,7 +1517,7 @@ class LightAgentService:
             log("Memory disabled for this run")
             return None
         try:
-            from src.engines.kasal.memory.crew_memory_service import CrewMemoryService
+            from src.services.memory.crew_memory import CrewMemoryService
             from src.engines.kasal.config.crew_config_builder import CrewConfigBuilder
             from src.engines.kasal.config.embedder_config_builder import EmbedderConfigBuilder
             from src.schemas.memory_backend import MemoryBackendConfig

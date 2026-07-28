@@ -658,7 +658,7 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
 
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -677,7 +677,7 @@ class TestCrewPreparation:
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.core.llm_manager.LLMManager.get_llm', return_value=mock_llm), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
             assert result is True
@@ -701,7 +701,7 @@ class TestCrewPreparation:
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
              patch('src.core.llm_manager.LLMManager.configure_kasal_llm') as mock_configure_llm, \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             mock_configure_llm.return_value = mock_manager_llm
 
@@ -729,7 +729,7 @@ class TestCrewPreparation:
         mock_crew = MagicMock()
 
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -745,7 +745,7 @@ class TestCrewPreparation:
 
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', side_effect=Exception("Test error")), \
              patch('src.engines.kasal.paths.crew.crew_preparation.handle_crew_error') as mock_handle_error, \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
             assert result is False
@@ -763,7 +763,7 @@ class TestCrewPreparation:
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=ImportError("Module not found")), \
              patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger, \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -781,7 +781,7 @@ class TestCrewPreparation:
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=Exception("LLM error")), \
              patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger, \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -801,7 +801,7 @@ class TestCrewPreparation:
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=[Exception("LLM error"), mock_fallback_llm]), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
              patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger, \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -821,7 +821,7 @@ class TestCrewPreparation:
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.core.llm_manager.LLMManager.get_llm', return_value=mock_default_llm), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -839,7 +839,7 @@ class TestCrewPreparation:
 
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -861,7 +861,7 @@ class TestCrewPreparation:
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value="test-key"), \
              patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger, \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -879,7 +879,7 @@ class TestCrewPreparation:
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value="test-openai-key"), \
              patch.dict('os.environ', {}, clear=True), \
              patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger, \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -898,7 +898,7 @@ class TestCrewPreparation:
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
              patch.dict('os.environ', {}, clear=True), \
              patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger, \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -916,7 +916,7 @@ class TestCrewPreparation:
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', side_effect=Exception("API error")), \
              patch('src.engines.kasal.paths.crew.crew_preparation.logger') as mock_logger, \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -996,7 +996,7 @@ class TestCrewPreparation:
              patch('src.core.llm_manager.LLMManager.get_llm', side_effect=Exception("Model not found")) as mock_get_llm, \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
              patch('src.repositories.databricks_config_repository.DatabricksConfigRepository') as mock_databricks_repo, \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             # Configure mock to return None for get_databricks_config
             mock_databricks_instance = MagicMock()
@@ -1030,7 +1030,7 @@ class TestCrewPreparation:
 
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', return_value=mock_crew) as mock_crew_class, \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -1093,7 +1093,7 @@ class TestCrewPreparation:
              patch('src.engines.kasal.config.manager_config_builder.LLMManager.configure_kasal_llm',
                    return_value=mock_manager_llm), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 
@@ -1142,7 +1142,7 @@ class TestCrewPreparation:
         with patch('src.engines.kasal.paths.crew.crew_preparation.Crew', side_effect=crew_side_effect) as mock_crew_class, \
              patch('src.engines.kasal.config.manager_config_builder.create_agent', side_effect=mock_create_agent_func), \
              patch('src.services.api_keys_service.ApiKeysService.get_provider_api_key', return_value=None), \
-             patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
+             patch('src.services.memory.crew_memory.CrewMemoryService.fetch_memory_backend_config', new_callable=AsyncMock, return_value=None):
 
             result = await crew_preparation._create_crew()
 

@@ -37,7 +37,7 @@ class AdminCtx:
 
 def test_get_memory_backend_service_creates_instance():
     """get_memory_backend_service creates MemoryBackendService with session."""
-    from src.services.memory_backend_service import MemoryBackendService
+    from src.services.memory.backend_service import MemoryBackendService
 
     fake_session = MagicMock()
     with patch("src.api.memory_backend.dependencies.MemoryBackendService") as MockSvc:

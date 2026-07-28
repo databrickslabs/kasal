@@ -12,7 +12,7 @@ from fastapi import Depends
 
 from src.core.dependencies import SessionDep
 from src.core.logger import LoggerManager
-from src.services.memory_backend_service import MemoryBackendService
+from src.services.memory.backend_service import MemoryBackendService
 
 logger = LoggerManager.get_instance().api
 

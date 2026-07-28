@@ -1,5 +1,5 @@
 """
-Coverage tests for src/engines/kasal/memory/memory_backend_factory.py
+Coverage tests for src/services/memory/backend_factory.py
 
 Updated for the app-modes refactoring:
 - create_unified_storage() replaces per-type create_memory_backends()
@@ -15,7 +15,7 @@ import sys
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.engines.kasal.memory.memory_backend_factory import (
+from src.services.memory.backend_factory import (
     MemoryBackendFactory,
     DatabricksIndexValidationError,
 )
@@ -304,7 +304,7 @@ async def test_create_memory_backends_lakebase_returns_unified():
     mock_lakebase_module.LakebaseStorageBackend = MagicMock(return_value=mock_backend)
 
     with patch.dict(sys.modules, {
-        "src.engines.kasal.memory.lakebase_storage_backend": mock_lakebase_module,
+        "src.services.memory.lakebase_storage_backend": mock_lakebase_module,
     }):
         result = await MemoryBackendFactory.create_memory_backends(
             config=config, crew_id="g1_crew_abc123"
@@ -330,7 +330,7 @@ async def test_create_memory_backends_lakebase_with_job_id():
     mock_lakebase_module.LakebaseStorageBackend = MagicMock(side_effect=capture)
 
     with patch.dict(sys.modules, {
-        "src.engines.kasal.memory.lakebase_storage_backend": mock_lakebase_module,
+        "src.services.memory.lakebase_storage_backend": mock_lakebase_module,
     }):
         await MemoryBackendFactory.create_memory_backends(
             config=config, crew_id="g1_crew_abc123", job_id="job-456"

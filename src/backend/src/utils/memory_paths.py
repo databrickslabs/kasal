@@ -1,7 +1,7 @@
 """Deterministic on-disk location for LOCAL (DEFAULT) cognitive memory.
 
 The DEFAULT backend is kasal's own SQLite store — ``memory.db`` under the group
-directory, written by engines/kasal/memory/local_storage_backend.py (embeddings
+directory, written by services/memory/local_storage_backend.py (embeddings
 as float32 blobs, search by numpy cosine). It is NOT LanceDB: that was crewAI's
 built-in default and left with the crewai library. A leftover
 ``<group>/memory/memories.lance/`` directory from before the engine migration is

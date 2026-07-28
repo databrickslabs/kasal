@@ -5,10 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from kasal_engine.memory import Memory
-from src.engines.kasal.memory.engine_storage_adapter import EngineStorageAdapter
-from src.engines.kasal.memory.local_storage_backend import LocalMemoryStorage
+from src.services.memory.engine_storage_adapter import EngineStorageAdapter
+from src.services.memory.local_storage_backend import LocalMemoryStorage
 from src.engines.kasal.memory.memory_hooks import flush_memory_writes, remember_async
-from src.engines.kasal.memory.memory_maintenance import consolidate_memory
+from src.services.memory.maintenance import consolidate_memory
 
 
 def _embedder(texts):
@@ -78,7 +78,7 @@ class TestConsolidateGuards:
 
 class TestCognitiveWeightPlumbing:
     def test_factory_maps_cognitive_config_to_scoring_kwargs(self):
-        from src.engines.kasal.memory.memory_backend_factory import (
+        from src.services.memory.backend_factory import (
             MemoryBackendFactory,
         )
         from src.schemas.memory_backend import MemoryBackendConfig
@@ -103,7 +103,7 @@ class TestCognitiveWeightPlumbing:
         }
 
     def test_factory_omits_unset_fields(self):
-        from src.engines.kasal.memory.memory_backend_factory import (
+        from src.services.memory.backend_factory import (
             MemoryBackendFactory,
         )
         from src.schemas.memory_backend import MemoryBackendConfig
@@ -144,7 +144,7 @@ def _memory_with_records(tmp_path, n, llm=None):
 
 class TestMergeSimilarMemories:
     def test_merges_clusters_and_replaces_records(self, tmp_path):
-        from src.engines.kasal.memory.memory_maintenance import (
+        from src.services.memory.maintenance import (
             merge_similar_memories,
         )
 
@@ -165,7 +165,7 @@ class TestMergeSimilarMemories:
         assert merged and merged[0].content == "merged fact"
 
     def test_skips_below_min_records(self, tmp_path):
-        from src.engines.kasal.memory.memory_maintenance import (
+        from src.services.memory.maintenance import (
             merge_similar_memories,
         )
 
@@ -176,7 +176,7 @@ class TestMergeSimilarMemories:
         assert not llm.prompts, "LLM should not run under the record threshold"
 
     def test_skips_without_llm(self, tmp_path):
-        from src.engines.kasal.memory.memory_maintenance import (
+        from src.services.memory.maintenance import (
             merge_similar_memories,
         )
 
@@ -184,7 +184,7 @@ class TestMergeSimilarMemories:
         assert merge_similar_memories(memory)["merged_clusters"] == 0
 
     def test_env_kill_switch(self, tmp_path, monkeypatch):
-        from src.engines.kasal.memory.memory_maintenance import (
+        from src.services.memory.maintenance import (
             merge_similar_memories,
         )
 
@@ -195,7 +195,7 @@ class TestMergeSimilarMemories:
         assert not llm.prompts
 
     def test_malformed_llm_reply_is_noop(self, tmp_path):
-        from src.engines.kasal.memory.memory_maintenance import (
+        from src.services.memory.maintenance import (
             merge_similar_memories,
         )
 
@@ -207,7 +207,7 @@ class TestMergeSimilarMemories:
         assert backend.count("/g1") == before
 
     def test_invalid_indices_are_ignored(self, tmp_path):
-        from src.engines.kasal.memory.memory_maintenance import (
+        from src.services.memory.maintenance import (
             merge_similar_memories,
         )
 
@@ -223,7 +223,7 @@ class TestMergeSimilarMemories:
 
 class TestRunMemoryMaintenance:
     def test_combines_dedupe_and_merge_stats(self, tmp_path):
-        from src.engines.kasal.memory.memory_maintenance import (
+        from src.services.memory.maintenance import (
             run_memory_maintenance,
         )
 

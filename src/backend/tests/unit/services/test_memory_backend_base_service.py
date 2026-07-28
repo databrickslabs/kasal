@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 from uuid import uuid4
 
-from src.services.memory_backend_base_service import MemoryBackendBaseService
+from src.services.memory.backend_base_service import MemoryBackendBaseService
 from src.models.memory_backend import MemoryBackend
 from src.schemas.memory_backend import (
     MemoryBackendCreate,

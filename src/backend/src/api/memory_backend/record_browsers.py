@@ -184,7 +184,7 @@ def _browse_default_records(
     from pathlib import Path
 
     try:
-        from src.engines.kasal.memory.local_storage_backend import LocalMemoryStorage
+        from src.services.memory.local_storage_backend import LocalMemoryStorage
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Default memory browse failed (local storage missing): %s", exc)
         return [], 0
@@ -458,7 +458,7 @@ def _delete_default_records(
     # intact in each store.
     if scope:
         try:
-            from src.engines.kasal.memory.local_storage_backend import LocalMemoryStorage
+            from src.services.memory.local_storage_backend import LocalMemoryStorage
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("Default memory delete failed (local storage missing): %s", exc)
             return 0

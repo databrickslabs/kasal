@@ -49,7 +49,7 @@ def _cfg(backend_type, instance_name="my-lb", has_lakebase=True):
 def _patch_config(config):
     svc = MagicMock()
     svc.get_active_config = AsyncMock(return_value=config)
-    return patch("src.services.memory_config_service.MemoryConfigService", return_value=svc)
+    return patch("src.services.memory.config_service.MemoryConfigService", return_value=svc)
 
 
 class TestResolveLakebaseInstance:
@@ -82,7 +82,7 @@ class TestResolveLakebaseInstance:
     async def test_none_on_error(self):
         svc = MagicMock()
         svc.get_active_config = AsyncMock(side_effect=RuntimeError("boom"))
-        with patch("src.services.memory_config_service.MemoryConfigService", return_value=svc):
+        with patch("src.services.memory.config_service.MemoryConfigService", return_value=svc):
             inst = await resolve_lakebase_instance(MagicMock(), "g1")
         assert inst is None
 
@@ -241,7 +241,7 @@ class TestKnowledgeRoutingObservability:
         svc = MagicMock()
         svc.get_active_config = AsyncMock(side_effect=RuntimeError("boom"))
         with patch(
-            "src.services.memory_config_service.MemoryConfigService", return_value=svc
+            "src.services.memory.config_service.MemoryConfigService", return_value=svc
         ), span_patch:
             inst = await resolve_lakebase_instance(MagicMock(), "g1")
         assert inst is None

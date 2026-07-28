@@ -13,8 +13,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import hashlib
 import json
 
-from src.engines.kasal.memory.crew_memory_service import CrewMemoryService
-from src.engines.kasal.memory.memory_backend_factory import DatabricksIndexValidationError
+from src.services.memory.crew_memory import CrewMemoryService
+from src.services.memory.backend_factory import DatabricksIndexValidationError
 
 
 class TestGenerateCrewIdGroupIsolation:
@@ -184,7 +184,7 @@ class TestCreateMemoryBackendsErrorHandling:
             service, '_emit_index_validation_trace', new_callable=AsyncMock
         ) as mock_emit:
             with patch(
-                'src.engines.kasal.memory.crew_memory_service.MemoryBackendFactory.create_memory_backends',
+                'src.services.memory.crew_memory.MemoryBackendFactory.create_memory_backends',
                 new_callable=AsyncMock
             ) as mock_factory:
                 mock_factory.side_effect = DatabricksIndexValidationError(
@@ -214,7 +214,7 @@ class TestCreateMemoryBackendsErrorHandling:
             service, '_emit_index_validation_trace', new_callable=AsyncMock
         ) as mock_emit:
             with patch(
-                'src.engines.kasal.memory.crew_memory_service.MemoryBackendFactory.create_memory_backends',
+                'src.services.memory.crew_memory.MemoryBackendFactory.create_memory_backends',
                 new_callable=AsyncMock,
                 return_value={'short_term': MagicMock()}
             ):

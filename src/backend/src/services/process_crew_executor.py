@@ -1477,7 +1477,7 @@ def run_crew_in_process(
                             )
                         # Sleep-time maintenance: bounded, LLM-free dedupe of
                         # the group scope now that this run's writes landed.
-                        from src.engines.kasal.memory.memory_maintenance import (
+                        from src.services.memory.maintenance import (
                             run_memory_maintenance,
                         )
 

@@ -12,7 +12,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from typing import Dict, Any
 
-from src.engines.kasal.memory.memory_backend_factory import (
+from src.services.memory.backend_factory import (
     MemoryBackendFactory,
     DatabricksIndexValidationError
 )

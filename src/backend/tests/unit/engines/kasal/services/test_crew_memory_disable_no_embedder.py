@@ -19,7 +19,7 @@ import pytest
 import kasal_engine.memory
 from unittest.mock import MagicMock, patch
 
-from src.engines.kasal.memory.crew_memory_service import CrewMemoryService
+from src.services.memory.crew_memory import CrewMemoryService
 from src.schemas.memory_backend import MemoryBackendConfig, MemoryBackendType
 
 
@@ -95,7 +95,7 @@ class TestDefaultBackendNoEmbedderDisablesMemory:
         # The code tries to build Memory. Since we can't predict if crewai.Memory
         # succeeds, we just check memory is NOT forcibly set to False by the guard.
         # Patch Memory to avoid real OpenAI calls.
-        with patch('src.engines.kasal.memory.crew_memory_service.CrewMemoryService.configure_crew_memory_components') as mock_cfg:
+        with patch('src.services.memory.crew_memory.CrewMemoryService.configure_crew_memory_components') as mock_cfg:
             mock_cfg.return_value = {'memory': True, 'embedder': crew_kwargs['embedder']}
             result = service.configure_crew_memory_components(
                 crew_kwargs=crew_kwargs,

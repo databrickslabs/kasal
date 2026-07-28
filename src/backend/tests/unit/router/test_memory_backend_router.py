@@ -47,7 +47,7 @@ from src.schemas.memory_backend import (
     MemoryBackendType,
 )
 from src.models.memory_backend import MemoryBackend
-from src.services.memory_backend_service import MemoryBackendService
+from src.services.memory.backend_service import MemoryBackendService
 
 
 @pytest.fixture

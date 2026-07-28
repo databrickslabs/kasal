@@ -649,7 +649,7 @@ class LakebaseStorageBackend:
         """
         if not asyncio.iscoroutine(coro):
             return coro
-        from src.engines.kasal.memory.databricks_storage_backend import _get_bridge_loop
+        from src.services.memory.databricks_storage_backend import _get_bridge_loop
 
         return asyncio.run_coroutine_threadsafe(coro, _get_bridge_loop()).result()
 

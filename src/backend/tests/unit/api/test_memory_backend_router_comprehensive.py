@@ -699,7 +699,7 @@ class TestLocalDefaultStoreReadDelete:
         with patch(
             "src.api.memory_backend.record_browsers.local_memory_store_dir", return_value=store
         ), patch(
-            "src.engines.kasal.memory.local_storage_backend.LocalMemoryStorage",
+            "src.services.memory.local_storage_backend.LocalMemoryStorage",
             return_value=storage,
         ), patch(
             "src.api.memory_backend.record_browsers._memory_record_to_dict",
@@ -739,7 +739,7 @@ class TestLocalDefaultStoreReadDelete:
         with patch(
             "src.api.memory_backend.record_browsers.local_memory_store_dir", return_value=store
         ), patch(
-            "src.engines.kasal.memory.local_storage_backend.LocalMemoryStorage",
+            "src.services.memory.local_storage_backend.LocalMemoryStorage",
             return_value=storage,
         ):
             deleted = _delete_default_records(group_id="g", scope="/g/sess1")

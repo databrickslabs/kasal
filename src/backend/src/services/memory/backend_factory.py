@@ -140,7 +140,7 @@ class MemoryBackendFactory:
             group_id=group_id,
         )
 
-        from src.engines.kasal.memory.databricks_storage_backend import (
+        from src.services.memory.databricks_storage_backend import (
             DatabricksStorageBackend,
         )
 
@@ -194,7 +194,7 @@ class MemoryBackendFactory:
                 "cognitive memory."
             )
 
-        from src.engines.kasal.memory.lakebase_storage_backend import (
+        from src.services.memory.lakebase_storage_backend import (
             LakebaseStorageBackend,
         )
 

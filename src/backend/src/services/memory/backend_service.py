@@ -25,8 +25,8 @@ from src.services.databricks_vectorsearch_verification_service import (
 )
 
 # Import specialized services
-from src.services.memory_backend_base_service import MemoryBackendBaseService
-from src.services.memory_config_service import MemoryConfigService
+from src.services.memory.backend_base_service import MemoryBackendBaseService
+from src.services.memory.config_service import MemoryConfigService
 
 logger = LoggerManager.get_instance().system
 
@@ -363,7 +363,7 @@ class MemoryBackendService:
 
     def _get_lakebase_service(self, instance_name: Optional[str] = None):
         """Create a LakebaseMemoryService for the given instance."""
-        from src.services.lakebase_memory_service import LakebaseMemoryService
+        from src.services.memory.lakebase_service import LakebaseMemoryService
 
         return LakebaseMemoryService(instance_name=instance_name)
 
