@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.schemas.a2a_agent import A2AAgentCreate, A2AAgentUpdate
-from src.services.a2a_agent_service import A2AAgentService
+from src.services.a2a.agent_service import A2AAgentService
 
 
 class _Ctx:

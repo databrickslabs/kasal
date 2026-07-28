@@ -15,8 +15,11 @@ substitutes for the other, so a globally-available agent still does nothing
 until a workspace opts in, and a Kasal admin turning one off cascades
 immediately regardless of what workspaces had enabled.
 
-The protocol lives in ``services/a2a/client.py``. This service owns policy and
-never builds a request.
+The protocol lives beside this, in ``client.py``. This service owns policy —
+who may configure, group scoping, credential encryption — and never builds a
+request. It sits in the ``a2a`` package rather than as a loose
+``a2a_agent_service.py`` for the same reason ``mcp/service.py`` does: everything
+one protocol needs is findable in one place.
 """
 
 import logging
