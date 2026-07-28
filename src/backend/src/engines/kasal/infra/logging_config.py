@@ -75,7 +75,7 @@ class ExecutionLogsDatabaseHandler(logging.Handler):
                      Contains unstructured log messages
 
     - execution_trace: Structured events from CrewAI event bus
-                      Written by event listeners (AgentTraceEventListener, etc.)
+                      Written by the OTel bridge (see services/otel_tracing/)
                       Contains structured events like task_started, agent_execution
                       Uses the original GroupContext object
 
@@ -567,7 +567,6 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
     # Apply file handler (and console handler in Databricks Apps) to all relevant loggers
     for logger_name in [
         'kasal_engine',  # engine logs (crew kickoff, task execution, etc.)
-        'src.engines.kasal.callbacks.logging_callbacks',
         'src.engines.kasal.callbacks.execution_callback',
         'src.engines.kasal.infra.trace_management',
         'src.services.trace.queue',  # Add trace queue logger

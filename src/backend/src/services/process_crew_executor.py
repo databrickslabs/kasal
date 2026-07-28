@@ -998,14 +998,10 @@ def run_crew_in_process(
 
                 async_logger.info(f"Starting execution for job {execution_id}")
 
-                # Initialize event listeners in the subprocess BEFORE kickoff
-                # These must be created and connected to the crew
+                # The crew's own step/task hooks (execution logs + secret
+                # redaction). Event SUBSCRIPTIONS are the OTel bridge's job.
                 from src.engines.kasal.callbacks.execution_callback import (
                     create_execution_callbacks,
-                )
-                from src.engines.kasal.callbacks.logging_callbacks import (
-                    AgentTraceEventListener,
-                    TaskCompletionEventListener,
                 )
                 from src.engines.kasal.infra.trace_management import TraceManager
 
@@ -1029,35 +1025,13 @@ def run_crew_in_process(
                         f"TraceManager writer started in subprocess for {execution_id}"
                     )
 
-                    # Create the event listeners in this subprocess
-                    # Import the event bus from crewai
+                    # Event subscriptions belong to the OTel bridge, registered
+                    # just below on this same bus.
                     from kasal_engine.events import crewai_event_bus
 
-                    # Create and register the event listeners with group_context
-                    agent_trace_listener = AgentTraceEventListener(
-                        job_id=execution_id,
-                        group_context=group_context,
-                        task_event_queue=log_queue,
-                    )
-                    agent_trace_listener.setup_listeners(crewai_event_bus)
-                    async_logger.info(
-                        f"Created and registered AgentTraceEventListener for {execution_id}"
-                    )
-
-                    # Log that subprocess mode is enabled for direct DB writes
                     async_logger.info(
                         f"CREW_SUBPROCESS_MODE={os.environ.get('CREW_SUBPROCESS_MODE')} - Direct DB writes enabled"
                     )
-
-                    # Also create and register the other event listeners
-                    task_logger = TaskCompletionEventListener(job_id=execution_id)
-                    task_logger.setup_listeners(crewai_event_bus)
-                    async_logger.info(
-                        f"Created and registered TaskCompletionEventListener for {execution_id}"
-                    )
-
-                    # DetailedOutputLogger functionality now integrated into AgentTraceEventListener
-                    # No separate detailed logger needed
 
                     # Register OTel Event Bridge on the CrewAI event bus
                     # (OTel provider was initialized earlier, before crew preparation)
@@ -1179,9 +1153,6 @@ def run_crew_in_process(
                     loggers_to_configure = [
                         logging.getLogger("crew"),  # Main crew logger
                         logging.getLogger(
-                            "src.engines.kasal.callbacks.logging_callbacks"
-                        ),
-                        logging.getLogger(
                             "src.engines.kasal.callbacks.execution_callback"
                         ),
                         logging.getLogger("src.engines.kasal"),
@@ -1209,23 +1180,6 @@ def run_crew_in_process(
                     )
 
                     # async_logger already defined above - no need to redefine
-
-                    task_completion_logger = TaskCompletionEventListener(
-                        job_id=execution_id
-                    )
-                    async_logger.info(
-                        f"Created TaskCompletionEventListener for {execution_id}"
-                    )
-
-                    # DetailedOutputLogger functionality now integrated into AgentTraceEventListener
-                    # No separate detailed logger needed
-                    async_logger.info(
-                        f"Detailed output logging integrated into AgentTraceEventListener for {execution_id}"
-                    )
-
-                    async_logger.info(
-                        f"All event listeners initialized in subprocess for {execution_id}"
-                    )
 
                     # Log configuration parameters at the start of execution
                     try:

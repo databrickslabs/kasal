@@ -3,7 +3,7 @@ Unit tests for execution-scoped callback system.
 
 Tests the lightweight execution-scoped callbacks that handle execution log
 streaming.  Trace creation is now handled by the event bus handlers
-(logging_callbacks.py) and the OTel pipeline.
+and the OTel pipeline.
 """
 import pytest
 from unittest.mock import patch, MagicMock

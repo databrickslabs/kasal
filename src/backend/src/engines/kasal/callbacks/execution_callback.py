@@ -2,8 +2,10 @@
 Execution-scoped callback system for CrewAI.
 
 Provides lightweight callback functions scoped to specific executions.
-Trace creation is handled by the event bus handlers (logging_callbacks.py)
-and the OTel pipeline (KasalDBSpanExporter) when enabled.
+Trace creation belongs to the OTel pipeline (OTelEventBridge ->
+KasalDBSpanExporter). What lives here is the crew's own step/task hooks: they
+write EXECUTION LOGS (the Logs tab) and scan tool output for injected content
+and leaked secrets before any of it is streamed.
 
 Agent attribution heuristics have been removed — the OTel-instrumented event
 bus carries correct agent/task context on every event, eliminating the need
@@ -29,9 +31,8 @@ def create_execution_callbacks(
 ):
     """Create execution-scoped callback functions for a specific CrewAI execution.
 
-    These callbacks handle execution log streaming only.  Trace creation is
-    delegated to the event bus handlers (``logging_callbacks.py``) and the
-    OTel pipeline (``KasalDBSpanExporter``).
+    These callbacks handle execution log streaming only. Trace creation is
+    delegated to the OTel pipeline (``KasalDBSpanExporter``).
 
     Args:
         job_id: Unique identifier for the execution.

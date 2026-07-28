@@ -6,7 +6,7 @@ to ensure proper isolation between concurrent executions.
 
 NOTE: The execution_callback module now only creates execution logs via
 enqueue_log().  Trace creation is handled by the event bus handlers
-(logging_callbacks.py) and the OTel pipeline.
+and the OTel pipeline.
 """
 import pytest
 from unittest.mock import patch, MagicMock

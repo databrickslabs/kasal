@@ -11,10 +11,6 @@ from src.engines.kasal.callbacks.streaming_callbacks import (
     LogCaptureHandler,
     JobOutputCallback
 )
-from src.engines.kasal.callbacks.logging_callbacks import (
-    AgentTraceEventListener,
-    TaskCompletionEventListener
-)
 from src.engines.kasal.callbacks.databricks_volume_callback import (
     DatabricksVolumeCallback
 )
@@ -26,10 +22,6 @@ __all__ = [
     # Streaming
     'LogCaptureHandler',
     'JobOutputCallback',
-
-    # Logging
-    'AgentTraceEventListener',
-    'TaskCompletionEventListener',
 
     # Storage
     'DatabricksVolumeCallback',

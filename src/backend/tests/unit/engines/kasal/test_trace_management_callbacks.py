@@ -4,7 +4,7 @@ Simplified unit tests for trace management with execution-scoped callbacks.
 Tests core trace management functionality with minimal async complexity.
 
 NOTE: The execution_callback module has been refactored to delegate trace creation
-to the event bus (logging_callbacks.py) and the OTel pipeline.  The callbacks now
+to the event bus and the OTel pipeline.  The callbacks now
 only create execution logs via enqueue_log().
 """
 import asyncio

@@ -113,8 +113,6 @@ def _deep_run_extended(
     all_patches.append(patch("signal.signal"))
     all_patches.append(patch.dict("sys.modules", sys_modules_patches))
     all_patches.append(patch("src.engines.kasal.infra.trace_management.TraceManager", mock_tm))
-    all_patches.append(patch("src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener", return_value=MagicMock()))
-    all_patches.append(patch("src.engines.kasal.callbacks.logging_callbacks.TaskCompletionEventListener", return_value=MagicMock()))
     all_patches.append(patch("src.utils.user_context.UserContext", mock_uc))
     all_patches.append(patch("src.db.session.safe_async_session", return_value=mock_session_cm))
     all_patches.append(patch("src.db.session.async_session_factory", return_value=mock_session_cm))

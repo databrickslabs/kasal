@@ -272,7 +272,7 @@ class BackendFlow:
 
         Note: For flows, we don't use JobOutputCallback (async) like regular crews.
         Instead, we rely on:
-        1. AgentTraceEventListener for execution traces (set up in subprocess)
+        1. The OTel event bridge for execution traces (registered in the subprocess)
         2. Synchronous step_callback and task_callback set on each Crew instance
         """
         # Set group context in UserContext for multi-tenant isolation
@@ -287,7 +287,7 @@ class BackendFlow:
 
         # For flows, we only need minimal callback setup with job_id and flow_id
         # The actual logging/tracing is handled by:
-        # 1. TraceManager + AgentTraceEventListener (initialized in subprocess)
+        # 1. TraceManager + the OTel event bridge (initialized in subprocess)
         # 2. Synchronous callbacks set on each Crew instance in flow methods
         flow_id_for_callbacks = str(self._flow_id) if self._flow_id else None
         self._config['callbacks'] = {

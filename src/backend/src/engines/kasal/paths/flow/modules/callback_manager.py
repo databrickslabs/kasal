@@ -18,7 +18,6 @@ Key Features:
 Callback Types Managed:
     - JobOutputCallback: Streams execution output to database
     - EventStreamingCallback: Captures real-time CrewAI events
-    - AgentTraceEventListener: Records execution traces
     - Custom event listeners via BaseEventListener
 
 Example:
@@ -88,7 +87,6 @@ class CallbackManager:
                 - handlers: List of initialized callback instances
                 - streaming: JobOutputCallback instance (if created)
                 - event_streaming: EventStreamingCallback instance (if created)
-                - agent_trace: AgentTraceEventListener instance (if created)
                 - start_trace_writer: Boolean indicating trace writer needed
         
         Note:
@@ -136,29 +134,9 @@ class CallbackManager:
                 logger.warning(f"Error creating EventStreamingCallback: {e}", exc_info=True)
                 event_streaming_cb = None
                 
-            # Create agent trace event listener for database trace recording
-            try:
-                from src.engines.kasal.callbacks.logging_callbacks import AgentTraceEventListener
-                agent_trace_cb = AgentTraceEventListener(job_id=job_id, group_context=group_context)
-                logger.info(f"Created AgentTraceEventListener for job {job_id}")
-                handlers.append(agent_trace_cb)
-                callbacks_dict['agent_trace'] = agent_trace_cb
-            except Exception as e:
-                logger.warning(f"Error creating AgentTraceEventListener: {e}", exc_info=True)
-                agent_trace_cb = None
-                
-            # Create task completion logger - DISABLED to prevent duplicates
-            # The AgentTraceEventListener already handles task completion events
-            # try:
-            #     from src.engines.kasal.callbacks.logging_callbacks import TaskCompletionLogger
-            #     task_completion_cb = TaskCompletionLogger(job_id=job_id)
-            #     logger.info(f"Created TaskCompletionLogger for job {job_id}")
-            #     handlers.append(task_completion_cb)
-            #     callbacks_dict['task_completion'] = task_completion_cb
-            # except Exception as e:
-            #     logger.warning(f"Error creating TaskCompletionLogger: {e}", exc_info=True)
-            #     task_completion_cb = None
-            
+            # Trace recording (including task completion) is the OTel bridge's,
+            # registered by the flow subprocess. Nothing to create here.
+
             # IMPORTANT: Event listeners inheriting from BaseEventListener are automatically 
             # registered in their __init__ method, so we don't need to register them again.
             # Only register listeners that don't inherit from BaseEventListener

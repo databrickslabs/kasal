@@ -502,7 +502,7 @@ class DatabricksVectorStorage:
                 f"Saved {self.memory_type} memory record to index {self.index_name}"
             )
             # NOTE: Trace emission removed - memory events are now captured
-            # by the CrewAI event bus in logging_callbacks.py with proper agent attribution.
+            # by the OTel event bridge with proper agent attribution.
 
         except Exception as e:
             self.memory_logger.error(f"Failed to save to Databricks Vector Search: {e}")

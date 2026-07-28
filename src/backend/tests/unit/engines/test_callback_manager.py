@@ -36,17 +36,14 @@ class TestCallbackManager:
     def test_init_callbacks_success(self, mock_job_id, mock_config, mock_group_context, mock_crewai_event_bus):
         """Test successful callback initialization."""
         with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback:
             
             # Mock callback instances
             job_cb = Mock()
             event_cb = Mock()
-            trace_cb = Mock()
             
             mock_job_callback.return_value = job_cb
             mock_event_callback.return_value = event_cb
-            mock_trace_callback.return_value = trace_cb
             
             result = CallbackManager.init_callbacks(
                 job_id=mock_job_id,
@@ -57,13 +54,11 @@ class TestCallbackManager:
             assert 'handlers' in result
             assert 'streaming' in result
             assert 'event_streaming' in result
-            assert 'agent_trace' in result
             assert 'start_trace_writer' in result
             
-            assert len(result['handlers']) == 3
+            assert len(result['handlers']) == 2
             assert job_cb in result['handlers']
             assert event_cb in result['handlers']
-            assert trace_cb in result['handlers']
             
             # Check that callbacks were created with correct parameters
             mock_job_callback.assert_called_once_with(
@@ -74,10 +69,6 @@ class TestCallbackManager:
             mock_event_callback.assert_called_once_with(
                 job_id=mock_job_id,
                 config=mock_config,
-                group_context=mock_group_context
-            )
-            mock_trace_callback.assert_called_once_with(
-                job_id=mock_job_id,
                 group_context=mock_group_context
             )
 
@@ -96,81 +87,49 @@ class TestCallbackManager:
     def test_init_callbacks_job_output_callback_error(self, mock_job_id, mock_crewai_event_bus):
         """Test callback initialization when JobOutputCallback creation fails."""
         with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback:
             
             # Make JobOutputCallback creation fail
             mock_job_callback.side_effect = Exception("JobOutputCallback error")
             
             event_cb = Mock()
-            trace_cb = Mock()
             mock_event_callback.return_value = event_cb
-            mock_trace_callback.return_value = trace_cb
             
             result = CallbackManager.init_callbacks(job_id=mock_job_id)
             
             # Should still return result with other callbacks
             assert 'handlers' in result
             assert 'event_streaming' in result
-            assert 'agent_trace' in result
             assert 'streaming' not in result  # Failed to create
             
-            assert len(result['handlers']) == 2  # Only event and trace callbacks
+            assert len(result['handlers']) == 1  # Only the event callback
 
     def test_init_callbacks_event_streaming_callback_error(self, mock_job_id, mock_crewai_event_bus):
         """Test callback initialization when EventStreamingCallback creation fails."""
         with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback:
             
             job_cb = Mock()
-            trace_cb = Mock()
             mock_job_callback.return_value = job_cb
             mock_event_callback.side_effect = Exception("EventStreamingCallback error")
-            mock_trace_callback.return_value = trace_cb
             
             result = CallbackManager.init_callbacks(job_id=mock_job_id)
             
             # Should still return result with other callbacks
             assert 'handlers' in result
             assert 'streaming' in result
-            assert 'agent_trace' in result
             assert 'event_streaming' not in result  # Failed to create
             
-            assert len(result['handlers']) == 2  # Only job and trace callbacks
-
-    def test_init_callbacks_agent_trace_callback_error(self, mock_job_id, mock_crewai_event_bus):
-        """Test callback initialization when AgentTraceEventListener creation fails."""
-        with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
-            
-            job_cb = Mock()
-            event_cb = Mock()
-            mock_job_callback.return_value = job_cb
-            mock_event_callback.return_value = event_cb
-            mock_trace_callback.side_effect = Exception("AgentTraceEventListener error")
-            
-            result = CallbackManager.init_callbacks(job_id=mock_job_id)
-            
-            # Should still return result with other callbacks
-            assert 'handlers' in result
-            assert 'streaming' in result
-            assert 'event_streaming' in result
-            assert 'agent_trace' not in result  # Failed to create
-            
-            assert len(result['handlers']) == 2  # Only job and event callbacks
+            assert len(result['handlers']) == 1  # Only the job callback
 
     def test_init_callbacks_all_creation_errors(self, mock_job_id, mock_crewai_event_bus):
         """Test callback initialization when all callback creations fail."""
         with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback:
             
             # Make all callback creations fail
             mock_job_callback.side_effect = Exception("JobOutputCallback error")
             mock_event_callback.side_effect = Exception("EventStreamingCallback error")
-            mock_trace_callback.side_effect = Exception("AgentTraceEventListener error")
             
             result = CallbackManager.init_callbacks(job_id=mock_job_id)
             
@@ -186,8 +145,7 @@ class TestCallbackManager:
             
             # Mock callbacks to be created successfully
             with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-                 patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-                 patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+                 patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback:
                 
                 job_cb = Mock(spec=['event_bus'])
                 event_cb = Mock(spec=['event_bus'])
@@ -195,7 +153,6 @@ class TestCallbackManager:
                 
                 mock_job_callback.return_value = job_cb
                 mock_event_callback.return_value = event_cb
-                mock_trace_callback.return_value = trace_cb
                 
                 result = CallbackManager.init_callbacks(job_id=mock_job_id)
                 
@@ -325,11 +282,9 @@ class TestCallbackManager:
         event_streaming_cb = Mock()
         event_streaming_cb.cleanup = Mock()
         
-        agent_trace_cb = Mock()
         
         callbacks = {
             'event_streaming': event_streaming_cb,
-            'agent_trace': agent_trace_cb
         }
         
         CallbackManager.cleanup_callbacks(callbacks)
@@ -339,10 +294,8 @@ class TestCallbackManager:
 
     def test_cleanup_callbacks_no_event_streaming(self):
         """Test callback cleanup without event streaming callback."""
-        agent_trace_cb = Mock()
         
         callbacks = {
-            'agent_trace': agent_trace_cb
         }
         
         CallbackManager.cleanup_callbacks(callbacks)
@@ -363,71 +316,43 @@ class TestCallbackManager:
         # Should handle cleanup error gracefully
         event_streaming_cb.cleanup.assert_called_once()
 
-    def test_cleanup_callbacks_trace_cleanup_error(self):
-        """Test callback cleanup when agent trace cleanup fails."""
-        event_streaming_cb = Mock()
-        event_streaming_cb.cleanup = Mock()
-        
-        agent_trace_cb = Mock()
-        
-        callbacks = {
-            'event_streaming': event_streaming_cb,
-            'agent_trace': agent_trace_cb
-        }
-        
-        CallbackManager.cleanup_callbacks(callbacks)
-        
-        # Should complete successfully
-        event_streaming_cb.cleanup.assert_called_once()
-
     def test_init_callbacks_with_base_event_listeners(self, mock_job_id, mock_crewai_event_bus):
         """Test callback initialization with listeners that inherit from BaseEventListener."""
         with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
              patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback, \
              patch.object(CallbackManager, 'ensure_event_listeners_registered') as mock_ensure:
-            
+
             # Mock callback instances with setup_listeners (inheriting from BaseEventListener)
             job_cb = Mock()
             job_cb.setup_listeners = Mock()  # Has setup_listeners, so inherits from BaseEventListener
-            
-            event_cb = Mock()
-            event_cb.setup_listeners = Mock()  # Has setup_listeners, so inherits from BaseEventListener
-            
-            trace_cb = Mock(spec=['event_bus'])  # No setup_listeners method, so doesn't inherit from BaseEventListener
-            
+
+            event_cb = Mock(spec=['event_bus'])  # No setup_listeners method, so doesn't inherit from BaseEventListener
+
             mock_job_callback.return_value = job_cb
             mock_event_callback.return_value = event_cb
-            mock_trace_callback.return_value = trace_cb
-            
+
             result = CallbackManager.init_callbacks(job_id=mock_job_id)
-            
+
             # Should only register non-BaseEventListener handlers
             mock_ensure.assert_called_once()
             call_args = mock_ensure.call_args[0][0]  # First argument
-            assert len(call_args) == 1  # Only trace_cb should be in the list
-            assert trace_cb in call_args
+            assert len(call_args) == 1  # Only event_cb should be in the list
 
     def test_init_callbacks_all_base_event_listeners(self, mock_job_id, mock_crewai_event_bus):
         """Test callback initialization when all listeners inherit from BaseEventListener."""
         with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
              patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback, \
              patch.object(CallbackManager, 'ensure_event_listeners_registered') as mock_ensure:
-            
+
             # Mock all callback instances with setup_listeners (all inherit from BaseEventListener)
             job_cb = Mock()
             job_cb.setup_listeners = Mock()
-            
+
             event_cb = Mock()
             event_cb.setup_listeners = Mock()
-            
-            trace_cb = Mock()
-            trace_cb.setup_listeners = Mock()
-            
+
             mock_job_callback.return_value = job_cb
             mock_event_callback.return_value = event_cb
-            mock_trace_callback.return_value = trace_cb
             
             result = CallbackManager.init_callbacks(job_id=mock_job_id)
             
@@ -456,13 +381,11 @@ class TestCallbackManager:
         """Test callback initialization when import-level exception occurs."""
         # Simulate an import exception that happens in the try block
         with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback:
             
             # Make all imports fail to trigger the outer exception handler
             mock_job_callback.side_effect = ImportError("Cannot import callback modules")
             mock_event_callback.side_effect = ImportError("Cannot import callback modules")
-            mock_trace_callback.side_effect = ImportError("Cannot import callback modules")
             
             result = CallbackManager.init_callbacks(job_id=mock_job_id)
             
@@ -472,16 +395,13 @@ class TestCallbackManager:
     def test_init_callbacks_with_config_none(self, mock_job_id):
         """Test callback initialization with None config."""
         with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback:
             
             job_cb = Mock()
             event_cb = Mock()
-            trace_cb = Mock()
             
             mock_job_callback.return_value = job_cb
             mock_event_callback.return_value = event_cb
-            mock_trace_callback.return_value = trace_cb
             
             result = CallbackManager.init_callbacks(job_id=mock_job_id, config=None)
             
@@ -502,21 +422,16 @@ class TestCallbackManager:
         """Test callback initialization with partial failures and non-base listeners."""
         with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
              patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback, \
              patch.object(CallbackManager, 'ensure_event_listeners_registered') as mock_ensure:
-            
+
             # Create callbacks where some inherit from BaseEventListener and some don't
             job_cb = Mock()
             job_cb.setup_listeners = Mock()  # Has setup_listeners (BaseEventListener)
-            
+
             event_cb = Mock(spec=['event_bus'])  # No setup_listeners method (not BaseEventListener)
-            
-            trace_cb = Mock()
-            trace_cb.setup_listeners = Mock()  # Has setup_listeners (BaseEventListener)
-            
+
             mock_job_callback.return_value = job_cb
             mock_event_callback.return_value = event_cb
-            mock_trace_callback.return_value = trace_cb
             
             result = CallbackManager.init_callbacks(job_id=mock_job_id)
             
@@ -526,31 +441,24 @@ class TestCallbackManager:
             assert len(call_args) == 1  # Only event_cb should be in the list
             assert event_cb in call_args
             assert job_cb not in call_args
-            assert trace_cb not in call_args
     
     def test_init_callbacks_none_handlers(self, mock_job_id, mock_crewai_event_bus):
         """Test callback initialization when some handlers are None."""
         with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback, \
-             patch.object(CallbackManager, 'ensure_event_listeners_registered') as mock_ensure:
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback:
             
             # Set some callbacks to return None by making them raise exceptions
             mock_job_callback.side_effect = Exception("Job callback error")
             event_cb = Mock(spec=['event_bus'])  # No setup_listeners (not BaseEventListener)
-            trace_cb = Mock()
-            trace_cb.setup_listeners = Mock()  # Has setup_listeners (BaseEventListener)
-            
+
             mock_event_callback.return_value = event_cb
-            mock_trace_callback.return_value = trace_cb
-            
+
             result = CallbackManager.init_callbacks(job_id=mock_job_id)
-            
+
             # Should handle None callbacks gracefully
             assert 'handlers' in result
-            assert len(result['handlers']) == 2  # Only non-None callbacks
+            assert len(result['handlers']) == 1  # Only non-None callbacks
             assert event_cb in result['handlers']
-            assert trace_cb in result['handlers']
     
     def test_ensure_event_listeners_connect_events_not_callable(self, mock_crewai_event_bus):
         """Test event listeners registration when connect_events is not callable."""
@@ -597,71 +505,11 @@ class TestCallbackManager:
         listener.setup_listeners.assert_called_once_with(mock_crewai_event_bus)
         listener.connect_events.assert_called_once()
     
-    def test_cleanup_callbacks_with_agent_trace_cleanup_exception(self):
-        """Test callback cleanup when agent trace section has exception."""
-        event_streaming_cb = Mock()
-        event_streaming_cb.cleanup = Mock()
-        
-        agent_trace_cb = Mock()
-        
-        callbacks = {
-            'event_streaming': event_streaming_cb,
-            'agent_trace': agent_trace_cb
-        }
-        
-        # Simulate the trace cleanup logic path
-        with patch('src.engines.kasal.paths.flow.modules.callback_manager.logger') as mock_logger:
-            CallbackManager.cleanup_callbacks(callbacks)
-            
-            # Should call cleanup on event streaming callback
-            event_streaming_cb.cleanup.assert_called_once()
-            # Should log info about trace processing
-            mock_logger.info.assert_any_call("Cleaning up EventStreamingCallback")
-            mock_logger.info.assert_any_call("EventStreamingCallback cleanup completed successfully")
-            mock_logger.info.assert_any_call("Ensuring traces are processed")
-    
-    def test_cleanup_callbacks_only_agent_trace(self):
-        """Test callback cleanup with only agent trace callback."""
-        agent_trace_cb = Mock()
-        
-        callbacks = {
-            'agent_trace': agent_trace_cb
-        }
-        
-        with patch('src.engines.kasal.paths.flow.modules.callback_manager.logger') as mock_logger:
-            CallbackManager.cleanup_callbacks(callbacks)
-            
-            # Should log info about trace processing
-            mock_logger.info.assert_any_call("Ensuring traces are processed")
-    
-    def test_cleanup_callbacks_trace_cleanup_exception(self):
-        """Test callback cleanup when trace cleanup section throws exception."""
-        event_streaming_cb = Mock()
-        event_streaming_cb.cleanup = Mock()
-        
-        agent_trace_cb = Mock()
-        
-        callbacks = {
-            'event_streaming': event_streaming_cb,
-            'agent_trace': agent_trace_cb
-        }
-        
-        # Mock logger to raise exception in trace cleanup section
-        with patch('src.engines.kasal.paths.flow.modules.callback_manager.logger') as mock_logger:
-            # Make the trace processing line raise an exception
-            mock_logger.info.side_effect = [None, None, Exception("Trace error")]
-            
-            CallbackManager.cleanup_callbacks(callbacks)
-            
-            # Should handle exception gracefully
-            event_streaming_cb.cleanup.assert_called_once()
-    
     def test_init_callbacks_major_exception_in_try_block(self, mock_job_id):
         """Test callback initialization when major exception occurs in main try block."""
         # Test when a major exception occurs in the try block after callback creation
         with patch('src.engines.kasal.callbacks.streaming_callbacks.JobOutputCallback') as mock_job_callback, \
-             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback, \
-             patch('src.engines.kasal.callbacks.logging_callbacks.AgentTraceEventListener') as mock_trace_callback:
+             patch('src.engines.kasal.callbacks.streaming_callbacks.EventStreamingCallback') as mock_event_callback:
             
             # Mock successful callback creation
             job_cb = Mock(spec=['event_bus'])
@@ -670,7 +518,6 @@ class TestCallbackManager:
             
             mock_job_callback.return_value = job_cb
             mock_event_callback.return_value = event_cb
-            mock_trace_callback.return_value = trace_cb
             
             # Make the ensure_event_listeners_registered call fail with a major error
             with patch.object(CallbackManager, 'ensure_event_listeners_registered') as mock_ensure:

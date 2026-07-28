@@ -143,7 +143,7 @@ def run_flow_in_process(
 
     # Mark that we're in subprocess mode for logging purposes
     os.environ["FLOW_SUBPROCESS_MODE"] = "true"
-    # CRITICAL: Set CREW_SUBPROCESS_MODE for AgentTraceEventListener to write directly to DB
+    # CRITICAL: Set CREW_SUBPROCESS_MODE so the OTel exporter writes directly to the DB
     os.environ["CREW_SUBPROCESS_MODE"] = "true"
     # Set debug tracing flag (default to true for comprehensive logging)
     os.environ["CREWAI_DEBUG_TRACING"] = "true"
@@ -361,40 +361,12 @@ def run_flow_in_process(
                 )
 
                 from src.engines.kasal.infra.trace_management import TraceManager
-                from src.engines.kasal.callbacks.logging_callbacks import (
-                    AgentTraceEventListener,
-                    TaskCompletionEventListener,
-                )
                 from kasal_engine.events import crewai_event_bus
 
                 # Start trace and logs writers
                 await TraceManager.ensure_writer_started()
                 async_logger.info(
                     f"[FLOW_SUBPROCESS] TraceManager writer started for {execution_id}"
-                )
-
-                # Create and register event listeners
-                trace_listener = AgentTraceEventListener(
-                    job_id=execution_id,
-                    group_context=group_context,
-                )
-                trace_listener.setup_listeners(crewai_event_bus)
-                async_logger.info(
-                    f"[FLOW_SUBPROCESS] AgentTraceEventListener registered for {execution_id}"
-                )
-
-                # Log that subprocess mode is enabled for direct DB writes
-                async_logger.info(
-                    f"[FLOW_SUBPROCESS] CREW_SUBPROCESS_MODE={os.environ.get('CREW_SUBPROCESS_MODE')} - Direct DB writes enabled"
-                )
-
-                # Create task completion listener
-                task_listener = TaskCompletionEventListener(
-                    job_id=execution_id, group_context=group_context
-                )
-                task_listener.setup_listeners(crewai_event_bus)
-                async_logger.info(
-                    f"[FLOW_SUBPROCESS] TaskCompletionEventListener registered for {execution_id}"
                 )
 
                 # Initialize OTel tracing (always-on, sole trace source)

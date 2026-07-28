@@ -3,7 +3,7 @@ Extended unit tests for execution_callback module.
 
 Comprehensive tests covering the simplified execution-scoped callbacks that
 handle execution log streaming only.  Trace creation is delegated to the
-event bus handlers (logging_callbacks.py) and the OTel pipeline.
+event bus handlers and the OTel pipeline.
 """
 import pytest
 from unittest.mock import MagicMock, patch

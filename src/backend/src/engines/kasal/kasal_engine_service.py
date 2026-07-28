@@ -48,9 +48,6 @@ from src.engines.kasal.paths.flow.flow_execution_runner import run_flow_in_proce
 from src.engines.kasal.config_adapter import normalize_config, normalize_flow_config
 from src.engines.kasal.paths.crew.crew_preparation import CrewPreparation
 
-# Import the logging callbacks
-from src.engines.kasal.callbacks.logging_callbacks import AgentTraceEventListener, TaskCompletionEventListener
-
 # Import CrewAI components
 from kasal_engine.core import Crew
 

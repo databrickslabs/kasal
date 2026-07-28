@@ -765,7 +765,7 @@ class ExecutionTraceRepository(BaseRepository[ExecutionTrace]):
                 if trace.output:
                     if isinstance(trace.output, dict):
                         # CRITICAL FIX: Try to get the actual output content
-                        # First check for nested "content" key (from logging_callbacks format after trace_management processing)
+                        # First check for nested "content" key (legacy listener format, after trace_management processing)
                         # Then check for "output_content" or "raw" (legacy formats)
                         full_output = trace.output.get("content") or trace.output.get("output_content") or trace.output.get("raw") or trace.output
                     else:

@@ -873,7 +873,7 @@ class CrewMemoryService:
             set_trace_ctx(getattr(crew, "_entity_memory", None))
 
             # NOTE: Direct memory tracing removed - memory events are now captured
-            # by the CrewAI event bus in logging_callbacks.py with proper agent attribution.
+            # by the OTel event bridge with proper agent attribution.
             # The _patch_default_memory_tracing method was causing duplicate events appearing
             # under "Memory[...]" as separate agents instead of being grouped with the correct task/agent.
 
