@@ -80,7 +80,7 @@ def client(mock_current_user, mock_session):
     from src.dependencies.admin_auth import (
         require_authenticated_user, get_authenticated_user, get_admin_user
     )
-    from tests.unit.router.conftest import register_exception_handlers
+    from tests.unit.api.conftest import register_exception_handlers
 
     app = FastAPI()
     app.include_router(router)

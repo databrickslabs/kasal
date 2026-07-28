@@ -26,7 +26,7 @@ from src.core.exceptions import BadRequestError, NotFoundError
 from src.schemas.chat_history import SaveMessageRequest
 from src.utils.user_context import GroupContext
 
-from tests.unit.router.conftest import register_exception_handlers
+from tests.unit.api.conftest import register_exception_handlers
 
 
 def gc(valid=True, email="user@company.com"):

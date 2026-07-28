@@ -22,7 +22,7 @@ from src.schemas.template_generation import (
     TemplateGenerationResponse,
 )
 from src.utils.user_context import GroupContext
-from tests.unit.router.conftest import register_exception_handlers
+from tests.unit.api.conftest import register_exception_handlers
 
 
 def _group_context():

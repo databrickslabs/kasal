@@ -59,7 +59,7 @@ def mock_group_context():
 @pytest.fixture
 def app(mock_db_session, mock_current_user, mock_group_context):
     """Create a FastAPI app with mocked dependencies."""
-    from tests.unit.router.conftest import register_exception_handlers
+    from tests.unit.api.conftest import register_exception_handlers
 
     app = FastAPI()
     app.include_router(router)

@@ -22,7 +22,7 @@ from src.core.dependencies import get_group_context
 from src.db.database_router import get_smart_db_session
 from src.schemas.crew import CrewCreate, CrewUpdate
 from src.utils.user_context import GroupContext
-from tests.unit.router.conftest import register_exception_handlers
+from tests.unit.api.conftest import register_exception_handlers
 
 
 def gc(role="user"):

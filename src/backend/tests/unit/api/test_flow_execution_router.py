@@ -18,7 +18,7 @@ from src.api.flow_execution_router import router
 @pytest.fixture
 def app():
     """Create a FastAPI app for testing."""
-    from tests.unit.router.conftest import register_exception_handlers
+    from tests.unit.api.conftest import register_exception_handlers
 
     app = FastAPI()
     app.include_router(router)

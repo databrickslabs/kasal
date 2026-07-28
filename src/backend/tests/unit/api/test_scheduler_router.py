@@ -115,7 +115,7 @@ def app(mock_scheduler_service, mock_group_context):
     from fastapi import FastAPI
     from src.api.scheduler_router import router, get_scheduler_service
     from src.core.dependencies import get_group_context
-    from tests.unit.router.conftest import register_exception_handlers
+    from tests.unit.api.conftest import register_exception_handlers
 
     app = FastAPI()
     app.include_router(router)

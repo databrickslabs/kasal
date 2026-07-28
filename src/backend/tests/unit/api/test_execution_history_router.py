@@ -182,7 +182,7 @@ def app(mock_execution_history_service, mock_group_context):
     from src.api.execution_history_router import router
     from src.services.execution.history import get_execution_history_service
     from src.core.dependencies import get_group_context
-    from tests.unit.router.conftest import register_exception_handlers
+    from tests.unit.api.conftest import register_exception_handlers
 
     app = FastAPI()
     app.include_router(router)
