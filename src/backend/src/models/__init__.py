@@ -1,3 +1,4 @@
+from src.models.a2a_push_config import A2APushConfig
 from src.models.agent import Agent
 from src.models.api_key import ApiKey
 from src.models.chat_history import ChatHistory

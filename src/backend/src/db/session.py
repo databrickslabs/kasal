@@ -812,6 +812,24 @@ async def _ensure_workflow_recipe_trials_table(conn) -> None:
         logger.warning(f"Could not ensure workflow_recipe_trials table: {e}")
 
 
+async def _ensure_a2a_push_configs_table(conn) -> None:
+    """Idempotently create a2a_push_configs (A2A webhook registrations).
+
+    New table, so a checkfirst-create reaches deployed installs identically on
+    SQLite, PostgreSQL and Lakebase — same as its neighbours here.
+    """
+    try:
+        from src.models.a2a_push_config import A2APushConfig
+
+        def _create(sync_conn):
+            A2APushConfig.__table__.create(sync_conn, checkfirst=True)
+
+        await conn.run_sync(_create)
+        logger.info("Ensured a2a_push_configs table exists")
+    except Exception as e:
+        logger.warning(f"Could not ensure a2a_push_configs table: {e}")
+
+
 async def _ensure_crew_publications_table(conn) -> None:
     """Idempotently create `publications` (the external-publication registry).
 
@@ -1147,6 +1165,7 @@ async def run_schema_self_heal(conn) -> None:
     await _ensure_workflow_recipes_table(conn)
     await _ensure_workflow_recipe_trials_table(conn)
     await _ensure_crew_publications_table(conn)
+    await _ensure_a2a_push_configs_table(conn)
     await _ensure_crew_feedback_table(conn)
     await _ensure_powerbi_extraction_table(conn)
     await _ensure_prompt_optimization_runs_table(conn)

@@ -84,7 +84,13 @@ async def build_card(
             # Streaming is real (SSE already exists) but is not yet translated
             # into TaskStatusUpdateEvent — so it stays false until it is.
             streaming=False,
-            pushNotifications=False,
+            # True because delivery now exists: subscribers are registered per
+            # task and POSTed a status-update on every state change, from the
+            # same choke point that announces to the browser. The flag was false
+            # for as long as that was untrue — a card is a promise, and
+            # advertising a webhook that never arrives is worse than advertising
+            # none.
+            pushNotifications=True,
             stateTransitionHistory=False,
         ),
         securitySchemes={

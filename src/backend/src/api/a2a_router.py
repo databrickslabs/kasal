@@ -15,11 +15,13 @@ import logging
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Header, Query, Request
+from pydantic import BaseModel, Field
 
 from src.core.dependencies import SessionDep
 from src.core.exceptions import KasalError, NotFoundError, UnprocessableEntityError
 from src.schemas.a2a import AgentCard, SendMessageRequest, Task
 from src.services.a2a import card as a2a_card
+from src.services.a2a import push as a2a_push
 from src.services.a2a import tasks as a2a_tasks
 from src.services.external.identity import (
     ExternalAuthError,
@@ -171,3 +173,72 @@ async def list_tasks(
     the scoping is in the service rather than left to this handler.
     """
     return {"tasks": await a2a_tasks.list_tasks(caller, limit=limit, session=session)}
+
+
+# ---------------------------------------------------------------------------
+# Push notifications. The spec's four config operations.
+#
+# The alternative to a held connection: a crew run takes minutes, so a caller
+# that must keep a stream open for the whole thing is the weakest arrangement
+# on offer. Push is what makes a long-running task practical over A2A.
+# ---------------------------------------------------------------------------
+
+
+class PushConfigRequest(BaseModel):
+    url: str = Field(..., description="Public https endpoint to POST updates to.")
+    token: Optional[str] = Field(
+        None, description="Sent as a bearer token on delivery."
+    )
+    secret: Optional[str] = Field(
+        None,
+        description=(
+            "HMAC secret. When set, deliveries carry X-Kasal-Signature so the "
+            "receiver can verify the call came from Kasal."
+        ),
+    )
+
+
+@router.post("/a2a/v1/tasks/{task_id}/pushNotificationConfigs")
+async def create_push_config(
+    task_id: str,
+    body: PushConfigRequest,
+    caller: CallerDep,
+    session: SessionDep,
+):
+    """Register a webhook for a task.
+
+    The URL is validated here as well as at delivery: refusing an unusable
+    endpoint now is the difference between a caller who fixes it immediately and
+    one who waits for a notification that never comes.
+    """
+    try:
+        return await a2a_push.register(
+            caller=caller,
+            task_id=task_id,
+            url=body.url,
+            token=body.token,
+            secret=body.secret,
+            session=session,
+        )
+    except a2a_push.PushConfigNotFound as exc:
+        raise NotFoundError(str(exc))
+    except ValueError as exc:
+        raise UnprocessableEntityError(str(exc))
+
+
+@router.get("/a2a/v1/tasks/{task_id}/pushNotificationConfigs")
+async def list_push_configs(task_id: str, caller: CallerDep, session: SessionDep):
+    """Webhooks registered on a task. Tokens and secrets are never returned."""
+    return {"configs": await a2a_push.list_for_task(caller, task_id, session=session)}
+
+
+@router.delete(
+    "/a2a/v1/tasks/{task_id}/pushNotificationConfigs/{config_id}",
+    status_code=204,
+)
+async def delete_push_config(
+    task_id: str, config_id: int, caller: CallerDep, session: SessionDep
+):
+    """Remove a webhook."""
+    if not await a2a_push.delete(caller, config_id, session=session):
+        raise NotFoundError("No such push notification config")

@@ -279,6 +279,21 @@ class ExecutionStatusService:
                             f"[ExecutionStatusService] Failed to broadcast SSE event: {sse_error}"
                         )
 
+                    # Tell external subscribers, the same way and in the same
+                    # place the SSE announcement above tells the browser. Goes
+                    # through the EIL rather than a protocol adapter, so this
+                    # layer never learns that A2A or webhooks exist — and it is
+                    # scheduled, not awaited: an unreachable webhook retried
+                    # three times must not sit in the way of a crew's progress.
+                    try:
+                        from src.services.external.notify import notify_state_change
+
+                        notify_state_change(job_id, status, result)
+                    except Exception as notify_error:  # noqa: BLE001
+                        logger.debug(
+                            f"[ExecutionStatusService] external notify skipped: {notify_error}"
+                        )
+
                     return True
                 else:
                     logger.error(

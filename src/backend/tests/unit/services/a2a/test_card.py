@@ -89,11 +89,12 @@ class TestSkills:
 
 class TestCapabilitiesAreAPromise:
     @pytest.mark.asyncio
-    async def test_push_notifications_are_not_claimed_before_delivery_exists(self):
-        """Advertising a webhook that never arrives is worse than advertising
-        none. The flag flips when the dispatcher ships, not before."""
+    async def test_push_notifications_are_claimed_now_that_delivery_exists(self):
+        """The flag was false for as long as there was no dispatcher — a card is
+        a promise. It flipped when registration, delivery, retry and signing
+        landed, and not before."""
         card = await _build([])
-        assert card.capabilities.pushNotifications is False
+        assert card.capabilities.pushNotifications is True
 
     @pytest.mark.asyncio
     async def test_streaming_is_not_claimed_before_it_is_translated(self):
