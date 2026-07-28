@@ -164,12 +164,12 @@ class TestDeleteByFilePerUser:
 
 class TestSearchIsolationAndTtl:
     async def _search(self, session, created_by, ttl_days=30):
-        from src.services.knowledge_search_service import KnowledgeSearchService
+        from src.services.knowledge.search_service import KnowledgeSearchService
 
         svc = KnowledgeSearchService(AsyncMock(), GROUP)
         with (
             patch(
-                "src.services.knowledge_embedding_session.knowledge_embedding_session",
+                "src.services.knowledge.embedding_session.knowledge_embedding_session",
                 store_ctx(session),
             ),
             patch(
@@ -177,7 +177,7 @@ class TestSearchIsolationAndTtl:
                 AsyncMock(return_value=[1.0, 0.0, 0.0]),
             ),
             patch(
-                "src.services.knowledge_embedding_service.KNOWLEDGE_TTL_DAYS",
+                "src.services.knowledge.embedding_service.KNOWLEDGE_TTL_DAYS",
                 ttl_days,
             ),
         ):
@@ -236,12 +236,12 @@ class TestSearchIsolationAndTtl:
 class TestEmbedStampingAndPurge:
     @pytest.mark.asyncio
     async def test_embed_file_stamps_the_uploader(self, session):
-        from src.services.knowledge_embedding_service import KnowledgeEmbeddingService
+        from src.services.knowledge.embedding_service import KnowledgeEmbeddingService
 
         svc = KnowledgeEmbeddingService(AsyncMock(), GROUP)
         with (
             patch(
-                "src.services.knowledge_embedding_session.knowledge_embedding_session",
+                "src.services.knowledge.embedding_session.knowledge_embedding_session",
                 store_ctx(session),
             ),
             patch(
@@ -270,7 +270,7 @@ class TestEmbedStampingAndPurge:
 
     @pytest.mark.asyncio
     async def test_purge_expired_is_group_scoped(self, session):
-        from src.services.knowledge_embedding_service import KnowledgeEmbeddingService
+        from src.services.knowledge.embedding_service import KnowledgeEmbeddingService
 
         session.add_all([
             row(content="mine fresh", embedding=[1.0], age_days=1),
@@ -281,7 +281,7 @@ class TestEmbedStampingAndPurge:
 
         svc = KnowledgeEmbeddingService(AsyncMock(), GROUP)
         with patch(
-            "src.services.knowledge_embedding_session.knowledge_embedding_session",
+            "src.services.knowledge.embedding_session.knowledge_embedding_session",
             store_ctx(session),
         ):
             purged = await svc.purge_expired()
@@ -297,10 +297,10 @@ class TestEmbedStampingAndPurge:
 
     @pytest.mark.asyncio
     async def test_purge_disabled_when_ttl_is_zero(self, session):
-        from src.services.knowledge_embedding_service import KnowledgeEmbeddingService
+        from src.services.knowledge.embedding_service import KnowledgeEmbeddingService
 
         svc = KnowledgeEmbeddingService(AsyncMock(), GROUP)
-        with patch("src.services.knowledge_embedding_service.KNOWLEDGE_TTL_DAYS", 0):
+        with patch("src.services.knowledge.embedding_service.KNOWLEDGE_TTL_DAYS", 0):
             assert await svc.purge_expired() == 0
 
 

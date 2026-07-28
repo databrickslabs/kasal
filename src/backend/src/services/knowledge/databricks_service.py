@@ -55,8 +55,8 @@ class DatabricksKnowledgeService:
         self.user_token = user_token
 
         # Initialize specialized services (proper separation of concerns)
-        from src.services.knowledge_embedding_service import KnowledgeEmbeddingService
-        from src.services.knowledge_search_service import KnowledgeSearchService
+        from src.services.knowledge.embedding_service import KnowledgeEmbeddingService
+        from src.services.knowledge.search_service import KnowledgeSearchService
 
         self.embedding_service = KnowledgeEmbeddingService(session, group_id)
         self.search_service = KnowledgeSearchService(session, group_id)
@@ -674,7 +674,7 @@ class DatabricksKnowledgeService:
             from src.repositories.documentation_embedding_repository import (
                 DocumentationEmbeddingRepository,
             )
-            from src.services.knowledge_embedding_session import (
+            from src.services.knowledge.embedding_session import (
                 ensure_lakebase_doc_table,
                 knowledge_embedding_session,
             )
@@ -735,7 +735,7 @@ class DatabricksKnowledgeService:
             # Generate a dummy query embedding for fetching sources, using the
             # shared knowledge embedder so it matches the ingest/search model.
             from src.core.llm_manager import LLMManager
-            from src.services.knowledge_embedder import resolve_knowledge_embedder_config
+            from src.services.knowledge.embedder import resolve_knowledge_embedder_config
 
             embedder_config = await resolve_knowledge_embedder_config(
                 user_token=user_token, group_id=self.group_id

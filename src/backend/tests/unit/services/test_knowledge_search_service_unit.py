@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from src.services.knowledge_search_service import KnowledgeSearchService
+from src.services.knowledge.search_service import KnowledgeSearchService
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -221,7 +221,7 @@ class TestSearchSuccess:
     def _force_app_session(self):
         # Force the app-DB read path (no Lakebase) for these unit tests.
         with patch(
-            "src.services.knowledge_embedding_session.resolve_lakebase_instance",
+            "src.services.knowledge.embedding_session.resolve_lakebase_instance",
             new=AsyncMock(return_value=None),
         ):
             yield

@@ -9,7 +9,7 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-from src.services.databricks_knowledge_service import DatabricksKnowledgeService
+from src.services.knowledge.databricks_service import DatabricksKnowledgeService
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -28,18 +28,18 @@ def make_svc(group_id="g1"):
     # KnowledgeEmbeddingService and KnowledgeSearchService are imported locally in __init__
     with (
         patch(
-            "src.services.databricks_knowledge_service.DatabricksConfigRepository"
+            "src.services.knowledge.databricks_service.DatabricksConfigRepository"
         ) as cfg_repo,
         patch(
-            "src.services.databricks_knowledge_service.DatabricksVolumeRepository"
+            "src.services.knowledge.databricks_service.DatabricksVolumeRepository"
         ) as vol_repo,
         patch.dict(
             "sys.modules",
             {
-                "src.services.knowledge_embedding_service": MagicMock(
+                "src.services.knowledge.embedding_service": MagicMock(
                     KnowledgeEmbeddingService=MagicMock(return_value=AsyncMock())
                 ),
-                "src.services.knowledge_search_service": MagicMock(
+                "src.services.knowledge.search_service": MagicMock(
                     KnowledgeSearchService=MagicMock(return_value=AsyncMock())
                 ),
             },
@@ -254,7 +254,7 @@ class TestUploadKnowledgeFile:
             return fd, path
 
         with patch(
-            "src.services.databricks_knowledge_service.tempfile.mkstemp",
+            "src.services.knowledge.databricks_service.tempfile.mkstemp",
             side_effect=tracking_mkstemp,
         ):
             with pytest.raises(KasalError):
@@ -288,7 +288,7 @@ class TestUploadKnowledgeFile:
             return fd, path
 
         with patch(
-            "src.services.databricks_knowledge_service.tempfile.mkstemp",
+            "src.services.knowledge.databricks_service.tempfile.mkstemp",
             side_effect=tracking_mkstemp,
         ):
             result = await svc.upload_knowledge_file(
@@ -772,7 +772,7 @@ def patch_embedding_store(deleted_rows=3, delete_error=None):
     repo_cls = MagicMock(return_value=MagicMock(delete_by_file=delete_by_file))
     patches = [
         patch(
-            "src.services.knowledge_embedding_session.knowledge_embedding_session",
+            "src.services.knowledge.embedding_session.knowledge_embedding_session",
             fake_ctx,
         ),
         patch(

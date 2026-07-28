@@ -7,7 +7,7 @@ import asyncio
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from datetime import datetime
 
-from src.services.knowledge_embedding_service import KnowledgeEmbeddingService
+from src.services.knowledge.embedding_service import KnowledgeEmbeddingService
 
 
 class TestKnowledgeEmbeddingServiceInit:
@@ -245,7 +245,7 @@ class TestGetVectorStorage:
         mock_mbs = AsyncMock()
         mock_mbs.get_memory_backends.return_value = []
 
-        with patch("src.services.knowledge_embedding_service.KnowledgeEmbeddingService._get_vector_storage") as mock_gvs:
+        with patch("src.services.knowledge.embedding_service.KnowledgeEmbeddingService._get_vector_storage") as mock_gvs:
             mock_gvs.return_value = None
             result = await service._get_vector_storage()
 
@@ -259,12 +259,12 @@ class TestGetVectorStorage:
 
     @pytest.mark.asyncio
     async def test_returns_none_on_exception(self, service):
-        with patch("src.services.knowledge_embedding_service.KnowledgeEmbeddingService._get_vector_storage", new_callable=AsyncMock) as mock_gvs:
+        with patch("src.services.knowledge.embedding_service.KnowledgeEmbeddingService._get_vector_storage", new_callable=AsyncMock) as mock_gvs:
             mock_gvs.side_effect = Exception("unexpected")
             # Call the real method which will catch the exception
         # Use the real method but mock memory backend
         service._memory_backend_service = None
-        with patch("src.services.knowledge_embedding_service.MemoryBackendService" if False else "builtins.__import__", side_effect=ImportError):
+        with patch("src.services.knowledge.embedding_service.MemoryBackendService" if False else "builtins.__import__", side_effect=ImportError):
             pass
         result = await service._get_vector_storage()
         assert result is None
@@ -288,7 +288,7 @@ class TestEmbedFile:
     def _force_app_session(self):
         # Force the app-DB storage path (no Lakebase) for these unit tests.
         with patch(
-            "src.services.knowledge_embedding_session.resolve_lakebase_instance",
+            "src.services.knowledge.embedding_session.resolve_lakebase_instance",
             new=AsyncMock(return_value=None),
         ):
             yield

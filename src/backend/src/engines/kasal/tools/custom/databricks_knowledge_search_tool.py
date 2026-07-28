@@ -11,11 +11,11 @@ import logging
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-from src.engines.kasal.tools.custom.knowledge_search_guard import (
-    KnowledgeSearchBudget,
-    filter_by_relevance,
-    no_relevant_results_notice,
-)
+from src.services.knowledge import KnowledgeSearchBudget
+
+#: Ceiling on one tool call, a little above the service's own search timeout so
+#: the service's message ("the search timed out") is what the agent sees.
+SEARCH_CALL_TIMEOUT_SECONDS = 35
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -173,223 +173,69 @@ class DatabricksKnowledgeSearchTool(BaseTool):
         return resolved_paths if resolved_paths else None
 
     def _run(self, query: str, limit: int = 10, file_paths: Optional[List[str]] = None) -> str:
-        """
-        Run the knowledge search synchronously (required by CrewAI).
+        """Answer one search for the agent (CrewAI calls this synchronously).
 
-        Args:
-            query: The search query
-            limit: Maximum number of results
-            file_paths: Optional file paths filter (from agent call - will be resolved to full paths)
-
-        Returns:
-            Formatted search results as a string
+        Everything agent-specific happens HERE — the per-agent search budget,
+        resolving the paths the agent named against the ones configured on the
+        tool — and the search itself is delegated to the service, which is
+        reachable without an agent at all.
         """
-        # Answer a repeated search from what it returned the first time, and stop
-        # answering at all once the budget is spent. Both exist because the index
-        # cannot say "I don't have this": it always returns its top-k, so an agent
-        # hunting for something absent will rephrase until the round limit kills
-        # the run (see knowledge_search_guard).
+        # Answer a repeated search from what it returned the first time, and
+        # stop answering once the budget is spent. Both exist because the index
+        # cannot say "I don't have this": it always returns its top-k, so an
+        # agent hunting for something absent will rephrase until the round limit
+        # kills the run. This is the agent's problem, so it stays on the tool.
         previous = self._budget.previous_answer(query)
         if previous is not None:
-            logger.info(f"[TOOL DEBUG] Repeat search for '{query}' — returning the first answer")
+            logger.info(f"[knowledge-tool] repeat search for '{query}' — returning the first answer")
             return self._budget.repeat_notice(query, previous)
         if self._budget.exhausted():
             logger.warning(
-                f"[TOOL DEBUG] Search budget exhausted after "
-                f"{self._budget.searches_used} searches; refusing '{query}'"
+                f"[knowledge-tool] budget exhausted after {self._budget.searches_used} "
+                f"searches; refusing '{query}'"
             )
             return self._budget.exhausted_notice()
 
-        # PRIORITY: If agent provides file_paths, resolve and use those (agent knows what it wants)
-        # FALLBACK: If no file_paths provided, use configured paths from tool_configs
-        # This allows dynamic file selection while maintaining backwards compatibility
-        if file_paths:
-            effective_file_paths = self._resolve_file_paths(file_paths)
-            logger.info(f"[TOOL DEBUG] Using agent-provided file paths (resolved): {effective_file_paths}")
-        else:
-            effective_file_paths = self._configured_file_paths
-            logger.info(f"[TOOL DEBUG] Using configured file paths (tool_configs): {effective_file_paths}")
+        # The agent's paths win when it named any (it knows what it wants);
+        # otherwise the ones configured in tool_configs apply.
+        effective_file_paths = (
+            self._resolve_file_paths(file_paths) if file_paths else self._configured_file_paths
+        )
+        logger.info(
+            f"[knowledge-tool] query={query!r} limit={limit} "
+            f"paths={effective_file_paths} group={self._group_id} agent={self._agent_id}"
+        )
 
-        logger.info("="*80)
-        logger.info("[TOOL DEBUG] DatabricksKnowledgeSearchTool._run() called")
-        logger.info(f"[TOOL DEBUG] Query: '{query}'")
-        logger.info(f"[TOOL DEBUG] Limit: {limit}")
-        logger.info(f"[TOOL DEBUG] File paths from agent call: {file_paths}")
-        logger.info(f"[TOOL DEBUG] Configured file paths (tool_configs): {self._configured_file_paths}")
-        logger.info(f"[TOOL DEBUG] Effective file paths (will use): {effective_file_paths}")
-        logger.info(f"[TOOL DEBUG] Agent ID (for access control): {self._agent_id}")
-        logger.info(f"[TOOL DEBUG] Group ID: {self._group_id}")
-        logger.info(f"[TOOL DEBUG] Execution ID: {self._execution_id}")
-        logger.info("="*80)
-
-        try:
-            # Run the async search in a thread pool executor
-            logger.info("[TOOL DEBUG] Starting async search in thread pool...")
-            with ThreadPoolExecutor() as executor:
-                future = executor.submit(self._run_async_search, query, limit, effective_file_paths)
-                results = future.result(timeout=30)  # 30 second timeout
-
-            logger.info(f"[TOOL DEBUG] Async search completed, got {len(results) if results else 0} results")
-
-            if not results:
-                logger.warning("[TOOL DEBUG] No results found, returning empty message")
-                return self._record(query, no_relevant_results_notice(query, 0.0))
-
-            # An index always returns its top-k, so "20 results" says nothing
-            # about whether any of them answer the question. Drop the distant
-            # ones and, when none survive, say so in terms that end the search
-            # rather than invite another rephrasing.
-            kept, best_score, scored = filter_by_relevance(results)
-            if scored and not kept:
-                logger.info(
-                    f"[TOOL DEBUG] {len(results)} result(s) all below the relevance "
-                    f"floor (best={best_score:.3f}); reporting no match"
-                )
-                return self._record(query, no_relevant_results_notice(query, best_score))
-
-            # Format results for the agent
-            formatted_output = []
-            formatted_output.append(f"Found {len(kept)} relevant results:\n")
-
-            for i, result in enumerate(kept, 1):
-                content = result.get('content', '')
-                metadata = result.get('metadata', {})
-                source = metadata.get('source', 'Unknown')
-                score = metadata.get('score', 0.0)
-
-                formatted_output.append(f"\n--- Result {i} (Score: {score:.3f}) ---")
-                formatted_output.append(f"Source: {source}")
-                formatted_output.append(f"Content: {content}")
-                formatted_output.append("---")
-
-            return self._record(query, "\n".join(formatted_output))
-
-        except Exception as e:
-            logger.error(f"Error running knowledge search: {e}", exc_info=True)
-            return f"Error searching knowledge base: {str(e)}"
-
-    def _record(self, query: str, answer: str) -> str:
-        """Remember what this search answered, then answer it."""
+        answer = self._search_in_thread(query, limit, effective_file_paths)
         self._budget.record(query, answer)
         return answer
 
-    def _run_async_search(self, query: str, limit: int, file_paths: Optional[List[str]]) -> List[Dict[str, Any]]:
+    def _search_in_thread(
+        self, query: str, limit: int, file_paths: Optional[List[str]]
+    ) -> str:
+        """Run the async capability from CrewAI's synchronous tool call.
+
+        Its own loop in its own thread: the tool is invoked from inside a
+        running event loop (the light path) and from a worker thread with none
+        (the crew subprocess), and only a fresh loop is correct in both.
         """
-        Helper method to run async search in a new event loop.
+        from src.services.knowledge import KnowledgeSearch
 
-        Args:
-            query: The search query
-            limit: Maximum number of results
-            file_paths: Optional file paths filter
+        search = KnowledgeSearch(
+            group_id=self._group_id,
+            execution_id=self._execution_id,
+            user_token=self._user_token,
+            user_email=self._user_email,
+            agent_id=self._agent_id,
+        )
 
-        Returns:
-            List of search results
-        """
-        # Create a new event loop for this thread
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        def _run_search() -> str:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(search.search(query, limit, file_paths))
+            finally:
+                loop.close()
 
-        try:
-            # Run the async search
-            return loop.run_until_complete(self._async_search(query, limit, file_paths))
-        finally:
-            loop.close()
-
-    async def _async_search(self, query: str, limit: int, file_paths: Optional[List[str]]) -> List[Dict[str, Any]]:
-        """
-        Perform the actual async search using the DatabricksKnowledgeService.
-
-        Args:
-            query: The search query
-            limit: Maximum number of results
-            file_paths: Optional file paths filter
-
-        Returns:
-            List of search results
-        """
-        logger.info("[TOOL ASYNC DEBUG] _async_search started")
-        logger.info(f"[TOOL ASYNC DEBUG] Query: '{query}'")
-        logger.info(f"[TOOL ASYNC DEBUG] Group ID: {self._group_id}")
-        logger.info(f"[TOOL ASYNC DEBUG] Execution ID: {self._execution_id}")
-        logger.info(f"[TOOL ASYNC DEBUG] User token: {bool(self._user_token)}")
-
-        try:
-            logger.info("[TOOL ASYNC DEBUG] Importing DatabricksKnowledgeService...")
-            # Lazy import to avoid circular dependencies
-            import importlib
-            import sys
-
-            # CRITICAL FIX: Force remove from sys.modules and reload to get latest code
-            # Subprocess inherits cached modules from parent process
-            modules_to_reload = [
-                'src.services.databricks_knowledge_service',
-                'src.services.knowledge_search_service',  # Also reload search service
-                'src.repositories.databricks_vector_index_repository'  # Also reload repository
-            ]
-            for module_name in modules_to_reload:
-                if module_name in sys.modules:
-                    logger.info(f"[TOOL ASYNC DEBUG] Removing {module_name} from sys.modules...")
-                    del sys.modules[module_name]
-            logger.info("[TOOL ASYNC DEBUG] Modules removed, will import fresh from disk")
-
-            from src.engines.kasal.tools.tool_session_provider import ToolSessionProvider
-            from src.repositories.databricks_config_repository import DatabricksConfigRepository
-            from src.utils.user_context import UserContext, GroupContext
-
-            logger.info("[TOOL ASYNC DEBUG] Imports successful")
-
-            # CRITICAL: Set group context so PAT lookup works
-            # The embedding generation needs group_id to find the PAT token
-            if self._group_id:
-                logger.info(f"[TOOL ASYNC DEBUG] Setting group context for PAT lookup: {self._group_id}")
-                # GroupContext is a dataclass - use group_ids parameter, NOT primary_group_id
-                # primary_group_id is a computed property that returns group_ids[0]
-                group_context = GroupContext(group_ids=[self._group_id])
-                UserContext.set_group_context(group_context)
-                logger.info("[TOOL ASYNC DEBUG] Group context set successfully")
-
-            logger.info("[TOOL ASYNC DEBUG] Creating knowledge service via ToolSessionProvider...")
-
-            # Create a new session for each search via ToolSessionProvider
-            async with ToolSessionProvider.knowledge_service(
-                group_id=self._group_id or "default",
-                user_token=self._user_token,
-            ) as service:
-                logger.info("[TOOL ASYNC DEBUG] Service created successfully")
-                logger.info("="*80)
-                logger.info("🎯🎯🎯 [TOOL] ABOUT TO CALL service.search_knowledge() 🎯🎯🎯")
-                logger.info("="*80)
-                logger.info("[TOOL ASYNC DEBUG] Calling search_knowledge method...")
-                logger.info(f"[TOOL ASYNC DEBUG] Parameters:")
-                logger.info(f"  - query: '{query}'")
-                logger.info(f"  - group_id: '{self._group_id}'")
-                logger.info(f"  - execution_id: '{self._execution_id}'")
-                logger.info(f"  - file_paths: {file_paths}")
-                logger.info(f"  - agent_id: '{self._agent_id}'")
-                logger.info(f"  - limit: {limit}")
-                logger.info(f"  - user_token: {bool(self._user_token)}")
-
-                # Call the search_knowledge method
-                results = await service.search_knowledge(
-                    query=query,
-                    group_id=self._group_id,
-                    execution_id=self._execution_id,
-                    file_paths=file_paths,
-                    agent_id=self._agent_id,
-                    limit=limit,
-                    user_token=self._user_token,
-                    # Per-user isolation: only this user's uploaded knowledge
-                    created_by=self._user_email,
-                )
-
-                logger.info("="*80)
-                logger.info("🎯🎯🎯 [TOOL] RETURNED FROM service.search_knowledge() 🎯🎯🎯")
-                logger.info("="*80)
-            logger.info(f"[TOOL ASYNC DEBUG] search_knowledge returned {len(results) if results else 0} results")
-            logger.info(f"Knowledge search returned {len(results)} results")
-            return results
-
-        except Exception as e:
-            logger.error(f"[TOOL ASYNC DEBUG] ❌ EXCEPTION in async search: {e}", exc_info=True)
-            logger.error(f"Error in async search: {e}", exc_info=True)
-            return []
+        with ThreadPoolExecutor() as executor:
+            return executor.submit(_run_search).result(timeout=SEARCH_CALL_TIMEOUT_SECONDS)

@@ -324,7 +324,7 @@ class WorkflowRecipeService:
         """
         try:
             from src.core.llm_manager import LLMManager
-            from src.services.knowledge_embedder import (
+            from src.services.knowledge.embedder import (
                 resolve_knowledge_embedder_config,
             )
 

@@ -122,7 +122,7 @@ class ToolSessionProvider:
                 results = await svc.search_knowledge(query=q, ...)
         """
         from src.db.session import async_session_factory
-        from src.services.databricks_knowledge_service import DatabricksKnowledgeService
+        from src.services.knowledge.databricks_service import DatabricksKnowledgeService
 
         async with async_session_factory() as session:
             try:

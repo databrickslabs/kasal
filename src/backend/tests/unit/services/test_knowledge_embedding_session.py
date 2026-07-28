@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from src.services.knowledge_embedding_session import (
+from src.services.knowledge.embedding_session import (
     resolve_lakebase_instance,
     knowledge_embedding_session,
     ensure_lakebase_doc_table,
@@ -146,7 +146,7 @@ class TestKnowledgeEmbeddingSession:
     async def test_app_session_when_no_lakebase(self):
         app = MagicMock()
         with patch(
-            "src.services.knowledge_embedding_session.resolve_lakebase_instance",
+            "src.services.knowledge.embedding_session.resolve_lakebase_instance",
             new=AsyncMock(return_value=None),
         ):
             async with knowledge_embedding_session(app, "g1") as (sess, is_lakebase):
@@ -165,7 +165,7 @@ class TestKnowledgeEmbeddingSession:
             yield lb
 
         with patch(
-            "src.services.knowledge_embedding_session.resolve_lakebase_instance",
+            "src.services.knowledge.embedding_session.resolve_lakebase_instance",
             new=AsyncMock(return_value="my-lb"),
         ):
             with patch(
@@ -190,7 +190,7 @@ class TestKnowledgeRoutingObservability:
         captured, span_patch = _capture_spans()
         app = MagicMock()
         with patch(
-            "src.services.knowledge_embedding_session.resolve_lakebase_instance",
+            "src.services.knowledge.embedding_session.resolve_lakebase_instance",
             new=AsyncMock(return_value=None),
         ), span_patch:
             async with knowledge_embedding_session(app, "g1") as (sess, is_lakebase):
@@ -212,7 +212,7 @@ class TestKnowledgeRoutingObservability:
             yield lb
 
         with patch(
-            "src.services.knowledge_embedding_session.resolve_lakebase_instance",
+            "src.services.knowledge.embedding_session.resolve_lakebase_instance",
             new=AsyncMock(return_value="my-lb"),
         ), patch(
             "src.db.lakebase_session.get_lakebase_session", new=fake_get_lakebase_session

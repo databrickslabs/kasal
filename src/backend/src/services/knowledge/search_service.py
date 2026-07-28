@@ -67,7 +67,7 @@ class KnowledgeSearchService:
             # time (resolved through the shared resolver: Databricks in prod, local
             # Ollama in dev — both 1024 dims) so it matches the stored vectors in
             # the documentation_embeddings pgvector table.
-            from src.services.knowledge_embedder import resolve_knowledge_embedder_config
+            from src.services.knowledge.embedder import resolve_knowledge_embedder_config
 
             embedder_config = await resolve_knowledge_embedder_config(
                 user_token=user_token, group_id=self.group_id
@@ -85,7 +85,7 @@ class KnowledgeSearchService:
             # isolation) and optionally file_paths. When the active memory backend
             # is Lakebase, that's the Lakebase memory instance; otherwise the app
             # DB. Read from the same place ingest writes.
-            from src.services.knowledge_embedding_session import knowledge_embedding_session
+            from src.services.knowledge.embedding_session import knowledge_embedding_session
             from src.repositories.documentation_embedding_repository import (
                 DocumentationEmbeddingRepository,
             )
@@ -173,7 +173,7 @@ class KnowledgeSearchService:
 
                     # TTL: expired chunks are excluded immediately, even before
                     # the next upload-time purge sweeps them out of the table.
-                    from src.services.knowledge_embedding_service import KNOWLEDGE_TTL_DAYS
+                    from src.services.knowledge.embedding_service import KNOWLEDGE_TTL_DAYS
                     if KNOWLEDGE_TTL_DAYS > 0:
                         from datetime import datetime, timedelta, timezone
 
@@ -199,7 +199,7 @@ class KnowledgeSearchService:
                     # otel_spans — so this is what makes a deployed run's search
                     # routing + row counts observable (lakebase store vs empty
                     # app-DB fallback, group_rows before per-user/TTL filters).
-                    from src.services.knowledge_embedding_session import emit_knowledge_span
+                    from src.services.knowledge.embedding_session import emit_knowledge_span
                     emit_knowledge_span(
                         "knowledge_search",
                         {
@@ -248,7 +248,7 @@ class KnowledgeSearchService:
                 # table, so a swallowed pgvector/permission error (e.g. the
                 # "vector <=> text" cast bug) is otherwise invisible. Spans DO
                 # reach otel_spans.
-                from src.services.knowledge_embedding_session import emit_knowledge_span
+                from src.services.knowledge.embedding_session import emit_knowledge_span
                 emit_knowledge_span(
                     "knowledge_search_error",
                     {

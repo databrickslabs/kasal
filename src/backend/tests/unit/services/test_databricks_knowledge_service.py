@@ -6,7 +6,7 @@ Auto-generated test template. TODO: Add comprehensive test coverage.
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from src.services.databricks_knowledge_service import (
+from src.services.knowledge.databricks_service import (
     DatabricksKnowledgeService
 )
 

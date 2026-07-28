@@ -10,7 +10,7 @@ never gave the model a reason to stop.
 
 import pytest
 
-from src.engines.kasal.tools.custom.knowledge_search_guard import (
+from src.services.knowledge.search_guard import (
     KnowledgeSearchBudget,
     filter_by_relevance,
     no_relevant_results_notice,

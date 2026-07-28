@@ -95,7 +95,7 @@ class KnowledgeEmbeddingService:
             # the shared resolver (Databricks in prod, local Ollama in dev) — the
             # SAME resolver the search side uses, so query/stored vectors always
             # match (both 1024-dim).
-            from src.services.knowledge_embedder import resolve_knowledge_embedder_config
+            from src.services.knowledge.embedder import resolve_knowledge_embedder_config
 
             embedder_config = await resolve_knowledge_embedder_config(
                 user_token=user_token, group_id=self.group_id
@@ -154,7 +154,7 @@ class KnowledgeEmbeddingService:
             # crew memory — otherwise to the app DB. We bulk-insert on a single
             # session (never the SQLite per-row queue, whose separate session
             # deadlocks against this upload's open transaction).
-            from src.services.knowledge_embedding_session import (
+            from src.services.knowledge.embedding_session import (
                 knowledge_embedding_session,
                 ensure_lakebase_doc_table,
             )
@@ -242,7 +242,7 @@ class KnowledgeEmbeddingService:
             return 0
         from sqlalchemy import delete
         from src.models.documentation_embedding import KnowledgeEmbedding
-        from src.services.knowledge_embedding_session import knowledge_embedding_session
+        from src.services.knowledge.embedding_session import knowledge_embedding_session
 
         cutoff = datetime.utcnow() - timedelta(days=KNOWLEDGE_TTL_DAYS)
         try:

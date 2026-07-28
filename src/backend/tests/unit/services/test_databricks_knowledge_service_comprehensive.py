@@ -11,7 +11,7 @@ import pytest
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from typing import Optional, Dict, Any, List
 
-from src.services.databricks_knowledge_service import DatabricksKnowledgeService
+from src.services.knowledge.databricks_service import DatabricksKnowledgeService
 
 
 class TestDatabricksKnowledgeServiceInit:
@@ -389,7 +389,7 @@ class TestDatabricksKnowledgeServiceDeleteKnowledgeFile:
         repo_cls = MagicMock(return_value=MagicMock(delete_by_file=delete_by_file))
         return (
             patch(
-                "src.services.knowledge_embedding_session.knowledge_embedding_session",
+                "src.services.knowledge.embedding_session.knowledge_embedding_session",
                 fake_ctx,
             ),
             patch(

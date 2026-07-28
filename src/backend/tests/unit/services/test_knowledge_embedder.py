@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.services import knowledge_embedder
-from src.services.knowledge_embedder import resolve_knowledge_embedder_config
+from src.services.knowledge import embedder as knowledge_embedder
+from src.services.knowledge.embedder import resolve_knowledge_embedder_config
 
 _GET_AUTH = "src.utils.databricks_auth.get_auth_context"
 

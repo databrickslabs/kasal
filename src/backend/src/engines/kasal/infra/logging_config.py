@@ -572,7 +572,7 @@ def configure_subprocess_logging(execution_id: str, process_type: str = "crew"):
         'src.engines.kasal.infra.trace_management',
         'src.services.trace.queue',  # Add trace queue logger
         'src.engines.kasal.paths.crew.execution_runner',  # Add execution runner logger
-        'src.services.databricks_knowledge_service',  # Add knowledge service logger for search debugging
+        'src.services.knowledge.databricks_service',  # Add knowledge service logger for search debugging
         'src.engines.kasal.tools.tool_factory',  # Tool factory creation + config injection logs
         'src.engines.kasal.tools.custom.powerbi_analysis_tool',  # Add PowerBI tool logger
         'src.engines.kasal.tools.custom.powerbi_semantic_model_dax_tool',  # DAX Generator tool logs

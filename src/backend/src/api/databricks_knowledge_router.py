@@ -11,7 +11,7 @@ from src.core.exceptions import BadRequestError
 from fastapi.responses import JSONResponse
 
 from src.core.dependencies import GroupContextDep, SessionDep
-from src.services.databricks_knowledge_service import DatabricksKnowledgeService
+from src.services.knowledge.databricks_service import DatabricksKnowledgeService
 
 logger = logging.getLogger(__name__)
 
