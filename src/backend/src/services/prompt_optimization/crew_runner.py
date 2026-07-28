@@ -269,8 +269,18 @@ class CrewRunnerMixin:
 
                     # Only judges ASSIGNED to this crew (scoped by name prefix)
                     # participate — the shared library is inert until assigned.
+                    # Called on the mixin that DEFINES it. This used to say
+                    # PromptOptimizationService._crew_judge_prefix, a name never
+                    # imported here, so it raised NameError the moment a crew_id
+                    # was present — silently disabling per-crew judge scoping.
+                    # `self` is not an option either: the enclosing
+                    # _execute_crew_optimization_sync is a @staticmethod.
+                    from src.services.prompt_optimization.judges import (
+                        JudgeOperationsMixin,
+                    )
+
                     crew_prefix = (
-                        PromptOptimizationService._crew_judge_prefix(crew_id)
+                        JudgeOperationsMixin._crew_judge_prefix(crew_id)
                         if crew_id
                         else None
                     )

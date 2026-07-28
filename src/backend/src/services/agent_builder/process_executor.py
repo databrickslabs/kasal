@@ -308,34 +308,9 @@ def run_crew_in_process(
                 file=sys.stderr,
             )
 
-        # CRITICAL: Patch CrewAI's CONTEXT_LIMIT_ERRORS to recognize Databricks error messages
-        # Databricks returns "exceeds maximum allowed content length" which is not in CrewAI's
-        # default error patterns. Without this patch, CrewAI won't trigger summarization
-        # when Databricks returns a context length error.
-        try:
-
-            databricks_error_patterns = [
-                "exceeds maximum allowed content length",  # Databricks specific
-                "maximum allowed content length",  # Alternative pattern
-                "requestsize",  # Part of Databricks error format
-            ]
-            for pattern in databricks_error_patterns:
-                if (
-                    pattern
-                    not in context_window_exceeding_exception.CONTEXT_LIMIT_ERRORS
-                ):
-                    context_window_exceeding_exception.CONTEXT_LIMIT_ERRORS.append(
-                        pattern
-                    )
-            print(
-                f"[SUBPROCESS] Registered Databricks error patterns for context limit detection",
-                file=sys.stderr,
-            )
-        except Exception as err_reg:
-            print(
-                f"[SUBPROCESS] Warning: Could not register Databricks error patterns: {err_reg}",
-                file=sys.stderr,
-            )
+        # The Databricks context-limit phrases this block used to patch into
+        # crewAI's CONTEXT_LIMIT_ERRORS now live in src/core/llm/context_limits.py,
+        # which extends the engine's list at import, for every process.
 
         from src.services.execution.runtime import Crew
 

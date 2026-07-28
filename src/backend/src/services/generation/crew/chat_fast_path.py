@@ -6,9 +6,12 @@ a default assistant answering a message, so this skips them entirely."""
 
 import logging
 import traceback
-from typing import Dict, Any, List, Tuple, Optional
+from typing import TYPE_CHECKING, Dict, Any, List, Tuple, Optional
 from src.core.sse_manager import sse_manager, SSEEvent
 from src.utils.user_context import GroupContext
+
+if TYPE_CHECKING:  # imported for the annotation only, no runtime cost
+    from src.schemas.crew import CrewStreamingRequest
 
 logger = logging.getLogger(__name__)
 

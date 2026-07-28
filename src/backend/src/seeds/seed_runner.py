@@ -3,6 +3,7 @@ Main entry point for running database seeders.
 """
 import asyncio
 import argparse
+import logging
 import traceback
 import os
 import sys

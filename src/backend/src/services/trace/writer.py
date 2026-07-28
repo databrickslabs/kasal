@@ -39,7 +39,11 @@ async def _root_span_id(session: Any, job_id: str) -> Optional[str]:
         for event_type in _ROOT_EVENT_TYPES:
             if by_type.get(event_type):
                 return by_type[event_type]
-        return rows[0][1] if rows else None
+        # No root event type present. This used to read `rows`, a leftover from
+        # the row-scanning version of this lookup — an undefined name, so it
+        # raised NameError straight into the except below and logged a lookup
+        # failure for what is simply "no root span yet".
+        return None
     except Exception as lookup_err:  # noqa: BLE001
         logger.debug(f"[trace-writer] root span lookup skipped for {job_id}: {lookup_err}")
         return None

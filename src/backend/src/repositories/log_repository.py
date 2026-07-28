@@ -128,13 +128,15 @@ class LLMLogRepository(BaseRepository[LLMLog]):
         # Apply endpoint filter if provided
         if endpoint and endpoint != 'all':
             query = query.where(self.model.endpoint == endpoint)
-            
-            # Apply pagination
-            query = query.offset(page * per_page).limit(per_page)
-            
-            # Execute query
-            result = await session.execute(query)
-            return list(result.scalars().all())
+
+        # Pagination and execution are OUTSIDE the endpoint branch — matching
+        # get_logs_paginated above. Nested inside it, this method could not work
+        # either way: with an endpoint it raised NameError on the bare `session`,
+        # and without one it fell off the end and returned None to a caller
+        # annotated List[LLMLog].
+        query = query.offset(page * per_page).limit(per_page)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
 
     async def count_logs_by_tenant(
         self, 

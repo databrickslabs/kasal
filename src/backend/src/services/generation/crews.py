@@ -21,7 +21,7 @@ and no call site changes.
 
 import logging
 import traceback
-from typing import Dict, Any, List, Tuple, Optional
+from typing import TYPE_CHECKING, Dict, Any, List, Tuple, Optional
 from src.services.catalog.templates import TemplateService
 from src.services.tools.tool_service import ToolService
 from src.repositories.log_repository import LLMLogRepository
@@ -36,6 +36,9 @@ from src.services.generation.crew import (
     ProgressiveGenerationMixin,
     RecipeHooksMixin,
 )
+
+if TYPE_CHECKING:  # imported for the annotation only, no runtime cost
+    from src.schemas.crew import CrewStreamingRequest
 
 logger = logging.getLogger(__name__)
 

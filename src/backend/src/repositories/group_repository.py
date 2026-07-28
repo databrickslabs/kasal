@@ -8,7 +8,7 @@ from sqlalchemy import select, update, delete, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.models.group import Group, GroupUser
+from src.models.group import Group, GroupUser, GroupUserStatus
 from src.models.user import User
 from src.core.base_repository import BaseRepository
 

@@ -28,6 +28,14 @@ logger = logging.getLogger(__name__)
 #     whose sequential-task context outgrows the window fails outright instead of
 #     summarizing — the output clamp cannot help once the INPUT alone is too big.
 #   - Anthropic-on-Databricks says "prompt is too long".
+#   - Databricks model serving says "exceeds maximum allowed content length",
+#     and puts "requestsize" in the error envelope. These were patched into the
+#     engine list from inside the crew subprocess; that block referenced
+#     crewAI's context_window_exceeding_exception, which stopped existing when
+#     crewAI was removed, so it raised NameError into its own except and printed
+#     a warning on every run. The phrases went with it — none of the others here
+#     match Databricks' wording, so a Databricks overflow HARD-FAILED instead of
+#     compacting. They belong here, where every consumer sees them.
 #   - Assorted providers phrase it as "maximum context" / "context window" /
 #     "tokens > " without the exact built-in wording.
 _KASAL_CONTEXT_LIMIT_PHRASES: Final[tuple[str, ...]] = (
@@ -35,6 +43,9 @@ _KASAL_CONTEXT_LIMIT_PHRASES: Final[tuple[str, ...]] = (
     "please reduce the length of the input",
     "the model's context length is only",
     "prompt is too long",
+    "exceeds maximum allowed content length",
+    "maximum allowed content length",
+    "requestsize",
     "maximum context",
     "context window",
     "context_length",

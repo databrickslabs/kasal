@@ -2,7 +2,7 @@
 Service for deploying crews to Databricks Model Serving.
 """
 
-from typing import Dict, Any, Optional, List
+from typing import TYPE_CHECKING, Dict, Any, Optional, List
 import logging
 import json
 import tempfile
@@ -23,6 +23,9 @@ from src.repositories.agent_repository import AgentRepository
 from src.repositories.task_repository import TaskRepository
 from src.repositories.tool_repository import ToolRepository
 from src.utils.user_context import GroupContext
+
+if TYPE_CHECKING:  # imported for the annotation only, no runtime cost
+    from src.services.execution.runtime import Crew
 
 logger = logging.getLogger(__name__)
 
