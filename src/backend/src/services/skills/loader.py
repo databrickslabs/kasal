@@ -21,10 +21,22 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-#: Bundled files a skill may carry. ``scripts/`` is absent on purpose: running
-#: bundled code needs a sandbox and an approval model, and being able to READ a
-#: script is the first half of being able to run one.
-ALLOWED_PREFIXES = ("references/", "assets/")
+#: The ONE directory a skill may not carry. ``references/``, ``assets/`` and
+#: ``scripts/`` are the spec's EXAMPLES, not an exhaustive list — the layout
+#: ends with "... # Any additional files or directories", and Anthropic's own
+#: published skills use it: ``internal-comms`` bundles ``examples/*.md`` and
+#: ``brand-guidelines`` points ``license:`` at a root-level LICENSE.txt. An
+#: earlier version of this file whitelisted references/ and assets/, which
+#: silently dropped both.
+#:
+#: ``scripts/`` stays refused, and that is a Kasal policy rather than a spec
+#: rule: running bundled code needs a sandbox and an approval model, and being
+#: able to READ a script is the first half of being able to run one.
+REFUSED_PREFIXES = ("scripts/",)
+
+#: "Keep file references one level deep from SKILL.md." A root-level file is one
+#: segment, ``references/guide.md`` is two.
+MAX_PATH_SEGMENTS = 2
 
 
 class SkillNotFound(LookupError):
@@ -55,17 +67,19 @@ def normalise_path(path: str) -> str:
     if any(p == ".." for p in parts):
         raise SkillFileNotFound(f"'{path}' may not traverse outside the skill.")
     cleaned = "/".join(parts)
-    if not cleaned.startswith(ALLOWED_PREFIXES):
+    if cleaned.startswith(REFUSED_PREFIXES):
         raise SkillFileNotFound(
-            f"'{path}' is not readable. Skill files live under "
-            + " or ".join(ALLOWED_PREFIXES)
-            + "."
+            f"'{path}' is not readable. Kasal does not load skill scripts — "
+            "running bundled code needs a sandbox and an approval model."
         )
-    if len(parts) > 2:
+    if cleaned == "SKILL.md":
         raise SkillFileNotFound(
-            f"'{path}' is nested too deep. Skill files are one level under "
-            + " or ".join(ALLOWED_PREFIXES)
-            + "."
+            "SKILL.md is the skill itself — load_skill already returns it."
+        )
+    if len(parts) > MAX_PATH_SEGMENTS:
+        raise SkillFileNotFound(
+            f"'{path}' is nested too deep. The spec keeps file references one "
+            "level deep from SKILL.md."
         )
     return cleaned
 

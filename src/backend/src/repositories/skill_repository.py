@@ -87,6 +87,19 @@ class SkillRepository(BaseRepository[Skill]):
         result = await self.session.execute(query)
         return result.scalars().first()
 
+    async def find_builtin_by_name(self, name: str) -> Optional[Skill]:
+        """The shipped row for a name, ignoring any workspace override.
+
+        Used by reset, which needs the version Kasal ships rather than the one
+        the resolver would prefer.
+        """
+        result = await self.session.execute(
+            self._with_files().where(
+                self.model.name == name, self.model.group_id.is_(None)
+            )
+        )
+        return result.scalars().first()
+
     async def find_by_names(
         self, names: List[str], group_ids: List[str]
     ) -> List[Skill]:

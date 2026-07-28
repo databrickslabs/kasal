@@ -34,8 +34,16 @@ class SkillBase(BaseModel):
     global_enabled: bool = False
 
 
+class SkillFileInput(BaseModel):
+    """A bundled reference file, as the editor sends it."""
+
+    path: str
+    content: str = ""
+
+
 class SkillCreate(SkillBase):
-    pass
+    #: Bundled files, replacing any existing set. Omit to leave files alone.
+    files: Optional[List[SkillFileInput]] = None
 
 
 class SkillUpdate(BaseModel):
@@ -47,6 +55,7 @@ class SkillUpdate(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
     enabled: Optional[bool] = None
     global_enabled: Optional[bool] = None
+    files: Optional[List["SkillFileInput"]] = None
 
 
 class SkillFileResponse(BaseModel):
@@ -63,6 +72,9 @@ class SkillResponse(SkillBase):
     source: str = "authored"
     #: NULL for a globally-available skill, set for one a workspace owns.
     group_id: Optional[str] = None
+    #: True when this workspace row replaces a skill Kasal ships. It is what the
+    #: UI needs to offer "reset to default" only where that means something.
+    overrides_builtin: bool = False
     files: List[SkillFileResponse] = Field(default_factory=list)
     created_by_email: Optional[str] = None
     created_at: Optional[datetime] = None

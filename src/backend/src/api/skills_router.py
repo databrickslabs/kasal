@@ -8,7 +8,7 @@ overriding one is authoring a workspace skill of the same name.
 """
 
 import logging
-from typing import Annotated, Any, Dict
+from typing import Annotated, Any, Dict, Optional, Set
 
 from fastapi import APIRouter, Body, Depends, File, Query, UploadFile, status
 from fastapi.responses import Response
@@ -55,7 +55,23 @@ def _require_author(group_context) -> None:
         raise ForbiddenError("Only workspace admins and editors can author skills.")
 
 
-def _to_response(skill) -> SkillResponse:
+async def _builtin_names_for(service: SkillService, skill) -> Set[str]:
+    """Whether THIS row shadows a builtin — one lookup, not a whole listing."""
+    if skill.group_id is None:
+        return set()
+    return (
+        {skill.name}
+        if await service.repository.find_builtin_by_name(skill.name)
+        else set()
+    )
+
+
+def _to_response(skill, builtin_names: Optional[Set[str]] = None) -> SkillResponse:
+    """Row -> response.
+
+    ``builtin_names`` lets the listing answer "does this override a builtin?"
+    with one pass over rows it already has, rather than a query per row.
+    """
     return SkillResponse(
         id=skill.id,
         name=skill.name,
@@ -68,6 +84,9 @@ def _to_response(skill) -> SkillResponse:
         global_enabled=bool(skill.global_enabled),
         source=skill.source or "authored",
         group_id=skill.group_id,
+        overrides_builtin=bool(
+            skill.group_id and builtin_names and skill.name in builtin_names
+        ),
         files=[
             {"path": f.path, "size_bytes": f.size_bytes, "sha256": f.sha256}
             for f in (skill.files or [])
@@ -82,8 +101,9 @@ def _to_response(skill) -> SkillResponse:
 async def list_skills(service: ServiceDep, group_context: GroupContextDep):
     """Skills this workspace can use: Kasal's builtins plus its own."""
     skills = await service.list_skills(group_context)
+    builtin_names = {s.name for s in skills if s.group_id is None}
     return SkillListResponse(
-        skills=[_to_response(s) for s in skills], count=len(skills)
+        skills=[_to_response(s, builtin_names) for s in skills], count=len(skills)
     )
 
 
@@ -120,10 +140,12 @@ async def update_skill(
     service: ServiceDep,
     group_context: GroupContextDep,
 ):
-    """Edit one of this workspace's own skills.
+    """Edit a skill, builtin or not.
 
-    A builtin is not editable in place: overriding one means authoring a
-    workspace skill with the same name, which the resolver already prefers.
+    Editing a builtin saves the change as this workspace's own copy — invisible
+    to the user, and what keeps one tenant's wording out of another's while
+    stopping the next seed run from undoing their work. ``/reset`` puts the
+    shipped version back.
     """
     _require_author(group_context)
     try:
@@ -133,8 +155,8 @@ async def update_skill(
     except ValueError as exc:
         raise BadRequestError(str(exc))
     if not skill:
-        raise NotFoundError(f"No editable skill {skill_id} in this workspace.")
-    return _to_response(skill)
+        raise NotFoundError(f"No skill {skill_id} available here.")
+    return _to_response(skill, await _builtin_names_for(service, skill))
 
 
 @router.delete("/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -166,6 +188,27 @@ async def set_enabled(
     skill = await service.set_enabled(skill_id, enabled, group_context)
     if not skill:
         raise NotFoundError(f"No skill {skill_id} available here.")
+    return _to_response(skill, await _builtin_names_for(service, skill))
+
+
+@router.post("/{skill_id}/reset", response_model=SkillResponse)
+async def reset_skill(
+    skill_id: int, service: ServiceDep, group_context: GroupContextDep
+):
+    """Put a skill back to the version Kasal ships.
+
+    Only meaningful for a skill that overrides a builtin — 404 otherwise, since
+    "reset" on a skill the workspace wrote itself would just be a delete under a
+    friendlier name. Returns the CURRENT shipped version, including anything
+    improved since the workspace edited it.
+    """
+    _require_author(group_context)
+    skill = await service.reset_skill(skill_id, group_context)
+    if not skill:
+        raise NotFoundError(
+            f"Skill {skill_id} does not override a built-in skill, so there is "
+            "nothing to reset to."
+        )
     return _to_response(skill)
 
 
@@ -201,6 +244,44 @@ async def upload_skill(
     except ValueError as exc:
         raise BadRequestError(str(exc))
     return _to_response(skill)
+
+
+@router.get("/{skill_id}/files")
+async def read_skill_file(
+    skill_id: int,
+    service: ServiceDep,
+    group_context: GroupContextDep,
+    path: Annotated[str, Query(description="Path relative to the skill root.")],
+):
+    """The content of one bundled file.
+
+    Separate from the skill listing on purpose: a workspace with twenty skills
+    would otherwise ship every reference file on every page load, and the point
+    of bundling them is that they load only when something needs them.
+
+    ``path`` is a query parameter rather than a path segment because these
+    contain slashes, and an encoded slash in a path segment is handled
+    differently by every proxy in front of this.
+    """
+    skill = await service.get_skill(skill_id, group_context)
+    if not skill:
+        raise NotFoundError(f"No skill {skill_id} available here.")
+
+    from src.services.skills import loader
+
+    try:
+        wanted = loader.normalise_path(path)
+    except loader.SkillFileNotFound as exc:
+        raise BadRequestError(str(exc))
+
+    for stored in skill.files or []:
+        if stored.path == wanted:
+            return {
+                "skill": skill.name,
+                "path": stored.path,
+                "content": stored.content or "",
+            }
+    raise NotFoundError(f"'{skill.name}' has no file '{wanted}'.")
 
 
 @router.get("/{skill_id}/export")

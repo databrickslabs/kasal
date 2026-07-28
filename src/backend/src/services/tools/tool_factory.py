@@ -8,6 +8,7 @@ from src.services.tools.base import BaseTool
 
 # Import only the CrewAI tools we're keeping
 from src.services.tools.image_generation import ImageGenerationTool
+from src.services.tools.a2a_agent_tool import A2AAgentTool
 from src.services.tools.async_bridge import run_async_with_context
 from src.services.tools.scrape_website import ScrapeWebsiteTool
 from src.services.tools.serper_search import SerperDevTool
@@ -273,6 +274,12 @@ class ToolFactory:
             "DatabricksKnowledgeSearchTool": DatabricksKnowledgeSearchTool,
             "Gmail": GmailTool,
             "GmailTool": GmailTool,  # alias used when referenced by class name
+            # A2A remote-agent delegation. Registered under BOTH the seeded
+            # title and the class name because the lookup below is by title and
+            # returns None for anything missing — a branch further down cannot
+            # rescue a tool the map does not know.
+            "Remote Agent": A2AAgentTool,
+            "A2AAgentTool": A2AAgentTool,
             "Power BI Comprehensive Analysis Tool": PowerBIAnalysisTool,  # New display name
             "PowerBIAnalysisTool": PowerBIAnalysisTool,  # Keep old name for backward compatibility
         }

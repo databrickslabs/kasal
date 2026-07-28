@@ -18,9 +18,11 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DownloadIcon from '@mui/icons-material/Download';
 import EditIcon from '@mui/icons-material/Edit';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { Skill, SkillInput, SkillService } from '../../../api/tools/SkillService';
 import SkillEditor from './SkillEditor';
+import SkillFileViewer from './SkillFileViewer';
 
 /**
  * Agent Skills — authoring, upload, enablement.
@@ -41,6 +43,9 @@ const SkillsConfiguration: React.FC = () => {
   const [toast, setToast] = useState<string | null>(null);
   const [editing, setEditing] = useState<Skill | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [viewing, setViewing] = useState<{ skill: Skill; path: string } | null>(
+    null,
+  );
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -87,6 +92,18 @@ const SkillsConfiguration: React.FC = () => {
       setToast(`${skill.name} removed.`);
     } catch (err) {
       setToast(err instanceof Error ? err.message : 'Could not remove that skill.');
+    }
+  };
+
+  const handleReset = async (skill: Skill) => {
+    try {
+      const shipped = await SkillService.reset(skill.id);
+      // The reset row has the BUILTIN's id, not the override's, so reconcile by
+      // name — the same rule the enable toggle follows.
+      setSkills((prev) => prev.map((s) => (s.name === shipped.name ? shipped : s)));
+      setToast(`${shipped.name} restored to the version Kasal ships.`);
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : 'Could not reset that skill.');
     }
   };
 
@@ -195,7 +212,14 @@ const SkillsConfiguration: React.FC = () => {
                     <Stack direction="row" spacing={1} alignItems="center">
                       <Typography variant="subtitle1">{skill.name}</Typography>
                       {isBuiltin && (
-                        <Chip size="small" variant="outlined" label="Built in" />
+                        <Tooltip title="Shipped by Kasal. Edit it freely — your changes stay in this teamspace, and Reset brings the shipped version back.">
+                          <Chip size="small" variant="outlined" label="Built in" />
+                        </Tooltip>
+                      )}
+                      {skill.overrides_builtin && (
+                        <Tooltip title="You have edited the built-in skill. Reset restores the shipped version.">
+                          <Chip size="small" color="info" variant="outlined" label="Edited" />
+                        </Tooltip>
                       )}
                       {skill.source === 'uploaded' && (
                         <Chip size="small" variant="outlined" label="Imported" />
@@ -215,8 +239,17 @@ const SkillsConfiguration: React.FC = () => {
                         spacing={0.5}
                         sx={{ mt: 1, flexWrap: 'wrap', gap: 0.5 }}
                       >
+                        {/* Clickable: the chips used to name files with no way
+                            to read them, which reads as a broken reference. */}
                         {skill.files.map((f) => (
-                          <Chip key={f.path} size="small" variant="outlined" label={f.path} />
+                          <Tooltip key={f.path} title="Open this file">
+                            <Chip
+                              size="small"
+                              variant="outlined"
+                              label={f.path}
+                              onClick={() => setViewing({ skill, path: f.path })}
+                            />
+                          </Tooltip>
                         ))}
                       </Stack>
                     )}
@@ -245,17 +278,30 @@ const SkillsConfiguration: React.FC = () => {
                         <DownloadIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
-                    {!isBuiltin && (
-                      <>
+                    {/* Editable whether or not it is a builtin: editing one
+                        saves this workspace's own copy underneath, which the
+                        user never has to think about. */}
+                    <IconButton
+                      size="small"
+                      onClick={() => {
+                        setEditing(skill);
+                        setEditorOpen(true);
+                      }}
+                    >
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                    {skill.overrides_builtin && (
+                      <Tooltip title="Discard your changes and go back to the version Kasal ships">
                         <IconButton
                           size="small"
-                          onClick={() => {
-                            setEditing(skill);
-                            setEditorOpen(true);
-                          }}
+                          onClick={() => void handleReset(skill)}
                         >
-                          <EditIcon fontSize="small" />
+                          <RestartAltIcon fontSize="small" />
                         </IconButton>
+                      </Tooltip>
+                    )}
+                    {!isBuiltin && (
+                      <>
                         <IconButton
                           size="small"
                           color="error"
@@ -278,6 +324,14 @@ const SkillsConfiguration: React.FC = () => {
         skill={editing}
         onClose={() => setEditorOpen(false)}
         onSave={handleSave}
+      />
+
+      <SkillFileViewer
+        open={Boolean(viewing)}
+        skillId={viewing?.skill.id ?? null}
+        skillName={viewing?.skill.name ?? ''}
+        path={viewing?.path ?? ''}
+        onClose={() => setViewing(null)}
       />
 
       <Snackbar

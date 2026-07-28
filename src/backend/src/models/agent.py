@@ -35,6 +35,11 @@ class Agent(Base):
         Integer, nullable=True
     )  # Optional temperature override (0-100, will be converted to 0.0-1.0)
     tools = Column(JSON, default=list, nullable=False)
+    #: Agent Skills attached to this agent, BY NAME. Names rather than ids
+    #: because a skill's name is its identity in the format — it must match the
+    #: folder it exports to — so a name survives an export/import round trip and
+    #: keeps working when a workspace overrides a builtin with its own version.
+    skills = Column(JSON, default=list, nullable=True)
     tool_configs = Column(
         JSON, default=dict, nullable=True
     )  # User-specific tool configuration overrides

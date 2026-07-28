@@ -21,6 +21,8 @@ class AgentBase(BaseModel):
         default=None, ge=0, le=100, description="Temperature override (0-100)"
     )
     tools: List[Any] = Field(default_factory=list)
+    #: Agent Skills, by name. See the model for why names rather than ids.
+    skills: List[str] = Field(default_factory=list)
     tool_configs: Optional[Dict[str, Dict[str, Any]]] = Field(
         default_factory=dict
     )  # Tool-specific config overrides
@@ -169,6 +171,7 @@ class AgentUpdate(BaseModel):
         default=None, ge=0, le=100, description="Temperature override (0-100)"
     )
     tools: Optional[List[Any]] = None
+    skills: Optional[List[str]] = None
     tool_configs: Optional[Dict[str, Dict[str, Any]]] = (
         None  # Tool-specific config overrides
     )

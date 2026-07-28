@@ -12,6 +12,7 @@ useless, so a workspace authors its own skills, and Kasal ships builtins
 same name overrides the builtin, which is what a workspace means by writing one.
 """
 
+import hashlib
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -71,8 +72,9 @@ class SkillService:
         self.session.add(skill)
         await self.session.flush()
 
-        if files:
-            await self.repository.replace_files(skill.id, files)
+        supplied = files if files is not None else self._files_of(data)
+        if supplied:
+            await self.repository.replace_files(skill.id, supplied)
         return await self.repository.find_visible(
             skill.id, group_context.group_ids or []
         )
@@ -80,16 +82,23 @@ class SkillService:
     async def update_skill(
         self, skill_id: int, data: SkillUpdate, group_context: GroupContext
     ) -> Optional[Any]:
-        """Edit a workspace's own skill.
+        """Edit a skill — including a builtin.
 
-        A builtin is not editable in place. Overriding one is authoring a
-        workspace skill with the same name — which the resolver already prefers
-        — so an edit here would either mutate Kasal's content for every tenant
-        or silently do nothing on the next seed run.
+        Editing a builtin writes the change as THIS workspace's own row rather
+        than touching the shared one. To the user that is invisible and should
+        be: they clicked edit, they edited, it saved. Underneath, one tenant's
+        wording cannot reach another's, and the next seed run cannot silently
+        undo their work — which is what editing the shared row in place would
+        cost, the same way prompt templates are re-seeded on every startup.
+
+        ``reset_skill`` puts the shipped version back by removing the override.
         """
         skill = await self.get_skill(skill_id, group_context)
-        if not skill or skill.group_id is None:
+        if not skill:
             return None
+
+        if skill.group_id is None:
+            skill = await self._own_copy_of(skill, group_context)
 
         merged = {
             "name": data.name if data.name is not None else skill.name,
@@ -127,8 +136,64 @@ class SkillService:
         if data.global_enabled is not None:
             skill.global_enabled = data.global_enabled
 
+        if data.files is not None:
+            # Replaced wholesale, so removing a reference file in the editor
+            # actually removes it — otherwise the body stops mentioning a file
+            # the model can still read.
+            await self.repository.replace_files(skill.id, self._files_of(data))
+
         await self.session.flush()
-        return skill
+        # Same reason: replace_files went round the ORM, so this instance's
+        # collection is stale or unloaded.
+        return (
+            await self.repository.find_visible(skill.id, group_context.group_ids or [])
+            or skill
+        )
+
+    @staticmethod
+    def _files_of(data: Any) -> List[Dict[str, Any]]:
+        """Validate and normalise the files an editor sent.
+
+        Paths go through the loader's own check rather than a second
+        implementation: what the editor can write must be exactly what the
+        agent can read, or a file is saved and then unreachable.
+        """
+        from src.services.skills.loader import normalise_path
+
+        out: List[Dict[str, Any]] = []
+        for entry in getattr(data, "files", None) or []:
+            content = entry.content or ""
+            out.append(
+                {
+                    "path": normalise_path(entry.path),
+                    "content": content,
+                    "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                    "size_bytes": len(content.encode("utf-8")),
+                }
+            )
+        return out
+
+    async def reset_skill(self, skill_id: int, group_context: GroupContext) -> Any:
+        """Put a builtin back to the version Kasal ships.
+
+        Deletes this workspace's override; the shared row was never modified, so
+        the shipped skill simply becomes visible again — and it is the CURRENT
+        shipped version, including anything improved since the workspace edited
+        it. Returns the builtin, or None when there was nothing to reset.
+        """
+        skill = await self.get_skill(skill_id, group_context)
+        if not skill or skill.group_id is None:
+            return None
+
+        builtin = await self.repository.find_builtin_by_name(skill.name)
+        if not builtin:
+            # Not an override of anything — resetting would just delete their
+            # skill, which is not what the word means.
+            return None
+
+        await self.session.delete(skill)
+        await self.session.flush()
+        return builtin
 
     async def delete_skill(self, skill_id: int, group_context: GroupContext) -> bool:
         skill = await self.get_skill(skill_id, group_context)
@@ -192,7 +257,7 @@ class SkillService:
                 for f in (skill.files or [])
             ],
         )
-        return override
+        return await self.repository.find_visible(override.id, [group_id]) or override
 
     async def import_zip(
         self, data: bytes, group_context: GroupContext, replace: bool = False
@@ -273,6 +338,48 @@ class SkillService:
         return parser.validate_row(
             name, description, body, data.license, data.compatibility, data.metadata
         )
+
+    async def _own_copy_of(self, builtin: Any, group_context: GroupContext) -> Any:
+        """This workspace's row for a builtin, creating it if needed."""
+        group_id = self._group_of(group_context)
+        existing = await self._own_skill_named(builtin.name, group_id)
+        if existing:
+            return existing
+
+        from src.models.skill import Skill
+
+        copy = Skill(
+            name=builtin.name,
+            description=builtin.description,
+            body=builtin.body,
+            license=builtin.license,
+            compatibility=builtin.compatibility,
+            skill_metadata=dict(builtin.skill_metadata or {}),
+            source=builtin.source,
+            group_id=group_id,
+            created_by_email=getattr(group_context, "group_email", None),
+            enabled=bool(builtin.enabled),
+            global_enabled=bool(builtin.global_enabled),
+        )
+        self.session.add(copy)
+        await self.session.flush()
+        await self.repository.replace_files(
+            copy.id,
+            [
+                {
+                    "path": f.path,
+                    "content": f.content,
+                    "sha256": f.sha256,
+                    "size_bytes": f.size_bytes,
+                }
+                for f in (builtin.files or [])
+            ],
+        )
+        # Re-read rather than return the instance: a row created in THIS session
+        # has no loaded `files`, and the router touches that relationship to
+        # render the response. Outside a greenlet that raises MissingGreenlet —
+        # which surfaces as a 500 on an otherwise successful save.
+        return await self.repository.find_visible(copy.id, [group_id]) or copy
 
     async def _own_skill_named(self, name: str, group_id: Optional[str]) -> Any:
         if not group_id:

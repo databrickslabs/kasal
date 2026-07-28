@@ -932,6 +932,30 @@ async def _ensure_chat_sessions_columns(conn) -> None:
         logger.warning(f"Could not ensure chat_sessions columns: {e}")
 
 
+async def _ensure_agent_columns(conn) -> None:
+    """Idempotently add agents.skills. ``create_all`` never ALTERs an existing
+    table, so a database created before Agent Skills existed would accept the
+    field from the UI and silently drop it on save — the failure reads as "my
+    skill selection did not persist". Nullable JSON/TEXT, safe every startup."""
+    is_sqlite = str(settings.DATABASE_URI).startswith("sqlite")
+    try:
+        if is_sqlite:
+            res = await conn.exec_driver_sql("PRAGMA table_info(agents)")
+            existing = {row[1] for row in res.fetchall()}
+            if not existing:
+                return  # table not created yet (create_all handles fresh DBs)
+            if "skills" not in existing:
+                await conn.exec_driver_sql("ALTER TABLE agents ADD COLUMN skills TEXT")
+                logger.info("Added agents.skills column (SQLite self-heal)")
+        else:
+            await conn.exec_driver_sql(
+                "ALTER TABLE agents ADD COLUMN IF NOT EXISTS skills JSONB"
+            )
+            logger.info("Ensured agents.skills column")
+    except Exception as e:
+        logger.warning(f"Could not ensure agents.skills column: {e}")
+
+
 async def _ensure_crew_columns(conn) -> None:
     """Idempotently add reasoning_config to crews. create_all never ALTERs an
     existing table, so DBs created before this column existed (e.g. deployed
@@ -1209,6 +1233,7 @@ async def run_schema_self_heal(conn) -> None:
     await _ensure_crew_feedback_table(conn)
     await _ensure_powerbi_extraction_table(conn)
     await _ensure_prompt_optimization_runs_table(conn)
+    await _ensure_agent_columns(conn)
     await _ensure_crew_columns(conn)
     await _ensure_ui_config_columns(conn)
     await _ensure_hot_polling_indexes(conn)

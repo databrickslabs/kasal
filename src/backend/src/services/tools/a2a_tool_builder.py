@@ -14,6 +14,12 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+#: How many remotes to expose when the tool config names none. Beyond a handful,
+#: an unselected list is almost certainly not what the operator meant, and a long
+#: tool list makes a model worse at picking ANY tool — so the fix is to select,
+#: and this cap keeps the damage bounded until someone does.
+MAX_UNSELECTED = 5
+
 
 async def build_a2a_tools(
     tool_config: Optional[Dict[str, Any]] = None,
@@ -38,7 +44,7 @@ async def build_a2a_tools(
     from src.services.tools.a2a_agent_tool import A2AAgentTool
 
     config = tool_config or {}
-    wanted = config.get("agent_name") or config.get("agent_names")
+    wanted = config.get("agent_names") or config.get("agent_name")
     if isinstance(wanted, str):
         wanted = [wanted]
 
@@ -55,6 +61,22 @@ async def build_a2a_tools(
             if wanted:
                 names = {str(n) for n in wanted}
                 rows = [r for r in rows if r.name in names]
+            elif len(rows) > MAX_UNSELECTED:
+                # One tool is built PER remote so its description can name that
+                # remote's skills. The cost is that an unselected workspace with
+                # twenty remotes hands the agent twenty delegation tools, which
+                # degrades selection for every OTHER tool too. Capped rather than
+                # unbounded, and logged rather than silent — a remote that never
+                # appears is indistinguishable from one the model ignored.
+                logger.warning(
+                    "[A2A] %d remote agents are enabled and none were selected; "
+                    "exposing the first %d (%s). Choose specific agents in the "
+                    "Remote Agent tool configuration.",
+                    len(rows),
+                    MAX_UNSELECTED,
+                    ", ".join(r.name for r in rows[:MAX_UNSELECTED]),
+                )
+                rows = rows[:MAX_UNSELECTED]
 
             for row in rows:
                 resolved = await service.resolve_for_call(row.name, group_ids)

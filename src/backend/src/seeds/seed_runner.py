@@ -47,6 +47,7 @@ try:
         model_configs,
         prompt_templates,
         schemas,
+        skills,
         tools,
     )
 
@@ -65,6 +66,12 @@ try:
     debug_log("Added tools.seed to SEEDERS")
 except (NameError, AttributeError) as e:
     logger.error(f"Error adding tools seeder: {e}")
+
+try:
+    SEEDERS["skills"] = skills.seed
+    debug_log("Added skills.seed to SEEDERS")
+except (NameError, AttributeError) as e:
+    logger.error(f"Error adding skills seeder: {e}")
 
 try:
     SEEDERS["schemas"] = schemas.seed

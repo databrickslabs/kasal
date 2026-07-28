@@ -52,11 +52,12 @@ class TestIngest:
 
     def test_macos_metadata_is_ignored_rather_than_refused(self):
         """__MACOSX turns up in every archive made from Finder; refusing it
-        would reject most real uploads."""
+        would reject most real uploads, and keeping it would bundle junk."""
         parsed, files = packaging.read_zip(
             _zip(
                 {
                     "pricing/SKILL.md": _skill_md(),
+                    "pricing/__MACOSX/._SKILL.md": "junk",
                     "__MACOSX/pricing/._SKILL.md": "junk",
                 }
             )
@@ -64,11 +65,25 @@ class TestIngest:
         assert parsed.name == "pricing"
         assert files == []
 
-    def test_files_outside_references_and_assets_are_dropped(self):
+    def test_any_bundled_file_is_kept_not_just_references_and_assets(self):
+        """The spec's layout ends with "... # Any additional files or
+        directories", and Anthropic's own published skills rely on it:
+        internal-comms bundles examples/*.md and brand-guidelines points its
+        license field at a root LICENSE.txt. An earlier whitelist of
+        references/ and assets/ silently dropped both."""
         _, files = packaging.read_zip(
-            _zip({"pricing/SKILL.md": _skill_md(), "pricing/notes.txt": "x"})
+            _zip(
+                {
+                    "pricing/SKILL.md": _skill_md(),
+                    "pricing/examples/3p-update.md": "x",
+                    "pricing/LICENSE.txt": "MIT",
+                }
+            )
         )
-        assert files == []
+        assert sorted(f["path"] for f in files) == [
+            "LICENSE.txt",
+            "examples/3p-update.md",
+        ]
 
 
 class TestHostileArchives:

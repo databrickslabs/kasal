@@ -17,7 +17,7 @@ import logging
 import zipfile
 from typing import Any, Dict, List, Tuple
 
-from src.services.skills.loader import ALLOWED_PREFIXES, normalise_path
+from src.services.skills.loader import REFUSED_PREFIXES, normalise_path
 from src.services.skills.parser import ParsedSkill, parse, to_skill_md
 
 logger = logging.getLogger(__name__)
@@ -72,9 +72,21 @@ def read_zip(data: bytes) -> Tuple[ParsedSkill, List[Dict[str, Any]]]:
     files: List[Dict[str, Any]] = []
 
     for info in entries:
-        relative = info.filename[len(prefix) :] if prefix else info.filename
-        relative = relative.replace("\\", "/").lstrip("/")
-        if not relative or relative.startswith("__MACOSX/"):
+        # Stripped only when the entry is ACTUALLY under the prefix. Stripping
+        # unconditionally slices n characters off every other path — which
+        # turned "__MACOSX/pricing/._SKILL.md" into a plausible-looking
+        # "pricing/._SKILL.md" and bundled it.
+        name = info.filename.replace("\\", "/")
+        relative = name[len(prefix) :] if prefix and name.startswith(prefix) else name
+        relative = relative.lstrip("/")
+        # Finder metadata, at the root or nested. Dropped rather than refused:
+        # it turns up in most archives a person makes by hand, and bundling it
+        # would put junk in front of the model.
+        if (
+            not relative
+            or "__MACOSX" in relative.split("/")
+            or relative.startswith(".")
+        ):
             continue
         if info.file_size > MAX_FILE_BYTES:
             raise SkillPackageError(
@@ -85,7 +97,7 @@ def read_zip(data: bytes) -> Tuple[ParsedSkill, List[Dict[str, Any]]]:
             skill_md = _text(archive.read(info))
             continue
 
-        if relative.startswith("scripts/"):
+        if relative.startswith(REFUSED_PREFIXES):
             # Not stored at all. Being able to READ a bundled script is the
             # first half of being able to run one, and execution needs a
             # sandbox and an approval model that do not exist yet.
@@ -94,12 +106,6 @@ def read_zip(data: bytes) -> Tuple[ParsedSkill, List[Dict[str, Any]]]:
                 "Executing skill code needs a sandbox and an approval model; "
                 "remove scripts/ to import the instructions."
             )
-
-        if not relative.startswith(ALLOWED_PREFIXES):
-            logger.info(
-                "[skills] ignoring '%s' — outside references/ and assets/", relative
-            )
-            continue
 
         try:
             path = normalise_path(relative)

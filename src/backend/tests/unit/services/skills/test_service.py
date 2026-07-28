@@ -32,6 +32,7 @@ def _service():
     service.repository.find_visible = AsyncMock(return_value=None)
     service.repository.list_visible = AsyncMock(return_value=[])
     service.repository.replace_files = AsyncMock()
+    service.repository.find_builtin_by_name = AsyncMock(return_value=None)
     return service
 
 
@@ -107,14 +108,48 @@ class TestAuthoring:
 
 class TestBuiltins:
     @pytest.mark.asyncio
-    async def test_a_builtin_cannot_be_edited_in_place(self):
-        """The row is shared across tenants. Editing it would either change
-        Kasal's content for everyone or be silently undone by the next seed."""
+    async def test_editing_a_builtin_saves_a_workspace_copy_instead(self):
+        """The user just edits — no "make a copy" step. Underneath the shared
+        row is untouched, so one tenant's wording cannot reach another's and the
+        next seed run cannot undo their work. `reset_skill` puts it back."""
         service = _service()
-        service.repository.find_visible = AsyncMock(
-            return_value=_row(group_id=None, source="builtin")
-        )
-        assert await service.update_skill(1, SkillUpdate(body="mine"), _Ctx()) is None
+        builtin = _row(group_id=None, source="builtin", body="shipped")
+        # get_skill returns the builtin; the post-write re-read finds nothing in
+        # this fake repository, so the service falls back to the new instance.
+        service.repository.find_visible = AsyncMock(side_effect=[builtin, None, None])
+
+        edited = await service.update_skill(1, SkillUpdate(body="mine"), _Ctx())
+
+        assert edited is not builtin
+        assert edited.group_id == "acme"
+        assert edited.body == "mine"
+        assert builtin.body == "shipped"
+
+    @pytest.mark.asyncio
+    async def test_reset_removes_the_override_and_returns_the_shipped_version(self):
+        """And the CURRENT shipped version — including anything improved since
+        the workspace edited it."""
+        service = _service()
+        override = _row(group_id="acme", body="mine")
+        shipped = _row(id=2, group_id=None, body="shipped")
+        service.repository.find_visible = AsyncMock(return_value=override)
+        service.repository.find_builtin_by_name = AsyncMock(return_value=shipped)
+
+        result = await service.reset_skill(1, _Ctx())
+
+        assert result is shipped
+        service.session.delete.assert_awaited_with(override)
+
+    @pytest.mark.asyncio
+    async def test_reset_on_a_workspaces_own_skill_is_refused(self):
+        """Resetting something that overrides nothing would just be a delete
+        under a friendlier name."""
+        service = _service()
+        service.repository.find_visible = AsyncMock(return_value=_row(group_id="acme"))
+        service.repository.find_builtin_by_name = AsyncMock(return_value=None)
+
+        assert await service.reset_skill(1, _Ctx()) is None
+        service.session.delete.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_a_builtin_cannot_be_deleted(self):
@@ -127,7 +162,7 @@ class TestBuiltins:
         """One tenant turning a builtin off must not turn it off for everyone."""
         service = _service()
         builtin = _row(group_id=None, source="builtin")
-        service.repository.find_visible = AsyncMock(return_value=builtin)
+        service.repository.find_visible = AsyncMock(side_effect=[builtin, None])
 
         result = await service.set_enabled(1, False, _Ctx())
 

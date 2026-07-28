@@ -11,9 +11,16 @@ import {
   Stack,
   Switch,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
-import { Skill, SkillInput, SkillService } from '../../../api/tools/SkillService';
+import {
+  Skill,
+  SkillFileInput,
+  SkillInput,
+  SkillService,
+} from '../../../api/tools/SkillService';
+import SkillFilesEditor from './SkillFilesEditor';
 
 interface Props {
   open: boolean;
@@ -48,11 +55,27 @@ const SkillEditor: React.FC<Props> = ({ open, skill, onClose, onSave }) => {
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [files, setFiles] = useState<SkillFileInput[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setErrors([]);
     setWarnings([]);
+    // The listing carries paths, not content — that is the point of tier 3 —
+    // so the editor fetches each file when it opens rather than the config page
+    // shipping every file of every skill on load.
+    if (skill?.files?.length) {
+      setLoadingFiles(true);
+      Promise.all(skill.files.map((f) => SkillService.readFile(skill.id, f.path)))
+        .then((loaded) =>
+          setFiles(loaded.map((f) => ({ path: f.path, content: f.content }))),
+        )
+        .catch(() => setErrors(['Could not load this skill\'s reference files.']))
+        .finally(() => setLoadingFiles(false));
+    } else {
+      setFiles([]);
+    }
     setForm(
       skill
         ? {
@@ -73,7 +96,7 @@ const SkillEditor: React.FC<Props> = ({ open, skill, onClose, onSave }) => {
 
   const check = async () => {
     try {
-      const result = await SkillService.validate(form);
+      const result = await SkillService.validate({ ...form, files });
       setErrors(result.errors);
       setWarnings(result.warnings);
       return result.valid;
@@ -87,7 +110,7 @@ const SkillEditor: React.FC<Props> = ({ open, skill, onClose, onSave }) => {
     if (!(await check())) return;
     setSaving(true);
     try {
-      await onSave(form);
+      await onSave({ ...form, files });
       onClose();
     } catch (err) {
       const detail =
@@ -154,6 +177,8 @@ const SkillEditor: React.FC<Props> = ({ open, skill, onClose, onSave }) => {
             helperText="Markdown. Loaded only once the agent decides the skill applies, so length costs nothing until then — but keep it under ~500 lines and push detail into reference files."
           />
 
+          <SkillFilesEditor files={files} onChange={setFiles} />
+
           <FormControlLabel
             control={
               <Switch
@@ -174,14 +199,20 @@ const SkillEditor: React.FC<Props> = ({ open, skill, onClose, onSave }) => {
             label="Give this to every agent without attaching it"
           />
 
-          <Typography variant="caption" color="text.secondary">
-            Reference files are added by importing a skill folder — this editor
-            writes the SKILL.md.
-          </Typography>
+          {loadingFiles && (
+            <Typography variant="caption" color="text.secondary">
+              Loading reference files…
+            </Typography>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={() => void check()}>Check</Button>
+        {/* Saving validates too. This exists so a long draft can be checked
+            without committing it — the errors are the Agent Skills reference
+            validator's own, so they are the ones every other client reports. */}
+        <Tooltip title="Check the name, description and format against the Agent Skills spec, without saving">
+          <Button onClick={() => void check()}>Validate without saving</Button>
+        </Tooltip>
         <Box sx={{ flex: 1 }} />
         <Button onClick={onClose}>Cancel</Button>
         <Button onClick={handleSave} variant="contained" disabled={saving}>

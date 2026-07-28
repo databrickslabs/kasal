@@ -27,11 +27,18 @@ export interface Skill {
   global_enabled: boolean;
   /** builtin | uploaded | authored. */
   source: string;
+  /** True when this workspace row replaces a skill Kasal ships. */
+  overrides_builtin?: boolean;
   /** NULL for one of Kasal's builtins; set for a skill this workspace owns. */
   group_id?: string | null;
   files: SkillFile[];
   created_by_email?: string | null;
   updated_at?: string | null;
+}
+
+export interface SkillFileInput {
+  path: string;
+  content: string;
 }
 
 export interface SkillInput {
@@ -43,6 +50,11 @@ export interface SkillInput {
   metadata?: Record<string, unknown>;
   enabled?: boolean;
   global_enabled?: boolean;
+  /**
+   * Bundled reference files, REPLACED wholesale when present. Omit the field to
+   * leave existing files alone; send [] to remove them all.
+   */
+  files?: SkillFileInput[];
 }
 
 export interface SkillValidationResult {
@@ -97,6 +109,34 @@ export const SkillService = {
    */
   async setEnabled(id: number, enabled: boolean): Promise<Skill> {
     const { data } = await apiClient.patch<Skill>(`${BASE}/${id}/enabled`, { enabled });
+    return data;
+  },
+
+  /**
+   * The content of one bundled file.
+   *
+   * Fetched on demand rather than included in the skill listing: a workspace
+   * with twenty skills would otherwise ship every reference file on every page
+   * load, and the whole point of bundling them is that they load only when
+   * something needs them.
+   */
+  async readFile(id: number, path: string): Promise<{ path: string; content: string }> {
+    const { data } = await apiClient.get<{ path: string; content: string }>(
+      `${BASE}/${id}/files`,
+      { params: { path } },
+    );
+    return data;
+  },
+
+  /**
+   * Put a skill back to the version Kasal ships.
+   *
+   * Only meaningful for a row that overrides a builtin — the API 404s
+   * otherwise, since resetting a skill the workspace wrote itself would just be
+   * a delete under a friendlier name.
+   */
+  async reset(id: number): Promise<Skill> {
+    const { data } = await apiClient.post<Skill>(`${BASE}/${id}/reset`);
     return data;
   },
 

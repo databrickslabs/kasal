@@ -47,6 +47,7 @@ import { GenieSpaceSelector } from '../Common/GenieSpaceSelector';
 import { AgentBricksEndpointSelector } from '../Common/AgentBricksEndpointSelector';
 import { PerplexityConfigSelector } from '../Common/PerplexityConfigSelector';
 import { SerperConfigSelector } from '../Common/SerperConfigSelector';
+import RemoteAgentConfigSelector, { RemoteAgentToolConfig } from '../Common/RemoteAgentConfigSelector';
 import { MCPServerSelector } from '../Common/MCPServerSelector';
 import { PowerBIAnalysisConfigSelector, PowerBIAnalysisConfig } from '../Common/PowerBIAnalysisConfigSelector';
 import { MeasureConverterConfigSelector, MeasureConverterConfig } from '../Common/MeasureConverterConfigSelector';
@@ -1226,6 +1227,26 @@ const TaskForm: React.FC<TaskFormProps> = ({ initialData, onCancel, onTaskSaved,
                   label="Serper Configuration"
                   helperText="Configure Serper.dev search parameters for this task"
                   fullWidth
+                />
+              </Box>
+            )}
+
+            {/* Remote Agent (A2A) configuration — which remotes this agent may
+                delegate to. One delegation tool is built per remote, so an
+                unselected workspace with many remotes buries every other tool. */}
+            {formData.tools.some(toolId => {
+              const tool = tools.find(t => String(t.id) === String(toolId));
+              return tool?.title === 'Remote Agent';
+            }) && (
+              <Box sx={{ mt: 2 }}>
+                <RemoteAgentConfigSelector
+                  value={(toolConfigs['Remote Agent'] as RemoteAgentToolConfig) || {}}
+                  onChange={(config) => {
+                    setToolConfigs(prev => ({
+                      ...prev,
+                      'Remote Agent': config
+                    }));
+                  }}
                 />
               </Box>
             )}
