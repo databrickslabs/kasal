@@ -25,6 +25,7 @@ import BuildIcon from '@mui/icons-material/Build';
 import CodeIcon from '@mui/icons-material/Code';
 import TextFormatIcon from '@mui/icons-material/TextFormat';
 import CloudIcon from '@mui/icons-material/Cloud';
+import HubIcon from '@mui/icons-material/Hub';
 import EngineeringIcon from '@mui/icons-material/Engineering';
 import CloseIcon from '@mui/icons-material/Close';
 import MemoryIcon from '@mui/icons-material/Memory';
@@ -45,6 +46,7 @@ import ToolsConfiguration from './Tools/ToolsConfiguration';
 import Prompts from './Prompts';
 import DatabricksConfiguration from './DatabricksConfiguration';
 import MCPConfiguration from './MCP/MCPConfiguration';
+import RemoteAgents from './RemoteAgents/RemoteAgents';
 import EnginesConfiguration from './Engines';
 import { MemoryConfiguration } from '../MemoryBackend';
 import DatabaseManagement from './DatabaseManagement';
@@ -267,6 +269,15 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
       baseNavItems.push({
         label: t('configuration.mcp.workspace', { defaultValue: 'MCP (Teamspace)' }),
         icon: <CloudIcon fontSize="small" />,
+        index: currentIndex++,
+        group: 'workspace'
+      });
+      // Remote Agents (Workspace) — the outbound half of A2A. Beside MCP
+      // because they are the same kind of thing to an operator: an external
+      // capability attached to this workspace's agents.
+      baseNavItems.push({
+        label: t('configuration.remoteAgents.tab', { defaultValue: 'Remote Agents' }),
+        icon: <HubIcon fontSize="small" />,
         index: currentIndex++,
         group: 'workspace'
       });
@@ -747,6 +758,15 @@ function Configuration({ onClose }: ConfigurationProps): JSX.Element {
               return (
                 <ContentPanel key={item.index} value={activeSection} index={item.index}>
                   <MCPConfiguration mode="workspace" />
+                </ContentPanel>
+              );
+            }
+
+            // Remote Agents (Workspace)
+            if (item.label === t('configuration.remoteAgents.tab', { defaultValue: 'Remote Agents' })) {
+              return (
+                <ContentPanel key={item.index} value={activeSection} index={item.index}>
+                  <RemoteAgents />
                 </ContentPanel>
               );
             }
